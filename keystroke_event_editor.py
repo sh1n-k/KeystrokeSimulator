@@ -159,7 +159,8 @@ class KeystrokeEventEditor:
         self.key_combobox.bind("<KeyPress>", self.filter_key_combobox)
 
     def filter_key_combobox(self, event):
-        key_name = event.keysym.upper()
+        key_name = (event.keysym or event.char).upper()
+        logger.debug(f"filter_key_combobox: {key_name}")
         if key_name.startswith("F") and key_name[1:].isdigit():
             self.key_combobox.set(key_name)
             self.update_key_to_enter(event)
@@ -312,7 +313,10 @@ class KeystrokeEventEditor:
         if self.keyboard_input_listener:
             self.keyboard_input_listener.stop()
             self.keyboard_input_listener.join()
-        keyboard.unhook_all()
+
+        if platform.system() == "Darwin":
+            keyboard.unhook(KeyUtils.get_keycode("command"))
+            keyboard.unhook(KeyUtils.get_keycode("control"))
 
         if (
             self.screenshot_capturer.capture_thread
@@ -339,7 +343,7 @@ class KeystrokeEventEditor:
             self.event_window.geometry(f"+{x}+{y}")
             self.event_window.update_idletasks()
 
-        if state and "event_pointer" in state:
+        if not self.is_edit and state and "event_pointer" in state:
             pointer_position = eval(state["event_pointer"])
             self.screenshot_capturer.set_current_mouse_position(pointer_position)
 

@@ -156,7 +156,7 @@ class KeystrokeProfiles:
         window.transient(self.main_window)
         window.grab_set()
         window.focus_force()
-        window.attributes("-topmost", True)
+        # window.attributes("-topmost", True)
         window.bind("<Escape>", self._close_settings)
         return window
 

@@ -140,6 +140,7 @@ class KeystrokeQuickEventEditor:
         elif platform.system() == "Windows":
 
             def on_press(key):
+                logger.debug(f"windows on_press()")
                 if key == pynput.keyboard.Key.alt_l:
                     self.screenshot_capturer.set_current_mouse_position(
                         self.event_window.winfo_pointerxy()
@@ -148,6 +149,7 @@ class KeystrokeQuickEventEditor:
                     self.hold_image()
 
             def on_release(key):
+                logger.debug(f"windows on_release()")
                 return key != pynput.keyboard.Key.esc
 
             self.keyboard_input_listener = pynput.keyboard.Listener(
@@ -238,7 +240,9 @@ class KeystrokeQuickEventEditor:
             entry.configure(state="readonly")
 
     def close_window(self, event=None):
-        keyboard.unhook_all()
+        if platform.system() == "Darwin":
+            keyboard.unhook_key(KeyUtils.get_keycode("command"))
+            keyboard.unhook_key(KeyUtils.get_keycode("control"))
         self.stop_listeners()
         self.save_latest_position()
         self.event_window.grab_release()
