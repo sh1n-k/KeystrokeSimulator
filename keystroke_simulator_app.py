@@ -122,13 +122,13 @@ class ProfileFrame(tk.Frame):
 
 class ButtonFrame(tk.Frame):
     def __init__(
-        self,
-        master,
-        toggle_callback: Callable,
-        events_callback: Callable,
-        settings_callback: Callable,
-        *args,
-        **kwargs,
+            self,
+            master,
+            toggle_callback: Callable,
+            events_callback: Callable,
+            settings_callback: Callable,
+            *args,
+            **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
         self.start_stop_button = tk.Button(
@@ -160,12 +160,12 @@ class ButtonFrame(tk.Frame):
 
 class ProfileButtonFrame(tk.Frame):
     def __init__(
-        self,
-        master,
-        edit_callback: Callable,
-        sort_callback: Callable,
-        *args,
-        **kwargs,
+            self,
+            master,
+            edit_callback: Callable,
+            sort_callback: Callable,
+            *args,
+            **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
         self.settings_button = tk.Button(
@@ -325,9 +325,9 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         return [
             event_list[
-                i * chunk_size
-                + min(i, remainder) : (i + 1) * chunk_size
-                + min(i + 1, remainder)
+            i * chunk_size
+            + min(i, remainder): (i + 1) * chunk_size
+                                 + min(i + 1, remainder)
             ]
             for i in range(num_threads)
         ]
@@ -380,7 +380,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         KeystrokeQuickEventEditor(self)
 
     def open_settings(self):
-        if self.settings_window:
+        if self.settings_window is not None:
             return
 
         self.unbind_events()
@@ -388,18 +388,17 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def load_latest_state(self):
         state = StateUtils.load_main_app_state()
-        logger.debug(f"Loaded state: {state}")
         if state:
-            if "latest_process" in state:
+            if "process" in state:
                 for process in self.process_frame.process_combobox["values"]:
-                    if process.startswith(state["latest_process"]):
+                    if process.startswith(state["process"]):
                         self.selected_process.set(process)
                         logger.debug(
-                            f"Set default process to: {state['latest_process']}"
+                            f"Set default process to: {state['process']}"
                         )
-            if "latest_profile" in state:
-                self.selected_profile.set(state["latest_profile"])
-                logger.debug(f"Set default profile to: {state['latest_profile']}")
+            if "profile" in state:
+                self.selected_profile.set(state["profile"])
+                logger.debug(f"Set default profile to: {state['profile']}")
 
     def save_latest_state(self):
         StateUtils.save_main_app_state(
