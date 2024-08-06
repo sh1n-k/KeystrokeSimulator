@@ -6,7 +6,8 @@ import threading
 from pathlib import Path
 from typing import Optional, Dict
 
-import pygame
+if platform.system() == 'Windows':
+    import pygame
 
 
 class WindowUtils:

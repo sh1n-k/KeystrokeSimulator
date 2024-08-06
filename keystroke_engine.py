@@ -4,10 +4,21 @@ import threading
 import time
 from threading import Thread
 from typing import List, Dict, Optional
-
+import platform
 import mss
-import win32gui
-import win32process
+if platform.system() == 'Windows':
+    import win32gui
+    import win32process
+elif platform.system() == 'Darwin':
+    import AppKit
+    from Quartz import (
+        CGEventCreateKeyboardEvent,
+        CGEventSetFlags,
+        CGEventPost,
+        kCGHIDEventTap,
+        kCGEventFlagMaskShift,
+    )
+
 from loguru import logger
 
 from keystroke_models import EventModel
