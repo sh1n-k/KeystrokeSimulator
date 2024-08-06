@@ -24,14 +24,15 @@ class WindowUtils:
         )
 
     @staticmethod
-    def center_window(window, width_percent=None, height_percent=None):
-        screen_width, screen_height = WindowUtils._get_screen_dimensions(window)
-        window_width, window_height = WindowUtils._calculate_window_size(
-            window, screen_width, screen_height, width_percent, height_percent
-        )
+    def center_window(window):
+        window.update_idletasks()
+        screen_width = window.winfo_screenwidth()
+        screen_height = window.winfo_screenheight()
+        window_width = window.winfo_width()
+        window_height = window.winfo_height()
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
-        window.geometry(f"{int(window_width)}x{int(window_height)}+{x}+{y}")
+        window.geometry(f"+{x}+{y}")
 
     @staticmethod
     def set_window_position(window, x_percent=0.5, y_percent=0.5):
@@ -42,6 +43,7 @@ class WindowUtils:
         x = int((screen_width - window_width) * x_percent)
         y = int((screen_height - window_height) * y_percent)
         window.geometry(f"+{x}+{y}")
+        window.update_idletasks()
 
 
 class KeyUtils:

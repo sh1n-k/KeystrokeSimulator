@@ -122,13 +122,13 @@ class ProfileFrame(tk.Frame):
 
 class ButtonFrame(tk.Frame):
     def __init__(
-            self,
-            master,
-            toggle_callback: Callable,
-            events_callback: Callable,
-            settings_callback: Callable,
-            *args,
-            **kwargs,
+        self,
+        master,
+        toggle_callback: Callable,
+        events_callback: Callable,
+        settings_callback: Callable,
+        *args,
+        **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
         self.start_stop_button = tk.Button(
@@ -160,12 +160,12 @@ class ButtonFrame(tk.Frame):
 
 class ProfileButtonFrame(tk.Frame):
     def __init__(
-            self,
-            master,
-            edit_callback: Callable,
-            sort_callback: Callable,
-            *args,
-            **kwargs,
+        self,
+        master,
+        edit_callback: Callable,
+        sort_callback: Callable,
+        *args,
+        **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
         self.settings_button = tk.Button(
@@ -225,7 +225,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.terminate_event = threading.Event()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        WindowUtils.set_window_position(self, 0.5, 0.3)
+        WindowUtils.center_window(self)
 
     def load_settings(self):
         try:
@@ -325,9 +325,9 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         return [
             event_list[
-            i * chunk_size
-            + min(i, remainder): (i + 1) * chunk_size
-                                 + min(i + 1, remainder)
+                i * chunk_size
+                + min(i, remainder) : (i + 1) * chunk_size
+                + min(i + 1, remainder)
             ]
             for i in range(num_threads)
         ]
@@ -393,9 +393,7 @@ class KeystrokeSimulatorApp(tk.Tk):
                 for process in self.process_frame.process_combobox["values"]:
                     if process.startswith(state["process"]):
                         self.selected_process.set(process)
-                        logger.debug(
-                            f"Set default process to: {state['process']}"
-                        )
+                        logger.debug(f"Set default process to: {state['process']}")
             if "profile" in state:
                 self.selected_profile.set(state["profile"])
                 logger.debug(f"Set default profile to: {state['profile']}")

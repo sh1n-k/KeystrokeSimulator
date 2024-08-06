@@ -30,15 +30,12 @@ def invert_pixels_by_coordinate(image: Image.Image, x: int, y: int, axis: str):
 
 class KeystrokeEventEditor:
     def __init__(
-            self,
-            profiles_window: tk.Tk | tk.Toplevel,
-            row_num: int,
-            save_callback: Optional[Callable[[Image.Image], None]],
-            event_function: Optional[Callable[[], EventModel]],
+        self,
+        profiles_window: tk.Tk | tk.Toplevel,
+        row_num: int,
+        save_callback: Optional[Callable[[EventModel, bool, int], None]],
+        event_function: Optional[Callable[[], EventModel]],
     ):
-        self.save_callback = save_callback
-        self.screenshot_capturer = ScreenshotCapturer()
-        self.screenshot_capturer.screenshot_callback = self.update_capture_image
         self.profiles_window = profiles_window
         self.event_window = tk.Toplevel(profiles_window)
         self.event_window.title(f"Event Settings - Row {row_num + 1}")
@@ -49,8 +46,10 @@ class KeystrokeEventEditor:
         self.event_window.update_idletasks()
         self.event_window.grid_rowconfigure(0, weight=1)
         self.event_window.grid_columnconfigure(0, weight=1)
-        self.load_latest_position()
 
+        self.save_callback = save_callback
+        self.screenshot_capturer = ScreenshotCapturer()
+        self.screenshot_capturer.screenshot_callback = self.update_capture_image
         self.event_name: Optional[str] = ""
         self.latest_position: Optional[tuple] = None
         self.clicked_position: Optional[tuple] = None
@@ -69,6 +68,7 @@ class KeystrokeEventEditor:
         self.load_stored_event(event_function)
         self.screenshot_capturer.start_capture()
 
+        self.load_latest_position()
         self.key_combobox.focus_set()
 
     def create_ui(self):
@@ -117,7 +117,7 @@ class KeystrokeEventEditor:
         key_frame = tk.Frame(self.event_window)
         key_frame.pack(pady=5)
 
-        tk.Label(key_frame, text="Key:").grid(row=0, column=0)
+        tk.Label(key_frame, text="Key:", anchor="w").grid(row=0, column=0)
         self.key_combobox = ttk.Combobox(
             key_frame, state="readonly", values=KeyUtils.get_key_name_list()
         )
@@ -139,13 +139,13 @@ class KeystrokeEventEditor:
         info_label = tk.Label(
             self.event_window,
             text="ALT: Area selection\nCTRL: Grab current image\n"
-                 + "1. Set a crossline by left-clicking on the collected image.\n"
-                 + "2. select the key you want to set."
-                 + "\n\n"
-                 + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
-                 + "1. 수집된 이미지에 왼쪽 클릭으로 교차선을 설정하세요.\n"
-                 + "2. 설정할 키를 선택하세요.\n",
-            anchor="w",
+            + "1. Set a crossline by left-clicking on the collected image.\n"
+            + "2. select the key you want to set."
+            + "\n\n"
+            + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
+            + "1. 수집된 이미지에 왼쪽 클릭으로 교차선을 설정하세요.\n"
+            + "2. 설정할 키를 선택하세요.\n",
+            anchor="center",
             fg="black",
             wraplength=200,
         )
@@ -273,14 +273,14 @@ class KeystrokeEventEditor:
     def save_event(self):
         try:
             if not all(
-                    [
-                        self.latest_position,
-                        self.clicked_position,
-                        self.latest_screenshot,
-                        self.held_screenshot,
-                        self.ref_pixel_value,
-                        self.key_to_enter,
-                    ]
+                [
+                    self.latest_position,
+                    self.clicked_position,
+                    self.latest_screenshot,
+                    self.held_screenshot,
+                    self.ref_pixel_value,
+                    self.key_to_enter,
+                ]
             ):
                 messagebox.showerror(
                     "Error",
@@ -315,8 +315,8 @@ class KeystrokeEventEditor:
         keyboard.unhook_all()
 
         if (
-                self.screenshot_capturer.capture_thread
-                and self.screenshot_capturer.capture_thread.is_alive()
+            self.screenshot_capturer.capture_thread
+            and self.screenshot_capturer.capture_thread.is_alive()
         ):
             self.screenshot_capturer.stop_capture()
             self.screenshot_capturer.capture_thread.join(timeout=0.1)
@@ -328,18 +328,16 @@ class KeystrokeEventEditor:
     def save_latest_position(self):
         StateUtils.save_main_app_state(
             event_position=f"{self.event_window.winfo_x()}/{self.event_window.winfo_y()}",
-            event_pointer=str(
-                self.screenshot_capturer.get_current_mouse_position()
-            ),
+            event_pointer=str(self.screenshot_capturer.get_current_mouse_position()),
             clicked_position=str(self.clicked_position),
         )
 
     def load_latest_position(self):
-        logger.debug(f"Loading latest position")
         state = StateUtils.load_main_app_state()
         if state and "event_position" in state:
             x, y = state["event_position"].split("/")
             self.event_window.geometry(f"+{x}+{y}")
+            self.event_window.update_idletasks()
 
         if state and "event_pointer" in state:
             pointer_position = eval(state["event_pointer"])

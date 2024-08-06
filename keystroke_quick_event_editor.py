@@ -110,7 +110,7 @@ class KeystrokeQuickEventEditor:
             + "\n\n"
             + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
             + "수집된 이미지에 왼쪽 클릭으로 교차선을 설정한 뒤\nCTRL 키를 누르면 Quick 이벤트에 저장됩니다.",
-            anchor="w",
+            anchor="center",
             fg="black",
             wraplength=200,
         )
@@ -238,7 +238,6 @@ class KeystrokeQuickEventEditor:
             entry.configure(state="readonly")
 
     def close_window(self, event=None):
-        logger.debug(f"close_window called with event {event}")
         keyboard.unhook_all()
         self.stop_listeners()
         self.save_latest_position()
@@ -258,12 +257,9 @@ class KeystrokeQuickEventEditor:
             self.screenshot_capturer.capture_thread.join(timeout=0.1)
 
     def save_latest_position(self):
-        logger.debug(f"Saving latest position to {self.latest_screenshot}")
         StateUtils.save_main_app_state(
             quick_position=f"{self.event_window.winfo_x()}/{self.event_window.winfo_y()}",
-            quick_pointer=str(
-                self.screenshot_capturer.get_current_mouse_position()
-            ),
+            quick_pointer=str(self.screenshot_capturer.get_current_mouse_position()),
         )
 
     def load_latest_position(self):

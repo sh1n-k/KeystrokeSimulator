@@ -5,12 +5,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Callable, Optional, List
 
-from loguru import logger
-
 from keystroke_event_editor import KeystrokeEventEditor
 from keystroke_event_importer import EventImporter
 from keystroke_models import ProfileModel, EventModel
-from keystroke_utils import WindowUtils
+from keystroke_utils import WindowUtils, StateUtils
 
 
 class ProfileFrame(ttk.Frame):
@@ -25,9 +23,9 @@ class ProfileFrame(ttk.Frame):
 
 
 class EventListFrame(ttk.Frame):
-    def __init__(self, master, profile: ProfileModel, save_callback: Callable):
-        super().__init__(master)
-        self.master = master
+    def __init__(self, settings_window, profile: ProfileModel, save_callback: Callable):
+        super().__init__(settings_window)
+        self.settings_window = settings_window
         self.profile = profile
         self.save_callback = save_callback
         self.event_rows: List[ttk.Frame] = []
@@ -36,10 +34,10 @@ class EventListFrame(ttk.Frame):
 
     def create_buttons(self):
         ttk.Button(self, text="Add Event", command=self.add_event_row).grid(
-            row=1, column=0, columnspan=2, pady=5, sticky="we"
+            row=1, column=0, columnspan=1, pady=5, sticky="we"
         )
         ttk.Button(self, text="Import from", command=self.open_import_gui).grid(
-            row=2, column=0, columnspan=2, pady=5, sticky="we"
+            row=1, column=1, columnspan=1, pady=5, sticky="we"
         )
 
     def load_events(self):
@@ -75,14 +73,9 @@ class EventListFrame(ttk.Frame):
 
         self.event_rows.append(row_frame)
 
-        if resize:
-            # Adjust the window size
-            self.master.update_idletasks()
-            self.adjust_window_height()
-
     def open_event_settings(self, row_num, event):
         KeystrokeEventEditor(
-            self.master,
+            self.settings_window,
             row_num=row_num,
             save_callback=self.save_event_callback,
             event_function=lambda: event,
@@ -107,10 +100,6 @@ class EventListFrame(ttk.Frame):
         else:
             messagebox.showinfo("Info", "Only set events can be copied")
 
-        # Adjust the window size after copying
-        self.master.update_idletasks()
-        # self.adjust_window_height()
-
     def remove_event_row(self, row_frame, row_num):
         if len(self.profile.event_list) < 2:
             messagebox.showinfo("Info", "There must be at least one event")
@@ -123,11 +112,10 @@ class EventListFrame(ttk.Frame):
         self.save_callback()
 
         # Adjust the window size after removing
-        self.master.update_idletasks()
-        self.adjust_window_height(stretch=False)
+        self.settings_window.update_idletasks()
 
     def open_import_gui(self):
-        EventImporter(self.master, self.import_events)
+        EventImporter(self.settings_window, self.import_events)
 
     def import_events(self, event_list: List[EventModel]):
         self.profile.event_list.extend(event_list)
@@ -135,106 +123,118 @@ class EventListFrame(ttk.Frame):
             self.add_event_row(event=event)
         self.save_callback()
 
-    def adjust_window_height(self, stretch=True):
-        height = 29 if stretch else -29
-        current_width = self.master.winfo_width()
-        current_height = self.master.winfo_height()
-        new_height = current_height + height
-        logger.debug(
-            f"current width x height: {self.master.winfo_width()} x {self.master.winfo_height()}"
-        )
-        self.master.update_idletasks()
-        self.master.geometry(f"{current_width}x{new_height}")
-
 
 class KeystrokeProfiles:
     def __init__(
         self,
         main_window: tk.Tk,
         profile_name: str,
-        save_callback: Optional[Callable[[], None]],
+        save_callback: Optional[Callable[[str], None]] = None,
     ):
         self.main_window = main_window
         self.profile_name = profile_name
         self.external_save_callback = save_callback
         self.profiles_dir = "profiles"
 
-        self.settings_window = tk.Toplevel(main_window)
-        self.settings_window.title("Settings")
-        self.settings_window.transient(main_window)  # Set parent window
-        self.settings_window.grab_set()  # Make the window modal
-        self.settings_window.focus_force()
-        self.settings_window.attributes("-topmost", True)
-        self.settings_window.bind("<Escape>", self.close_settings)
-
-        self.profile = self.load_profile()
+        self.settings_window = self._create_settings_window()
+        self.profile = self._load_profile()
 
         self.profile_frame = ProfileFrame(self.settings_window, profile_name)
-        self.profile_frame.pack()
-
         self.event_list_frame = EventListFrame(
-            self.settings_window, self.profile, self.save_profile
-        )
-        self.event_list_frame.pack()
-
-        self.create_buttons()
-        self.settings_window.update_idletasks()
-
-        WindowUtils.center_window(self.settings_window)
-
-    def create_buttons(self):
-        button_frame = ttk.Frame(self.settings_window)
-        button_frame.pack(side="bottom", pady=10, fill="x")
-
-        ttk.Button(button_frame, text="OK", command=self.handle_ok_button).pack(
-            side=tk.LEFT, padx=5
-        )
-        ttk.Button(button_frame, text="Cancel", command=self.close_settings).pack(
-            side=tk.LEFT, padx=5
+            self.settings_window, self.profile, self._save_profile
         )
 
-    def load_profile(self) -> ProfileModel:
+        self._pack_frames()
+        self._create_buttons()
+        self._load_latest_position()
+
+        self.settings_window.protocol("WM_DELETE_WINDOW", self._close_settings)
+
+    def _create_settings_window(self) -> tk.Toplevel:
+        window = tk.Toplevel(self.main_window)
+        window.title("Settings")
+        window.transient(self.main_window)
+        window.grab_set()
+        window.focus_force()
+        window.attributes("-topmost", True)
+        window.bind("<Escape>", self._close_settings)
+        return window
+
+    def _load_profile(self) -> ProfileModel:
         try:
             with open(f"{self.profiles_dir}/{self.profile_name}.pkl", "rb") as f:
                 return pickle.load(f)
         except FileNotFoundError:
             return ProfileModel(name=self.profile_name, event_list=[])
 
-    def save_profile(self, check_profile_name: bool = True):
-        if len(self.profile.event_list) < 1:
-            messagebox.showerror("Error", "At least one event must be set")
-            raise ValueError("Empty event list")
+    def _pack_frames(self):
+        self.profile_frame.pack()
+        self.event_list_frame.pack()
+
+    def _create_buttons(self):
+        button_frame = ttk.Frame(self.settings_window)
+        button_frame.pack(side="bottom", pady=10, fill="x")
+
+        ttk.Button(button_frame, text="OK", command=self._handle_ok_button).pack(
+            side=tk.LEFT, padx=5
+        )
+        ttk.Button(button_frame, text="Cancel", command=self._close_settings).pack(
+            side=tk.LEFT, padx=5
+        )
+
+    def _save_profile(self, check_profile_name: bool = True):
+        if not self.profile.event_list:
+            raise ValueError("At least one event must be set")
 
         new_profile_name = self.profile_frame.profile_entry.get()
         if check_profile_name and not new_profile_name:
-            messagebox.showerror("Error", "Enter the profile name to save")
-            raise ValueError("Invalid profile name")
+            raise ValueError("Enter the profile name to save")
 
         if new_profile_name != self.profile_name:
-            old_file = f"{self.profiles_dir}/{self.profile_name}.pkl"
-            if os.path.exists(old_file):
-                os.remove(old_file)
+            self._remove_old_profile()
             self.profile_name = new_profile_name
 
         with open(f"{self.profiles_dir}/{self.profile_name}.pkl", "wb") as f:
             pickle.dump(self.profile, f)
 
-    def handle_ok_button(self):
+    def _remove_old_profile(self):
+        old_file = f"{self.profiles_dir}/{self.profile_name}.pkl"
+        if os.path.exists(old_file):
+            os.remove(old_file)
+
+    def _handle_ok_button(self):
         try:
-            self.save_event_names()
-            self.save_profile()
-            self.close_settings()
+            self._save_event_names()
+            self._save_profile()
+            self._close_settings()
             if self.external_save_callback:
                 self.external_save_callback(self.profile_name)
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save profile: {e}")
 
-    def save_event_names(self):
+    def _save_event_names(self):
         for idx, row_frame in enumerate(self.event_list_frame.event_rows):
             entry = row_frame.winfo_children()[0]
             if idx < len(self.profile.event_list):
                 self.profile.event_list[idx].event_name = entry.get()
 
-    def close_settings(self, event=None):
+    def _save_latest_position(self):
+        StateUtils.save_main_app_state(
+            profile_position=f"{self.settings_window.winfo_x()}/{self.settings_window.winfo_y()}",
+        )
+
+    def _load_latest_position(self):
+        state = StateUtils.load_main_app_state()
+        if not state or "profile_position" not in state:
+            WindowUtils.center_window(self.settings_window)
+            return
+        else:
+            x, y = state["profile_position"].split("/")
+            self.settings_window.geometry(f"+{x}+{y}")
+
+    def _close_settings(self, event=None):
+        self._save_latest_position()
         self.settings_window.grab_release()
         self.settings_window.destroy()
