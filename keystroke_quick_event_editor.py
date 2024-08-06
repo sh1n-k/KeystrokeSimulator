@@ -1,15 +1,18 @@
 import copy
 import os
 import pickle
+import platform
 import tkinter as tk
 from typing import List, Tuple
 
+import keyboard
 import pynput
 from PIL import Image, ImageTk
+from loguru import logger
 
 from keystroke_capturer import ScreenshotCapturer
 from keystroke_models import EventModel, ProfileModel
-from keystroke_utils import StateUtils, WindowUtils
+from keystroke_utils import StateUtils, WindowUtils, KeyUtils
 
 
 class KeystrokeQuickEventEditor:
@@ -44,12 +47,11 @@ class KeystrokeQuickEventEditor:
         self.screenshot_capturer = ScreenshotCapturer()
         self.screenshot_capturer.screenshot_callback = self.update_capture_image
         self.file_path = "profiles/_Quick.pkl"
-        self.ensure_file_exists(self.file_path)
+        self.ensure_file_exists()
 
-    @staticmethod
-    def ensure_file_exists(file_path: str):
-        if not os.path.isfile(file_path):
-            with open(file_path, "wb") as f:
+    def ensure_file_exists(self):
+        if not os.path.isfile(self.file_path):
+            with open(self.file_path, "wb") as f:
                 pass
 
     def create_ui(self):
@@ -120,21 +122,38 @@ class KeystrokeQuickEventEditor:
         self.bind_hotkey()
 
     def bind_hotkey(self):
-        def on_press(key):
-            if key == pynput.keyboard.Key.alt_l:
-                self.screenshot_capturer.set_current_mouse_position(
-                    self.event_window.winfo_pointerxy()
-                )
-            elif key == pynput.keyboard.Key.ctrl_l:
-                self.hold_image()
+        if platform.system() == "Darwin":
 
-        def on_release(key):
-            return key != pynput.keyboard.Key.esc
+            def on_cmd_press(e):
+                if e.event_type == "down":
+                    self.screenshot_capturer.set_current_mouse_position(
+                        self.event_window.winfo_pointerxy()
+                    )
 
-        self.keyboard_input_listener = pynput.keyboard.Listener(
-            on_press=on_press, on_release=on_release
-        )
-        self.keyboard_input_listener.start()
+            def on_control_press(e):
+                if e.event_type == "down":
+                    self.hold_image()
+
+            keyboard.hook_key(KeyUtils.get_keycode("command"), on_cmd_press)
+            keyboard.hook_key(KeyUtils.get_keycode("control"), on_control_press)
+
+        elif platform.system() == "Windows":
+
+            def on_press(key):
+                if key == pynput.keyboard.Key.alt_l:
+                    self.screenshot_capturer.set_current_mouse_position(
+                        self.event_window.winfo_pointerxy()
+                    )
+                elif key == pynput.keyboard.Key.ctrl_l:
+                    self.hold_image()
+
+            def on_release(key):
+                return key != pynput.keyboard.Key.esc
+
+            self.keyboard_input_listener = pynput.keyboard.Listener(
+                on_press=on_press, on_release=on_release
+            )
+            self.keyboard_input_listener.start()
 
     def update_capture_image(self, position: Tuple[int, int], image: Image.Image):
         if position and image:
@@ -219,6 +238,8 @@ class KeystrokeQuickEventEditor:
             entry.configure(state="readonly")
 
     def close_window(self, event=None):
+        logger.debug(f"close_window called with event {event}")
+        keyboard.unhook_all()
         self.stop_listeners()
         self.save_latest_position()
         self.event_window.grab_release()
@@ -237,24 +258,25 @@ class KeystrokeQuickEventEditor:
             self.screenshot_capturer.capture_thread.join(timeout=0.1)
 
     def save_latest_position(self):
+        logger.debug(f"Saving latest position to {self.latest_screenshot}")
         StateUtils.save_main_app_state(
             quick_position=f"{self.event_window.winfo_x()}/{self.event_window.winfo_y()}",
-            event_position_pointer=str(
+            quick_pointer=str(
                 self.screenshot_capturer.get_current_mouse_position()
             ),
         )
 
     def load_latest_position(self):
         state = StateUtils.load_main_app_state()
-        if not state or "latest_quick" not in state:
+        if not state or "quick_position" not in state:
             WindowUtils.center_window(self.event_window)
             return
         else:
-            x, y = state["latest_quick"].split("/")
+            x, y = state["quick_position"].split("/")
             self.event_window.geometry(f"+{x}+{y}")
 
-        if state and "latest_position_pointer" in state:
-            pointer_position = eval(state["latest_position_pointer"])
+        if state and "quick_pointer" in state:
+            pointer_position = eval(state["quick_pointer"])
             self.screenshot_capturer.set_current_mouse_position(pointer_position)
 
     @staticmethod

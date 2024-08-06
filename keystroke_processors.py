@@ -2,13 +2,12 @@ import ntpath
 import sys
 import platform
 
-if platform.system() == 'Windows':
+if platform.system() == "Windows":
     import win32api
     import win32gui
     import win32process
-elif platform.system() == 'Darwin':
+elif platform.system() == "Darwin":
     import AppKit
-
 
 
 def get_processes_macos():

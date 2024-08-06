@@ -5,6 +5,7 @@ import tkinter.ttk as ttk
 from tkinter import messagebox
 from typing import Callable, Optional
 
+import keyboard
 import pynput
 from PIL import ImageTk, Image
 from loguru import logger
@@ -118,7 +119,7 @@ class KeystrokeEventEditor:
 
         tk.Label(key_frame, text="Key:").grid(row=0, column=0)
         self.key_combobox = ttk.Combobox(
-            key_frame, state="readonly", values=KeyUtils.sort_cg_key_codes()
+            key_frame, state="readonly", values=KeyUtils.get_key_name_list()
         )
         self.key_combobox.grid(row=0, column=1)
 
@@ -173,29 +174,45 @@ class KeystrokeEventEditor:
                     self.update_key_to_enter(event)
 
     def bind_hotkey(self):
-        position_trigger_key = (
-            pynput.keyboard.Key.cmd_l
-            if platform.system() == "Darwin"
-            else pynput.keyboard.Key.alt_l
-        )
+        if platform.system() == "Darwin":
 
-        def on_press(key):
-            if key == position_trigger_key:
-                logger.debug(f"reset position")
-                self.screenshot_capturer.set_current_mouse_position(
-                    self.event_window.winfo_pointerxy()
-                )
-            elif key == pynput.keyboard.Key.ctrl_l:
-                logger.debug(f"hold current image")
-                self.hold_image()
+            def on_cmd_press(e):
+                if e.event_type == "down":
+                    self.screenshot_capturer.set_current_mouse_position(
+                        self.event_window.winfo_pointerxy()
+                    )
 
-        def on_release(key):
-            pass
+            def on_control_press(e):
+                if e.event_type == "down":
+                    self.hold_image()
 
-        self.keyboard_input_listener = pynput.keyboard.Listener(
-            on_press=on_press, on_release=on_release
-        )
-        self.keyboard_input_listener.start()
+            keyboard.hook_key(KeyUtils.get_keycode("command"), on_cmd_press)
+            keyboard.hook_key(KeyUtils.get_keycode("control"), on_control_press)
+
+        elif platform.system() == "Windows":
+            position_trigger_key = (
+                pynput.keyboard.Key.cmd_l
+                if platform.system() == "Darwin"
+                else pynput.keyboard.Key.alt_l
+            )
+
+            def on_press(key):
+                if key == position_trigger_key:
+                    logger.debug(f"reset position")
+                    self.screenshot_capturer.set_current_mouse_position(
+                        self.event_window.winfo_pointerxy()
+                    )
+                elif key == pynput.keyboard.Key.ctrl_l:
+                    logger.debug(f"hold current image")
+                    self.hold_image()
+
+            def on_release(key):
+                pass
+
+            self.keyboard_input_listener = pynput.keyboard.Listener(
+                on_press=on_press, on_release=on_release
+            )
+            self.keyboard_input_listener.start()
 
     def update_capture_image(self, position: tuple, image: Image.Image):
         if position and image:
@@ -295,6 +312,7 @@ class KeystrokeEventEditor:
         if self.keyboard_input_listener:
             self.keyboard_input_listener.stop()
             self.keyboard_input_listener.join()
+        keyboard.unhook_all()
 
         if (
             self.screenshot_capturer.capture_thread

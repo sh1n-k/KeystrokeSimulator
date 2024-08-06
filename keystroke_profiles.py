@@ -43,8 +43,9 @@ class EventListFrame(ttk.Frame):
         )
 
     def load_events(self):
-        for idx, event in enumerate(self.profile.event_list):
-            self.add_event_row(row_num=idx, event=event, resize=False)
+        if self.profile.event_list:
+            for idx, event in enumerate(self.profile.event_list):
+                self.add_event_row(row_num=idx, event=event, resize=False)
 
     def add_event_row(self, row_num=None, event=None, resize=True):
         if row_num is None:

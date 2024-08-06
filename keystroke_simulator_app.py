@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import pickle
+import platform
 import shutil
 import threading
 import tkinter as tk
@@ -18,7 +19,7 @@ from keystroke_profiles import KeystrokeProfiles
 from keystroke_quick_event_editor import KeystrokeQuickEventEditor
 from keystroke_settings import KeystrokeSettings
 from keystroke_sort_events import KeystrokeSortEvents
-from keystroke_utils import SoundUtils, StateUtils, WindowUtils
+from keystroke_utils import SoundUtils, StateUtils, WindowUtils, KeyUtils
 
 
 class ProcessFrame(tk.Frame):
@@ -239,7 +240,14 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def bind_events(self):
         self.bind("<Escape>", self.on_closing)
-        keyboard.on_press_key(self.settings.start_stop_key, self.toggle_start_stop)
+        start_stop_key = self.settings.start_stop_key
+        system = platform.system()
+
+        if system == "Windows":
+            keyboard.on_press_key(start_stop_key, self.toggle_start_stop)
+        elif system == "Darwin":
+            key_code = KeyUtils.get_key_list()[start_stop_key]
+            keyboard.on_press_key(key_code, self.toggle_start_stop)
 
     def unbind_events(self):
         self.unbind("<Escape>")
@@ -254,7 +262,6 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.start_simulation()
         else:
             self.stop_simulation()
-        self.update_ui()
 
     def start_simulation(self):
         if not self._validate_simulation_prerequisites():
@@ -264,10 +271,16 @@ class KeystrokeSimulatorApp(tk.Tk):
         if not profile:
             return
 
+        event_list = [p for p in profile.event_list if p.key_to_enter]
+        if not event_list:
+            return
+
         self.terminate_event.clear()
-        self._create_and_start_engines(profile)
-        SoundUtils.play(self.settings.start_sound)
+        self._create_and_start_engines(event_list)
         self.save_latest_state()
+
+        SoundUtils.play_sound(self.settings.start_sound)
+        self.update_ui()
 
     def _validate_simulation_prerequisites(self) -> bool:
         target_process = self.selected_process.get()
@@ -293,10 +306,8 @@ class KeystrokeSimulatorApp(tk.Tk):
             logger.info(f"Failed to load profile: {e}")
             return ProfileModel()
 
-    def _create_and_start_engines(self, profile: ProfileModel):
-        event_chunks = self._chunk_events(
-            [p for p in profile.event_list if p.key_to_enter]
-        )
+    def _create_and_start_engines(self, event_list: List[EventModel]):
+        event_chunks = self._chunk_events(event_list)
         target_process = self.selected_process.get()
 
         self.keystroke_engines = [
@@ -327,7 +338,8 @@ class KeystrokeSimulatorApp(tk.Tk):
             for engine in self.keystroke_engines:
                 engine.join(timeout=0.1)
             self.keystroke_engines = []
-            SoundUtils.play(self.settings.stop_sound)
+            SoundUtils.play_sound(self.settings.stop_sound)
+            self.update_ui()
 
     def update_ui(self):
         state = "disable" if self.is_running.get() else "normal"
@@ -344,6 +356,8 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.button_frame.start_stop_button.config(
             text="Stop" if self.is_running.get() else "Start"
         )
+        self.button_frame.settings_button.config(state=state)
+        self.profile_button_frame.sort_button.config(state=state)
 
     def open_profile(self):
         profile_name = self.selected_profile.get()
@@ -366,14 +380,11 @@ class KeystrokeSimulatorApp(tk.Tk):
         KeystrokeQuickEventEditor(self)
 
     def open_settings(self):
-        def save_callback():
-            self.load_settings()
-            self.settings_window = None
-            self.bind_events()
+        if self.settings_window:
+            return
 
-        if not self.settings_window:
-            self.unbind_events()
-            self.settings_window = KeystrokeSettings(self, save_callback)
+        self.unbind_events()
+        self.settings_window = KeystrokeSettings(self)
 
     def load_latest_state(self):
         state = StateUtils.load_main_app_state()

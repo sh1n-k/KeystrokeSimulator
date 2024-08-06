@@ -9,7 +9,6 @@ from PIL import Image
 
 
 class ScreenshotCapturer:
-
     def __init__(self):
         current_monitor = screeninfo.get_monitors()[0]
         self.screen_width, self.screen_height = (
