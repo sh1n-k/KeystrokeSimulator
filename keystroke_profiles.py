@@ -36,7 +36,7 @@ class EventListFrame(ttk.Frame):
         ttk.Button(self, text="Add Event", command=self.add_event_row).grid(
             row=1, column=0, columnspan=1, pady=5, sticky="we"
         )
-        ttk.Button(self, text="Import from", command=self.open_import_gui).grid(
+        ttk.Button(self, text="Import from", command=self.open_importer).grid(
             row=1, column=1, columnspan=1, pady=5, sticky="we"
         )
 
@@ -114,7 +114,7 @@ class EventListFrame(ttk.Frame):
         # Adjust the window size after removing
         self.settings_window.update_idletasks()
 
-    def open_import_gui(self):
+    def open_importer(self):
         EventImporter(self.settings_window, self.import_events)
 
     def import_events(self, event_list: List[EventModel]):
@@ -126,10 +126,10 @@ class EventListFrame(ttk.Frame):
 
 class KeystrokeProfiles:
     def __init__(
-        self,
-        main_window: tk.Tk,
-        profile_name: str,
-        save_callback: Optional[Callable[[str], None]] = None,
+            self,
+            main_window: tk.Tk,
+            profile_name: str,
+            save_callback: Optional[Callable[[str], None]] = None,
     ):
         self.main_window = main_window
         self.profile_name = profile_name
@@ -182,7 +182,7 @@ class KeystrokeProfiles:
             side=tk.LEFT, padx=5
         )
 
-    def _save_profile(self, check_profile_name: bool = True):
+    def _save_profile(self, check_profile_name: bool = True, reload_event_frame: bool = True):
         if not self.profile.event_list:
             raise ValueError("At least one event must be set")
 
@@ -197,6 +197,13 @@ class KeystrokeProfiles:
         with open(f"{self.profiles_dir}/{self.profile_name}.pkl", "wb") as f:
             pickle.dump(self.profile, f)
 
+        if reload_event_frame:
+            self.event_list_frame.destroy()
+            self.event_list_frame = EventListFrame(
+                self.settings_window, self.profile, self._save_profile
+            )
+            self.event_list_frame.pack()
+
     def _remove_old_profile(self):
         old_file = f"{self.profiles_dir}/{self.profile_name}.pkl"
         if os.path.exists(old_file):
@@ -205,7 +212,7 @@ class KeystrokeProfiles:
     def _handle_ok_button(self):
         try:
             self._save_event_names()
-            self._save_profile()
+            self._save_profile(reload_event_frame=False)
             self._close_settings()
             if self.external_save_callback:
                 self.external_save_callback(self.profile_name)
