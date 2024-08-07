@@ -173,10 +173,10 @@ class KeystrokeProfiles:
         self.event_list_frame.pack()
 
     def _create_buttons(self):
-        button_frame = ttk.Frame(self.settings_window)
-        button_frame.pack(side="bottom", anchor="center", pady=10, fill="both")
+        button_frame = ttk.Frame(self.settings_window, style="success.TFrame")
+        button_frame.pack(side="bottom", anchor="e", pady=10, fill="both")
 
-        ttk.Button(button_frame, text="Save", command=self._handle_ok_button).pack(
+        ttk.Button(button_frame, text="Save names", command=self._handle_ok_button).pack(
             side=tk.LEFT, anchor="center", padx=5
         )
         # ttk.Button(button_frame, text="Cancel", command=self._close_settings).pack(
@@ -199,6 +199,7 @@ class KeystrokeProfiles:
             pickle.dump(self.profile, f)
 
         if reload_event_frame:
+            self._save_event_names()
             self.event_list_frame.destroy()
             self.event_list_frame = EventListFrame(
                 self.settings_window, self.profile, self._save_profile
