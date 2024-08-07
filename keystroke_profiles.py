@@ -52,11 +52,11 @@ class EventListFrame(ttk.Frame):
         row_frame = ttk.Frame(self)
         row_frame.grid(row=row_num + 3, column=0, columnspan=2, padx=5, pady=2)
 
+        ttk.Label(row_frame, text=row_num + 1, width=2, anchor="center").pack(side=tk.LEFT)
         entry = ttk.Entry(row_frame)
         entry.pack(side=tk.LEFT, padx=5)
         if event and hasattr(event, "event_name"):
             entry.insert(0, event.event_name)
-
         ttk.Button(
             row_frame,
             text="⚙️",
@@ -95,6 +95,7 @@ class EventListFrame(ttk.Frame):
                 new_event.event_name = ""  # Clear the event name for the copy
                 self.profile.event_list.append(new_event)
                 self.add_event_row(event=new_event)
+                self.save_callback()
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to copy event: {str(e)}")
         else:
@@ -173,14 +174,14 @@ class KeystrokeProfiles:
 
     def _create_buttons(self):
         button_frame = ttk.Frame(self.settings_window)
-        button_frame.pack(side="bottom", pady=10, fill="x")
+        button_frame.pack(side="bottom", anchor="center", pady=10, fill="both")
 
-        ttk.Button(button_frame, text="OK", command=self._handle_ok_button).pack(
-            side=tk.LEFT, padx=5
+        ttk.Button(button_frame, text="Save", command=self._handle_ok_button).pack(
+            side=tk.LEFT, anchor="center", padx=5
         )
-        ttk.Button(button_frame, text="Cancel", command=self._close_settings).pack(
-            side=tk.LEFT, padx=5
-        )
+        # ttk.Button(button_frame, text="Cancel", command=self._close_settings).pack(
+        #     side=tk.LEFT, padx=5
+        # )
 
     def _save_profile(self, check_profile_name: bool = True, reload_event_frame: bool = True):
         if not self.profile.event_list:
@@ -223,7 +224,7 @@ class KeystrokeProfiles:
 
     def _save_event_names(self):
         for idx, row_frame in enumerate(self.event_list_frame.event_rows):
-            entry = row_frame.winfo_children()[0]
+            entry = row_frame.winfo_children()[1]
             if idx < len(self.profile.event_list):
                 self.profile.event_list[idx].event_name = entry.get()
 
