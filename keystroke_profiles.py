@@ -15,7 +15,7 @@ class ProfileFrame(ttk.Frame):
     def __init__(self, master, profile_name: str):
         super().__init__(master)
         self.profile_name = profile_name
-        self.profile_label = ttk.Label(self, text="Profile name:")
+        self.profile_label = ttk.Label(self, text="Profile Name: ")
         self.profile_entry = ttk.Entry(self)
         self.profile_label.grid(row=0, column=0, sticky=tk.E)
         self.profile_entry.grid(row=0, column=1, padx=1)
@@ -36,7 +36,7 @@ class EventListFrame(ttk.Frame):
         ttk.Button(self, text="Add Event", command=self.add_event_row).grid(
             row=1, column=0, columnspan=1, pady=5, sticky="we"
         )
-        ttk.Button(self, text="Import from", command=self.open_importer).grid(
+        ttk.Button(self, text="Import From", command=self.open_importer).grid(
             row=1, column=1, columnspan=1, pady=5, sticky="we"
         )
 
@@ -176,7 +176,7 @@ class KeystrokeProfiles:
         button_frame = ttk.Frame(self.settings_window, style="success.TFrame")
         button_frame.pack(side="bottom", anchor="e", pady=10, fill="both")
 
-        ttk.Button(button_frame, text="Save names", command=self._handle_ok_button).pack(
+        ttk.Button(button_frame, text="Save Names", command=self._handle_ok_button).pack(
             side=tk.LEFT, anchor="center", padx=5
         )
         # ttk.Button(button_frame, text="Cancel", command=self._close_settings).pack(

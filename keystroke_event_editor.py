@@ -160,7 +160,6 @@ class KeystrokeEventEditor:
 
     def filter_key_combobox(self, event):
         key_name = (event.keysym or event.char).upper()
-        logger.debug(f"filter_key_combobox: {key_name}")
         if key_name.startswith("F") and key_name[1:].isdigit():
             self.key_combobox.set(key_name)
             self.update_key_to_enter(event)
@@ -253,7 +252,6 @@ class KeystrokeEventEditor:
 
         image_x = int(event.x * image.width / self.image2_placeholder.winfo_width())
         image_y = int(event.y * image.height / self.image2_placeholder.winfo_height())
-        logger.debug(f"Image coordinates: ({image_x}, {image_y})")
 
         self.update_ref_pixel_placeholder(image, (image_x, image_y))
 

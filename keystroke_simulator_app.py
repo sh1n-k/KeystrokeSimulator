@@ -219,6 +219,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.button_frame.pack(pady=5)
         self.profile_button_frame.pack(pady=5)
 
+        self.set_ttk_style()
         self.load_settings()
         self.bind_events()
         self.load_latest_state()
@@ -226,6 +227,14 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         WindowUtils.center_window(self)
+
+    def set_ttk_style(self):
+        style = ttk.Style(self)
+        style.theme_use('default')
+        style.configure('TFrame', background='#2E2E2E')
+        style.configure('TLabel', background='black', foreground='white')
+        style.configure('TButton', background='white', foreground='black')
+        style.configure('TEntry', fieldbackground='white', foreground='black')
 
     def load_settings(self):
         try:
@@ -371,9 +380,10 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.profile_frame.profile_combobox.current(0)
 
     def sort_profile_events(self):
+        self.unbind_events()
         profile_name = self.selected_profile.get()
         if profile_name:
-            KeystrokeSortEvents(self)
+            KeystrokeSortEvents(self, profile_name, self.reload_profiles)
 
     def open_quick_events(self):
         KeystrokeQuickEventEditor(self)

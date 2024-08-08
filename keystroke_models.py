@@ -48,20 +48,3 @@ class ProfileModel:
         return (
             f"ProfileModel(name='{self.name}', event_list=[{', '.join(event_strings)}])"
         )
-
-
-class AppState:
-    def __init__(self):
-        self.selected_process: Optional[str] = None
-        self.selected_profile: Optional[str] = None
-        self.is_simulation_running: bool = False
-        # Add other state variables as needed
-
-    def update_process(self, process: str):
-        self.selected_process = process
-
-    def update_profile(self, profile: str):
-        self.selected_profile = profile
-
-    def toggle_simulation(self):
-        self.is_simulation_running = not self.is_simulation_running
