@@ -136,7 +136,7 @@ class KeystrokeSettings(tk.Toplevel):
         return P == "" or (P.isdigit() and 0 <= int(P) < 1000 and not P.startswith("0"))
 
     def _on_key_press(self, event):
-        self.start_stop_key.set(event.char or event.keysym)
+        self.start_stop_key.set((event.char or event.keysym).upper())
         self.settings.start_stop_key = self.start_stop_key.get()
         self.warning_label.config(text="")
 

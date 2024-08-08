@@ -15,7 +15,7 @@ class WindowUtils:
 
     @staticmethod
     def _calculate_window_size(
-        window, screen_width, screen_height, width_percent, height_percent
+            window, screen_width, screen_height, width_percent, height_percent
     ):
         window.update_idletasks()
         return (
@@ -201,12 +201,8 @@ class KeyUtils:
         return list(KeyUtils.key_codes[platform.system().lower()].keys())
 
     @staticmethod
-    def get_keycode(character):
-        return KeyUtils.get_key_list().get(character.lower())
-
-    @staticmethod
-    def sort_key_codes():
-        return sorted(KeyUtils.get_key_list().keys())
+    def get_keycode(character: str):
+        return KeyUtils.get_key_list().get(character.capitalize())
 
 
 class StateUtils:

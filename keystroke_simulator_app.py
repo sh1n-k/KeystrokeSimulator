@@ -246,8 +246,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         if system == "Windows":
             keyboard.on_press_key(start_stop_key, self.toggle_start_stop)
         elif system == "Darwin":
-            key_code = KeyUtils.get_key_list()[start_stop_key]
-            keyboard.on_press_key(key_code, self.toggle_start_stop)
+            keyboard.on_press_key(KeyUtils.get_keycode(start_stop_key), self.toggle_start_stop)
 
     def unbind_events(self):
         self.unbind("<Escape>")
