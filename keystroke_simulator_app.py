@@ -230,11 +230,11 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def set_ttk_style(self):
         style = ttk.Style(self)
-        style.theme_use('default')
-        style.configure('TFrame', background='#2E2E2E')
-        style.configure('TLabel', background='black', foreground='white')
-        style.configure('TButton', background='white', foreground='black')
-        style.configure('TEntry', fieldbackground='white', foreground='black')
+        style.theme_use("default")
+        style.configure("TFrame", background="#2E2E2E")
+        style.configure("TLabel", background="black", foreground="white")
+        style.configure("TButton", background="white", foreground="black")
+        style.configure("TEntry", fieldbackground="white", foreground="black")
 
     def load_settings(self):
         try:
@@ -255,7 +255,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         if system == "Windows":
             keyboard.on_press_key(start_stop_key, self.toggle_start_stop)
         elif system == "Darwin":
-            keyboard.on_press_key(KeyUtils.get_keycode(start_stop_key), self.toggle_start_stop)
+            keyboard.on_press_key(
+                KeyUtils.get_keycode(start_stop_key), self.toggle_start_stop
+            )
 
     def unbind_events(self):
         self.unbind("<Escape>")
@@ -414,7 +416,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
 
     def on_closing(self, event=None):
-        logger.info("Application closing, terminating threads...")
+        logger.info("Shutting down the application and terminating threads...")
         self.terminate_event.set()
         self.stop_simulation()
         self.save_latest_state()

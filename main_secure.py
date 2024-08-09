@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import os
+import platform
 import re
 import subprocess
 import tkinter as tk
@@ -12,7 +13,8 @@ import requests
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
+from loguru import logger
 
 from keystroke_simulator_app import KeystrokeSimulatorApp
 from keystroke_utils import WindowUtils
@@ -25,21 +27,27 @@ class DeviceManager:
 
     @staticmethod
     def get_machine_id():
-        bios_serial = DeviceManager._get_serial(
-            "wmic bios get serialnumber", "unknown_bios"
-        )
-        board_serial = DeviceManager._get_serial(
-            "wmic baseboard get serialnumber", "unknown_board"
-        )
+        if platform.system() == "Windows":
+            bios_serial = DeviceManager._get_windows_serial(
+                "wmic bios get serialnumber", "unknown_bios"
+            )
+            board_serial = DeviceManager._get_windows_serial(
+                "wmic baseboard get serialnumber", "unknown_board"
+            )
+            memory_gb = DeviceManager._get_memory_gb()
+        elif platform.system() == "Darwin":
+            bios_serial, board_serial, memory_gb = DeviceManager._get_macos_serial()
+        else:
+            raise
+
         os_name = os.name
         user_name = os.getlogin()
-        memory_gb = DeviceManager._get_memory_gb()
         machine_id = f"{bios_serial}:{board_serial}:{os_name}:{user_name}:{memory_gb}"
-        print(machine_id)
+        logger.debug(f"MachineId: {machine_id}")
         return hashlib.md5(machine_id.encode()).hexdigest()
 
     @staticmethod
-    def _get_serial(command, default):
+    def _get_windows_serial(command, default):
         try:
             return (
                 subprocess.check_output(command, shell=True)
@@ -49,6 +57,27 @@ class DeviceManager:
             )
         except Exception:
             return default
+
+    @staticmethod
+    def _get_macos_serial():
+        result = subprocess.run(
+            ["system_profiler", "SPHardwareDataType"], stdout=subprocess.PIPE
+        )
+        output = result.stdout.decode()
+
+        bios_serial = None
+        board_serial = None
+        memory = None
+
+        for line in output.split("\n"):
+            if "Serial Number (system)" in line:
+                bios_serial = line.split(":")[-1].strip()
+            if "Hardware UUID" in line:
+                board_serial = line.split(":")[-1].strip()
+            if "Memory" in line:
+                memory = line.split(":")[-1].strip()
+
+        return bios_serial, board_serial, memory
 
     @staticmethod
     def _get_memory_gb():
@@ -73,7 +102,7 @@ class CryptoManager:
 
     @staticmethod
     def obfuscate(data):
-        key = b"ObfuscationKey1213"
+        key = os.getenv("OBFUSCATION_KEY").encode("utf-8")
         return bytes([data[i] ^ key[i % len(key)] for i in range(len(data))])
 
 
@@ -114,55 +143,51 @@ class StorageManager:
             )
 
 
-def get_or_create_device_id():
-    try:
-        return StorageManager.retrieve_device_id()
-    except Exception:
-        device_id = DeviceManager.generate_device_id()
-        StorageManager.store_device_id(device_id)
-        return device_id
-
-
 class AuthApp:
     def __init__(self, master):
         self.master = master
-        master.title("Authentication")
-        self.device_id = get_or_create_device_id()
-        self.config = load_dotenv(".env")
+        self.setup_ui()
+        self.failed_attempts = 0
+        self.device_id = self.get_or_create_device_id()
 
-        self.id_label = ttk.Label(master, text="User ID:")
-        self.id_label.grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        self.id_entry = ttk.Entry(master)
-        self.id_entry.grid(row=0, column=1, padx=5, pady=5)
-        self.id_entry.config(
-            validate="key",
-            validatecommand=(master.register(self.validate_user_id), "%P"),
-        )
+    def setup_ui(self):
+        self.master.title("Authentication")
+        self.create_widgets()
+        self.setup_bindings()
+        WindowUtils.center_window(self.master)
 
+    def create_widgets(self):
+        self.id_label = ttk.Label(self.master, text="User ID:")
+        self.id_entry = ttk.Entry(self.master)
         self.error_label = tk.Label(
-            master,
-            text="Enter your username and click the 'OK' button or press Enter.",
+            self.master,
+            text="Enter your username and click 'OK' or press Enter.",
             fg="black",
-            wraplength=200,
+            wraplength=250,
         )
-        self.error_label.grid(row=2, column=0, columnspan=2, pady=5)
-
-        button_frame = ttk.Frame(master)
-        button_frame.grid(row=1, column=0, columnspan=2, pady=10)
+        button_frame = ttk.Frame(self.master)
         self.ok_button = ttk.Button(
             button_frame, text="OK", command=self.validate_and_auth
         )
-        self.ok_button.pack(side=tk.LEFT, padx=5)
         self.quit_button = ttk.Button(
             button_frame, text="Quit", command=self.master.quit
         )
+
+        self.id_label.grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        self.id_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.error_label.grid(row=2, column=0, columnspan=2, pady=5)
+        button_frame.grid(row=1, column=0, columnspan=2, pady=10)
+        self.ok_button.pack(side=tk.LEFT, padx=5)
         self.quit_button.pack(side=tk.LEFT, padx=5)
 
-        self.master.after(100, self.set_window_focus)
+    def setup_bindings(self):
+        self.id_entry.config(
+            validate="key",
+            validatecommand=(self.master.register(self.validate_user_id), "%P"),
+        )
         self.master.bind("<Escape>", lambda event: self.master.quit())
         self.id_entry.bind("<Return>", lambda event: self.ok_button.invoke())
-
-        self.center_window()
+        self.master.after(100, self.set_window_focus)
 
     def set_window_focus(self):
         self.master.focus_force()
@@ -191,6 +216,28 @@ class AuthApp:
     def clear_error(self):
         self.error_label.config(text="")
 
+    def lock_inputs(self):
+        self.id_entry.config(state="disabled")
+        self.ok_button.config(state="disabled")
+        self.start_countdown(10)
+
+    def unlock_inputs(self):
+        self.id_entry.config(state="normal")
+        self.ok_button.config(state="normal")
+        self.clear_error()
+        self.failed_attempts = 1
+
+    def start_countdown(self, remaining_time, final_message=""):
+        if remaining_time > 0:
+            self.show_error(
+                f"{final_message}\n\nToo many failed attempts.\nTry again in {remaining_time} seconds."
+            )
+            self.master.after(
+                1000, self.start_countdown, remaining_time - 1, final_message
+            )
+        else:
+            self.unlock_inputs()
+
     def validate_and_auth(self):
         if self.validate_input():
             self.ok_button.config(state="disabled")
@@ -199,34 +246,35 @@ class AuthApp:
     def request_authentication(self):
         user_id = self.id_entry.get()
         timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+        payload = {
+            "userId": user_id,
+            "deviceId": self.device_id,
+            "timestamp": timestamp,
+        }
+        resp_json = {}
 
-        resp_json = None
         try:
-            response = requests.post(
-                self.config["AUTH_URL"],
-                json={
-                    "userId": user_id,
-                    "deviceId": self.device_id,
-                    "timestamp": timestamp,
-                },
-                timeout=5,
-            )
+            response = requests.post(os.getenv("AUTH_URL"), json=payload, timeout=5)
             resp_json = response.json()
-            print(response.status_code)
-            print(resp_json)
+            logger.info(f"{response.status_code}: {resp_json}")
             response.raise_for_status()
             self.launch_keystroke_simulator()
         except requests.Timeout:
             self.show_error_and_reactivate("Authentication request timed out.")
         except requests.RequestException as e:
-            err_msg = resp_json["message"] if "message" in resp_json else ""
+            err_msg = resp_json.get("message", "") if resp_json else ""
             self.show_error_and_reactivate(f"Failed to login: {err_msg}")
 
     def show_error_and_reactivate(self, message):
-        self.show_error(message)
-        self.ok_button.config(state="normal")
-        self.master.deiconify()
-        self.master.after(100, self.set_window_focus)
+        self.failed_attempts += 1
+        if self.failed_attempts >= 2:
+            self.lock_inputs()
+            self.start_countdown(10, final_message=message)
+        else:
+            self.show_error(message)
+            self.ok_button.config(state="normal")
+            self.master.deiconify()
+            self.master.after(100, self.set_window_focus)
 
     def launch_keystroke_simulator(self):
         self.master.withdraw()
@@ -234,13 +282,14 @@ class AuthApp:
         keystroke_app = KeystrokeSimulatorApp()
         keystroke_app.mainloop()
 
-    def center_window(self):
-        self.master.update_idletasks()
-        width = self.master.winfo_width()
-        height = self.master.winfo_height()
-        x = (self.master.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.master.winfo_screenheight() // 2) - (height // 2)
-        self.master.geometry(f"{width}x{height}+{x}+{y}")
+    @staticmethod
+    def get_or_create_device_id():
+        try:
+            return StorageManager.retrieve_device_id()
+        except Exception:
+            device_id = DeviceManager.generate_device_id()
+            StorageManager.store_device_id(device_id)
+            return device_id
 
 
 class MainApp:
@@ -280,4 +329,5 @@ def main():
 
 
 if __name__ == "__main__":
+    load_dotenv(find_dotenv())
     main()

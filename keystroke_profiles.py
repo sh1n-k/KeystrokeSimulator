@@ -52,7 +52,9 @@ class EventListFrame(ttk.Frame):
         row_frame = ttk.Frame(self)
         row_frame.grid(row=row_num + 3, column=0, columnspan=2, padx=5, pady=2)
 
-        ttk.Label(row_frame, text=row_num + 1, width=2, anchor="center").pack(side=tk.LEFT)
+        ttk.Label(row_frame, text=row_num + 1, width=2, anchor="center").pack(
+            side=tk.LEFT
+        )
         entry = ttk.Entry(row_frame)
         entry.pack(side=tk.LEFT, padx=5)
         if event and hasattr(event, "event_name"):
@@ -127,10 +129,10 @@ class EventListFrame(ttk.Frame):
 
 class KeystrokeProfiles:
     def __init__(
-            self,
-            main_window: tk.Tk,
-            profile_name: str,
-            save_callback: Optional[Callable[[str], None]] = None,
+        self,
+        main_window: tk.Tk,
+        profile_name: str,
+        save_callback: Optional[Callable[[str], None]] = None,
     ):
         self.main_window = main_window
         self.profile_name = profile_name
@@ -153,7 +155,7 @@ class KeystrokeProfiles:
 
     def _create_settings_window(self) -> tk.Toplevel:
         window = tk.Toplevel(self.main_window)
-        window.title("Settings")
+        window.title("Profile Manager")
         window.transient(self.main_window)
         window.grab_set()
         window.focus_force()
@@ -176,14 +178,16 @@ class KeystrokeProfiles:
         button_frame = ttk.Frame(self.settings_window, style="success.TFrame")
         button_frame.pack(side="bottom", anchor="e", pady=10, fill="both")
 
-        ttk.Button(button_frame, text="Save Names", command=self._handle_ok_button).pack(
-            side=tk.LEFT, anchor="center", padx=5
-        )
+        ttk.Button(
+            button_frame, text="Save Names", command=self._handle_ok_button
+        ).pack(side=tk.LEFT, anchor="center", padx=5)
         # ttk.Button(button_frame, text="Cancel", command=self._close_settings).pack(
         #     side=tk.LEFT, padx=5
         # )
 
-    def _save_profile(self, check_profile_name: bool = True, reload_event_frame: bool = True):
+    def _save_profile(
+        self, check_profile_name: bool = True, reload_event_frame: bool = True
+    ):
         if not self.profile.event_list:
             raise ValueError("At least one event must be set")
 

@@ -15,7 +15,7 @@ class WindowUtils:
 
     @staticmethod
     def _calculate_window_size(
-            window, screen_width, screen_height, width_percent, height_percent
+        window, screen_width, screen_height, width_percent, height_percent
     ):
         window.update_idletasks()
         return (

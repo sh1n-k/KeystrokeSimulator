@@ -15,7 +15,7 @@ class KeystrokeSettings(tk.Toplevel):
     def __init__(self, master=None):
         super().__init__(master)
         self.master = master
-        self.title("Keystroke Settings")
+        self.title("Settings")
         self.settings = UserSettings()
         self._create_widgets()
         self._setup_window()
@@ -156,9 +156,7 @@ class KeystrokeSettings(tk.Toplevel):
         self._set_sound_label(4, self.settings.stop_sound)
 
     def on_reset(self):
-        if messagebox.askokcancel(
-            "Warning", f"Resets the values.\n설정값이 초기화 됩니다."
-        ):
+        if messagebox.askokcancel("Warning", f"Resets the values.\n설정값이 초기화 됩니다."):
             self.settings = UserSettings()  # Reset to default values
             self._update_ui_from_settings()
             self.warning_label.config(
@@ -203,9 +201,7 @@ class KeystrokeSettings(tk.Toplevel):
 
     def validate_min_max_values(self, min_value, max_value):
         if min_value >= max_value:
-            self.show_warning(
-                "Check the Min and Max values.\n최소, 최대값을 확인하세요."
-            )
+            self.show_warning("Check the Min and Max values.\n최소, 최대값을 확인하세요.")
             return False
         if min_value < 75 or max_value > 200:
             self.show_warning(

@@ -18,7 +18,7 @@ class EventImporter:
         confirm_callback: Optional[Callable[[list[EventModel]], None]] = None,
     ):
         self.event_importer = tk.Toplevel(profiles_window)
-        self.event_importer.title("Load from")
+        self.event_importer.title("Import events")
         self.event_importer.focus_force()
         self.event_importer.attributes("-topmost", True)
         self.event_importer.grab_set()

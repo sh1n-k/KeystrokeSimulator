@@ -17,8 +17,8 @@ class KeystrokeSortEvents(tk.Toplevel):
         self.profiles_dir = "./profiles"
         self.save_callback = save_callback
 
-        self.title("Event Manager")
-        self.configure(bg='#2E2E2E')
+        self.title("Event Organizer")
+        self.configure(bg="#2E2E2E")
 
         self.profile_name = tk.StringVar(value=profile_name)
         self.profile = self.load_profile(profile_name)
@@ -37,8 +37,11 @@ class KeystrokeSortEvents(tk.Toplevel):
         profile_frame.pack(pady=10, padx=10, fill=tk.X)
 
         ttk.Label(profile_frame, text="Profile Name:").pack(side=tk.LEFT, padx=(0, 5))
-        (ttk.Entry(profile_frame, textvariable=self.profile_name, state="readonly")
-         .pack(side=tk.LEFT, expand=True, fill=tk.BOTH))
+        (
+            ttk.Entry(
+                profile_frame, textvariable=self.profile_name, state="readonly"
+            ).pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
+        )
 
         # Event Frame
         self.event_frame = ttk.Frame(self)
@@ -56,11 +59,11 @@ class KeystrokeSortEvents(tk.Toplevel):
             event = EventModel()
             self.events.append(event)
 
-        frame = ttk.Frame(self.event_frame, style='Event.TFrame')
+        frame = ttk.Frame(self.event_frame, style="Event.TFrame")
         frame.pack(pady=5, fill=tk.X, padx=5)
         frame.configure(borderwidth=2, relief="solid")
         style = ttk.Style()
-        style.configure('Event.TFrame', background='#2E2E2E', bordercolor='red')
+        style.configure("Event.TFrame", background="#2E2E2E", bordercolor="red")
 
         # Index label
         index_label = ttk.Label(frame, text=f"{idx + 1}")
@@ -70,19 +73,29 @@ class KeystrokeSortEvents(tk.Toplevel):
         if event.held_screenshot:
             img = ImageTk.PhotoImage(event.held_screenshot.resize((50, 50)))
         else:
-            img = ImageTk.PhotoImage(Image.new('RGB', (50, 50), color='gray'))
+            img = ImageTk.PhotoImage(Image.new("RGB", (50, 50), color="gray"))
         img_label = ttk.Label(frame, image=img)
         img_label.image = img  # Keep a reference to prevent garbage collection
         img_label.pack(side=tk.LEFT, padx=5)
 
-        event_name_var = tk.StringVar(value=event.event_name if event.event_name else "")
+        event_name_var = tk.StringVar(
+            value=event.event_name if event.event_name else ""
+        )
         entry = ttk.Entry(frame, textvariable=event_name_var)
         entry.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
 
-        event_name_var.trace_add("write", lambda *args: self.update_event_name(event, event_name_var))
+        event_name_var.trace_add(
+            "write", lambda *args: self.update_event_name(event, event_name_var)
+        )
 
         # Start/Stop key display (read-only)
-        key_entry = ttk.Label(frame, text=event.key_to_enter or "N/A", width=3, anchor="w",  state="readonly")
+        key_entry = ttk.Label(
+            frame,
+            text=event.key_to_enter or "N/A",
+            width=3,
+            anchor="w",
+            state="readonly",
+        )
         key_entry.pack(side=tk.LEFT, padx=5)
 
         self.configure_drag_and_drop(frame)
@@ -108,13 +121,16 @@ class KeystrokeSortEvents(tk.Toplevel):
         # Create a clone of the widget for dragging
         self.drag_image = tk.Toplevel(self)
         self.drag_image.overrideredirect(True)
-        self.drag_image.attributes('-alpha', 0.7)  # Make it semi-transparent
-        self.drag_image.attributes('-topmost', True)  # Ensure it's always on top
+        self.drag_image.attributes("-alpha", 0.7)  # Make it semi-transparent
+        self.drag_image.attributes("-topmost", True)  # Ensure it's always on top
         clone = ttk.Frame(self.drag_image)
         clone.pack(fill=tk.BOTH, expand=True)
         for child in widget.winfo_children():
-            child_clone = ttk.Label(clone, image=child.image if hasattr(child, 'image') else None,
-                                    text=child['text'] if 'text' in child.keys() else None)
+            child_clone = ttk.Label(
+                clone,
+                image=child.image if hasattr(child, "image") else None,
+                text=child["text"] if "text" in child.keys() else None,
+            )
             child_clone.pack(side=tk.LEFT, padx=5)
 
         # Position the clone at the mouse cursor
@@ -123,7 +139,7 @@ class KeystrokeSortEvents(tk.Toplevel):
         self.drag_image.geometry(f"+{x}+{y}")
 
     def on_drag_motion(self, event):
-        if hasattr(self, 'drag_image'):
+        if hasattr(self, "drag_image"):
             x = self.winfo_pointerx() - self.winfo_rootx()
             y = self.winfo_pointery() - self.winfo_rooty()
             self.drag_image.geometry(f"+{x}+{y}")
@@ -136,7 +152,7 @@ class KeystrokeSortEvents(tk.Toplevel):
         widget.place(y=y)
 
     def on_drag_release(self, event):
-        if hasattr(self, 'drag_image'):
+        if hasattr(self, "drag_image"):
             self.drag_image.destroy()
             del self.drag_image
 
@@ -147,8 +163,12 @@ class KeystrokeSortEvents(tk.Toplevel):
         widget.place(y=y)
 
         # Reorder events based on new positions
-        sorted_frames = sorted(self.event_frame.winfo_children(), key=lambda w: w.winfo_y())
-        self.events = [self.events[int(f.winfo_children()[0]['text']) - 1] for f in sorted_frames]
+        sorted_frames = sorted(
+            self.event_frame.winfo_children(), key=lambda w: w.winfo_y()
+        )
+        self.events = [
+            self.events[int(f.winfo_children()[0]["text"]) - 1] for f in sorted_frames
+        ]
 
         # Update event order and redraw
         for widget in self.event_frame.winfo_children():
