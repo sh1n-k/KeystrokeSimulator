@@ -1,8 +1,8 @@
-import base64
 import hashlib
 import os
 import platform
 import re
+import secrets
 import subprocess
 import tkinter as tk
 import uuid
@@ -10,14 +10,108 @@ from datetime import datetime, timezone
 from tkinter import ttk
 
 import requests
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
 
 from keystroke_simulator_app import KeystrokeSimulatorApp
 from keystroke_utils import WindowUtils
+
+
+class CryptoManager:
+    @staticmethod
+    def derive_key(machine_id, salt):
+        # Use PBKDF2 with SHA256
+        iterations = 100000
+        key_length = 32  # AES-256 key length
+        dk = hashlib.pbkdf2_hmac(
+            "sha256", machine_id.encode(), salt, iterations, key_length
+        )
+        return dk  # Return the raw bytes, not base64 encoded
+
+    @staticmethod
+    def obfuscate(data):
+        key = os.getenv("OBFUSCATION_KEY").encode("utf-8")
+        return bytes([data[i] ^ key[i % len(key)] for i in range(len(data))])
+
+
+class StorageManager:
+    @staticmethod
+    def store_device_id(device_id):
+        machine_id = DeviceManager.get_machine_id()
+        salt = secrets.token_bytes(16)
+        key = CryptoManager.derive_key(machine_id, salt)
+        encrypted_data = StorageManager._encrypt(key, device_id.encode())
+        obfuscated_data = CryptoManager.obfuscate(encrypted_data)
+        file_path = os.path.join(os.path.expanduser("~"), ".secure_app_data")
+        with open(file_path, "wb") as file:
+            file.write(salt + obfuscated_data)
+
+    @staticmethod
+    def retrieve_device_id():
+        file_path = os.path.join(os.path.expanduser("~"), ".secure_app_data")
+        try:
+            with open(file_path, "rb") as file:
+                data = file.read()
+                salt = data[:16]
+                obfuscated_data = data[16:]
+        except FileNotFoundError:
+            raise Exception("Device ID not found. Please register this device.")
+
+        deobfuscated_data = CryptoManager.obfuscate(obfuscated_data)
+        machine_id = DeviceManager.get_machine_id()
+        key = CryptoManager.derive_key(machine_id, salt)
+        try:
+            decrypted_data = StorageManager._decrypt(key, deobfuscated_data)
+            return decrypted_data.decode()
+        except Exception:
+            raise Exception(
+                "Failed to decrypt device ID. This may not be the original device."
+            )
+
+    @staticmethod
+    def _encrypt(key, data):
+        iv = secrets.token_bytes(16)
+        cipher = StorageManager._create_cipher(key, iv)
+        return iv + cipher.encrypt(data)
+
+    @staticmethod
+    def _decrypt(key, data):
+        iv = data[:16]
+        cipher = StorageManager._create_cipher(key, iv)
+        return cipher.decrypt(data[16:])
+
+    @staticmethod
+    def _create_cipher(key, iv):
+        return StorageManager._AESCipher(key, iv)
+
+    class _AESCipher:
+        def __init__(self, key, iv):
+            self.key = key
+            self.iv = iv
+
+        def encrypt(self, data):
+            padded_data = self._pad(data)
+            cipher = self._create_cipher()
+            return cipher.encrypt(padded_data)
+
+        def decrypt(self, data):
+            cipher = self._create_cipher()
+            padded_data = cipher.decrypt(data)
+            return self._unpad(padded_data)
+
+        def _create_cipher(self):
+            from Crypto.Cipher import AES
+
+            return AES.new(self.key, AES.MODE_CBC, self.iv)
+
+        def _pad(self, data):
+            padding_length = 16 - (len(data) % 16)
+            padding = bytes([padding_length] * padding_length)
+            return data + padding
+
+        def _unpad(self, padded_data):
+            padding_length = padded_data[-1]
+            return padded_data[:-padding_length]
 
 
 class DeviceManager:
@@ -90,57 +184,6 @@ class DeviceManager:
             return total_memory_bytes
         except Exception as e:
             return f"Error retrieving memory: {e}"
-
-
-class CryptoManager:
-    @staticmethod
-    def derive_key(machine_id, salt):
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000
-        )
-        return base64.urlsafe_b64encode(kdf.derive(machine_id.encode()))
-
-    @staticmethod
-    def obfuscate(data):
-        key = os.getenv("OBFUSCATION_KEY").encode("utf-8")
-        return bytes([data[i] ^ key[i % len(key)] for i in range(len(data))])
-
-
-class StorageManager:
-    @staticmethod
-    def store_device_id(device_id):
-        machine_id = DeviceManager.get_machine_id()
-        salt = os.urandom(16)
-        key = CryptoManager.derive_key(machine_id, salt)
-        f = Fernet(key)
-        encrypted_data = f.encrypt(device_id.encode())
-        obfuscated_data = CryptoManager.obfuscate(encrypted_data)
-        file_path = os.path.join(os.path.expanduser("~"), ".secure_app_data")
-        with open(file_path, "wb") as file:
-            file.write(salt + obfuscated_data)
-
-    @staticmethod
-    def retrieve_device_id():
-        file_path = os.path.join(os.path.expanduser("~"), ".secure_app_data")
-        try:
-            with open(file_path, "rb") as file:
-                data = file.read()
-                salt = data[:16]
-                obfuscated_data = data[16:]
-        except FileNotFoundError:
-            raise Exception("Device ID not found. Please register this device.")
-
-        deobfuscated_data = CryptoManager.obfuscate(obfuscated_data)
-        machine_id = DeviceManager.get_machine_id()
-        key = CryptoManager.derive_key(machine_id, salt)
-        f = Fernet(key)
-        try:
-            decrypted_data = f.decrypt(deobfuscated_data)
-            return decrypted_data.decode()
-        except Exception:
-            raise Exception(
-                "Failed to decrypt device ID. This may not be the original device."
-            )
 
 
 class AuthApp:
