@@ -14,6 +14,8 @@
 .vscode/
 profiles/
 logs/
+*.json
+*.b64
 
 # AWS User-specific
 .idea/**/aws.xml
