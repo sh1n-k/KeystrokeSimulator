@@ -12,6 +12,7 @@
 .idea/**/dictionaries
 .idea/**/shelf
 .vscode/
+.fleet/
 profiles/
 logs/
 *.json
