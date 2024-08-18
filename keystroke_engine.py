@@ -145,7 +145,6 @@ class KeystrokeEngine(Thread):
     # Windows-specific methods
     @staticmethod
     def _is_process_active_windows(process_id: int) -> bool:
-        logger.debug(f"processId: {process_id}")
         active_window = win32gui.GetForegroundWindow()
         _, active_pid = win32process.GetWindowThreadProcessId(active_window)
         return process_id == active_pid
@@ -161,7 +160,6 @@ class KeystrokeEngine(Thread):
     # macOS-specific methods
     @staticmethod
     def _is_process_active_darwin(process_id: int) -> bool:
-        logger.debug(f"processId: {process_id}")
         active_app = AppKit.NSWorkspace.sharedWorkspace().activeApplication()
         return (
             active_app is not None
