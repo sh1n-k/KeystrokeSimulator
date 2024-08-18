@@ -399,15 +399,17 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def load_latest_state(self):
         state = StateUtils.load_main_app_state()
-        if state:
-            if "process" in state:
-                for process in self.process_frame.process_combobox["values"]:
-                    if process.startswith(state["process"]):
-                        self.selected_process.set(process)
-                        logger.debug(f"Set default process to: {state['process']}")
-            if "profile" in state:
-                self.selected_profile.set(state["profile"])
-                logger.debug(f"Set default profile to: {state['profile']}")
+        if not state:
+            return
+
+        if "process" in state:
+            for process in self.process_frame.process_combobox["values"]:
+                if process.startswith(state["process"]):
+                    self.selected_process.set(process)
+            logger.debug(f"Set default process to: {state['process']}")
+        if "profile" in state:
+            self.selected_profile.set(state["profile"])
+            logger.debug(f"Set default profile to: {state['profile']}")
 
     def save_latest_state(self):
         StateUtils.save_main_app_state(

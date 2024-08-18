@@ -64,7 +64,7 @@ class KeystrokeEngine(Thread):
         try:
             return int(
                 target_process[
-                    target_process.index("(") + 1 : target_process.index(")")
+                target_process.index("(") + 1: target_process.index(")")
                 ]
             )
         except (ValueError, IndexError):
@@ -138,8 +138,15 @@ class KeystrokeEngine(Thread):
 
     def simulate_keystroke(self, key: str):
         key_code = self.key_codes[key.upper()]
+        pressed_time = random.uniform(self.key_pressed[0], self.key_pressed[1])
+
+        if key_code is None:
+            logger.error(f"A key without a code was pressed: {key} / {key_code}")
+            time.sleep(pressed_time)
+            return
+
         self.press_key(key_code)
-        time.sleep(random.uniform(self.key_pressed[0], self.key_pressed[1]))
+        time.sleep(pressed_time)
         self.release_key(key_code)
 
     # Windows-specific methods
