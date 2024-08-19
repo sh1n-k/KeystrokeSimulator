@@ -203,7 +203,7 @@ class KeystrokeSettings(tk.Toplevel):
             set(f"F{i}" for i in range(1, 13))
             | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
             | set(chr(i) for i in range(ord("0"), ord("9") + 1))
-            | set("[];',./-=\\")
+            | set("`[];',./-=\\")
         )
 
         key = event.char.upper() or event.keysym.upper()
