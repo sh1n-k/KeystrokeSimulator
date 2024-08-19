@@ -3,6 +3,8 @@ import logging
 import os
 import platform
 from pathlib import Path
+import subprocess
+from threading import Thread
 from typing import Optional, Dict
 
 import pygame
@@ -240,12 +242,38 @@ class StateUtils:
 
 
 class SoundUtils:
-    _initialized = False
+    _play_sound_method = None
+    _loaded_sounds = {}
+
+    @staticmethod
+    def _play_sound_mac(sound_file):
+        def run_afplay():
+            try:
+                subprocess.run(["afplay", sound_file])
+            except Exception as e:
+                print(f"Failed to play sound on macOS: {e}")
+
+        thread = Thread(target=run_afplay, daemon=True)
+        thread.start()
+
+    @classmethod
+    def _play_sound_default(cls, sound_file):
+        if sound_file not in cls._loaded_sounds:
+            cls._loaded_sounds[sound_file] = pygame.mixer.Sound(sound_file)
+        cls._loaded_sounds[sound_file].play()
+
+    @classmethod
+    def initialize(cls):
+        if platform.system() == "Darwin":
+            cls._play_sound_method = cls._play_sound_mac
+        else:
+            pygame.mixer.init()
+            cls._play_sound_method = cls._play_sound_default
 
     @classmethod
     def play_sound(cls, sound_file):
-        if not cls._initialized:
-            pygame.mixer.init()
-            cls._initialized = True
-
-        pygame.mixer.Sound(sound_file).play()
+        if cls._play_sound_method is None:
+            raise RuntimeError(
+                "SoundUtils not initialized. Call SoundUtils.initialize() first."
+            )
+        cls._play_sound_method(sound_file)

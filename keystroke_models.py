@@ -24,6 +24,7 @@ class EventModel:
     held_screenshot: Optional[Image.Image] = None
     ref_pixel_value: Optional[tuple] = None
     key_to_enter: Optional[str] = None
+    use_event: bool = True
 
     def __iter__(self):
         for field in fields(self):

@@ -64,7 +64,7 @@ class KeystrokeEngine(Thread):
         try:
             return int(
                 target_process[
-                target_process.index("(") + 1: target_process.index(")")
+                    target_process.index("(") + 1 : target_process.index(")")
                 ]
             )
         except (ValueError, IndexError):

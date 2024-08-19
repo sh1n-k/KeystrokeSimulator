@@ -181,9 +181,6 @@ class KeystrokeProfiles:
         ttk.Button(
             button_frame, text="Save Names", command=self._handle_ok_button
         ).pack(side=tk.LEFT, anchor="center", padx=5)
-        # ttk.Button(button_frame, text="Cancel", command=self._close_settings).pack(
-        #     side=tk.LEFT, padx=5
-        # )
 
     def _save_profile(
         self, check_profile_name: bool = True, reload_event_frame: bool = True

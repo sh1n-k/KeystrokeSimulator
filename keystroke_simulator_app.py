@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+from pathlib import Path
 import pickle
 import platform
 import shutil
@@ -11,6 +12,7 @@ from typing import Callable, List, Optional
 
 import keyboard
 from loguru import logger
+import pynput
 
 from keystroke_engine import KeystrokeEngine
 from keystroke_models import ProfileModel, EventModel, UserSettings
@@ -85,8 +87,8 @@ class ProfileFrame(tk.Frame):
             for f in os.listdir(self.profiles_dir)
             if f.endswith(".pkl")
         ]
-        if "_Quick" in profile_files:
-            profile_files.insert(0, profile_files.pop(profile_files.index("_Quick")))
+        if "Quick" in profile_files:
+            profile_files.insert(0, profile_files.pop(profile_files.index("Quick")))
         self.profile_combobox["values"] = profile_files
         if profile_files:
             self.profile_combobox.current(0)
@@ -108,7 +110,7 @@ class ProfileFrame(tk.Frame):
 
     def delete_profile(self):
         current_profile = self.profile_combobox.get()
-        if not current_profile or current_profile == "_Quick":
+        if not current_profile or current_profile == "Quick":
             return
         if messagebox.askokcancel("Warning", f"Delete profile '{current_profile}'."):
             self._delete_profile(current_profile)
@@ -200,6 +202,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.selected_profile = tk.StringVar()
         self.keystroke_engines = []
 
+        self.init_profiles()
         self.settings_window = None
         self.process_frame = ProcessFrame(self, textvariable=self.selected_process)
         self.profile_frame = ProfileFrame(
@@ -218,20 +221,38 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_frame.pack(pady=1)
         self.button_frame.pack(pady=5)
         self.profile_button_frame.pack(pady=5)
-
         self.set_ttk_style()
         self.load_settings()
         self.bind_events()
         self.load_latest_state()
         self.terminate_event = threading.Event()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.start_stop_mouse_listener = None
 
+        SoundUtils.initialize()
         WindowUtils.center_window(self)
+
+    def init_profiles(self):
+        if not os.path.isdir(self.profiles_dir):
+            try:
+                shutil.rmtree(self.profiles_dir)
+            except FileNotFoundError as e:
+                pass
+
+        if not os.path.exists(self.profiles_dir):
+            os.makedirs(self.profiles_dir)
+
+        profile_quick_path = Path(f"{self.profiles_dir}/Quick.pkl")
+        if not os.path.exists(profile_quick_path):
+            Path(profile_quick_path).touch()
+            with open(profile_quick_path, "wb") as f:
+                pickle.dump(ProfileModel(), f)
+            self._load_profile()
 
     def set_ttk_style(self):
         style = ttk.Style(self)
         style.theme_use("default")
-        style.configure("TFrame", background="#2E2E2E")
+        style.configure("TFrame", background="black")
         style.configure("TLabel", background="black", foreground="white")
         style.configure("TButton", background="white", foreground="black")
         style.configure("TEntry", fieldbackground="white", foreground="black")
@@ -252,16 +273,32 @@ class KeystrokeSimulatorApp(tk.Tk):
         start_stop_key = self.settings.start_stop_key
         system = platform.system()
 
-        if system == "Windows":
-            keyboard.on_press_key(start_stop_key, self.toggle_start_stop)
-        elif system == "Darwin":
-            keyboard.on_press_key(
-                KeyUtils.get_keycode(start_stop_key), self.toggle_start_stop
+        if start_stop_key.startswith("W_"):
+            self.start_stop_mouse_listener = pynput.mouse.Listener(
+                on_scroll=self.on_mouse_scroll
             )
+            self.start_stop_mouse_listener.start()
+        else:
+            if system == "Windows":
+                keyboard.on_press_key(start_stop_key, self.toggle_start_stop)
+            elif system == "Darwin":
+                keyboard.on_press_key(
+                    KeyUtils.get_keycode(start_stop_key), self.toggle_start_stop
+                )
+
+    def on_mouse_scroll(self, x, y, dx, dy):
+        if self.settings.start_stop_key == "W_UP" and dy > 0:
+            self.toggle_start_stop()
+        elif self.settings.start_stop_key == "W_DN" and dy < 0:
+            self.toggle_start_stop()
 
     def unbind_events(self):
         self.unbind("<Escape>")
         keyboard.unhook_all()
+
+        if self.start_stop_mouse_listener:
+            self.start_stop_mouse_listener.stop()
+            self.start_stop_mouse_listener = None
 
     def toggle_start_stop(self, event=None):
         self.is_running.set(not self.is_running.get())
@@ -281,7 +318,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         if not profile:
             return
 
-        event_list = [p for p in profile.event_list if p.key_to_enter]
+        event_list = [p for p in profile.event_list if p.key_to_enter and p.use_event]
         if not event_list:
             return
 

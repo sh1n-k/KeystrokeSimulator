@@ -69,6 +69,14 @@ class KeystrokeSortEvents(tk.Toplevel):
         index_label = ttk.Label(frame, text=f"{idx + 1}")
         index_label.pack(side=tk.LEFT, padx=5)
 
+        # Checkbox for use_event
+        use_event_var = tk.BooleanVar(value=event.use_event)
+        use_event_check = ttk.Checkbutton(frame, variable=use_event_var)
+        use_event_check.pack(side=tk.LEFT, padx=5)
+        use_event_var.trace_add(
+            "write", lambda *args: self.update_use_event(event, use_event_var)
+        )
+
         # Placeholder for screenshot
         if event.held_screenshot:
             img = ImageTk.PhotoImage(event.held_screenshot.resize((50, 50)))
@@ -100,8 +108,11 @@ class KeystrokeSortEvents(tk.Toplevel):
 
         self.configure_drag_and_drop(frame)
         for idx, child in enumerate(frame.winfo_children()):
-            if idx < 2:
+            if idx < 3 and idx != 1:
                 self.configure_drag_and_drop(child)
+
+    def update_use_event(self, event: EventModel, use_event_var: tk.BooleanVar):
+        event.use_event = use_event_var.get()
 
     def configure_drag_and_drop(self, widget):
         widget.bind("<ButtonPress-1>", self.on_drag_start)
@@ -198,9 +209,6 @@ class KeystrokeSortEvents(tk.Toplevel):
         self.close_window()
 
     def close_window(self, event=None):
-        # if messagebox.askokcancel("Warning", f"Any changes made will be canceled.\n변경된 내용이 취소됩니다."):
-        #     self.destroy()
-        #     return
         self.master.load_settings()
         self.master.bind_events()
         self.destroy()

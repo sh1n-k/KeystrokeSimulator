@@ -46,7 +46,7 @@ class KeystrokeQuickEventEditor:
         self.keyboard_input_listener = None
         self.screenshot_capturer = ScreenshotCapturer()
         self.screenshot_capturer.screenshot_callback = self.update_capture_image
-        self.file_path = "profiles/_Quick.pkl"
+        self.file_path = "profiles/Quick.pkl"
         self.ensure_file_exists()
 
     def ensure_file_exists(self):

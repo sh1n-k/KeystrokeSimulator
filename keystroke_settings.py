@@ -43,17 +43,12 @@ class KeystrokeSettings(tk.Toplevel):
             loaded_settings = json.loads(settings_json)
             self.settings = UserSettings(**loaded_settings)
 
-            self.start_stop_key.set(self.settings.start_stop_key)
+            self._update_ui_from_settings()
 
-            self._set_entry_values(1, "key_pressed_time")
-            self._set_entry_values(2, "delay_between_loop")
-
-            self._set_sound_label(3, self.settings.start_sound)
-            self._set_sound_label(4, self.settings.stop_sound)
         except Exception as e:
             print("Error loading settings:", e)
             self.settings = UserSettings()
-        self._update_ui_from_settings()
+            self._update_ui_from_settings()
 
     def _set_entry_values(self, row, prefix):
         getattr(self, f"entry_min_{row}").delete(0, tk.END)
@@ -73,14 +68,77 @@ class KeystrokeSettings(tk.Toplevel):
         ttk.Label(self, text="Start/Stop Key:").grid(
             row=0, column=0, padx=10, pady=5, sticky=tk.W
         )
+
         self.start_stop_key = ttk.Combobox(self, values=["Press Key"], state="readonly")
         self.start_stop_key.grid(row=0, column=1, padx=10, pady=5)
         self.start_stop_key.current(0)
         self.start_stop_key.bind("<Key>", self._on_key_press)
 
+        self.wheel_up_var = tk.BooleanVar()
+        self.wheel_up_checkbox = ttk.Checkbutton(
+            self,
+            text="Wheel UP",
+            variable=self.wheel_up_var,
+            command=self._on_checkbox_change,
+        )
+        self.wheel_up_checkbox.grid(row=0, column=2, padx=5, pady=5)
+
+        self.wheel_down_var = tk.BooleanVar()
+        self.wheel_down_checkbox = ttk.Checkbutton(
+            self,
+            text="Wheel Down",
+            variable=self.wheel_down_var,
+            command=self._on_checkbox_change,
+        )
+        self.wheel_down_checkbox.grid(row=0, column=3, padx=5, pady=5)
+
+    def _on_checkbox_change(self):
+        if self.wheel_up_var.get() or self.wheel_down_var.get():
+            self.start_stop_key.config(state="disabled")
+        else:
+            self.start_stop_key.config(state="readonly")
+
+        self.wheel_up_checkbox.config(
+            state="normal" if not self.wheel_down_var.get() else "disabled"
+        )
+        self.wheel_down_checkbox.config(
+            state="normal" if not self.wheel_up_var.get() else "disabled"
+        )
+
+        self._store_wheel_settings()
+
+    def _store_wheel_settings(self):
+        if self.wheel_up_var.get():
+            self.settings.start_stop_key = "W_UP"
+        elif self.wheel_down_var.get():
+            self.settings.start_stop_key = "W_DN"
+        else:
+            self.settings.start_stop_key = self.start_stop_key.get()
+
+    def _update_ui_from_settings(self):
+        if self.settings.start_stop_key == "W_UP":
+            self.wheel_up_var.set(True)
+            self.start_stop_key.config(state="disabled")
+            self.wheel_down_checkbox.config(state="disabled")
+        elif self.settings.start_stop_key == "W_DN":
+            self.wheel_down_var.set(True)
+            self.start_stop_key.config(state="disabled")
+            self.wheel_up_checkbox.config(state="disabled")
+        else:
+            self.start_stop_key.set(self.settings.start_stop_key)
+            self.wheel_up_var.set(False)
+            self.wheel_down_var.set(False)
+            self.start_stop_key.config(state="readonly")
+            self.wheel_up_checkbox.config(state="normal")
+            self.wheel_down_checkbox.config(state="normal")
+
+        self._set_entry_values(1, "key_pressed_time")
+        self._set_entry_values(2, "delay_between_loop")
+        self._set_sound_label(3, self.settings.start_sound)
+        self._set_sound_label(4, self.settings.stop_sound)
+
     def _create_time_entries(self):
         validation_command = (self.register(self._validate_numeric_entry), "%P")
-
         self._create_entry_pair("Key pressed time (min, max):", 1, validation_command)
         self._create_entry_pair("Delay between loop (min, max):", 2, validation_command)
 
@@ -148,13 +206,6 @@ class KeystrokeSettings(tk.Toplevel):
         if filepath:
             label.config(text=filepath)
 
-    def _update_ui_from_settings(self):
-        self.start_stop_key.set(self.settings.start_stop_key)
-        self._set_entry_values(1, "key_pressed_time")
-        self._set_entry_values(2, "delay_between_loop")
-        self._set_sound_label(3, self.settings.start_sound)
-        self._set_sound_label(4, self.settings.stop_sound)
-
     def on_reset(self):
         if messagebox.askokcancel(
             "Warning", f"Resets the values.\n설정값이 초기화 됩니다."
@@ -169,7 +220,8 @@ class KeystrokeSettings(tk.Toplevel):
         if not self.validate_start_stop_key():
             return
 
-        self.settings.start_stop_key = self.start_stop_key.get()
+        self._store_wheel_settings()
+
         if not self.validate_and_set_time_settings():
             return
         self.set_sound_settings()
@@ -178,7 +230,7 @@ class KeystrokeSettings(tk.Toplevel):
         self.on_close()
 
     def validate_start_stop_key(self):
-        if self.settings.start_stop_key == "Press Key":
+        if self.settings.start_stop_key in ["Press Key", ""]:
             self.show_warning("Please select a Start/Stop key.")
             return False
         return True
