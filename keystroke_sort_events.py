@@ -37,22 +37,80 @@ class KeystrokeSortEvents(tk.Toplevel):
         profile_frame.pack(pady=10, padx=10, fill=tk.X)
 
         ttk.Label(profile_frame, text="Profile Name:").pack(side=tk.LEFT, padx=(0, 5))
-        (
-            ttk.Entry(
-                profile_frame, textvariable=self.profile_name, state="readonly"
-            ).pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
+        ttk.Entry(profile_frame, textvariable=self.profile_name, state="readonly").pack(
+            side=tk.LEFT, expand=True, fill=tk.BOTH
         )
 
-        # Event Frame
-        self.event_frame = ttk.Frame(self)
-        self.event_frame.pack(pady=10, fill=tk.BOTH, expand=True)
+        # Save Button - moved before the event frame
+        ttk.Button(self, text="Save", command=self.save_events).pack(pady=10)
+
+        # Create a canvas and a scrollbar for the event frame
+        canvas = tk.Canvas(self)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Create a frame inside the canvas
+        self.event_frame = ttk.Frame(canvas)
+
+        # Add the event frame to the canvas
+        canvas.create_window((0, 0), window=self.event_frame, anchor="nw")
+
+        # Configure the canvas to update scrollregion when the frame's size changes
+        self.event_frame.bind(
+            "<Configure>", lambda e: self.update_canvas(canvas, self.event_frame)
+        )
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Bind mouse wheel to scroll canvas when over event frames
+        self.bind_mouse_wheel(canvas)
 
         # Add existing events
         for idx, event in enumerate(self.events):
             self.add_event(idx, event)
 
-        # Save Button
-        ttk.Button(self, text="Save", command=self.save_events).pack(pady=10)
+        # Adjust the window size based on the number of events and screen height
+        self.adjust_window_height()
+
+    def update_canvas(self, canvas, frame):
+        # Update the canvas scrollregion and width
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        if frame.winfo_width() > canvas.winfo_width():
+            canvas.config(width=frame.winfo_width())
+
+    def bind_mouse_wheel(self, canvas):
+        # Bind mouse wheel scroll to canvas
+        def on_mouse_wheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind_all("<MouseWheel>", on_mouse_wheel)
+
+        # Ensure the mouse wheel works when hovering over event frames
+        for widget in self.event_frame.winfo_children():
+            widget.bind(
+                "<Enter>", lambda e: canvas.bind_all("<MouseWheel>", on_mouse_wheel)
+            )
+            widget.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+    def adjust_window_height(self):
+        # Get the screen height
+        screen_height = self.winfo_screenheight()
+        # Calculate the desired height based on event frames
+        event_frame_height = sum(
+            child.winfo_height() + 10 for child in self.event_frame.winfo_children()
+        )
+        # Add extra padding for the title bar, save button, etc.
+        total_desired_height = event_frame_height + 100
+
+        logger.debug(f"{screen_height}, {event_frame_height}, {total_desired_height}")
+
+        # Set the window height
+        if total_desired_height > screen_height:
+            self.geometry(f"{self.winfo_width()}x{screen_height}")
+        else:
+            self.geometry(f"{self.winfo_width()}x{total_desired_height}")
 
     def add_event(self, idx: int, event=None):
         if event is None:
