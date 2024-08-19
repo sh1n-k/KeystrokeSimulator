@@ -287,10 +287,13 @@ class KeystrokeSimulatorApp(tk.Tk):
                 )
 
     def on_mouse_scroll(self, x, y, dx, dy):
-        if self.settings.start_stop_key == "W_UP" and dy > 0:
-            self.toggle_start_stop()
-        elif self.settings.start_stop_key == "W_DN" and dy < 0:
-            self.toggle_start_stop()
+        if KeystrokeEngine._is_process_active_windows(
+            KeystrokeEngine.parse_process_id(self.selected_process.get())
+        ):
+            if self.settings.start_stop_key == "W_UP" and dy > 0:
+                self.toggle_start_stop()
+            elif self.settings.start_stop_key == "W_DN" and dy < 0:
+                self.toggle_start_stop()
 
     def unbind_events(self):
         self.unbind("<Escape>")

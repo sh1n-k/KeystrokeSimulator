@@ -1,0 +1,3436 @@
+```
+---------------
+File: _build.py
+---------------
+import os
+import tempfile
+
+from dotenv import load_dotenv, find_dotenv
+
+# Load environment variables
+load_dotenv(find_dotenv())
+
+
+# Function to create a temporary script with replaced environment variables
+def create_temp_script(filename):
+    with open(filename, "r") as file:
+        content = file.read()
+
+    # Replace environment variable references with actual values
+    for key, value in os.environ.items():
+        content = content.replace(f"os.getenv('{key}')", f"'{value}'")
+        content = content.replace(f'os.getenv("{key}")', f"'{value}'")
+
+    # Create a temporary file
+    temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
+    temp_file.write(content)
+    temp_file.close()
+
+    return temp_file.name
+
+
+if __name__ == "__main__":
+    # Create a temporary script with replaced environment variables
+    temp_main = create_temp_script("main_secure.py")
+
+    import PyInstaller.__main__
+
+    PyInstaller.__main__.run(
+        [
+            temp_main,
+            "--onefile",
+            "--windowed",
+            "--noconfirm",
+            "--log-level=WARN",
+            "--onefile",
+            "--nowindow",
+            "--optimize=2",
+            "--strip",
+        ]
+    )
+
+
+---------------
+File: _timestamp.py
+---------------
+from datetime import datetime, timezone, timedelta
+
+
+def timestamp_to_ktc(timestamp):
+    utc_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    ktc_time = utc_time + timedelta(hours=9)
+    return ktc_time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+# Example usage
+timestamp = 1724065393  # Example Unix timestamp
+print(timestamp_to_ktc(timestamp))
+
+
+---------------
+File: keystroke_capturer.py
+---------------
+import time
+import tkinter as tk
+from threading import Event, Thread
+from typing import Optional, Tuple
+
+import mss
+import screeninfo
+from PIL import Image
+
+
+class ScreenshotCapturer:
+    def __init__(self):
+        current_monitor = screeninfo.get_monitors()[0]
+        self.screen_width, self.screen_height = (
+            current_monitor.width,
+            current_monitor.height,
+        )
+        self.box_size = 100
+        self.current_position = (0, 0)
+
+        self.capturing: Event = Event()
+        self.capture_thread: Optional[Thread] = None
+        self.screenshot_callback: Optional[Tuple, Image.Image] = None
+
+    def get_current_mouse_position(self) -> Optional[Tuple[int, int]]:
+        return self.current_position
+
+    def set_current_mouse_position(self, position):
+        mouse_x, mouse_y = position
+        if (
+            mouse_x + self.box_size >= self.screen_width
+            or mouse_y + self.box_size >= self.screen_height
+        ):
+            return
+
+        self.current_position = (mouse_x, mouse_y)
+
+    def set_mouse_position(self, position):
+        self.current_position = position
+
+    def start_capture(self):
+        self.capturing.set()
+        self.capture_thread = Thread(target=self.capture_screenshot)
+        self.capture_thread.start()
+
+    def stop_capture(self):
+        self.capturing.clear()
+
+    def capture_screenshot(self):
+        with mss.mss() as sct:
+            while self.capturing.is_set():
+                try:
+                    position = self.get_current_mouse_position()
+                    if position and self.screenshot_callback:
+                        image = sct.grab(
+                            {
+                                "top": position[1],
+                                "left": position[0],
+                                "width": self.box_size,
+                                "height": self.box_size,
+                            }
+                        )
+                        pil_image = Image.frombytes(
+                            "RGB", image.size, image.bgra, "raw", "BGRX"
+                        )
+                        self.screenshot_callback(position, pil_image)
+                except tk.TclError as e:
+                    print(f"Event windows has been destroyed: {e}")
+                    self.capturing.clear()
+                    break
+
+                time.sleep(0.2)
+
+
+---------------
+File: keystroke_engine.py
+---------------
+import platform
+import random
+import threading
+import time
+from threading import Thread
+from typing import List, Dict, Optional
+
+import mss
+from loguru import logger
+
+from keystroke_models import EventModel
+from keystroke_utils import KeyUtils
+
+# OS-specific initialization
+if platform.system() == "Windows":
+    import win32gui
+    import win32process
+    import ctypes
+elif platform.system() == "Darwin":
+    import AppKit
+    from Quartz import (
+        CGEventCreateKeyboardEvent,
+        CGEventPost,
+        kCGHIDEventTap,
+    )
+
+
+class KeystrokeEngine(Thread):
+    def __init__(
+        self,
+        main,
+        target_process: str,
+        event_list: List[EventModel],
+        terminate_event: threading.Event,
+    ):
+        super().__init__()
+        self.main = main
+        self.loop_delay = (
+            self.main.settings.delay_between_loop_min / 1000,
+            self.main.settings.delay_between_loop_max / 1000,
+        )
+        self.key_pressed = (
+            self.main.settings.key_pressed_time_min / 1000,
+            self.main.settings.key_pressed_time_max / 1000,
+        )
+
+        self.target_process = self.parse_process_id(target_process)
+        self.event_list = self.prepare_events(event_list)
+        self.terminate_event = terminate_event
+        self.key_codes = KeyUtils.get_key_list()
+
+        # OS-specific initialization
+        if platform.system() == "Windows":
+            self.is_process_active = self._is_process_active_windows
+            self.press_key = self._press_key_windows
+            self.release_key = self._release_key_windows
+        elif platform.system() == "Darwin":
+            self.is_process_active = self._is_process_active_darwin
+            self.press_key = self._press_key_darwin
+            self.release_key = self._release_key_darwin
+
+    @staticmethod
+    def parse_process_id(target_process: str) -> Optional[int]:
+        try:
+            return int(
+                target_process[
+                    target_process.index("(") + 1 : target_process.index(")")
+                ]
+            )
+        except (ValueError, IndexError):
+            return None
+
+    @staticmethod
+    def prepare_events(event_list: List[EventModel]) -> List[Dict]:
+        return [
+            {
+                "ref_pixel_value": tuple(event.ref_pixel_value[:3]),
+                "click_position": (
+                    event.latest_position[0] + event.clicked_position[0],
+                    event.latest_position[1] + event.clicked_position[1],
+                ),
+                "key": event.key_to_enter,
+            }
+            for event in event_list
+        ]
+
+    def run(self):
+        prev_key = None
+        key_count = 0
+        max_key_count = 10
+        sleep_duration = 0.1
+        last_pressed_time = 0
+        last_grab_result = None
+        last_grab_time = 0
+
+        with mss.mss() as sct:
+            while not self.terminate_event.is_set():
+                if not self.is_process_active(self.target_process):
+                    time.sleep(sleep_duration)
+                    continue
+
+                for event in self.event_list:
+                    x, y = event["click_position"]
+                    current_time = time.time()
+
+                    if (
+                        last_grab_result
+                        and last_grab_result[1] == (x, y)
+                        and current_time - last_grab_time < 0.1
+                    ):
+                        current_pixel = last_grab_result[0]
+                    else:
+                        current_pixel = sct.grab(
+                            {"top": y, "left": x, "width": 1, "height": 1}
+                        ).pixel(0, 0)
+                        last_grab_result = (current_pixel, (x, y))
+                        last_grab_time = current_time
+
+                    if current_pixel[:3] == event["ref_pixel_value"]:
+                        key = event["key"]
+                        between_pressed = current_time - last_pressed_time
+                        if key == prev_key:
+                            key_count += 1
+                            if key_count <= max_key_count:
+                                self.simulate_keystroke(key)
+                        else:
+                            prev_key = key
+                            key_count = 1
+                            self.simulate_keystroke(key)
+                        last_pressed_time = current_time
+                        logger.debug(f"pressed gap: {between_pressed}")
+                        time.sleep(
+                            random.uniform(self.loop_delay[0], self.loop_delay[1])
+                        )
+                        break
+
+        logger.info("KeystrokeEngine thread terminated.")
+
+    def simulate_keystroke(self, key: str):
+        key_code = self.key_codes[key.upper()]
+        pressed_time = random.uniform(self.key_pressed[0], self.key_pressed[1])
+
+        if key_code is None:
+            logger.error(f"A key without a code was pressed: {key} / {key_code}")
+            time.sleep(pressed_time)
+            return
+
+        self.press_key(key_code)
+        time.sleep(pressed_time)
+        self.release_key(key_code)
+
+    # Windows-specific methods
+    @staticmethod
+    def _is_process_active_windows(process_id: int) -> bool:
+        active_window = win32gui.GetForegroundWindow()
+        _, active_pid = win32process.GetWindowThreadProcessId(active_window)
+        return process_id == active_pid
+
+    @staticmethod
+    def _press_key_windows(code: int):
+        ctypes.windll.user32.keybd_event(code, 0, 0, 0)
+
+    @staticmethod
+    def _release_key_windows(code: int):
+        ctypes.windll.user32.keybd_event(code, 0, 2, 0)
+
+    # macOS-specific methods
+    @staticmethod
+    def _is_process_active_darwin(process_id: int) -> bool:
+        active_app = AppKit.NSWorkspace.sharedWorkspace().activeApplication()
+        return (
+            active_app is not None
+            and active_app["NSApplicationProcessIdentifier"] == process_id
+        )
+
+    @staticmethod
+    def _press_key_darwin(code: int):
+        event = CGEventCreateKeyboardEvent(None, code, True)
+        CGEventPost(kCGHIDEventTap, event)
+
+    @staticmethod
+    def _release_key_darwin(code: int):
+        event = CGEventCreateKeyboardEvent(None, code, False)
+        CGEventPost(kCGHIDEventTap, event)
+
+
+---------------
+File: keystroke_event_editor.py
+---------------
+import copy
+import platform
+import tkinter as tk
+import tkinter.ttk as ttk
+from tkinter import messagebox
+from typing import Callable, Optional
+
+import keyboard
+import pynput
+from PIL import ImageTk, Image
+from loguru import logger
+
+from keystroke_capturer import ScreenshotCapturer
+from keystroke_models import EventModel
+from keystroke_utils import KeyUtils, StateUtils
+
+
+def invert_pixels_by_coordinate(image: Image.Image, x: int, y: int, axis: str):
+    width, height = image.width, image.height
+    for coord in range(width) if axis == "x" else range(height):
+        current_pixel = image.getpixel((x, coord) if axis == "y" else (coord, y))
+        inverted_pixel = (
+            255 - current_pixel[0],
+            255 - current_pixel[1],
+            255 - current_pixel[2],
+            255,
+        )
+        image.putpixel((x, coord) if axis == "y" else (coord, y), inverted_pixel)
+
+
+class KeystrokeEventEditor:
+    def __init__(
+        self,
+        profiles_window: tk.Tk | tk.Toplevel,
+        row_num: int,
+        save_callback: Optional[Callable[[EventModel, bool, int], None]],
+        event_function: Optional[Callable[[], EventModel]],
+    ):
+        self.profiles_window = profiles_window
+        self.event_window = tk.Toplevel(profiles_window)
+        self.event_window.title(f"Event Settings - Row {row_num + 1}")
+        self.event_window.transient(profiles_window)  # Set parent window
+        self.event_window.grab_set()  # Make the window modal
+        self.event_window.focus_force()
+        self.event_window.attributes("-topmost", True)
+        self.event_window.update_idletasks()
+        self.event_window.grid_rowconfigure(0, weight=1)
+        self.event_window.grid_columnconfigure(0, weight=1)
+
+        self.save_callback = save_callback
+        self.screenshot_capturer = ScreenshotCapturer()
+        self.screenshot_capturer.screenshot_callback = self.update_capture_image
+        self.event_name: Optional[str] = ""
+        self.latest_position: Optional[tuple] = None
+        self.clicked_position: Optional[tuple] = None
+        self.latest_screenshot: Optional[Image.Image] = None
+        self.held_screenshot: Optional[Image.Image] = None
+        self.ref_pixel_value = None
+        self.key_to_enter = None
+        self.keyboard_input_listener = None
+
+        self.create_ui()
+        self.bind_events()
+
+        self.event_window.update_idletasks()
+        self.row_num = row_num
+        self.is_edit = bool(event_function())
+        self.load_stored_event(event_function)
+        self.screenshot_capturer.start_capture()
+
+        self.load_latest_position()
+        self.key_combobox.focus_set()
+
+    def create_ui(self):
+        self.create_image_placeholders()
+        self.create_ref_pixel_placeholder()
+        self.create_coordinate_entries()
+        self.create_refresh_button()
+        self.create_key_entry()
+        self.create_ok_cancel_buttons()
+        self.create_info_label()
+
+    def create_image_placeholders(self):
+        image_frame = tk.Frame(self.event_window)
+        image_frame.pack(pady=5)
+
+        self.image1_placeholder = tk.Label(image_frame, width=10, height=5, bg="red")
+        self.image1_placeholder.grid(row=0, column=0, padx=5)
+
+        self.image2_placeholder = tk.Label(image_frame, width=10, height=5, bg="gray")
+        self.image2_placeholder.grid(row=0, column=1, padx=5)
+        self.image2_placeholder.bind("<Button-1>", self.get_coordinates_of_held_image)
+        self.image2_placeholder.bind("<B1-Motion>", self.get_coordinates_of_held_image)
+
+    def create_ref_pixel_placeholder(self):
+        ref_pixel_frame = tk.Frame(self.event_window)
+        ref_pixel_frame.pack(pady=5)
+        self.ref_pixel_placeholder = tk.Label(
+            ref_pixel_frame, width=2, height=1, bg="gray"
+        )
+        self.ref_pixel_placeholder.grid(row=0, column=1, padx=5)
+
+    def create_coordinate_entries(self):
+        coord_frame = tk.Frame(self.event_window)
+        coord_frame.pack()
+
+        coord_labels = ["X1:", "Y1:", "X2:", "Y2:"]
+        self.coord_entries = self.create_coord_entries(coord_frame, coord_labels)
+
+    def create_refresh_button(self):
+        refresh_button = tk.Button(
+            self.event_window, text="Refresh", command=self.handle_refresh_btn
+        )
+        refresh_button.pack(pady=5)
+
+    def create_key_entry(self):
+        key_frame = tk.Frame(self.event_window)
+        key_frame.pack(pady=5)
+
+        tk.Label(key_frame, text="Key:", anchor="w").grid(row=0, column=0)
+        self.key_combobox = ttk.Combobox(
+            key_frame, state="readonly", values=KeyUtils.get_key_name_list()
+        )
+        self.key_combobox.grid(row=0, column=1)
+
+    def create_ok_cancel_buttons(self):
+        button_frame = tk.Frame(self.event_window)
+        button_frame.pack(pady=10)
+
+        ok_button = tk.Button(button_frame, text="OK", command=self.save_event)
+        ok_button.grid(row=0, column=0, padx=5)
+
+        cancel_button = tk.Button(
+            button_frame, text="Cancel", command=self.close_window
+        )
+        cancel_button.grid(row=0, column=1, padx=5)
+
+    def create_info_label(self):
+        info_label = tk.Label(
+            self.event_window,
+            text="ALT: Area selection\nCTRL: Grab current image\n"
+            + "1. Set a crossline by left-clicking on the collected image.\n"
+            + "2. select the key you want to set."
+            + "\n\n"
+            + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
+            + "1. 수집된 이미지에 왼쪽 클릭으로 교차선을 설정하세요.\n"
+            + "2. 설정할 키를 선택하세요.\n",
+            anchor="center",
+            fg="black",
+            wraplength=200,
+        )
+        info_label.pack(pady=5, fill="both")
+
+    def bind_events(self):
+        self.bind_hotkey()
+        self.event_window.bind("<Escape>", self.close_window)
+        self.event_window.protocol("WM_DELETE_WINDOW", self.close_window)
+        self.key_combobox.bind("<<ComboboxSelected>>", self.update_key_to_enter)
+        self.key_combobox.bind("<KeyPress>", self.filter_key_combobox)
+
+    def filter_key_combobox(self, event):
+        key_name = (event.keysym or event.char).upper()
+        if key_name.startswith("F") and key_name[1:].isdigit():
+            self.key_combobox.set(key_name)
+            self.update_key_to_enter(event)
+        else:
+            value = event.char.upper()
+            if value:
+                filtered_values = [
+                    k for k in self.key_combobox["values"] if k.startswith(value)
+                ]
+                if filtered_values:
+                    self.key_combobox.set(filtered_values[0])
+                    self.update_key_to_enter(event)
+
+    def bind_hotkey(self):
+        if platform.system() == "Darwin":
+
+            def on_cmd_press(e):
+                if e.event_type == "down":
+                    self.screenshot_capturer.set_current_mouse_position(
+                        self.event_window.winfo_pointerxy()
+                    )
+
+            def on_control_press(e):
+                if e.event_type == "down":
+                    self.hold_image()
+
+            keyboard.hook_key(KeyUtils.get_keycode("command"), on_cmd_press)
+            keyboard.hook_key(KeyUtils.get_keycode("control"), on_control_press)
+
+        elif platform.system() == "Windows":
+            position_trigger_key = (
+                pynput.keyboard.Key.cmd_l
+                if platform.system() == "Darwin"
+                else pynput.keyboard.Key.alt_l
+            )
+
+            def on_press(key):
+                if key == position_trigger_key:
+                    logger.debug(f"reset position")
+                    self.screenshot_capturer.set_current_mouse_position(
+                        self.event_window.winfo_pointerxy()
+                    )
+                elif key == pynput.keyboard.Key.ctrl_l:
+                    logger.debug(f"hold current image")
+                    self.hold_image()
+
+            def on_release(key):
+                pass
+
+            self.keyboard_input_listener = pynput.keyboard.Listener(
+                on_press=on_press, on_release=on_release
+            )
+            self.keyboard_input_listener.start()
+
+    def update_capture_image(self, position: tuple, image: Image.Image):
+        if position and image:
+            self.latest_position = position
+            self.latest_screenshot = image
+            if self.image1_placeholder.winfo_exists():
+                self.update_image_placeholder(self.image1_placeholder, image)
+
+    def update_ref_pixel_placeholder(self, image, coordinates):
+        self.ref_pixel_value = image.getpixel(coordinates)
+        color_square = Image.new("RGBA", (25, 25), color=self.ref_pixel_value)
+        self.update_image_placeholder(self.ref_pixel_placeholder, color_square)
+
+    def hold_image(self):
+        if self.latest_position and self.latest_screenshot:
+            x, y = self.latest_position
+            self.update_coordinate_entries(self.coord_entries[:2], x, y)
+
+            self.held_screenshot = self.latest_screenshot
+            self.update_image_placeholder(
+                self.image2_placeholder, self.latest_screenshot
+            )
+
+            if self.clicked_position:
+                self.apply_crosshair_to_placeholder(
+                    self.held_screenshot, self.image2_placeholder
+                )
+                self.handle_refresh_btn()
+
+    def get_coordinates_of_held_image(self, event):
+        image = copy.deepcopy(self.held_screenshot)
+
+        if not self.held_screenshot:
+            return
+        if event.x >= image.width or event.y >= image.height:
+            return
+
+        image_x = int(event.x * image.width / self.image2_placeholder.winfo_width())
+        image_y = int(event.y * image.height / self.image2_placeholder.winfo_height())
+
+        self.update_ref_pixel_placeholder(image, (image_x, image_y))
+
+        self.clicked_position = (image_x, image_y)
+        self.update_coordinate_entries(self.coord_entries[2:], image_x, image_y)
+
+        self.apply_crosshair_to_placeholder(image, self.image2_placeholder)
+
+    def apply_crosshair_to_placeholder(self, image: Image.Image, placeholder: tk.Label):
+        image_to_apply = copy.deepcopy(image)
+        image_x, image_y = self.clicked_position
+
+        invert_pixels_by_coordinate(image_to_apply, image_x, image_y, "x")
+        invert_pixels_by_coordinate(image_to_apply, image_x, image_y, "y")
+
+        self.update_image_placeholder(placeholder, image_to_apply)
+
+    def save_event(self):
+        try:
+            if not all(
+                [
+                    self.latest_position,
+                    self.clicked_position,
+                    self.latest_screenshot,
+                    self.held_screenshot,
+                    self.ref_pixel_value,
+                    self.key_to_enter,
+                ]
+            ):
+                messagebox.showerror(
+                    "Error",
+                    "You must set the image, coordinates, key\n이미지와 좌표 및 키를 설정하세요.",
+                )
+                return
+
+            event = EventModel(
+                self.event_name,
+                self.latest_position,
+                self.clicked_position,
+                self.latest_screenshot,
+                self.held_screenshot,
+                self.ref_pixel_value,
+                self.key_to_enter,
+            )
+            self.save_callback(event, self.is_edit, self.row_num)
+            self.update_image_placeholder(self.image2_placeholder, self.held_screenshot)
+            self.close_window()
+
+        except Exception as e:
+            logger.debug(f"Failed to save event: {e}")
+            messagebox.showerror("Error", f"Failed to save event: {str(e)}")
+
+    def close_window(self, event=None):
+        self.key_combobox.unbind("<<ComboboxSelected>>")
+        self.key_combobox.unbind("<KeyPress>")
+
+        if self.keyboard_input_listener:
+            self.keyboard_input_listener.stop()
+            self.keyboard_input_listener.join()
+
+        if platform.system() == "Darwin":
+            keyboard.unhook(KeyUtils.get_keycode("command"))
+            keyboard.unhook(KeyUtils.get_keycode("control"))
+
+        if (
+            self.screenshot_capturer.capture_thread
+            and self.screenshot_capturer.capture_thread.is_alive()
+        ):
+            self.screenshot_capturer.stop_capture()
+            self.screenshot_capturer.capture_thread.join(timeout=0.1)
+
+        self.save_latest_position()
+        self.event_window.grab_release()
+        self.event_window.destroy()
+
+    def save_latest_position(self):
+        StateUtils.save_main_app_state(
+            event_position=f"{self.event_window.winfo_x()}/{self.event_window.winfo_y()}",
+            event_pointer=str(self.screenshot_capturer.get_current_mouse_position()),
+            clicked_position=str(self.clicked_position),
+        )
+
+    def load_latest_position(self):
+        state = StateUtils.load_main_app_state()
+        if state and "event_position" in state:
+            x, y = state["event_position"].split("/")
+            self.event_window.geometry(f"+{x}+{y}")
+            self.event_window.update_idletasks()
+
+        if not self.is_edit and state and "event_pointer" in state:
+            pointer_position = eval(state["event_pointer"])
+            self.screenshot_capturer.set_current_mouse_position(pointer_position)
+
+    @staticmethod
+    def create_coord_entries(parent: tk.Frame, labels: list[str]) -> list[tk.Entry]:
+        entries = []
+        for i, label_text in enumerate(labels):
+            label = tk.Label(parent, text=label_text)
+            row = 0 if i < 2 else 1
+            column = (i % 2) * 2
+            label.grid(row=row, column=column, padx=1, sticky=tk.E)
+
+            entry = tk.Entry(parent, width=4)
+            entry.grid(row=row, column=column + 1, padx=4, sticky=tk.W)
+            entries.append(entry)
+        return entries
+
+    def update_key_to_enter(self, event):
+        self.key_to_enter = self.key_combobox.get()
+
+    def handle_refresh_btn(self):
+        self.update_ref_pixel_placeholder(self.held_screenshot, self.clicked_position)
+
+    def load_stored_event(self, event_function):
+        event = event_function()
+        if not event:
+            return
+
+        self.event_name = event.event_name
+        self.latest_position = event.latest_position
+        self.clicked_position = event.clicked_position
+        self.latest_screenshot = event.latest_screenshot
+        self.held_screenshot = event.held_screenshot
+        self.key_to_enter = event.key_to_enter
+
+        self.screenshot_capturer.set_mouse_position(event.latest_position)
+
+        self.apply_crosshair_to_placeholder(
+            self.held_screenshot, self.image2_placeholder
+        )
+
+        self.update_coordinate_entries(
+            self.coord_entries[:2], self.latest_position[0], self.latest_position[1]
+        )
+        self.update_coordinate_entries(
+            self.coord_entries[2:], self.clicked_position[0], self.clicked_position[1]
+        )
+
+        self.update_ref_pixel_placeholder(self.held_screenshot, self.clicked_position)
+
+        if self.key_to_enter:
+            self.key_combobox.set(self.key_to_enter)
+
+    @staticmethod
+    def update_coordinate_entries(entries: list[tk.Entry], x, y):
+        for idx, entry in enumerate(entries):
+            entry.configure(state="normal")
+            entry.delete(0, tk.END)
+            entry.insert(0, str((x, y)[idx]))
+            entry.configure(state="readonly")
+
+    @staticmethod
+    def update_image_placeholder(placeholder: tk.Label, image: Image.Image):
+        photo = ImageTk.PhotoImage(image)
+        placeholder.configure(
+            image=photo,
+            width=image.width,
+            height=image.height,
+        )
+        placeholder.image = photo
+
+
+---------------
+File: keystroke_event_importer.py
+---------------
+import os
+import pickle
+import tkinter as tk
+from tkinter import ttk
+from tkinter.ttk import Scrollbar
+from typing import Callable, Optional
+
+from loguru import logger
+
+from keystroke_models import EventModel
+from keystroke_utils import WindowUtils, StateUtils
+
+
+class EventImporter:
+    def __init__(
+        self,
+        profiles_window: tk.Toplevel,
+        confirm_callback: Optional[Callable[[list[EventModel]], None]] = None,
+    ):
+        self.event_importer = tk.Toplevel(profiles_window)
+        self.event_importer.title("Import events")
+        self.event_importer.focus_force()
+        self.event_importer.attributes("-topmost", True)
+        self.event_importer.grab_set()
+        self.profile_dir = "profiles"
+        self.selected_profile = None
+        self.confirm_callback = confirm_callback
+        self.checkboxes = []
+        self.current_profile = None
+
+        self.event_importer.protocol("WM_DELETE_WINDOW", self.cancel_button_clicked)
+        self.event_importer.bind("<Escape>", self.cancel_button_clicked)
+
+        self.create_profile_frame()
+        self.create_event_frame()
+        self.create_button_frame()
+
+        self.load_profiles()
+        self.load_latest_position()
+
+    def create_profile_frame(self):
+        self.profile_frame = ttk.Frame(self.event_importer)
+        self.profile_frame.pack(pady=10)
+
+        self.profile_label = ttk.Entry(self.profile_frame)
+        self.profile_label.insert(0, "Profile:")
+        self.profile_label.config(state="readonly")
+        self.profile_label.pack(side="left", padx=5)
+
+        self.profile_combobox = ttk.Combobox(self.profile_frame)
+        self.profile_combobox.bind("<<ComboboxSelected>>", self.load_events)
+        self.profile_combobox.config(state="readonly")
+        self.profile_combobox.pack(side="left", padx=5)
+
+    def create_event_frame(self):
+        self.event_frame = ttk.LabelFrame(self.event_importer, text="Events")
+        self.event_frame.pack(pady=20, padx=20, fill="both", expand=True)
+
+    def create_button_frame(self):
+        button_frame = ttk.Frame(self.event_importer)
+        button_frame.pack(side="bottom", pady=10, fill="x")
+
+        ok_button = ttk.Button(
+            button_frame,
+            text="OK",
+            command=self.ok_button_clicked,
+        )
+        cancel_button = ttk.Button(
+            button_frame,
+            text="Cancel",
+            command=self.cancel_button_clicked,
+        )
+        select_button = ttk.Button(
+            button_frame,
+            text="Select/Deselect All",
+            command=self.select_button_clicked,
+        )
+
+        ok_button.pack(side="left", padx=5)
+        cancel_button.pack(side="left", padx=5)
+        select_button.pack(side="right", padx=5)
+
+    def ok_button_clicked(self):
+        selected_events = []
+        profile_name = self.profile_combobox.get()
+        for i, var in enumerate(self.checkboxes):
+            if var.get() == 1:
+                profile_model = self.get_profile_model(profile_name)
+                if profile_model and profile_model.event_list:
+                    selected_events.append(profile_model.event_list[i])
+
+        if not selected_events:
+            return
+
+        if self.confirm_callback:
+            self.confirm_callback(selected_events)
+            logger.info(
+                f"{len(selected_events)} events selected in profile '{profile_name}'"
+            )
+
+        self.event_importer.destroy()
+
+    def save_latest_position(self):
+        StateUtils.save_main_app_state(
+            importer_position=f"{self.event_importer.winfo_x()}/{self.event_importer.winfo_y()}",
+        )
+
+    def load_latest_position(self):
+        state = StateUtils.load_main_app_state()
+        if state and "importer_position" in state:
+            x, y = state["importer_position"].split("/")
+            self.event_importer.geometry(f"+{x}+{y}")
+            self.event_importer.update_idletasks()
+
+    def cancel_button_clicked(self, event=None):
+        self.save_latest_position()
+        self.event_importer.destroy()
+
+    def select_button_clicked(self):
+        if any(var.get() == 0 for var in self.checkboxes):
+            self.select_all()
+
+        elif all(var.get() == 1 for var in self.checkboxes):
+            self.deselect_all()
+
+        else:
+            self.select_all()
+
+    def select_all(self):
+        for var in self.checkboxes:
+            var.set(1)
+
+    def deselect_all(self):
+        for var in self.checkboxes:
+            var.set(0)
+
+    def load_profiles(self):
+        profile_names = self.get_profile_names()
+
+        if "_Quick" in profile_names:
+            profile_names.insert(0, profile_names.pop(profile_names.index("_Quick")))
+
+        self.profile_combobox["values"] = profile_names
+
+        if profile_names:
+            self.profile_combobox.current(0)
+            self.load_events(None)
+
+    def get_profile_names(self):
+        return [
+            os.path.splitext(f)[0]
+            for f in os.listdir(self.profile_dir)
+            if f.endswith(".pkl")
+        ]
+
+    def load_events(self, event):
+        profile_name = self.profile_combobox.get()
+        profile_model = self.get_profile_model(profile_name)
+
+        # Clear existing event widgets
+        for widget in self.event_frame.winfo_children():
+            widget.destroy()
+        self.checkboxes = []
+
+        if profile_model and profile_model.event_list:
+            for idx, event_model in enumerate(profile_model.event_list):
+                self.create_event_widget(idx, event_model)
+
+        self.current_profile = profile_model
+
+    def get_profile_model(self, profile_name):
+        try:
+            with open(f"{self.profile_dir}/{profile_name}.pkl", "rb") as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"Failed to load profile: {e}")
+            return None
+
+    def create_event_widget(self, row, event_model):
+        entry = ttk.Entry(self.event_frame)
+        entry.insert(0, event_model.event_name)
+        entry.config(state="readonly")
+        entry_status = ttk.Entry(self.event_frame, width=2)
+        entry_status.insert(0, event_model.key_to_enter or "")
+        entry_status.config(state="readonly")
+        checkbox_var = tk.IntVar()
+        checkbox = ttk.Checkbutton(
+            self.event_frame,
+            state="",
+            text=f"{row + 1}",
+            variable=checkbox_var,
+            command=lambda: self.checkbox_clicked(
+                event_model, entry, entry_status, checkbox_var
+            ),
+        )
+        checkbox.grid(row=row, column=0, sticky="w", padx=10)
+        entry.grid(row=row, column=1, padx=10)
+        entry_status.grid(row=row, column=2, padx=5)
+
+        self.checkboxes.append(checkbox_var)
+
+    def checkbox_clicked(self, event_model, entry, entry_status, checkbox_var):
+        if checkbox_var.get():
+            entry.insert(0, event_model.event_name)
+            entry_status.insert(0, event_model.key_to_enter or "")
+        else:
+            entry.delete(0, tk.END)
+            entry_status.delete(0, tk.END)
+
+
+---------------
+File: keystroke_models.py
+---------------
+from dataclasses import dataclass, fields
+from typing import Optional
+
+from PIL import Image
+
+
+@dataclass
+class UserSettings:
+    start_stop_key: str = "`"
+    key_pressed_time_min: int = 95
+    key_pressed_time_max: int = 135
+    delay_between_loop_min: int = 100
+    delay_between_loop_max: int = 150
+    start_sound: str = "start.mp3"
+    stop_sound: str = "stop.mp3"
+
+
+@dataclass
+class EventModel:
+    event_name: Optional[str] = None
+    latest_position: Optional[tuple] = None
+    clicked_position: Optional[tuple] = None
+    latest_screenshot: Optional[Image.Image] = None
+    held_screenshot: Optional[Image.Image] = None
+    ref_pixel_value: Optional[tuple] = None
+    key_to_enter: Optional[str] = None
+    use_event: bool = True
+
+    def __iter__(self):
+        for field in fields(self):
+            yield field, getattr(self, field.name)
+
+    def __str__(self):
+        field_strings = [f"{field.name}={value}" for field, value in self]
+        return f"EventModel({', '.join(field_strings)})"
+
+
+@dataclass
+class ProfileModel:
+    name: Optional[str] = None
+    event_list: Optional[list[EventModel]] = None
+
+    def __iter__(self):
+        for event in self.event_list or []:
+            yield event
+
+    def __str__(self):
+        event_strings = [str(event) for event in self]
+        return (
+            f"ProfileModel(name='{self.name}', event_list=[{', '.join(event_strings)}])"
+        )
+
+
+---------------
+File: keystroke_processors.py
+---------------
+import ntpath
+import sys
+import platform
+
+if platform.system() == "Windows":
+    import win32api
+    import win32gui
+    import win32process
+elif platform.system() == "Darwin":
+    import AppKit
+
+
+def get_processes_macos():
+    workspace = AppKit.NSWorkspace.sharedWorkspace()
+    app_list = workspace.runningApplications()
+
+    return [
+        (app.localizedName(), app.processIdentifier(), None)
+        for app in app_list
+        if app.activationPolicy() == 0
+    ]
+
+
+def get_processes_windows():
+    processes = {}
+    window_names = {}
+
+    def enum_window_callback(hwnd, lparam):
+        if win32gui.IsWindowVisible(hwnd):
+            tid, pid = win32process.GetWindowThreadProcessId(hwnd)
+            if pid not in processes:
+                process_handle = win32api.OpenProcess(0x1000, False, pid)
+                process_name = win32process.GetModuleFileNameEx(process_handle, 0)
+                processes[pid] = process_name
+                window_name = win32gui.GetWindowText(hwnd)
+                window_names[pid] = [window_name]
+                win32api.CloseHandle(process_handle)
+            else:
+                window_name = win32gui.GetWindowText(hwnd)
+                if window_name not in window_names[pid]:
+                    window_names[pid].append(window_name)
+        return True
+
+    win32gui.EnumWindows(enum_window_callback, None)
+
+    return [
+        (ntpath.basename(processes[pid]).split(".")[0], pid, window_names[pid])
+        for pid in processes
+    ]
+
+
+class ProcessCollector:
+    @staticmethod
+    def get():
+        return (
+            get_processes_macos()
+            if sys.platform == "darwin"
+            else get_processes_windows()
+        )
+
+
+---------------
+File: keystroke_profiles.py
+---------------
+import copy
+import os
+import pickle
+import tkinter as tk
+from tkinter import ttk, messagebox
+from typing import Callable, Optional, List
+
+from keystroke_event_editor import KeystrokeEventEditor
+from keystroke_event_importer import EventImporter
+from keystroke_models import ProfileModel, EventModel
+from keystroke_utils import WindowUtils, StateUtils
+
+
+class ProfileFrame(ttk.Frame):
+    def __init__(self, master, profile_name: str):
+        super().__init__(master)
+        self.profile_name = profile_name
+        self.profile_label = ttk.Label(self, text="Profile Name: ")
+        self.profile_entry = ttk.Entry(self)
+        self.profile_label.grid(row=0, column=0, sticky=tk.E)
+        self.profile_entry.grid(row=0, column=1, padx=1)
+        self.profile_entry.insert(0, profile_name)
+
+
+class EventListFrame(ttk.Frame):
+    def __init__(self, settings_window, profile: ProfileModel, save_callback: Callable):
+        super().__init__(settings_window)
+        self.settings_window = settings_window
+        self.profile = profile
+        self.save_callback = save_callback
+        self.event_rows: List[ttk.Frame] = []
+        self.create_buttons()
+        self.load_events()
+
+    def create_buttons(self):
+        ttk.Button(self, text="Add Event", command=self.add_event_row).grid(
+            row=1, column=0, columnspan=1, pady=5, sticky="we"
+        )
+        ttk.Button(self, text="Import From", command=self.open_importer).grid(
+            row=1, column=1, columnspan=1, pady=5, sticky="we"
+        )
+
+    def load_events(self):
+        if self.profile.event_list:
+            for idx, event in enumerate(self.profile.event_list):
+                self.add_event_row(row_num=idx, event=event, resize=False)
+
+    def add_event_row(self, row_num=None, event=None, resize=True):
+        if row_num is None:
+            row_num = len(self.event_rows)
+
+        row_frame = ttk.Frame(self)
+        row_frame.grid(row=row_num + 3, column=0, columnspan=2, padx=5, pady=2)
+
+        ttk.Label(row_frame, text=row_num + 1, width=2, anchor="center").pack(
+            side=tk.LEFT
+        )
+        entry = ttk.Entry(row_frame)
+        entry.pack(side=tk.LEFT, padx=5)
+        if event and hasattr(event, "event_name"):
+            entry.insert(0, event.event_name)
+        ttk.Button(
+            row_frame,
+            text="⚙️",
+            command=lambda: self.open_event_settings(row_num, event),
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            row_frame, text="📝", command=lambda: self.copy_event_row(event)
+        ).pack(side=tk.LEFT)
+        ttk.Button(
+            row_frame,
+            text="🗑️",
+            command=lambda: self.remove_event_row(row_frame, row_num),
+        ).pack(side=tk.LEFT)
+
+        self.event_rows.append(row_frame)
+
+    def open_event_settings(self, row_num, event):
+        KeystrokeEventEditor(
+            self.settings_window,
+            row_num=row_num,
+            save_callback=self.save_event_callback,
+            event_function=lambda: event,
+        )
+
+    def save_event_callback(self, event: EventModel, is_edit: bool, row_num: int = 0):
+        if is_edit and 0 <= row_num < len(self.profile.event_list):
+            self.profile.event_list[row_num] = event
+        else:
+            self.profile.event_list.append(event)
+        self.save_callback(check_profile_name=False)
+
+    def copy_event_row(self, event: Optional[EventModel]):
+        if event:
+            try:
+                new_event = copy.deepcopy(event)
+                new_event.event_name = ""  # Clear the event name for the copy
+                self.profile.event_list.append(new_event)
+                self.add_event_row(event=new_event)
+                self.save_callback()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to copy event: {str(e)}")
+        else:
+            messagebox.showinfo("Info", "Only set events can be copied")
+
+    def remove_event_row(self, row_frame, row_num):
+        if len(self.profile.event_list) < 2:
+            messagebox.showinfo("Info", "There must be at least one event")
+            return
+
+        row_frame.destroy()
+        self.event_rows.remove(row_frame)
+        if 0 <= row_num < len(self.profile.event_list):
+            self.profile.event_list.pop(row_num)
+        self.save_callback()
+
+        # Adjust the window size after removing
+        self.settings_window.update_idletasks()
+
+    def open_importer(self):
+        EventImporter(self.settings_window, self.import_events)
+
+    def import_events(self, event_list: List[EventModel]):
+        self.profile.event_list.extend(event_list)
+        for event in event_list:
+            self.add_event_row(event=event)
+        self.save_callback()
+
+
+class KeystrokeProfiles:
+    def __init__(
+        self,
+        main_window: tk.Tk,
+        profile_name: str,
+        save_callback: Optional[Callable[[str], None]] = None,
+    ):
+        self.main_window = main_window
+        self.profile_name = profile_name
+        self.external_save_callback = save_callback
+        self.profiles_dir = "profiles"
+
+        self.settings_window = self._create_settings_window()
+        self.profile = self._load_profile()
+
+        self.profile_frame = ProfileFrame(self.settings_window, profile_name)
+        self.event_list_frame = EventListFrame(
+            self.settings_window, self.profile, self._save_profile
+        )
+
+        self._pack_frames()
+        self._create_buttons()
+        self._load_latest_position()
+
+        self.settings_window.protocol("WM_DELETE_WINDOW", self._close_settings)
+
+    def _create_settings_window(self) -> tk.Toplevel:
+        window = tk.Toplevel(self.main_window)
+        window.title("Profile Manager")
+        window.transient(self.main_window)
+        window.grab_set()
+        window.focus_force()
+        # window.attributes("-topmost", True)
+        window.bind("<Escape>", self._close_settings)
+        return window
+
+    def _load_profile(self) -> ProfileModel:
+        try:
+            with open(f"{self.profiles_dir}/{self.profile_name}.pkl", "rb") as f:
+                return pickle.load(f)
+        except FileNotFoundError:
+            return ProfileModel(name=self.profile_name, event_list=[])
+
+    def _pack_frames(self):
+        self.profile_frame.pack()
+        self.event_list_frame.pack()
+
+    def _create_buttons(self):
+        button_frame = ttk.Frame(self.settings_window, style="success.TFrame")
+        button_frame.pack(side="bottom", anchor="e", pady=10, fill="both")
+
+        ttk.Button(
+            button_frame, text="Save Names", command=self._handle_ok_button
+        ).pack(side=tk.LEFT, anchor="center", padx=5)
+
+    def _save_profile(
+        self, check_profile_name: bool = True, reload_event_frame: bool = True
+    ):
+        if not self.profile.event_list:
+            raise ValueError("At least one event must be set")
+
+        new_profile_name = self.profile_frame.profile_entry.get()
+        if check_profile_name and not new_profile_name:
+            raise ValueError("Enter the profile name to save")
+
+        if new_profile_name != self.profile_name:
+            self._remove_old_profile()
+            self.profile_name = new_profile_name
+
+        with open(f"{self.profiles_dir}/{self.profile_name}.pkl", "wb") as f:
+            pickle.dump(self.profile, f)
+
+        if reload_event_frame:
+            self._save_event_names()
+            self.event_list_frame.destroy()
+            self.event_list_frame = EventListFrame(
+                self.settings_window, self.profile, self._save_profile
+            )
+            self.event_list_frame.pack()
+
+    def _remove_old_profile(self):
+        old_file = f"{self.profiles_dir}/{self.profile_name}.pkl"
+        if os.path.exists(old_file):
+            os.remove(old_file)
+
+    def _handle_ok_button(self):
+        try:
+            self._save_event_names()
+            self._save_profile(reload_event_frame=False)
+            self._close_settings()
+            if self.external_save_callback:
+                self.external_save_callback(self.profile_name)
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save profile: {e}")
+
+    def _save_event_names(self):
+        for idx, row_frame in enumerate(self.event_list_frame.event_rows):
+            entry = row_frame.winfo_children()[1]
+            if idx < len(self.profile.event_list):
+                self.profile.event_list[idx].event_name = entry.get()
+
+    def _save_latest_position(self):
+        StateUtils.save_main_app_state(
+            profile_position=f"{self.settings_window.winfo_x()}/{self.settings_window.winfo_y()}",
+        )
+
+    def _load_latest_position(self):
+        state = StateUtils.load_main_app_state()
+        if not state or "profile_position" not in state:
+            WindowUtils.center_window(self.settings_window)
+            return
+        else:
+            x, y = state["profile_position"].split("/")
+            self.settings_window.geometry(f"+{x}+{y}")
+
+    def _close_settings(self, event=None):
+        self._save_latest_position()
+        self.settings_window.grab_release()
+        self.settings_window.destroy()
+
+
+---------------
+File: keystroke_quick_event_editor.py
+---------------
+import copy
+import os
+import pickle
+import platform
+import tkinter as tk
+from typing import List, Tuple
+
+import keyboard
+import pynput
+from PIL import Image, ImageTk
+from loguru import logger
+
+from keystroke_capturer import ScreenshotCapturer
+from keystroke_models import EventModel, ProfileModel
+from keystroke_utils import StateUtils, WindowUtils, KeyUtils
+
+
+class KeystrokeQuickEventEditor:
+    def __init__(self, settings_window: tk.Tk | tk.Toplevel):
+        self.settings_window = settings_window
+        self.event_window = None
+        self.setup_window()
+        self.initialize_variables()
+        self.create_ui()
+        self.bind_events()
+        self.load_latest_position()
+        self.screenshot_capturer.start_capture()
+
+    def setup_window(self):
+        self.event_window = tk.Toplevel(self.settings_window)
+        self.event_window.title("Quick Event Settings")
+        self.event_window.transient(self.settings_window)
+        self.event_window.grab_set()
+        self.event_window.focus_force()
+        self.event_window.attributes("-topmost", True)
+
+    def initialize_variables(self):
+        self.event_idx = 1
+        self.event_list: List[EventModel] = []
+        self.latest_position: Tuple[int, int] | None = None
+        self.clicked_position: Tuple[int, int] | None = None
+        self.latest_screenshot: Image.Image | None = None
+        self.held_screenshot: Image.Image | None = None
+        self.ref_pixel_value: Tuple[int, int, int, int] | None = None
+        self.key_to_enter = None
+        self.keyboard_input_listener = None
+        self.screenshot_capturer = ScreenshotCapturer()
+        self.screenshot_capturer.screenshot_callback = self.update_capture_image
+        self.file_path = "profiles/Quick.pkl"
+        self.ensure_file_exists()
+
+    def ensure_file_exists(self):
+        if not os.path.isfile(self.file_path):
+            with open(self.file_path, "wb") as f:
+                pass
+
+    def create_ui(self):
+        self.create_image_frame()
+        self.create_ref_pixel_frame()
+        self.create_coordinate_frame()
+        self.create_close_button()
+        self.create_info_label()
+
+    def create_image_frame(self):
+        image_frame = tk.Frame(self.event_window)
+        image_frame.pack(pady=5)
+
+        self.image1_placeholder = self.create_image_placeholder(
+            image_frame, "red", 0, 0
+        )
+        self.image2_placeholder = self.create_image_placeholder(
+            image_frame, "gray", 0, 1
+        )
+        self.image2_placeholder.bind("<Button-1>", self.get_coordinates_of_held_image)
+        self.image2_placeholder.bind("<B1-Motion>", self.get_coordinates_of_held_image)
+
+    def create_image_placeholder(
+        self, parent: tk.Frame, bg_color: str, row: int, column: int
+    ) -> tk.Label:
+        placeholder = tk.Label(parent, width=10, height=5, bg=bg_color)
+        placeholder.grid(row=row, column=column, padx=5)
+        return placeholder
+
+    def create_ref_pixel_frame(self):
+        ref_pixel_frame = tk.Frame(self.event_window)
+        ref_pixel_frame.pack(pady=5)
+        self.ref_pixel_placeholder = tk.Label(
+            ref_pixel_frame, width=2, height=1, bg="gray"
+        )
+        self.ref_pixel_placeholder.grid(row=0, column=1, padx=5)
+
+    def create_coordinate_frame(self):
+        coord_frame = tk.Frame(self.event_window)
+        coord_frame.pack()
+
+        coord_labels = ["X1:", "Y1:", "X2:", "Y2:"]
+        self.coord_entries = self.create_coord_entries(coord_frame, coord_labels)
+
+    def create_close_button(self):
+        close_button = tk.Button(
+            self.event_window, text="Close", command=self.close_window
+        )
+        close_button.pack(pady=5)
+
+    def create_info_label(self):
+        self.info_label = tk.Label(
+            self.event_window,
+            text="ALT: Area selection\nCTRL: Grab current image\n"
+            + "Left-click on the collected image to set a Crossline and press CTRL to save it to a Quick Event."
+            + "\n\n"
+            + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
+            + "수집된 이미지에 왼쪽 클릭으로 교차선을 설정한 뒤\nCTRL 키를 누르면 Quick 이벤트에 저장됩니다.",
+            anchor="center",
+            fg="black",
+            wraplength=200,
+        )
+        self.info_label.pack(pady=5, fill="both")
+
+    def bind_events(self):
+        self.event_window.bind("<Escape>", self.close_window)
+        self.event_window.protocol("WM_DELETE_WINDOW", self.close_window)
+        self.bind_hotkey()
+
+    def bind_hotkey(self):
+        if platform.system() == "Darwin":
+
+            def on_cmd_press(e):
+                if e.event_type == "down":
+                    self.screenshot_capturer.set_current_mouse_position(
+                        self.event_window.winfo_pointerxy()
+                    )
+
+            def on_control_press(e):
+                if e.event_type == "down":
+                    self.hold_image()
+
+            keyboard.hook_key(KeyUtils.get_keycode("command"), on_cmd_press)
+            keyboard.hook_key(KeyUtils.get_keycode("control"), on_control_press)
+
+        elif platform.system() == "Windows":
+
+            def on_press(key):
+                logger.debug(f"windows on_press()")
+                if key == pynput.keyboard.Key.alt_l:
+                    self.screenshot_capturer.set_current_mouse_position(
+                        self.event_window.winfo_pointerxy()
+                    )
+                elif key == pynput.keyboard.Key.ctrl_l:
+                    self.hold_image()
+
+            def on_release(key):
+                logger.debug(f"windows on_release()")
+                return key != pynput.keyboard.Key.esc
+
+            self.keyboard_input_listener = pynput.keyboard.Listener(
+                on_press=on_press, on_release=on_release
+            )
+            self.keyboard_input_listener.start()
+
+    def update_capture_image(self, position: Tuple[int, int], image: Image.Image):
+        if position and image:
+            self.latest_position = position
+            self.latest_screenshot = image
+            if self.image1_placeholder and self.image1_placeholder.winfo_exists():
+                self.update_image_placeholder(self.image1_placeholder, image)
+
+    def hold_image(self):
+        if self.latest_position and self.latest_screenshot:
+            self.update_coordinate_entries(
+                self.coord_entries[:2], *self.latest_position
+            )
+            self.held_screenshot = self.latest_screenshot
+            self.update_image_placeholder(
+                self.image2_placeholder, self.latest_screenshot
+            )
+
+            if self.clicked_position:
+                self.apply_crosshair_to_placeholder(
+                    self.held_screenshot, self.image2_placeholder
+                )
+                self.save_event()
+
+    def get_coordinates_of_held_image(self, event):
+        if not self.held_screenshot:
+            return
+
+        image = copy.deepcopy(self.held_screenshot)
+        image_x, image_y = self.get_scaled_coordinates(event, image)
+
+        if not self.is_valid_coordinate(image, image_x, image_y):
+            return
+
+        self.update_ref_pixel_placeholder(image, (image_x, image_y))
+        self.clicked_position = (image_x, image_y)
+        self.update_coordinate_entries(self.coord_entries[2:], image_x, image_y)
+        self.apply_crosshair_to_placeholder(image, self.image2_placeholder)
+
+    def get_scaled_coordinates(self, event, image):
+        return (
+            int(event.x * image.width / self.image2_placeholder.winfo_width()),
+            int(event.y * image.height / self.image2_placeholder.winfo_height()),
+        )
+
+    @staticmethod
+    def is_valid_coordinate(image, x, y):
+        return 0 <= x < image.width and 0 <= y < image.height
+
+    def update_ref_pixel_placeholder(self, image, coordinates):
+        self.ref_pixel_value = image.getpixel(coordinates)
+        color_square = Image.new("RGBA", (25, 25), color=self.ref_pixel_value)
+        self.update_image_placeholder(self.ref_pixel_placeholder, color_square)
+
+    def apply_crosshair_to_placeholder(self, image: Image.Image, placeholder: tk.Label):
+        image_to_apply = copy.deepcopy(image)
+        image_x, image_y = self.clicked_position
+        self.invert_pixels_by_coordinate(image_to_apply, image_x, image_y, "x")
+        self.invert_pixels_by_coordinate(image_to_apply, image_x, image_y, "y")
+        self.update_image_placeholder(placeholder, image_to_apply)
+
+    @staticmethod
+    def invert_pixels_by_coordinate(image, x, y, axis):
+        width, height = image.width, image.height
+        for coord in range(width if axis == "x" else height):
+            current_pixel = image.getpixel((x, coord) if axis == "y" else (coord, y))
+            inverted_pixel = tuple(255 - v for v in current_pixel[:3]) + (255,)
+            image.putpixel((x, coord) if axis == "y" else (coord, y), inverted_pixel)
+
+    @staticmethod
+    def update_image_placeholder(placeholder: tk.Label, image: Image.Image):
+        photo = ImageTk.PhotoImage(image)
+        placeholder.configure(image=photo, width=image.width, height=image.height)
+        placeholder.image = photo
+
+    @staticmethod
+    def update_coordinate_entries(entries: List[tk.Entry], x, y):
+        for idx, entry in enumerate(entries):
+            entry.configure(state="normal")
+            entry.delete(0, tk.END)
+            entry.insert(0, str((x, y)[idx]))
+            entry.configure(state="readonly")
+
+    def close_window(self, event=None):
+        if platform.system() == "Darwin":
+            keyboard.unhook_key(KeyUtils.get_keycode("command"))
+            keyboard.unhook_key(KeyUtils.get_keycode("control"))
+        self.stop_listeners()
+        self.save_latest_position()
+        self.event_window.grab_release()
+        self.event_window.destroy()
+
+    def stop_listeners(self):
+        if self.keyboard_input_listener:
+            self.keyboard_input_listener.stop()
+            self.keyboard_input_listener.join()
+
+        if (
+            self.screenshot_capturer.capture_thread
+            and self.screenshot_capturer.capture_thread.is_alive()
+        ):
+            self.screenshot_capturer.stop_capture()
+            self.screenshot_capturer.capture_thread.join(timeout=0.1)
+
+    def save_latest_position(self):
+        StateUtils.save_main_app_state(
+            quick_position=f"{self.event_window.winfo_x()}/{self.event_window.winfo_y()}",
+            quick_pointer=str(self.screenshot_capturer.get_current_mouse_position()),
+        )
+
+    def load_latest_position(self):
+        state = StateUtils.load_main_app_state()
+        if not state or "quick_position" not in state:
+            WindowUtils.center_window(self.event_window)
+            return
+        else:
+            x, y = state["quick_position"].split("/")
+            self.event_window.geometry(f"+{x}+{y}")
+
+        if state and "quick_pointer" in state:
+            pointer_position = eval(state["quick_pointer"])
+            self.screenshot_capturer.set_current_mouse_position(pointer_position)
+
+    @staticmethod
+    def create_coord_entries(parent: tk.Frame, labels: List[str]) -> List[tk.Entry]:
+        entries = []
+        for i, label_text in enumerate(labels):
+            label = tk.Label(parent, text=label_text)
+            row, column = divmod(i, 2)
+            label.grid(row=row, column=column * 2, padx=1, sticky=tk.E)
+
+            entry = tk.Entry(parent, width=4)
+            entry.grid(row=row, column=column * 2 + 1, padx=4, sticky=tk.W)
+            entries.append(entry)
+        return entries
+
+    def save_event(self):
+        if all(
+            [
+                self.latest_position,
+                self.clicked_position,
+                self.latest_screenshot,
+                self.held_screenshot,
+                self.ref_pixel_value,
+            ]
+        ):
+            event = EventModel(
+                event_name=str(self.event_idx),
+                latest_position=self.latest_position,
+                clicked_position=self.clicked_position,
+                latest_screenshot=self.latest_screenshot,
+                held_screenshot=self.held_screenshot,
+                ref_pixel_value=self.ref_pixel_value,
+            )
+            self.event_list.append(event)
+            self.event_idx += 1
+            self.save_to_quick_profile()
+
+    def save_to_quick_profile(self):
+        profile = ProfileModel()
+        profile.event_list = self.event_list
+        with open(self.file_path, "wb") as f:
+            pickle.dump(profile, f)
+
+
+---------------
+File: keystroke_settings.py
+---------------
+import base64
+import json
+import tkinter as tk
+from dataclasses import asdict
+from tkinter import ttk, filedialog, messagebox
+from typing import Callable
+
+from loguru import logger
+
+from keystroke_models import UserSettings
+from keystroke_utils import WindowUtils
+
+
+class KeystrokeSettings(tk.Toplevel):
+    def __init__(self, master=None):
+        super().__init__(master)
+        self.master = master
+        self.title("Settings")
+        self.settings = UserSettings()
+        self._create_widgets()
+        self._setup_window()
+        self._load_settings()
+
+    def _create_widgets(self):
+        self._create_start_stop_key()
+        self._create_time_entries()
+        self._create_sound_selectors()
+        self._create_buttons()
+        self._create_warning_label()
+
+    def _setup_window(self):
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(2, weight=1)
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.bind("<Escape>", self.on_close)
+        WindowUtils.center_window(self)
+
+    def _load_settings(self):
+        try:
+            with open("user_settings.b64", "r") as file:
+                settings_base64 = file.read()
+            settings_json = base64.b64decode(settings_base64).decode("utf-8")
+            loaded_settings = json.loads(settings_json)
+            self.settings = UserSettings(**loaded_settings)
+
+        except Exception as e:
+            print("Error loading settings:", e)
+            self.settings = UserSettings()
+
+        finally:
+            self._update_ui_from_settings()
+
+    def _set_entry_values(self, row, prefix):
+        getattr(self, f"entry_min_{row}").delete(0, tk.END)
+        getattr(self, f"entry_min_{row}").insert(
+            0, str(getattr(self.settings, f"{prefix}_min"))
+        )
+        getattr(self, f"entry_max_{row}").delete(0, tk.END)
+        getattr(self, f"entry_max_{row}").insert(
+            0, str(getattr(self.settings, f"{prefix}_max"))
+        )
+
+    def _set_sound_label(self, row, filepath):
+        sound_label = self.grid_slaves(row=row, column=1)[0]
+        sound_label.config(text=filepath)
+
+    def _create_start_stop_key(self):
+        ttk.Label(self, text="Start/Stop Key:").grid(
+            row=0, column=0, padx=10, pady=5, sticky=tk.W
+        )
+
+        self.start_stop_key = ttk.Combobox(self, values=["Press Key"], state="readonly")
+        self.start_stop_key.grid(row=0, column=1, padx=10, pady=5)
+        self.start_stop_key.current(0)
+        self.start_stop_key.bind("<Key>", self._on_key_press)
+
+        self.wheel_up_var = tk.BooleanVar()
+        self.wheel_up_checkbox = ttk.Checkbutton(
+            self,
+            text="Wheel UP",
+            variable=self.wheel_up_var,
+            command=self._on_checkbox_change,
+        )
+        self.wheel_up_checkbox.grid(row=0, column=2, padx=5, pady=5)
+
+        self.wheel_down_var = tk.BooleanVar()
+        self.wheel_down_checkbox = ttk.Checkbutton(
+            self,
+            text="Wheel Down",
+            variable=self.wheel_down_var,
+            command=self._on_checkbox_change,
+        )
+        self.wheel_down_checkbox.grid(row=0, column=3, padx=5, pady=5)
+
+    def _on_checkbox_change(self):
+        if self.wheel_up_var.get() or self.wheel_down_var.get():
+            self.start_stop_key.config(state="disabled")
+        else:
+            self.start_stop_key.config(state="readonly")
+
+        self.wheel_up_checkbox.config(
+            state="normal" if not self.wheel_down_var.get() else "disabled"
+        )
+        self.wheel_down_checkbox.config(
+            state="normal" if not self.wheel_up_var.get() else "disabled"
+        )
+
+        self._store_wheel_settings()
+
+    def _store_wheel_settings(self):
+        if self.wheel_up_var.get():
+            self.settings.start_stop_key = "W_UP"
+        elif self.wheel_down_var.get():
+            self.settings.start_stop_key = "W_DN"
+        else:
+            self.settings.start_stop_key = self.start_stop_key.get()
+
+    def _update_ui_from_settings(self):
+        if self.settings.start_stop_key == "W_UP":
+            self.wheel_up_var.set(True)
+            self.start_stop_key.config(state="disabled")
+            self.wheel_down_checkbox.config(state="disabled")
+        elif self.settings.start_stop_key == "W_DN":
+            self.wheel_down_var.set(True)
+            self.start_stop_key.config(state="disabled")
+            self.wheel_up_checkbox.config(state="disabled")
+        else:
+            self.start_stop_key.set(self.settings.start_stop_key)
+            self.wheel_up_var.set(False)
+            self.wheel_down_var.set(False)
+            self.start_stop_key.config(state="readonly")
+            self.wheel_up_checkbox.config(state="normal")
+            self.wheel_down_checkbox.config(state="normal")
+
+        self._set_entry_values(1, "key_pressed_time")
+        self._set_entry_values(2, "delay_between_loop")
+        self._set_sound_label(3, self.settings.start_sound)
+        self._set_sound_label(4, self.settings.stop_sound)
+
+    def _create_time_entries(self):
+        validation_command = (self.register(self._validate_numeric_entry), "%P")
+        self._create_entry_pair("Key pressed time (min, max):", 1, validation_command)
+        self._create_entry_pair("Delay between loop (min, max):", 2, validation_command)
+
+    def _create_entry_pair(self, label: str, row: int, validation_command: Callable):
+        ttk.Label(self, text=label).grid(
+            row=row, column=0, padx=10, pady=5, sticky=tk.W
+        )
+        setattr(
+            self,
+            f"entry_min_{row}",
+            ttk.Entry(self, validate="key", validatecommand=validation_command),
+        )
+        getattr(self, f"entry_min_{row}").grid(row=row, column=1, padx=10, pady=5)
+        setattr(
+            self,
+            f"entry_max_{row}",
+            ttk.Entry(self, validate="key", validatecommand=validation_command),
+        )
+        getattr(self, f"entry_max_{row}").grid(row=row, column=2, padx=10, pady=5)
+
+    def _create_sound_selectors(self):
+        self._create_sound_selector("Start Sound:", 3, self._select_sound)
+        self._create_sound_selector("Stop Sound:", 4, self._select_sound)
+
+    def _create_sound_selector(self, label: str, row: int, command: Callable):
+        ttk.Label(self, text=label).grid(
+            row=row, column=0, padx=10, pady=5, sticky=tk.W
+        )
+        sound_label = ttk.Label(self, text="Select file", wraplength=140)
+        sound_label.grid(row=row, column=1, padx=10, pady=5, sticky=tk.W)
+        sound_button = ttk.Button(
+            self, text="Browse", command=lambda: command(sound_label)
+        )
+        sound_button.grid(row=row, column=2, padx=10, pady=5)
+
+    def _create_buttons(self):
+        ttk.Button(self, text="Reset", command=self.on_reset).grid(
+            row=5, column=0, padx=10, pady=10
+        )
+        ttk.Button(self, text="OK", command=self.on_ok).grid(
+            row=5, column=1, padx=10, pady=10
+        )
+        ttk.Button(self, text="Cancel", command=self.on_close).grid(
+            row=5, column=2, padx=10, pady=10
+        )
+
+    def _create_warning_label(self):
+        self.warning_label = ttk.Label(
+            self, text="\n", background="white", foreground="red"
+        )
+        self.warning_label.grid(row=6, column=0, columnspan=3, pady=5)
+        self.warning_label.config(
+            text="For Start/Stop, set only A-Z, 0-9, and special character keys.\n\nStart/Stop 은 A-Z, 0-9, 특수문자 키만 설정하세요."
+        )
+
+    @staticmethod
+    def _validate_numeric_entry(P):
+        return P == "" or (P.isdigit() and 0 <= int(P) < 1000 and not P.startswith("0"))
+
+    def _on_key_press(self, event):
+        valid_keys = (
+            set(f"F{i}" for i in range(1, 13))
+            | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
+            | set(chr(i) for i in range(ord("0"), ord("9") + 1))
+            | set("`[];',./-=\\")
+        )
+
+        key = event.char.upper() or event.keysym.upper()
+        if key in valid_keys:
+            self.start_stop_key.set(key)
+            self.settings.start_stop_key = self.start_stop_key.get()
+
+    def _select_sound(self, label):
+        filepath = filedialog.askopenfilename(
+            title="Select Sound File",
+            filetypes=[("Sound Files", "*.mp3 *.wav *.ogg"), ("All Files", "*.*")],
+        )
+        if filepath:
+            label.config(text=filepath)
+
+    def on_reset(self):
+        if messagebox.askokcancel(
+            "Warning", f"Resets the values.\n설정값이 초기화 됩니다."
+        ):
+            self.settings = UserSettings()  # Reset to default values
+            self._update_ui_from_settings()
+            self.warning_label.config(
+                text="Settings have been reset to default values."
+            )
+
+    def on_ok(self):
+        if not self.validate_start_stop_key():
+            return
+
+        self._store_wheel_settings()
+
+        if not self.validate_and_set_time_settings():
+            return
+        self.set_sound_settings()
+        self.save_settings()
+
+        self.on_close()
+
+    def validate_start_stop_key(self):
+        if self.settings.start_stop_key in ["Press Key", ""]:
+            self.show_warning("Please select a Start/Stop key.")
+            return False
+        return True
+
+    def validate_and_set_time_settings(self):
+        time_settings = [
+            (1, "key_pressed_time", 95, 135),
+            (2, "delay_between_loop", 100, 150),
+        ]
+
+        for row, prefix, min_default, max_default in time_settings:
+            min_value = int(getattr(self, f"entry_min_{row}").get() or min_default)
+            max_value = int(getattr(self, f"entry_max_{row}").get() or max_default)
+
+            if not self.validate_min_max_values(min_value, max_value):
+                return False
+
+            setattr(self.settings, f"{prefix}_min", min_value)
+            setattr(self.settings, f"{prefix}_max", max_value)
+
+        return True
+
+    def validate_min_max_values(self, min_value, max_value):
+        if min_value >= max_value:
+            self.show_warning(
+                "Check the Min and Max values.\n최소, 최대값을 확인하세요."
+            )
+            return False
+        if min_value < 75 or max_value > 200:
+            self.show_warning(
+                "The Min value cannot be set below 75 and the Max value cannot be set above 200.\n"
+                "Min 값은 75 미만,  Max 값은 200 초과할 수 없습니다."
+            )
+            return False
+        return True
+
+    def set_sound_settings(self):
+        sound_settings = [(3, "start"), (4, "stop")]
+
+        for row, prefix in sound_settings:
+            sound_label = self.grid_slaves(row=row, column=1)[0]
+            setattr(
+                self.settings,
+                f"{prefix}_sound",
+                (
+                    sound_label["text"]
+                    if sound_label["text"] != "Select file"
+                    else f"{prefix}.mp3"
+                ),
+            )
+
+    def save_settings(self):
+        settings_dict = asdict(self.settings)
+        settings_json = json.dumps(settings_dict).encode("utf-8")
+        settings_base64 = base64.b64encode(settings_json).decode("utf-8")
+        with open("user_settings.b64", "w") as file:
+            file.write(settings_base64)
+
+        logger.debug("Saved settings:", settings_dict)
+
+    def show_warning(self, message):
+        self.warning_label.config(text=message)
+
+    def on_close(self, event=None):
+        self.master.settings_window = None
+        self.master.load_settings()
+        self.master.bind_events()
+        self.destroy()
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.withdraw()  # Hide the root window
+    app = KeystrokeSettings(master=root)
+    app.mainloop()
+
+
+---------------
+File: keystroke_simulator_app.py
+---------------
+import base64
+import json
+import os
+from pathlib import Path
+import pickle
+import platform
+import shutil
+import threading
+import tkinter as tk
+from tkinter import ttk, messagebox
+from typing import Callable, List, Optional
+
+import keyboard
+from loguru import logger
+import pynput
+
+from keystroke_engine import KeystrokeEngine
+from keystroke_models import ProfileModel, EventModel, UserSettings
+from keystroke_processors import ProcessCollector
+from keystroke_profiles import KeystrokeProfiles
+from keystroke_quick_event_editor import KeystrokeQuickEventEditor
+from keystroke_settings import KeystrokeSettings
+from keystroke_sort_events import KeystrokeSortEvents
+from keystroke_utils import SoundUtils, StateUtils, WindowUtils, KeyUtils
+
+
+class ProcessFrame(tk.Frame):
+    def __init__(self, master, textvariable, *args, **kwargs):
+        super().__init__(master, *args, **kwargs)
+        self.process_label = tk.Label(
+            self,
+            text="Process:",
+        )
+        self.process_combobox = ttk.Combobox(
+            self,
+            textvariable=textvariable,
+            state="readonly",
+        )
+        self.refresh_button = tk.Button(
+            self,
+            text="Refresh",
+            command=self.refresh_processes,
+        )
+
+        self.process_label.pack(side=tk.LEFT, padx=5)
+        self.process_combobox.pack(side=tk.LEFT, padx=5)
+        self.refresh_button.pack(side=tk.LEFT)
+        self.refresh_processes()
+
+    def refresh_processes(self):
+        processes = ProcessCollector.get()
+        sorted_processes = sorted(processes, key=lambda x: x[0].lower())
+        self.process_combobox["values"] = [
+            f"{name} ({pid})" for name, pid, _ in sorted_processes
+        ]
+        if sorted_processes:
+            self.process_combobox.current(0)
+            self.process_combobox.event_generate("<<ComboboxSelected>>")
+
+
+class ProfileFrame(tk.Frame):
+    def __init__(self, master, textvariable, profiles_dir, *args, **kwargs):
+        super().__init__(master, *args, **kwargs)
+        self.profiles_dir = profiles_dir
+        self.profile_label = tk.Label(
+            self,
+            text="Profiles:",
+        )
+        self.profile_combobox = ttk.Combobox(
+            self,
+            textvariable=textvariable,
+            state="readonly",
+        )
+        self.copy_button = tk.Button(self, text="Copy", command=self.copy_profile)
+        self.del_button = tk.Button(self, text="Delete", command=self.delete_profile)
+
+        self.profile_label.pack(side=tk.LEFT, padx=5)
+        self.profile_combobox.pack(side=tk.LEFT, padx=5)
+        self.copy_button.pack(side=tk.LEFT)
+        self.del_button.pack(side=tk.LEFT)
+
+        self.load_profiles()
+
+    def load_profiles(self):
+        profile_files = [
+            os.path.splitext(f)[0]
+            for f in os.listdir(self.profiles_dir)
+            if f.endswith(".pkl")
+        ]
+        if "Quick" in profile_files:
+            profile_files.insert(0, profile_files.pop(profile_files.index("Quick")))
+        self.profile_combobox["values"] = profile_files
+        if profile_files:
+            self.profile_combobox.current(0)
+
+    def copy_profile(self):
+        current_profile = self.profile_combobox.get()
+        if not current_profile:
+            return
+        new_profile_name = self._copy_profile(current_profile)
+        self.load_profiles()
+        self.profile_combobox.set(new_profile_name)
+
+    def _copy_profile(self, profile_name: str) -> str:
+        source_file = os.path.join(self.profiles_dir, f"{profile_name}.pkl")
+        new_profile_name = f"{profile_name} - Copied"
+        destination_file = os.path.join(self.profiles_dir, f"{new_profile_name}.pkl")
+        shutil.copy(source_file, destination_file)
+        return new_profile_name
+
+    def delete_profile(self):
+        current_profile = self.profile_combobox.get()
+        if not current_profile or current_profile == "Quick":
+            return
+        if messagebox.askokcancel("Warning", f"Delete profile '{current_profile}'."):
+            self._delete_profile(current_profile)
+            self.load_profiles()
+
+    def _delete_profile(self, profile_name: str):
+        profile_file = os.path.join(self.profiles_dir, f"{profile_name}.pkl")
+        if os.path.exists(profile_file):
+            os.remove(profile_file)
+
+
+class ButtonFrame(tk.Frame):
+    def __init__(
+        self,
+        master,
+        toggle_callback: Callable,
+        events_callback: Callable,
+        settings_callback: Callable,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(master, *args, **kwargs)
+        self.start_stop_button = tk.Button(
+            self,
+            text="Start",
+            width=10,
+            height=1,
+            command=toggle_callback,
+        )
+        self.events_button = tk.Button(
+            self,
+            text="Quick Events",
+            width=10,
+            height=1,
+            command=events_callback,
+        )
+        self.settings_button = tk.Button(
+            self,
+            text="Settings",
+            width=10,
+            height=1,
+            command=settings_callback,
+        )
+
+        self.start_stop_button.pack(side=tk.LEFT, padx=5)
+        self.events_button.pack(side=tk.LEFT, padx=5)
+        self.settings_button.pack(side=tk.LEFT, padx=5)
+
+
+class ProfileButtonFrame(tk.Frame):
+    def __init__(
+        self,
+        master,
+        edit_callback: Callable,
+        sort_callback: Callable,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(master, *args, **kwargs)
+        self.settings_button = tk.Button(
+            self,
+            text="Edit Profile",
+            width=10,
+            height=1,
+            command=edit_callback,
+        )
+        self.sort_button = tk.Button(
+            self,
+            text="Sort Profile",
+            width=10,
+            height=1,
+            command=sort_callback,
+        )
+
+        self.settings_button.pack(side=tk.LEFT, padx=5)
+        self.sort_button.pack(side=tk.LEFT, padx=5)
+
+
+class KeystrokeSimulatorApp(tk.Tk):
+    def __init__(self, device_id=""):
+        super().__init__()
+        self.title("Python 3.12")
+        self.profiles_dir = "profiles"
+        self.device_id = device_id
+        self.production_mode = device_id != ""
+        self.is_running = tk.BooleanVar(value=False)
+        self.settings: UserSettings
+        self.selected_process = tk.StringVar()
+        self.selected_profile = tk.StringVar()
+        self.keystroke_engines = []
+
+        self.init_profiles()
+        self.settings_window = None
+        self.process_frame = ProcessFrame(self, textvariable=self.selected_process)
+        self.profile_frame = ProfileFrame(
+            self, textvariable=self.selected_profile, profiles_dir=self.profiles_dir
+        )
+        self.button_frame = ButtonFrame(
+            self, self.toggle_start_stop, self.open_quick_events, self.open_settings
+        )
+        self.profile_button_frame = ProfileButtonFrame(
+            self,
+            self.open_profile,
+            self.sort_profile_events,
+        )
+
+        self.process_frame.pack(pady=1)
+        self.profile_frame.pack(pady=1)
+        self.button_frame.pack(pady=5)
+        self.profile_button_frame.pack(pady=5)
+        self.set_ttk_style()
+        self.load_settings()
+        self.bind_events()
+        self.load_latest_state()
+        self.terminate_event = threading.Event()
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.start_stop_mouse_listener = None
+
+        SoundUtils.initialize()
+        WindowUtils.center_window(self)
+
+    def init_profiles(self):
+        if not os.path.isdir(self.profiles_dir):
+            try:
+                shutil.rmtree(self.profiles_dir)
+            except FileNotFoundError as e:
+                pass
+
+        if not os.path.exists(self.profiles_dir):
+            os.makedirs(self.profiles_dir)
+
+        profile_quick_path = Path(f"{self.profiles_dir}/Quick.pkl")
+        if not os.path.exists(profile_quick_path):
+            Path(profile_quick_path).touch()
+            with open(profile_quick_path, "wb") as f:
+                pickle.dump(ProfileModel(), f)
+            self._load_profile()
+
+    def set_ttk_style(self):
+        style = ttk.Style(self)
+        style.theme_use("default")
+        style.configure("TFrame", background="black")
+        style.configure("TLabel", background="black", foreground="white")
+        style.configure("TButton", background="white", foreground="black")
+        style.configure("TEntry", fieldbackground="white", foreground="black")
+
+    def load_settings(self):
+        try:
+            with open("user_settings.b64", "r") as file:
+                settings_base64 = file.read()
+            settings_json = base64.b64decode(settings_base64).decode("utf-8")
+            loaded_settings = json.loads(settings_json)
+            self.settings = UserSettings(**loaded_settings)
+            logger.debug(f"Loaded settings: {loaded_settings}")
+        except FileNotFoundError:
+            self.settings = UserSettings()
+
+    def bind_events(self):
+        self.bind("<Escape>", self.on_closing)
+        start_stop_key = self.settings.start_stop_key
+        system = platform.system()
+
+        if start_stop_key.startswith("W_"):
+            self.start_stop_mouse_listener = pynput.mouse.Listener(
+                on_scroll=self.on_mouse_scroll
+            )
+            self.start_stop_mouse_listener.start()
+        else:
+            if system == "Windows":
+                keyboard.on_press_key(start_stop_key, self.toggle_start_stop)
+            elif system == "Darwin":
+                keyboard.on_press_key(
+                    KeyUtils.get_keycode(start_stop_key), self.toggle_start_stop
+                )
+
+    def on_mouse_scroll(self, x, y, dx, dy):
+        if KeystrokeEngine._is_process_active_windows(
+            KeystrokeEngine.parse_process_id(self.selected_process.get())
+        ):
+            if self.settings.start_stop_key == "W_UP" and dy > 0:
+                self.toggle_start_stop()
+            elif self.settings.start_stop_key == "W_DN" and dy < 0:
+                self.toggle_start_stop()
+
+    def unbind_events(self):
+        self.unbind("<Escape>")
+        keyboard.unhook_all()
+
+        if self.start_stop_mouse_listener:
+            self.start_stop_mouse_listener.stop()
+            self.start_stop_mouse_listener = None
+
+    def toggle_start_stop(self, event=None):
+        self.is_running.set(not self.is_running.get())
+        if self.is_running.get():
+            event_list = self._load_profile().event_list
+            if not event_list or len(event_list) == 0:
+                return
+            self.start_simulation()
+        else:
+            self.stop_simulation()
+
+    def start_simulation(self):
+        if not self._validate_simulation_prerequisites():
+            return
+
+        profile = self._load_profile()
+        if not profile:
+            return
+
+        event_list = [p for p in profile.event_list if p.key_to_enter and p.use_event]
+        if not event_list:
+            return
+
+        self.terminate_event.clear()
+        self._create_and_start_engines(event_list)
+        self.save_latest_state()
+
+        SoundUtils.play_sound(self.settings.start_sound)
+        self.update_ui()
+
+    def _validate_simulation_prerequisites(self) -> bool:
+        target_process = self.selected_process.get()
+        target_profile = self.selected_profile.get()
+
+        if not target_process or " (" not in target_process:
+            logger.info("Invalid process selected")
+            return False
+        if not target_profile:
+            logger.info("No profile selected")
+            return False
+        return True
+
+    def _load_profile(self) -> Optional[ProfileModel]:
+        target_profile = self.selected_profile.get()
+        try:
+            with open(f"{self.profiles_dir}/{target_profile}.pkl", "rb") as f:
+                profile: ProfileModel = pickle.load(f)
+                if len(profile.event_list) < 1:
+                    raise ValueError("Empty profile!")
+                return profile
+        except Exception as e:
+            logger.info(f"Failed to load profile: {e}")
+            return ProfileModel()
+
+    def _create_and_start_engines(self, event_list: List[EventModel]):
+        event_chunks = self._chunk_events(event_list)
+        target_process = self.selected_process.get()
+
+        self.keystroke_engines = [
+            KeystrokeEngine(self, target_process, chunk, self.terminate_event)
+            for chunk in event_chunks
+        ]
+
+        for engine in self.keystroke_engines:
+            engine.start()
+
+    def _chunk_events(self, event_list: List[EventModel]) -> List[List[EventModel]]:
+        num_events = len(event_list)
+        num_threads = (num_events + 9) // 10
+        chunk_size, remainder = divmod(num_events, num_threads)
+
+        return [
+            event_list[
+                i * chunk_size
+                + min(i, remainder) : (i + 1) * chunk_size
+                + min(i + 1, remainder)
+            ]
+            for i in range(num_threads)
+        ]
+
+    def stop_simulation(self):
+        self.terminate_event.set()
+        if self.keystroke_engines:
+            for engine in self.keystroke_engines:
+                engine.join(timeout=0.1)
+            self.keystroke_engines = []
+            SoundUtils.play_sound(self.settings.stop_sound)
+            self.update_ui()
+
+    def update_ui(self):
+        state = "disable" if self.is_running.get() else "normal"
+        self.process_frame.process_combobox.config(
+            state="disable" if self.is_running.get() else "readonly"
+        )
+        self.process_frame.refresh_button.config(state=state)
+        self.profile_button_frame.settings_button.config(state=state)
+        self.profile_frame.profile_combobox.config(
+            state="disable" if self.is_running.get() else "readonly"
+        )
+        self.profile_frame.copy_button.config(state=state)
+        self.profile_frame.del_button.config(state=state)
+        self.button_frame.start_stop_button.config(
+            text="Stop" if self.is_running.get() else "Start"
+        )
+        self.button_frame.settings_button.config(state=state)
+        self.profile_button_frame.sort_button.config(state=state)
+
+    def open_profile(self):
+        profile_name = self.selected_profile.get()
+        if profile_name:
+            KeystrokeProfiles(self, profile_name, self.reload_profiles)
+
+    def reload_profiles(self, new_profile_name):
+        self.profile_frame.load_profiles()
+        if new_profile_name in self.profile_frame.profile_combobox["values"]:
+            self.profile_frame.profile_combobox.set(new_profile_name)
+        elif self.profile_frame.profile_combobox["values"]:
+            self.profile_frame.profile_combobox.current(0)
+
+    def sort_profile_events(self):
+        self.unbind_events()
+        profile_name = self.selected_profile.get()
+        if profile_name:
+            KeystrokeSortEvents(self, profile_name, self.reload_profiles)
+
+    def open_quick_events(self):
+        KeystrokeQuickEventEditor(self)
+
+    def open_settings(self):
+        if self.settings_window is not None:
+            return
+
+        self.unbind_events()
+        self.settings_window = KeystrokeSettings(self)
+
+    def load_latest_state(self):
+        state = StateUtils.load_main_app_state()
+        if not state:
+            return
+
+        if "process" in state:
+            for process in self.process_frame.process_combobox["values"]:
+                if process.startswith(state["process"]):
+                    self.selected_process.set(process)
+            logger.debug(f"Set default process to: {state['process']}")
+        if "profile" in state:
+            self.selected_profile.set(state["profile"])
+            logger.debug(f"Set default profile to: {state['profile']}")
+
+    def save_latest_state(self):
+        StateUtils.save_main_app_state(
+            process=self.selected_process.get().split(" (")[0],
+            profile=self.selected_profile.get(),
+        )
+
+    def on_closing(self, event=None):
+        logger.info("Shutting down the application and terminating threads...")
+        self.terminate_event.set()
+        self.stop_simulation()
+        self.save_latest_state()
+        keyboard.unhook_all()
+        self.destroy()
+        logger.info("Bye")
+
+
+---------------
+File: keystroke_sort_events.py
+---------------
+import pickle
+import tkinter as tk
+from tkinter import ttk, messagebox
+from typing import Callable
+
+from PIL import Image, ImageTk
+from loguru import logger
+
+from keystroke_models import EventModel, ProfileModel
+from keystroke_utils import WindowUtils
+
+
+class KeystrokeSortEvents(tk.Toplevel):
+    def __init__(self, master, profile_name: str, save_callback: Callable[[str], None]):
+        super().__init__(master)
+        self.master = master
+        self.profiles_dir = "./profiles"
+        self.save_callback = save_callback
+
+        self.title("Event Organizer")
+        self.configure(bg="#2E2E2E")
+
+        self.profile_name = tk.StringVar(value=profile_name)
+        self.profile = self.load_profile(profile_name)
+        self.events = self.profile.event_list
+
+        self.create_widgets()
+
+        self.bind("<Escape>", self.close_window)
+        self.protocol("WM_DELETE_WINDOW", self.close_window)
+
+        WindowUtils.center_window(self)
+
+    def create_widgets(self):
+        # Profile Name frame
+        profile_frame = ttk.Frame(self)
+        profile_frame.pack(pady=10, padx=10, fill=tk.X)
+
+        ttk.Label(profile_frame, text="Profile Name:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Entry(profile_frame, textvariable=self.profile_name, state="readonly").pack(
+            side=tk.LEFT, expand=True, fill=tk.BOTH
+        )
+
+        # Save Button - moved before the event frame
+        ttk.Button(self, text="Save", command=self.save_events).pack(pady=10)
+
+        # Create a canvas and a scrollbar for the event frame
+        canvas = tk.Canvas(self)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Create a frame inside the canvas
+        self.event_frame = ttk.Frame(canvas)
+
+        # Add the event frame to the canvas
+        canvas.create_window((0, 0), window=self.event_frame, anchor="nw")
+
+        # Configure the canvas to update scrollregion when the frame's size changes
+        self.event_frame.bind(
+            "<Configure>", lambda e: self.update_canvas(canvas, self.event_frame)
+        )
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Bind mouse wheel to scroll canvas when over event frames
+        self.bind_mouse_wheel(canvas)
+
+        # Add existing events
+        for idx, event in enumerate(self.events):
+            self.add_event(idx, event)
+
+        # Adjust the window size based on the number of events and screen height
+        self.adjust_window_height()
+
+    def update_canvas(self, canvas, frame):
+        # Update the canvas scrollregion and width
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        if frame.winfo_width() > canvas.winfo_width():
+            canvas.config(width=frame.winfo_width())
+
+    def bind_mouse_wheel(self, canvas):
+        # Bind mouse wheel scroll to canvas
+        def on_mouse_wheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind_all("<MouseWheel>", on_mouse_wheel)
+
+        # Ensure the mouse wheel works when hovering over event frames
+        for widget in self.event_frame.winfo_children():
+            widget.bind(
+                "<Enter>", lambda e: canvas.bind_all("<MouseWheel>", on_mouse_wheel)
+            )
+            widget.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+    def adjust_window_height(self):
+        # Get the screen height
+        screen_height = self.winfo_screenheight()
+        # Calculate the desired height based on event frames
+        event_frame_height = sum(
+            child.winfo_height() + 10 for child in self.event_frame.winfo_children()
+        )
+        # Add extra padding for the title bar, save button, etc.
+        total_desired_height = event_frame_height + 100
+
+        logger.debug(f"{screen_height}, {event_frame_height}, {total_desired_height}")
+
+        # Set the window height
+        if total_desired_height > screen_height:
+            self.geometry(f"{self.winfo_width()}x{screen_height}")
+        else:
+            self.geometry(f"{self.winfo_width()}x{total_desired_height}")
+
+    def add_event(self, idx: int, event=None):
+        if event is None:
+            event = EventModel()
+            self.events.append(event)
+
+        frame = ttk.Frame(self.event_frame, style="Event.TFrame")
+        frame.pack(pady=5, fill=tk.X, padx=5)
+        frame.configure(borderwidth=2, relief="solid")
+        style = ttk.Style()
+        style.configure("Event.TFrame", background="#2E2E2E", bordercolor="red")
+
+        # Index label
+        index_label = ttk.Label(frame, text=f"{idx + 1}")
+        index_label.pack(side=tk.LEFT, padx=5)
+
+        # Checkbox for use_event
+        use_event_var = tk.BooleanVar(value=event.use_event)
+        use_event_check = ttk.Checkbutton(frame, variable=use_event_var)
+        use_event_check.pack(side=tk.LEFT, padx=5)
+        use_event_var.trace_add(
+            "write", lambda *args: self.update_use_event(event, use_event_var)
+        )
+
+        # Placeholder for screenshot
+        if event.held_screenshot:
+            img = ImageTk.PhotoImage(event.held_screenshot.resize((50, 50)))
+        else:
+            img = ImageTk.PhotoImage(Image.new("RGB", (50, 50), color="gray"))
+        img_label = ttk.Label(frame, image=img)
+        img_label.image = img  # Keep a reference to prevent garbage collection
+        img_label.pack(side=tk.LEFT, padx=5)
+
+        event_name_var = tk.StringVar(
+            value=event.event_name if event.event_name else ""
+        )
+        entry = ttk.Entry(frame, textvariable=event_name_var)
+        entry.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
+
+        event_name_var.trace_add(
+            "write", lambda *args: self.update_event_name(event, event_name_var)
+        )
+
+        # Start/Stop key display (read-only)
+        key_entry = ttk.Label(
+            frame,
+            text=event.key_to_enter or "N/A",
+            width=3,
+            anchor="w",
+            state="readonly",
+        )
+        key_entry.pack(side=tk.LEFT, padx=5)
+
+        self.configure_drag_and_drop(frame)
+        for idx, child in enumerate(frame.winfo_children()):
+            if idx < 3 and idx != 1:
+                self.configure_drag_and_drop(child)
+
+    def update_use_event(self, event: EventModel, use_event_var: tk.BooleanVar):
+        event.use_event = use_event_var.get()
+
+    def configure_drag_and_drop(self, widget):
+        widget.bind("<ButtonPress-1>", self.on_drag_start)
+        widget.bind("<B1-Motion>", self.on_drag_motion)
+        widget.bind("<ButtonRelease-1>", self.on_drag_release)
+
+    def update_event_name(self, event: EventModel, name_var: tk.StringVar):
+        event.event_name = name_var.get()
+
+    def on_drag_start(self, event):
+        widget = event.widget
+        while not isinstance(widget, ttk.Frame):
+            widget = widget.master
+        widget._drag_start_y = event.y_root - widget.winfo_rooty()
+        widget._drag_start_mouse_y = event.y_root
+
+        # Create a clone of the widget for dragging
+        self.drag_image = tk.Toplevel(self)
+        self.drag_image.overrideredirect(True)
+        self.drag_image.attributes("-alpha", 0.7)  # Make it semi-transparent
+        self.drag_image.attributes("-topmost", True)  # Ensure it's always on top
+        clone = ttk.Frame(self.drag_image)
+        clone.pack(fill=tk.BOTH, expand=True)
+        for child in widget.winfo_children():
+            child_clone = ttk.Label(
+                clone,
+                image=child.image if hasattr(child, "image") else None,
+                text=child["text"] if "text" in child.keys() else None,
+            )
+            child_clone.pack(side=tk.LEFT, padx=5)
+
+        # Position the clone at the mouse cursor
+        x = self.winfo_pointerx() - self.winfo_rootx()
+        y = self.winfo_pointery() - self.winfo_rooty()
+        self.drag_image.geometry(f"+{x}+{y}")
+
+    def on_drag_motion(self, event):
+        if hasattr(self, "drag_image"):
+            x = self.winfo_pointerx() - self.winfo_rootx()
+            y = self.winfo_pointery() - self.winfo_rooty()
+            self.drag_image.geometry(f"+{x}+{y}")
+
+        widget = event.widget
+        while not isinstance(widget, ttk.Frame):
+            widget = widget.master
+        y = widget.winfo_y() + (event.y_root - widget._drag_start_mouse_y)
+        widget._drag_start_mouse_y = event.y_root
+        widget.place(y=y)
+
+    def on_drag_release(self, event):
+        if hasattr(self, "drag_image"):
+            self.drag_image.destroy()
+            del self.drag_image
+
+        widget = event.widget
+        while not isinstance(widget, ttk.Frame):
+            widget = widget.master
+        y = widget.winfo_y() + (event.y_root - widget._drag_start_mouse_y)
+        widget.place(y=y)
+
+        # Reorder events based on new positions
+        sorted_frames = sorted(
+            self.event_frame.winfo_children(), key=lambda w: w.winfo_y()
+        )
+        self.events = [
+            self.events[int(f.winfo_children()[0]["text"]) - 1] for f in sorted_frames
+        ]
+
+        # Update event order and redraw
+        for widget in self.event_frame.winfo_children():
+            widget.destroy()
+        for idx, event in enumerate(self.events):
+            self.add_event(idx, event)
+
+    def load_profile(self, profile_name: str) -> ProfileModel:
+        try:
+            with open(f"{self.profiles_dir}/{profile_name}.pkl", "rb") as f:
+                return pickle.load(f)
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"File not found: {profile_name}")
+            self.close_window()
+
+    def save_events(self):
+        self.profile.event_list = self.events
+
+        try:
+            with open(f"{self.profiles_dir}/{self.profile_name.get()}.pkl", "wb") as f:
+                pickle.dump(self.profile, f)
+        except Exception as e:
+            logger.error(f"Failed to save events: {type(e)}, {str(e)}")
+            return
+
+        self.save_callback(self.profile_name.get())
+        self.close_window()
+
+    def close_window(self, event=None):
+        self.master.load_settings()
+        self.master.bind_events()
+        self.destroy()
+
+
+---------------
+File: keystroke_utils.py
+---------------
+import json
+import logging
+import os
+import platform
+from pathlib import Path
+import subprocess
+from threading import Thread
+from typing import Optional, Dict
+
+import pygame
+
+
+class WindowUtils:
+    @staticmethod
+    def _get_screen_dimensions(window):
+        return window.winfo_screenwidth(), window.winfo_screenheight()
+
+    @staticmethod
+    def _calculate_window_size(
+        window, screen_width, screen_height, width_percent, height_percent
+    ):
+        window.update_idletasks()
+        return (
+            width_percent * screen_width if width_percent else window.winfo_width(),
+            height_percent * screen_height if height_percent else window.winfo_height(),
+        )
+
+    @staticmethod
+    def center_window(window):
+        window.update_idletasks()
+        screen_width = window.winfo_screenwidth()
+        screen_height = window.winfo_screenheight()
+        window_width = window.winfo_width()
+        window_height = window.winfo_height()
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        window.geometry(f"+{x}+{y}")
+
+    @staticmethod
+    def set_window_position(window, x_percent=0.5, y_percent=0.5):
+        screen_width, screen_height = WindowUtils._get_screen_dimensions(window)
+        window_width, window_height = WindowUtils._calculate_window_size(
+            window, screen_width, screen_height, None, None
+        )
+        x = int((screen_width - window_width) * x_percent)
+        y = int((screen_height - window_height) * y_percent)
+        window.geometry(f"+{x}+{y}")
+        window.update_idletasks()
+
+
+class KeyUtils:
+    key_codes = {
+        "darwin": {
+            "1": 18,
+            "2": 19,
+            "3": 20,
+            "4": 21,
+            "5": 23,
+            "6": 22,
+            "7": 26,
+            "8": 28,
+            "9": 25,
+            "0": 29,
+            "=": 24,
+            "-": 27,
+            "[": 33,
+            "]": 30,
+            "\\": 42,
+            "A": 0,
+            "B": 11,
+            "C": 8,
+            "D": 2,
+            "E": 14,
+            "F": 3,
+            "G": 5,
+            "H": 4,
+            "I": 34,
+            "J": 38,
+            "K": 40,
+            "L": 37,
+            "M": 46,
+            "N": 45,
+            "O": 31,
+            "P": 35,
+            "Q": 12,
+            "R": 15,
+            "S": 1,
+            "T": 17,
+            "U": 32,
+            "V": 9,
+            "W": 13,
+            "X": 7,
+            "Y": 16,
+            "Z": 6,
+            ",": 43,
+            ".": 47,
+            "/": 44,
+            ";": 41,
+            "'": 39,
+            "`": 50,
+            "F1": 122,
+            "F2": 120,
+            "F3": 99,
+            "F4": 118,
+            "F5": 96,
+            "F6": 97,
+            "F7": 98,
+            "F8": 100,
+            "F9": 101,
+            "F10": 109,
+            "F11": 103,
+            "F12": 111,
+            "Control": 59,
+            "Space": 49,
+            "Command": 55,
+            "Option": 58,
+        },
+        "windows": {
+            "1": 0x31,
+            "2": 0x32,
+            "3": 0x33,
+            "4": 0x34,
+            "5": 0x35,
+            "6": 0x36,
+            "7": 0x37,
+            "8": 0x38,
+            "9": 0x39,
+            "0": 0x30,
+            "=": 0xBB,
+            "-": 0xBD,
+            "[": 0xDB,
+            "]": 0xDD,
+            "\\": 0xDC,
+            "A": 0x41,
+            "B": 0x42,
+            "C": 0x43,
+            "D": 0x44,
+            "E": 0x45,
+            "F": 0x46,
+            "G": 0x47,
+            "H": 0x48,
+            "I": 0x49,
+            "J": 0x4A,
+            "K": 0x4B,
+            "L": 0x4C,
+            "M": 0x4D,
+            "N": 0x4E,
+            "O": 0x4F,
+            "P": 0x50,
+            "Q": 0x51,
+            "R": 0x52,
+            "S": 0x53,
+            "T": 0x54,
+            "U": 0x55,
+            "V": 0x56,
+            "W": 0x57,
+            "X": 0x58,
+            "Y": 0x59,
+            "Z": 0x5A,
+            ",": 0xBC,
+            ".": 0xBE,
+            "/": 0xBF,
+            ";": 0xBA,
+            "'": 0xDE,
+            "F1": 0x70,
+            "F2": 0x71,
+            "F3": 0x72,
+            "F4": 0x73,
+            "F5": 0x74,
+            "F6": 0x75,
+            "F7": 0x76,
+            "F8": 0x77,
+            "F9": 0x78,
+            "F10": 0x79,
+            "F11": 0x7A,
+            "F12": 0x7B,
+            "Space": 0x20,
+            "Tab": 0x09,
+            "Left": 0x25,
+            "Up": 0x26,
+            "Right": 0x27,
+            "Down": 0x28,
+            "Delete": 0x2E,
+            "Backspace": 0x08,
+            "Home": 0x24,
+            "End": 0x23,
+            "Pageup": 0x21,
+            "Pagedown": 0x22,
+            "Insert": 0x2D,
+            "Esc": 0x1B,
+            "VolumeUp": 0xAF,
+            "VolumeDown": 0xAE,
+            "Mute": 0xAD,
+        },
+    }
+
+    @staticmethod
+    def get_key_list():
+        return KeyUtils.key_codes[platform.system().lower()]
+
+    @staticmethod
+    def get_key_name_list():
+        return list(KeyUtils.key_codes[platform.system().lower()].keys())
+
+    @staticmethod
+    def get_keycode(character: str):
+        return KeyUtils.get_key_list().get(character.capitalize())
+
+
+class StateUtils:
+    state_file_path = Path("./app_state.json")
+
+    @staticmethod
+    def save_main_app_state(**kwargs):
+        try:
+            state = StateUtils.load_main_app_state() or {}
+            updated = False
+
+            for key, value in kwargs.items():
+                if value:
+                    state[key] = value
+                    updated = True
+
+            if updated:
+                temp_file_path = StateUtils.state_file_path.with_suffix(".tmp")
+                with open(temp_file_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, ensure_ascii=False)
+                os.replace(temp_file_path, StateUtils.state_file_path)
+        except Exception as e:
+            logging.error(f"Failed to save state file: {e}")
+
+    @staticmethod
+    def load_main_app_state() -> Optional[Dict]:
+        if not StateUtils.state_file_path.exists():
+            return {}
+        try:
+            with open(StateUtils.state_file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logging.error(f"Failed to load state file: {e}")
+            return {}
+
+
+class SoundUtils:
+    _play_sound_method = None
+    _loaded_sounds = {}
+
+    @staticmethod
+    def _play_sound_mac(sound_file):
+        def run_afplay():
+            try:
+                subprocess.run(["afplay", sound_file])
+            except Exception as e:
+                print(f"Failed to play sound on macOS: {e}")
+
+        thread = Thread(target=run_afplay, daemon=True)
+        thread.start()
+
+    @classmethod
+    def _play_sound_default(cls, sound_file):
+        if sound_file not in cls._loaded_sounds:
+            cls._loaded_sounds[sound_file] = pygame.mixer.Sound(sound_file)
+        cls._loaded_sounds[sound_file].play()
+
+    @classmethod
+    def initialize(cls):
+        if platform.system() == "Darwin":
+            cls._play_sound_method = cls._play_sound_mac
+        else:
+            pygame.mixer.init()
+            cls._play_sound_method = cls._play_sound_default
+
+    @classmethod
+    def play_sound(cls, sound_file):
+        if cls._play_sound_method is None:
+            raise RuntimeError(
+                "SoundUtils not initialized. Call SoundUtils.initialize() first."
+            )
+        cls._play_sound_method(sound_file)
+
+
+---------------
+File: main.py
+---------------
+import os
+import shutil
+
+from loguru import logger
+
+from keystroke_simulator_app import KeystrokeSimulatorApp
+
+if __name__ == "__main__":
+    # Configure Loguru
+    log_path = "logs"
+    if not os.path.exists(log_path):
+        os.mkdir(log_path)
+    if os.path.isfile(log_path):
+        shutil.move(log_path, "logs.bak")
+        os.makedirs(log_path)
+    logger.add(os.path.join(log_path, "keysym.log"), rotation="1 MB", level="DEBUG")
+
+    if not os.path.exists("profiles"):
+        os.makedirs("profiles")
+
+    app = KeystrokeSimulatorApp()
+    app.mainloop()
+
+
+---------------
+File: main_secure.py
+---------------
+import hashlib
+import os
+import platform
+import re
+import secrets
+import subprocess
+import tkinter as tk
+import uuid
+from datetime import datetime, timezone
+from tkinter import ttk
+
+import requests
+from dotenv import load_dotenv, find_dotenv
+from loguru import logger
+
+from keystroke_simulator_app import KeystrokeSimulatorApp
+from keystroke_utils import WindowUtils
+
+
+class CryptoManager:
+    @staticmethod
+    def derive_key(machine_id, salt):
+        # Use PBKDF2 with SHA256
+        iterations = 100000
+        key_length = 32  # AES-256 key length
+        dk = hashlib.pbkdf2_hmac(
+            "sha256", machine_id.encode(), salt, iterations, key_length
+        )
+        return dk  # Return the raw bytes, not base64 encoded
+
+    @staticmethod
+    def obfuscate(data):
+        key = os.getenv("OBFUSCATION_KEY").encode("utf-8")
+        return bytes([data[i] ^ key[i % len(key)] for i in range(len(data))])
+
+
+class StorageManager:
+    @staticmethod
+    def store_device_id(device_id):
+        machine_id = DeviceManager.get_machine_id()
+        salt = secrets.token_bytes(16)
+        key = CryptoManager.derive_key(machine_id, salt)
+        encrypted_data = StorageManager._encrypt(key, device_id.encode())
+        obfuscated_data = CryptoManager.obfuscate(encrypted_data)
+        file_path = os.path.join(os.path.expanduser("~"), ".secure_app_data")
+        with open(file_path, "wb") as file:
+            file.write(salt + obfuscated_data)
+
+    @staticmethod
+    def retrieve_device_id():
+        file_path = os.path.join(os.path.expanduser("~"), ".secure_app_data")
+        try:
+            with open(file_path, "rb") as file:
+                data = file.read()
+                salt = data[:16]
+                obfuscated_data = data[16:]
+        except FileNotFoundError:
+            raise Exception("Device ID not found. Please register this device.")
+
+        deobfuscated_data = CryptoManager.obfuscate(obfuscated_data)
+        machine_id = DeviceManager.get_machine_id()
+        key = CryptoManager.derive_key(machine_id, salt)
+        try:
+            decrypted_data = StorageManager._decrypt(key, deobfuscated_data)
+            return decrypted_data.decode()
+        except Exception:
+            raise Exception(
+                "Failed to decrypt device ID. This may not be the original device."
+            )
+
+    @staticmethod
+    def _encrypt(key, data):
+        iv = secrets.token_bytes(16)
+        cipher = StorageManager._create_cipher(key, iv)
+        return iv + cipher.encrypt(data)
+
+    @staticmethod
+    def _decrypt(key, data):
+        iv = data[:16]
+        cipher = StorageManager._create_cipher(key, iv)
+        return cipher.decrypt(data[16:])
+
+    @staticmethod
+    def _create_cipher(key, iv):
+        return StorageManager._AESCipher(key, iv)
+
+    class _AESCipher:
+        def __init__(self, key, iv):
+            self.key = key
+            self.iv = iv
+
+        def encrypt(self, data):
+            padded_data = self._pad(data)
+            cipher = self._create_cipher()
+            return cipher.encrypt(padded_data)
+
+        def decrypt(self, data):
+            cipher = self._create_cipher()
+            padded_data = cipher.decrypt(data)
+            return self._unpad(padded_data)
+
+        def _create_cipher(self):
+            from Crypto.Cipher import AES
+
+            return AES.new(self.key, AES.MODE_CBC, self.iv)
+
+        def _pad(self, data):
+            padding_length = 16 - (len(data) % 16)
+            padding = bytes([padding_length] * padding_length)
+            return data + padding
+
+        def _unpad(self, padded_data):
+            padding_length = padded_data[-1]
+            return padded_data[:-padding_length]
+
+
+class DeviceManager:
+    @staticmethod
+    def generate_device_id():
+        return str(uuid.uuid4())
+
+    @staticmethod
+    def get_machine_id():
+        if platform.system() == "Windows":
+            bios_serial = DeviceManager._get_windows_serial(
+                "wmic bios get serialnumber", "unknown_bios"
+            )
+            board_serial = DeviceManager._get_windows_serial(
+                "wmic baseboard get serialnumber", "unknown_board"
+            )
+            memory_gb = DeviceManager._get_memory_gb()
+        elif platform.system() == "Darwin":
+            bios_serial, board_serial, memory_gb = DeviceManager._get_macos_serial()
+        else:
+            raise
+
+        os_name = os.name
+        user_name = os.getlogin()
+        machine_id = f"{bios_serial}:{board_serial}:{os_name}:{user_name}:{memory_gb}"
+        logger.debug(f"MachineId: {machine_id}")
+        return hashlib.md5(machine_id.encode()).hexdigest()
+
+    @staticmethod
+    def _get_windows_serial(command, default):
+        try:
+            return (
+                subprocess.check_output(command, shell=True)
+                .decode()
+                .split("\n")[1]
+                .strip()
+            )
+        except Exception:
+            return default
+
+    @staticmethod
+    def _get_macos_serial():
+        result = subprocess.run(
+            ["system_profiler", "SPHardwareDataType"], stdout=subprocess.PIPE
+        )
+        output = result.stdout.decode()
+
+        bios_serial = None
+        board_serial = None
+        memory = None
+
+        for line in output.split("\n"):
+            if "Serial Number (system)" in line:
+                bios_serial = line.split(":")[-1].strip()
+            if "Hardware UUID" in line:
+                board_serial = line.split(":")[-1].strip()
+            if "Memory" in line:
+                memory = line.split(":")[-1].strip()
+
+        return bios_serial, board_serial, memory
+
+    @staticmethod
+    def _get_memory_gb():
+        try:
+            output = subprocess.check_output(
+                ["wmic", "ComputerSystem", "get", "TotalPhysicalMemory"]
+            ).decode()
+            total_memory_str = output.split("\n")[1].strip()
+            total_memory_bytes = int(total_memory_str)
+            return total_memory_bytes
+        except Exception as e:
+            return f"Error retrieving memory: {e}"
+
+
+class AuthApp:
+    def __init__(self, master):
+        self.master = master
+        self.setup_ui()
+        self.failed_attempts = 0
+        self.device_id = self.get_or_create_device_id()
+
+    def setup_ui(self):
+        self.master.title("Authentication")
+        self.create_widgets()
+        self.setup_bindings()
+        WindowUtils.center_window(self.master)
+
+    def create_widgets(self):
+        self.id_label = ttk.Label(self.master, text="User ID:")
+        self.id_entry = ttk.Entry(self.master)
+        self.error_label = tk.Label(
+            self.master,
+            text="Enter your username and click 'OK' or press Enter.",
+            fg="black",
+            wraplength=250,
+        )
+        button_frame = ttk.Frame(self.master)
+        self.ok_button = ttk.Button(
+            button_frame, text="OK", command=self.validate_and_auth
+        )
+        self.quit_button = ttk.Button(
+            button_frame, text="Quit", command=self.master.quit
+        )
+
+        self.id_label.grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        self.id_entry.grid(row=0, column=1, padx=5, pady=5)
+        self.error_label.grid(row=2, column=0, columnspan=2, pady=5)
+        button_frame.grid(row=1, column=0, columnspan=2, pady=10)
+        self.ok_button.pack(side=tk.LEFT, padx=5)
+        self.quit_button.pack(side=tk.LEFT, padx=5)
+
+    def setup_bindings(self):
+        self.id_entry.config(
+            validate="key",
+            validatecommand=(self.master.register(self.validate_user_id), "%P"),
+        )
+        self.master.bind("<Escape>", lambda event: self.master.quit())
+        self.id_entry.bind("<Return>", lambda event: self.ok_button.invoke())
+        self.master.after(100, self.set_window_focus)
+
+    def set_window_focus(self):
+        self.master.focus_force()
+        self.master.lift()
+        self.id_entry.focus_set()
+
+    def validate_user_id(self, new_value):
+        if len(new_value) > 12:
+            self.show_error("User ID must be\n12 characters or less")
+            return False
+        self.clear_error()
+        return True
+
+    def validate_input(self):
+        user_id = self.id_entry.get()
+        if not re.match(r"^[a-zA-Z0-9]{4,12}$", user_id):
+            self.show_error("User ID must be\n4-12 alphanumeric characters")
+            return False
+        self.clear_error()
+        return True
+
+    def show_error(self, message):
+        self.error_label.config(text=message, fg="red")
+        self.master.update_idletasks()
+
+    def clear_error(self):
+        self.error_label.config(text="")
+
+    def lock_inputs(self):
+        self.id_entry.config(state="disabled")
+        self.ok_button.config(state="disabled")
+        self.start_countdown(10)
+
+    def unlock_inputs(self):
+        self.id_entry.config(state="normal")
+        self.ok_button.config(state="normal")
+        self.clear_error()
+        self.failed_attempts = 1
+
+    def start_countdown(self, remaining_time, final_message=""):
+        if remaining_time > 0:
+            self.show_error(
+                f"{final_message}\n\nToo many failed attempts.\nTry again in {remaining_time} seconds."
+            )
+            self.master.after(
+                1000, self.start_countdown, remaining_time - 1, final_message
+            )
+        else:
+            self.unlock_inputs()
+
+    def validate_and_auth(self):
+        if self.validate_input():
+            self.ok_button.config(state="disabled")
+            self.request_authentication()
+
+    def request_authentication(self):
+        user_id = self.id_entry.get()
+        timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+        payload = {
+            "userId": user_id,
+            "deviceId": self.device_id,
+            "timestamp": timestamp,
+        }
+        resp_json = {}
+
+        try:
+            response = requests.post(os.getenv("AUTH_URL"), json=payload, timeout=5)
+            resp_json = response.json()
+            logger.info(f"{response.status_code}: {resp_json}")
+            response.raise_for_status()
+            self.launch_keystroke_simulator()
+        except requests.Timeout:
+            self.show_error_and_reactivate("Authentication request timed out.")
+        except requests.RequestException as e:
+            err_msg = resp_json.get("message", "") if resp_json else ""
+            self.show_error_and_reactivate(f"Failed to login: {err_msg}")
+
+    def show_error_and_reactivate(self, message):
+        self.failed_attempts += 1
+        if self.failed_attempts >= 2:
+            self.lock_inputs()
+            self.start_countdown(10, final_message=message)
+        else:
+            self.show_error(message)
+            self.ok_button.config(state="normal")
+            self.master.deiconify()
+            self.master.after(100, self.set_window_focus)
+
+    def launch_keystroke_simulator(self):
+        self.master.withdraw()
+        self.master.destroy()
+        keystroke_app = KeystrokeSimulatorApp()
+        keystroke_app.mainloop()
+
+    @staticmethod
+    def get_or_create_device_id():
+        try:
+            return StorageManager.retrieve_device_id()
+        except Exception:
+            device_id = DeviceManager.generate_device_id()
+            StorageManager.store_device_id(device_id)
+            return device_id
+
+
+class MainApp:
+    def __init__(self, master, device_id):
+        self.master = master
+        self.device_id = device_id
+        master.title("Main Application")
+        master.geometry("400x300")
+
+        label = ttk.Label(master, text="Welcome to the Main Application!")
+        label.pack(pady=20)
+
+        device_label = ttk.Label(master, text=f"Device ID: {self.device_id}")
+        device_label.pack(pady=10)
+
+        quit_button = ttk.Button(master, text="Quit", command=self.quit_app)
+        quit_button.pack(pady=10)
+
+        master.protocol("WM_DELETE_WINDOW", self.quit_app)
+        self.master.after(100, self.set_window_focus)
+
+        WindowUtils.center_window(self.master)
+
+    def set_window_focus(self):
+        self.master.focus_force()
+        self.master.lift()
+
+    def quit_app(self):
+        self.master.quit()
+        self.master.destroy()
+
+
+def main():
+    root = tk.Tk()
+    app = AuthApp(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    load_dotenv(find_dotenv())
+    main()
+
+
+```

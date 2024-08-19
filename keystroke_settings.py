@@ -43,11 +43,11 @@ class KeystrokeSettings(tk.Toplevel):
             loaded_settings = json.loads(settings_json)
             self.settings = UserSettings(**loaded_settings)
 
-            self._update_ui_from_settings()
-
         except Exception as e:
             print("Error loading settings:", e)
             self.settings = UserSettings()
+
+        finally:
             self._update_ui_from_settings()
 
     def _set_entry_values(self, row, prefix):
@@ -186,17 +186,30 @@ class KeystrokeSettings(tk.Toplevel):
         )
 
     def _create_warning_label(self):
-        self.warning_label = ttk.Label(self, text="\n", foreground="red")
+        self.warning_label = ttk.Label(
+            self, text="\n", background="white", foreground="red"
+        )
         self.warning_label.grid(row=6, column=0, columnspan=3, pady=5)
+        self.warning_label.config(
+            text="For Start/Stop, set only A-Z, 0-9, and special character keys.\n\nStart/Stop 은 A-Z, 0-9, 특수문자 키만 설정하세요."
+        )
 
     @staticmethod
     def _validate_numeric_entry(P):
         return P == "" or (P.isdigit() and 0 <= int(P) < 1000 and not P.startswith("0"))
 
     def _on_key_press(self, event):
-        self.start_stop_key.set((event.char or event.keysym).upper())
-        self.settings.start_stop_key = self.start_stop_key.get()
-        self.warning_label.config(text="")
+        valid_keys = (
+            set(f"F{i}" for i in range(1, 13))
+            | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
+            | set(chr(i) for i in range(ord("0"), ord("9") + 1))
+            | set("[];',./-=\\")
+        )
+
+        key = event.char.upper() or event.keysym.upper()
+        if key in valid_keys:
+            self.start_stop_key.set(key)
+            self.settings.start_stop_key = self.start_stop_key.get()
 
     def _select_sound(self, label):
         filepath = filedialog.askopenfilename(
@@ -207,7 +220,9 @@ class KeystrokeSettings(tk.Toplevel):
             label.config(text=filepath)
 
     def on_reset(self):
-        if messagebox.askokcancel("Warning", f"Resets the values.\n설정값이 초기화 됩니다."):
+        if messagebox.askokcancel(
+            "Warning", f"Resets the values.\n설정값이 초기화 됩니다."
+        ):
             self.settings = UserSettings()  # Reset to default values
             self._update_ui_from_settings()
             self.warning_label.config(
@@ -253,7 +268,9 @@ class KeystrokeSettings(tk.Toplevel):
 
     def validate_min_max_values(self, min_value, max_value):
         if min_value >= max_value:
-            self.show_warning("Check the Min and Max values.\n최소, 최대값을 확인하세요.")
+            self.show_warning(
+                "Check the Min and Max values.\n최소, 최대값을 확인하세요."
+            )
             return False
         if min_value < 75 or max_value > 200:
             self.show_warning(
