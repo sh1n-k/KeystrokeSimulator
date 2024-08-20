@@ -11,6 +11,7 @@ class UserSettings:
     key_pressed_time_max: int = 135
     delay_between_loop_min: int = 100
     delay_between_loop_max: int = 150
+    events_per_thread: int = 10
     start_sound: str = "start.mp3"
     stop_sound: str = "stop.mp3"
 
@@ -24,6 +25,7 @@ class EventModel:
     held_screenshot: Optional[Image.Image] = None
     ref_pixel_value: Optional[tuple] = None
     key_to_enter: Optional[str] = None
+    independent_thread: Optional[bool] = False
     use_event: bool = True
 
     def __iter__(self):

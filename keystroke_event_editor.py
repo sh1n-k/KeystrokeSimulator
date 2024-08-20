@@ -58,6 +58,7 @@ class KeystrokeEventEditor:
         self.ref_pixel_value = None
         self.key_to_enter = None
         self.keyboard_input_listener = None
+        self.independent_thread = tk.BooleanVar(value=False)
 
         self.create_ui()
         self.bind_events()
@@ -77,6 +78,7 @@ class KeystrokeEventEditor:
         self.create_coordinate_entries()
         self.create_refresh_button()
         self.create_key_entry()
+        self.create_independent_thread_checkbox()
         self.create_ok_cancel_buttons()
         self.create_info_label()
 
@@ -123,15 +125,24 @@ class KeystrokeEventEditor:
         )
         self.key_combobox.grid(row=0, column=1)
 
+    def create_independent_thread_checkbox(self):
+        checkbox_frame = tk.Frame(self.event_window)
+        checkbox_frame.pack(pady=5)
+
+        self.independent_thread_checkbox = tk.Checkbutton(
+            checkbox_frame, text="Independent Thread", variable=self.independent_thread
+        )
+        self.independent_thread_checkbox.pack()
+
     def create_ok_cancel_buttons(self):
         button_frame = tk.Frame(self.event_window)
         button_frame.pack(pady=10)
 
-        ok_button = tk.Button(button_frame, text="OK", command=self.save_event)
+        ok_button = tk.Button(button_frame, text="OK(↩️)", command=self.save_event)
         ok_button.grid(row=0, column=0, padx=5)
 
         cancel_button = tk.Button(
-            button_frame, text="Cancel", command=self.close_window
+            button_frame, text="Cancel(ESC)", command=self.close_window
         )
         cancel_button.grid(row=0, column=1, padx=5)
 
@@ -154,6 +165,7 @@ class KeystrokeEventEditor:
     def bind_events(self):
         self.bind_hotkey()
         self.event_window.bind("<Escape>", self.close_window)
+        self.event_window.bind("<Return>", self.save_event)
         self.event_window.protocol("WM_DELETE_WINDOW", self.close_window)
         self.key_combobox.bind("<<ComboboxSelected>>", self.update_key_to_enter)
         self.key_combobox.bind("<KeyPress>", self.filter_key_combobox)
@@ -269,7 +281,7 @@ class KeystrokeEventEditor:
 
         self.update_image_placeholder(placeholder, image_to_apply)
 
-    def save_event(self):
+    def save_event(self, event=None):
         try:
             if not all(
                 [
@@ -295,6 +307,7 @@ class KeystrokeEventEditor:
                 self.held_screenshot,
                 self.ref_pixel_value,
                 self.key_to_enter,
+                independent_thread=self.independent_thread.get(),
             )
             self.save_callback(event, self.is_edit, self.row_num)
             self.update_image_placeholder(self.image2_placeholder, self.held_screenshot)
@@ -366,7 +379,7 @@ class KeystrokeEventEditor:
         self.update_ref_pixel_placeholder(self.held_screenshot, self.clicked_position)
 
     def load_stored_event(self, event_function):
-        event = event_function()
+        event: EventModel = event_function()
         if not event:
             return
 
@@ -394,6 +407,9 @@ class KeystrokeEventEditor:
 
         if self.key_to_enter:
             self.key_combobox.set(self.key_to_enter)
+
+        if hasattr(event, "independent_thread"):
+            self.independent_thread.set(event.independent_thread)
 
     @staticmethod
     def update_coordinate_entries(entries: list[tk.Entry], x, y):

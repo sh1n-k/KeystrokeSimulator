@@ -128,13 +128,16 @@ class KeystrokeEngine(Thread):
                             key_count = 1
                             self.simulate_keystroke(key)
                         last_pressed_time = current_time
-                        logger.debug(f"pressed gap: {between_pressed}")
+                        if between_pressed < 10:
+                            logger.debug(
+                                f"{self.name:<10} pressed gap: {between_pressed}"
+                            )
                         time.sleep(
                             random.uniform(self.loop_delay[0], self.loop_delay[1])
                         )
                         break
 
-        logger.info("KeystrokeEngine thread terminated.")
+        logger.info(f"KeystrokeEngine thread terminated: {self.name}")
 
     def simulate_keystroke(self, key: str):
         key_code = self.key_codes[key.upper()]

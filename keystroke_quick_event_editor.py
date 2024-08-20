@@ -98,7 +98,7 @@ class KeystrokeQuickEventEditor:
 
     def create_close_button(self):
         close_button = tk.Button(
-            self.event_window, text="Close", command=self.close_window
+            self.event_window, text="Close(ESC)", command=self.close_window
         )
         close_button.pack(pady=5)
 
