@@ -10,17 +10,51 @@ from keystroke_event_importer import EventImporter
 from keystroke_models import ProfileModel, EventModel
 from keystroke_utils import WindowUtils, StateUtils
 
-
 class ProfileFrame(ttk.Frame):
     def __init__(self, master, profile_name: str):
         super().__init__(master)
         self.profile_name = profile_name
+        self._create_widgets()
+
+    def _create_widgets(self):
         self.profile_label = ttk.Label(self, text="Profile Name: ")
         self.profile_entry = ttk.Entry(self)
         self.profile_label.grid(row=0, column=0, sticky=tk.E)
         self.profile_entry.grid(row=0, column=1, padx=1)
-        self.profile_entry.insert(0, profile_name)
+        self.profile_entry.insert(0, self.profile_name)
 
+    def get_profile_name(self) -> str:
+        return self.profile_entry.get()
+
+class EventRow(ttk.Frame):
+    def __init__(self, master, row_num: int, event: Optional[EventModel], callbacks):
+        super().__init__(master)
+        self.row_num = row_num
+        self.event = event
+        self.callbacks = callbacks
+        self._create_widgets()
+
+    def _create_widgets(self):
+        ttk.Label(self, text=str(self.row_num + 1), width=2, anchor="center").pack(side=tk.LEFT)
+        self.entry = ttk.Entry(self)
+        self.entry.pack(side=tk.LEFT, padx=5)
+        if self.event and hasattr(self.event, "event_name"):
+            self.entry.insert(0, self.event.event_name)
+        ttk.Button(self, text="⚙️", command=self._open_event_settings).pack(side=tk.LEFT)
+        ttk.Button(self, text="📝", command=self._copy_event).pack(side=tk.LEFT)
+        ttk.Button(self, text="🗑️", command=self._remove_event).pack(side=tk.LEFT)
+
+    def _open_event_settings(self):
+        self.callbacks['open_event_settings'](self.row_num, self.event)
+
+    def _copy_event(self):
+        self.callbacks['copy_event'](self.event)
+
+    def _remove_event(self):
+        self.callbacks['remove_event'](self, self.row_num)
+
+    def get_event_name(self) -> str:
+        return self.entry.get()
 
 class EventListFrame(ttk.Frame):
     def __init__(self, settings_window, profile: ProfileModel, save_callback: Callable):
@@ -28,82 +62,69 @@ class EventListFrame(ttk.Frame):
         self.settings_window = settings_window
         self.profile = profile
         self.save_callback = save_callback
-        self.event_rows: List[ttk.Frame] = []
-        self.create_buttons()
-        self.load_events()
+        self.event_rows: List[EventRow] = []
+        self._create_widgets()
 
-    def create_buttons(self):
-        ttk.Button(self, text="Add Event", command=self.add_event_row).grid(
+    def _create_widgets(self):
+        self._create_buttons()
+        self._load_events()
+
+    def _create_buttons(self):
+        ttk.Button(self, text="Add Event", command=self._add_event_row).grid(
             row=1, column=0, columnspan=1, pady=5, sticky="we"
         )
-        ttk.Button(self, text="Import From", command=self.open_importer).grid(
+        ttk.Button(self, text="Import From", command=self._open_importer).grid(
             row=1, column=1, columnspan=1, pady=5, sticky="we"
         )
 
-    def load_events(self):
+    def _load_events(self):
         if self.profile.event_list:
             for idx, event in enumerate(self.profile.event_list):
-                self.add_event_row(row_num=idx, event=event, resize=False)
+                self._add_event_row(row_num=idx, event=event, resize=False)
 
-    def add_event_row(self, row_num=None, event=None, resize=True):
+    def _add_event_row(self, row_num=None, event=None, resize=True):
         if row_num is None:
             row_num = len(self.event_rows)
 
-        row_frame = ttk.Frame(self)
-        row_frame.grid(row=row_num + 3, column=0, columnspan=2, padx=5, pady=2)
+        callbacks = {
+            'open_event_settings': self._open_event_settings,
+            'copy_event': self._copy_event_row,
+            'remove_event': self._remove_event_row
+        }
 
-        ttk.Label(row_frame, text=row_num + 1, width=2, anchor="center").pack(
-            side=tk.LEFT
-        )
-        entry = ttk.Entry(row_frame)
-        entry.pack(side=tk.LEFT, padx=5)
-        if event and hasattr(event, "event_name"):
-            entry.insert(0, event.event_name)
-        ttk.Button(
-            row_frame,
-            text="⚙️",
-            command=lambda: self.open_event_settings(row_num, event),
-        ).pack(side=tk.LEFT)
-        ttk.Button(
-            row_frame, text="📝", command=lambda: self.copy_event_row(event)
-        ).pack(side=tk.LEFT)
-        ttk.Button(
-            row_frame,
-            text="🗑️",
-            command=lambda: self.remove_event_row(row_frame, row_num),
-        ).pack(side=tk.LEFT)
+        event_row = EventRow(self, row_num, event, callbacks)
+        event_row.grid(row=row_num + 3, column=0, columnspan=2, padx=5, pady=2)
+        self.event_rows.append(event_row)
 
-        self.event_rows.append(row_frame)
-
-    def open_event_settings(self, row_num, event):
+    def _open_event_settings(self, row_num, event):
         KeystrokeEventEditor(
             self.settings_window,
             row_num=row_num,
-            save_callback=self.save_event_callback,
+            save_callback=self._save_event_callback,
             event_function=lambda: event,
         )
 
-    def save_event_callback(self, event: EventModel, is_edit: bool, row_num: int = 0):
+    def _save_event_callback(self, event: EventModel, is_edit: bool, row_num: int = 0):
         if is_edit and 0 <= row_num < len(self.profile.event_list):
             self.profile.event_list[row_num] = event
         else:
             self.profile.event_list.append(event)
         self.save_callback(check_profile_name=False)
 
-    def copy_event_row(self, event: Optional[EventModel]):
+    def _copy_event_row(self, event: Optional[EventModel]):
         if event:
             try:
                 new_event = copy.deepcopy(event)
-                new_event.event_name = ""  # Clear the event name for the copy
+                new_event.event_name = f"Copy of {event.event_name}"  # Set a default name for the copy
                 self.profile.event_list.append(new_event)
-                self.add_event_row(event=new_event)
+                self._add_event_row(event=new_event)
                 self.save_callback()
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to copy event: {str(e)}")
         else:
             messagebox.showinfo("Info", "Only set events can be copied")
 
-    def remove_event_row(self, row_frame, row_num):
+    def _remove_event_row(self, row_frame, row_num):
         if len(self.profile.event_list) < 2:
             messagebox.showinfo("Info", "There must be at least one event")
             return
@@ -117,15 +138,42 @@ class EventListFrame(ttk.Frame):
         # Adjust the window size after removing
         self.settings_window.update_idletasks()
 
-    def open_importer(self):
-        EventImporter(self.settings_window, self.import_events)
+    def _open_importer(self):
+        EventImporter(self.settings_window, self._import_events)
 
-    def import_events(self, event_list: List[EventModel]):
+    def _import_events(self, event_list: List[EventModel]):
         self.profile.event_list.extend(event_list)
         for event in event_list:
-            self.add_event_row(event=event)
+            self._add_event_row(event=event)
         self.save_callback()
 
+    def update_events(self):
+        current_row_count = len(self.event_rows)
+        new_row_count = len(self.profile.event_list)
+
+        # Update existing rows
+        for idx in range(min(current_row_count, new_row_count)):
+            event = self.profile.event_list[idx]
+            self.event_rows[idx].event = event
+            self.event_rows[idx].entry.delete(0, tk.END)
+            self.event_rows[idx].entry.insert(0, event.event_name)
+
+        # Remove excess rows
+        if current_row_count > new_row_count:
+            for row in self.event_rows[new_row_count:]:
+                row.destroy()
+            self.event_rows = self.event_rows[:new_row_count]
+
+        # Add new rows
+        for idx in range(current_row_count, new_row_count):
+            self._add_event_row(row_num=idx, event=self.profile.event_list[idx], resize=False)
+
+        self.settings_window.update_idletasks()
+
+    def save_event_names(self):
+        for idx, event_row in enumerate(self.event_rows):
+            if idx < len(self.profile.event_list):
+                self.profile.event_list[idx].event_name = event_row.get_event_name()
 
 class KeystrokeProfiles:
     def __init__(
@@ -159,7 +207,6 @@ class KeystrokeProfiles:
         window.transient(self.main_window)
         window.grab_set()
         window.focus_force()
-        # window.attributes("-topmost", True)
         window.bind("<Escape>", self._close_settings)
         return window
 
@@ -188,24 +235,27 @@ class KeystrokeProfiles:
         if not self.profile.event_list:
             raise ValueError("At least one event must be set")
 
-        new_profile_name = self.profile_frame.profile_entry.get()
+        new_profile_name = self.profile_frame.get_profile_name()
         if check_profile_name and not new_profile_name:
             raise ValueError("Enter the profile name to save")
 
         if new_profile_name != self.profile_name:
+            new_file_path = f"{self.profiles_dir}/{new_profile_name}.pkl"
+            if os.path.exists(new_file_path):
+                raise ValueError(f"A profile with the name '{new_profile_name}' already exists.")
             self._remove_old_profile()
             self.profile_name = new_profile_name
+
+        # Save event names before saving the profile
+        if reload_event_frame:
+            self.event_list_frame.save_event_names()
 
         with open(f"{self.profiles_dir}/{self.profile_name}.pkl", "wb") as f:
             pickle.dump(self.profile, f)
 
         if reload_event_frame:
-            self._save_event_names()
-            self.event_list_frame.destroy()
-            self.event_list_frame = EventListFrame(
-                self.settings_window, self.profile, self._save_profile
-            )
-            self.event_list_frame.pack()
+            # Update UI to reflect saved changes
+            self.event_list_frame.update_events()
 
     def _remove_old_profile(self):
         old_file = f"{self.profiles_dir}/{self.profile_name}.pkl"
@@ -214,7 +264,7 @@ class KeystrokeProfiles:
 
     def _handle_ok_button(self):
         try:
-            self._save_event_names()
+            self.event_list_frame.save_event_names()
             self._save_profile(reload_event_frame=False)
             self._close_settings()
             if self.external_save_callback:
@@ -223,12 +273,6 @@ class KeystrokeProfiles:
             messagebox.showerror("Error", str(e))
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save profile: {e}")
-
-    def _save_event_names(self):
-        for idx, row_frame in enumerate(self.event_list_frame.event_rows):
-            entry = row_frame.winfo_children()[1]
-            if idx < len(self.profile.event_list):
-                self.profile.event_list[idx].event_name = entry.get()
 
     def _save_latest_position(self):
         StateUtils.save_main_app_state(

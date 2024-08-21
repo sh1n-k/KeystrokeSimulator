@@ -1,7 +1,7 @@
 import time
 import tkinter as tk
 from threading import Event, Thread
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import mss
 import screeninfo
@@ -20,7 +20,7 @@ class ScreenshotCapturer:
 
         self.capturing: Event = Event()
         self.capture_thread: Optional[Thread] = None
-        self.screenshot_callback: Optional[Tuple, Image.Image] = None
+        self.screenshot_callback: Callable[[Tuple, Image.Image], None] = None
 
     def get_current_mouse_position(self) -> Optional[Tuple[int, int]]:
         return self.current_position
