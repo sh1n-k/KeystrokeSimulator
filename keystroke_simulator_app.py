@@ -83,6 +83,10 @@ class ProfileFrame(tk.Frame):
         self.load_profiles()
 
     def load_profiles(self):
+        if not os.path.exists(self.profiles_dir):
+            os.makedirs(self.profiles_dir)
+            with open(f"{self.profiles_dir}/Quick.pkl", "wb") as f:
+                pickle.dump(ProfileModel(), f)
         profile_files = [
             os.path.splitext(f)[0]
             for f in os.listdir(self.profiles_dir)

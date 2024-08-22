@@ -3,6 +3,7 @@ import os
 import platform
 import re
 import secrets
+import shutil
 import subprocess
 import tkinter as tk
 import uuid
@@ -366,6 +367,14 @@ class MainApp:
 
 
 def main():
+    log_path = "logs"
+    if not os.path.exists(log_path):
+        os.mkdir(log_path)
+    if os.path.isfile(log_path):
+        shutil.move(log_path, "logs.bak")
+        os.makedirs(log_path)
+    logger.add(os.path.join(log_path, "keysym.log"), rotation="1 MB", level="INFO")
+    
     root = tk.Tk()
     app = AuthApp(root)
     root.mainloop()

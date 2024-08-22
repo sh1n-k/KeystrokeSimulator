@@ -87,7 +87,7 @@ class KeystrokeEngine(Thread):
     def run(self):
         prev_key = None
         key_count = 0
-        max_key_count = 10
+        max_key_count = 20
         sleep_duration = 0.1
         last_pressed_time = 0
         last_grab_result = None
