@@ -374,7 +374,7 @@ def main():
         shutil.move(log_path, "logs.bak")
         os.makedirs(log_path)
     logger.add(os.path.join(log_path, "keysym.log"), rotation="1 MB", level="INFO")
-    
+
     root = tk.Tk()
     app = AuthApp(root)
     root.mainloop()

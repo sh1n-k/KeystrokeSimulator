@@ -41,6 +41,7 @@ class EventModel:
 class ProfileModel:
     name: Optional[str] = None
     event_list: Optional[list[EventModel]] = None
+    modification_keys: Optional[dict] = None
 
     def __iter__(self):
         for event in self.event_list or []:

@@ -17,6 +17,7 @@ import pynput
 
 from keystroke_engine import KeystrokeEngine
 from keystroke_models import ProfileModel, EventModel, UserSettings
+from keystroke_modkeys import ModificationKeysWindow
 from keystroke_processors import ProcessCollector
 from keystroke_profiles import KeystrokeProfiles
 from keystroke_quick_event_editor import KeystrokeQuickEventEditor
@@ -169,12 +170,20 @@ class ProfileButtonFrame(tk.Frame):
     def __init__(
         self,
         master,
+        modkeys_callback: Callable,
         edit_callback: Callable,
         sort_callback: Callable,
         *args,
         **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
+        self.modkeys_button = tk.Button(  # Add this new button
+            self,
+            text="ModKeys",
+            width=10,
+            height=1,
+            command=modkeys_callback,
+        )
         self.settings_button = tk.Button(
             self,
             text="Edit Profile",
@@ -190,6 +199,7 @@ class ProfileButtonFrame(tk.Frame):
             command=sort_callback,
         )
 
+        self.modkeys_button.pack(side=tk.LEFT, padx=5)
         self.settings_button.pack(side=tk.LEFT, padx=5)
         self.sort_button.pack(side=tk.LEFT, padx=5)
 
@@ -225,7 +235,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self, self.toggle_start_stop, self.open_quick_events, self.open_settings
         )
         self.profile_button_frame = ProfileButtonFrame(
-            self, self.open_profile, self.sort_profile_events
+            self, self.open_modkeys, self.open_profile, self.sort_profile_events
         )
 
         for frame in (
@@ -434,6 +444,12 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         self.button_frame.settings_button.config(state=state)
         self.profile_button_frame.sort_button.config(state=state)
+
+    def open_modkeys(self):
+        if self.selected_profile.get():
+            self.modkeys_window = ModificationKeysWindow(
+                self, self.selected_profile.get()
+            )
 
     def open_profile(self):
         if self.selected_profile.get():

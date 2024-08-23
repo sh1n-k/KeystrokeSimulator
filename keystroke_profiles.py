@@ -10,6 +10,7 @@ from keystroke_event_importer import EventImporter
 from keystroke_models import ProfileModel, EventModel
 from keystroke_utils import WindowUtils, StateUtils
 
+
 class ProfileFrame(ttk.Frame):
     def __init__(self, master, profile_name: str):
         super().__init__(master)
@@ -26,6 +27,7 @@ class ProfileFrame(ttk.Frame):
     def get_profile_name(self) -> str:
         return self.profile_entry.get()
 
+
 class EventRow(ttk.Frame):
     def __init__(self, master, row_num: int, event: Optional[EventModel], callbacks):
         super().__init__(master)
@@ -35,26 +37,31 @@ class EventRow(ttk.Frame):
         self._create_widgets()
 
     def _create_widgets(self):
-        ttk.Label(self, text=str(self.row_num + 1), width=2, anchor="center").pack(side=tk.LEFT)
+        ttk.Label(self, text=str(self.row_num + 1), width=2, anchor="center").pack(
+            side=tk.LEFT
+        )
         self.entry = ttk.Entry(self)
         self.entry.pack(side=tk.LEFT, padx=5)
         if self.event and hasattr(self.event, "event_name"):
             self.entry.insert(0, self.event.event_name)
-        ttk.Button(self, text="⚙️", command=self._open_event_settings).pack(side=tk.LEFT)
+        ttk.Button(self, text="⚙️", command=self._open_event_settings).pack(
+            side=tk.LEFT
+        )
         ttk.Button(self, text="📝", command=self._copy_event).pack(side=tk.LEFT)
         ttk.Button(self, text="🗑️", command=self._remove_event).pack(side=tk.LEFT)
 
     def _open_event_settings(self):
-        self.callbacks['open_event_settings'](self.row_num, self.event)
+        self.callbacks["open_event_settings"](self.row_num, self.event)
 
     def _copy_event(self):
-        self.callbacks['copy_event'](self.event)
+        self.callbacks["copy_event"](self.event)
 
     def _remove_event(self):
-        self.callbacks['remove_event'](self, self.row_num)
+        self.callbacks["remove_event"](self, self.row_num)
 
     def get_event_name(self) -> str:
         return self.entry.get()
+
 
 class EventListFrame(ttk.Frame):
     def __init__(self, settings_window, profile: ProfileModel, save_callback: Callable):
@@ -87,9 +94,9 @@ class EventListFrame(ttk.Frame):
             row_num = len(self.event_rows)
 
         callbacks = {
-            'open_event_settings': self._open_event_settings,
-            'copy_event': self._copy_event_row,
-            'remove_event': self._remove_event_row
+            "open_event_settings": self._open_event_settings,
+            "copy_event": self._copy_event_row,
+            "remove_event": self._remove_event_row,
         }
 
         event_row = EventRow(self, row_num, event, callbacks)
@@ -115,7 +122,9 @@ class EventListFrame(ttk.Frame):
         if event:
             try:
                 new_event = copy.deepcopy(event)
-                new_event.event_name = f"Copy of {event.event_name}"  # Set a default name for the copy
+                new_event.event_name = (
+                    f"Copy of {event.event_name}"  # Set a default name for the copy
+                )
                 self.profile.event_list.append(new_event)
                 self._add_event_row(event=new_event)
                 self.save_callback()
@@ -166,7 +175,9 @@ class EventListFrame(ttk.Frame):
 
         # Add new rows
         for idx in range(current_row_count, new_row_count):
-            self._add_event_row(row_num=idx, event=self.profile.event_list[idx], resize=False)
+            self._add_event_row(
+                row_num=idx, event=self.profile.event_list[idx], resize=False
+            )
 
         self.settings_window.update_idletasks()
 
@@ -174,6 +185,7 @@ class EventListFrame(ttk.Frame):
         for idx, event_row in enumerate(self.event_rows):
             if idx < len(self.profile.event_list):
                 self.profile.event_list[idx].event_name = event_row.get_event_name()
+
 
 class KeystrokeProfiles:
     def __init__(
@@ -242,7 +254,9 @@ class KeystrokeProfiles:
         if new_profile_name != self.profile_name:
             new_file_path = f"{self.profiles_dir}/{new_profile_name}.pkl"
             if os.path.exists(new_file_path):
-                raise ValueError(f"A profile with the name '{new_profile_name}' already exists.")
+                raise ValueError(
+                    f"A profile with the name '{new_profile_name}' already exists."
+                )
             self._remove_old_profile()
             self.profile_name = new_profile_name
 
