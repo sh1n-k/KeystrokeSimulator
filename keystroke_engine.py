@@ -209,7 +209,7 @@ class KeystrokeEngine(Thread):
                 # Check modification keys
                 if self.mod_key_handler.check_modification_keys():
                     logger.debug(f"modification keys: True")
-                    time.sleep(sleep_duration)
+                    time.sleep(random.uniform(self.key_pressed_time[0], self.key_pressed_time[1]))
                     continue
 
                 for event in self.event_list:

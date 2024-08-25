@@ -130,9 +130,6 @@ class KeyUtils:
             "Space": 49,
             "Command": 55,
             "Option": 58,
-            "Shift": kCGEventFlagMaskShift,
-            "Alt": kCGEventFlagMaskAlternate,
-            "Ctrl": kCGEventFlagMaskControl,
         },
         "windows": {
             "1": 0x31,
