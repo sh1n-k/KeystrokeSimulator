@@ -7,7 +7,23 @@ import subprocess
 from threading import Thread
 from typing import Optional, Dict
 
+from loguru import logger
 import pygame
+
+SYSTEM = platform.system().lower()
+
+if SYSTEM == "windows":
+    import ctypes
+elif SYSTEM == "darwin":
+    from Quartz import (
+        CGEventSourceKeyState,
+        CGEventSourceStateID,
+        kCGEventFlagMaskShift,
+        kCGEventFlagMaskAlternate,
+        kCGEventFlagMaskControl,
+        CGEventSourceFlagsState,
+        kCGEventSourceStateHIDSystemState,
+    )
 
 
 class WindowUtils:
@@ -114,6 +130,9 @@ class KeyUtils:
             "Space": 49,
             "Command": 55,
             "Option": 58,
+            "Shift": kCGEventFlagMaskShift,
+            "Alt": kCGEventFlagMaskAlternate,
+            "Ctrl": kCGEventFlagMaskControl,
         },
         "windows": {
             "1": 0x31,
@@ -191,6 +210,9 @@ class KeyUtils:
             "VolumeUp": 0xAF,
             "VolumeDown": 0xAE,
             "Mute": 0xAD,
+            "Shift": 0x10,
+            "Alt": 0x12,
+            "Ctrl": 0x11,
         },
     }
 
@@ -205,6 +227,28 @@ class KeyUtils:
     @staticmethod
     def get_keycode(character: str):
         return KeyUtils.get_key_list().get(character.capitalize())
+
+    @staticmethod
+    def mod_key_pressed(key_name: str) -> bool:
+        keycode = KeyUtils.get_keycode(key_name)
+        if not keycode:
+            logger.info(f"Invalid key: {key_name}")
+            return False
+
+        if SYSTEM == "windows":
+            return ctypes.windll.user32.GetAsyncKeyState(keycode) & 0x8000 != 0
+        elif SYSTEM == "darwin":
+            darwin_mod_keys = {
+                "shift": kCGEventFlagMaskShift,
+                "alt": kCGEventFlagMaskAlternate,
+                "ctrl": kCGEventFlagMaskControl,
+            }
+            darwin_mod_key = darwin_mod_keys.get(key_name.lower())
+
+            event_flags = CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState)
+            return (event_flags & darwin_mod_key) != 0
+        else:
+            raise NotImplementedError(f"Key check not implemented for {SYSTEM}")
 
 
 class StateUtils:

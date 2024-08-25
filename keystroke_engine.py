@@ -3,7 +3,7 @@ import random
 import threading
 import time
 from threading import Thread
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 import mss
 from loguru import logger
@@ -11,7 +11,7 @@ from loguru import logger
 from keystroke_models import EventModel
 from keystroke_utils import KeyUtils
 
-# OS-specific initialization
+# OS-specific imports
 if platform.system() == "Windows":
     import win32gui
     import win32process
@@ -25,12 +25,116 @@ elif platform.system() == "Darwin":
     )
 
 
+class BaseKeyHandler:
+    def __init__(
+        self,
+        key_codes,
+        loop_delay: Tuple[float, float],
+        key_pressed_time: Tuple[float, float],
+    ):
+        self.key_codes = key_codes
+        self.loop_delay = loop_delay
+        self.key_pressed_time = key_pressed_time
+
+        if platform.system() == "Windows":
+            self.press_key = self._press_key_windows
+            self.release_key = self._release_key_windows
+        elif platform.system() == "Darwin":
+            self.press_key = self._press_key_darwin
+            self.release_key = self._release_key_darwin
+
+    @staticmethod
+    def _press_key_windows(code: int):
+        ctypes.windll.user32.keybd_event(code, 0, 0, 0)
+
+    @staticmethod
+    def _release_key_windows(code: int):
+        ctypes.windll.user32.keybd_event(code, 0, 2, 0)
+
+    @staticmethod
+    def _press_key_darwin(code: int):
+        event = CGEventCreateKeyboardEvent(None, code, True)
+        CGEventPost(kCGHIDEventTap, event)
+
+    @staticmethod
+    def _release_key_darwin(code: int):
+        event = CGEventCreateKeyboardEvent(None, code, False)
+        CGEventPost(kCGHIDEventTap, event)
+
+    def get_sleep_time(self) -> float:
+        return random.uniform(self.loop_delay[0], self.loop_delay[1])
+
+    def get_key_press_time(self) -> float:
+        return random.uniform(self.key_pressed_time[0], self.key_pressed_time[1])
+
+
+class RegularKeyHandler(BaseKeyHandler):
+    def simulate_keystroke(self, key: str):
+        key_code = self.key_codes[key.upper()]
+        pressed_time = self.get_key_press_time()
+
+        if key_code is None:
+            logger.error(f"A key without a code was pressed: {key} / {key_code}")
+            time.sleep(pressed_time)
+            return
+
+        self.press_key(key_code)
+        time.sleep(pressed_time)
+        self.release_key(key_code)
+
+
+class ModificationKeyHandler(BaseKeyHandler):
+    def __init__(
+        self,
+        key_codes,
+        loop_delay: Tuple[float, float],
+        key_pressed_time: Tuple[float, float],
+        modification_keys,
+    ):
+        super().__init__(key_codes, loop_delay, key_pressed_time)
+        self.modification_keys = self.init_mod_keys(modification_keys)
+
+    def init_mod_keys(self, modification_keys):
+        available_keys = {}
+        for key in ["ctrl", "alt", "shift"]:
+            if key in modification_keys and modification_keys[key]["enabled"]:
+                available_keys[key] = modification_keys[key]
+        return available_keys
+
+    def check_modification_keys(self) -> bool:
+        pressed_modification_key = False
+        for key, value in self.modification_keys.items():
+            if KeyUtils.mod_key_pressed(key):
+                logger.debug(f"ModKey Pressed - {key}")
+                if value["pass"]:
+                    pressed_modification_key = True
+                    continue
+                else:
+                    self.simulate_keystroke(value["value"])
+                    time.sleep(self.get_sleep_time())
+                    pressed_modification_key = True
+        return pressed_modification_key
+
+    def simulate_keystroke(self, key: str):
+        key_code = self.key_codes[key.upper()]
+        if key_code is None:
+            logger.error(
+                f"A modification key without a code was pressed: {key} / {key_code}"
+            )
+            return
+
+        self.press_key(key_code)
+        time.sleep(self.get_key_press_time())
+        self.release_key(key_code)
+
+
 class KeystrokeEngine(Thread):
     def __init__(
         self,
         main,
         target_process: str,
         event_list: List[EventModel],
+        modification_keys: dict,
         terminate_event: threading.Event,
     ):
         super().__init__()
@@ -39,7 +143,7 @@ class KeystrokeEngine(Thread):
             self.main.settings.delay_between_loop_min / 1000,
             self.main.settings.delay_between_loop_max / 1000,
         )
-        self.key_pressed = (
+        self.key_pressed_time = (
             self.main.settings.key_pressed_time_min / 1000,
             self.main.settings.key_pressed_time_max / 1000,
         )
@@ -49,15 +153,18 @@ class KeystrokeEngine(Thread):
         self.terminate_event = terminate_event
         self.key_codes = KeyUtils.get_key_list()
 
+        self.regular_key_handler = RegularKeyHandler(
+            self.key_codes, self.loop_delay, self.key_pressed_time
+        )
+        self.mod_key_handler = ModificationKeyHandler(
+            self.key_codes, self.loop_delay, self.key_pressed_time, modification_keys
+        )
+
         # OS-specific initialization
         if platform.system() == "Windows":
             self.is_process_active = self._is_process_active_windows
-            self.press_key = self._press_key_windows
-            self.release_key = self._release_key_windows
         elif platform.system() == "Darwin":
             self.is_process_active = self._is_process_active_darwin
-            self.press_key = self._press_key_darwin
-            self.release_key = self._release_key_darwin
 
     @staticmethod
     def parse_process_id(target_process: str) -> Optional[int]:
@@ -87,7 +194,7 @@ class KeystrokeEngine(Thread):
     def run(self):
         prev_key = None
         key_count = 0
-        max_key_count = 20
+        max_key_count = 25
         sleep_duration = 0.1
         last_pressed_time = 0
         last_grab_result = None
@@ -96,6 +203,12 @@ class KeystrokeEngine(Thread):
         with mss.mss() as sct:
             while not self.terminate_event.is_set():
                 if not self.is_process_active(self.target_process):
+                    time.sleep(sleep_duration)
+                    continue
+
+                # Check modification keys
+                if self.mod_key_handler.check_modification_keys():
+                    logger.debug(f"modification keys: True")
                     time.sleep(sleep_duration)
                     continue
 
@@ -122,35 +235,20 @@ class KeystrokeEngine(Thread):
                         if key == prev_key:
                             key_count += 1
                             if key_count <= max_key_count:
-                                self.simulate_keystroke(key)
+                                self.regular_key_handler.simulate_keystroke(key)
                         else:
                             prev_key = key
                             key_count = 1
-                            self.simulate_keystroke(key)
+                            self.regular_key_handler.simulate_keystroke(key)
                         last_pressed_time = current_time
                         if between_pressed < 10:
                             logger.debug(
                                 f"{self.name:<10} pressed gap: {between_pressed}"
                             )
-                        time.sleep(
-                            random.uniform(self.loop_delay[0], self.loop_delay[1])
-                        )
+                        time.sleep(self.regular_key_handler.get_sleep_time())
                         break
 
         logger.info(f"KeystrokeEngine thread terminated: {self.name}")
-
-    def simulate_keystroke(self, key: str):
-        key_code = self.key_codes[key.upper()]
-        pressed_time = random.uniform(self.key_pressed[0], self.key_pressed[1])
-
-        if key_code is None:
-            logger.error(f"A key without a code was pressed: {key} / {key_code}")
-            time.sleep(pressed_time)
-            return
-
-        self.press_key(key_code)
-        time.sleep(pressed_time)
-        self.release_key(key_code)
 
     # Windows-specific methods
     @staticmethod
@@ -158,14 +256,6 @@ class KeystrokeEngine(Thread):
         active_window = win32gui.GetForegroundWindow()
         _, active_pid = win32process.GetWindowThreadProcessId(active_window)
         return process_id == active_pid
-
-    @staticmethod
-    def _press_key_windows(code: int):
-        ctypes.windll.user32.keybd_event(code, 0, 0, 0)
-
-    @staticmethod
-    def _release_key_windows(code: int):
-        ctypes.windll.user32.keybd_event(code, 0, 2, 0)
 
     # macOS-specific methods
     @staticmethod
@@ -175,13 +265,3 @@ class KeystrokeEngine(Thread):
             active_app is not None
             and active_app["NSApplicationProcessIdentifier"] == process_id
         )
-
-    @staticmethod
-    def _press_key_darwin(code: int):
-        event = CGEventCreateKeyboardEvent(None, code, True)
-        CGEventPost(kCGHIDEventTap, event)
-
-    @staticmethod
-    def _release_key_darwin(code: int):
-        event = CGEventCreateKeyboardEvent(None, code, False)
-        CGEventPost(kCGHIDEventTap, event)
