@@ -336,7 +336,10 @@ class KeystrokeSimulatorApp(tk.Tk):
         event_list = [p for p in profile.event_list if p.key_to_enter and p.use_event]
         if not event_list:
             return
+
         modification_keys = profile.modification_keys
+        if not modification_keys:
+            modification_keys = {}
 
         self.terminate_event.clear()
         self._create_and_start_engines(event_list, modification_keys)
@@ -349,7 +352,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         self, event_list: List[EventModel], modification_keys: Dict
     ):
         independent_events = [event for event in event_list if event.independent_thread]
-        regular_events = deque([event for event in event_list if not event.independent_thread])
+        regular_events = deque(
+            [event for event in event_list if not event.independent_thread]
+        )
 
         self.keystroke_engines = []
         self._process_independent_events(independent_events, modification_keys)
