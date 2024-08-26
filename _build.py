@@ -1,11 +1,12 @@
 import os
 import tempfile
-
 from dotenv import load_dotenv, find_dotenv
+import PyInstaller.__main__
+
+VERSION = "1.22"
 
 # Load environment variables
 load_dotenv(find_dotenv())
-
 
 # Function to create a temporary script with replaced environment variables
 def create_temp_script(filename):
@@ -17,30 +18,30 @@ def create_temp_script(filename):
         content = content.replace(f"os.getenv('{key}')", f"'{value}'")
         content = content.replace(f'os.getenv("{key}")', f"'{value}'")
 
-    # Create a temporary file
-    temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
-    temp_file.write(content)
-    temp_file.close()
-
-    return temp_file.name
-
+    return content
 
 if __name__ == "__main__":
-    # Create a temporary script with replaced environment variables
-    temp_main = create_temp_script("main_secure.py")
+    # Read the original script and replace environment variables
+    script_content = create_temp_script("main_secure.py")
 
-    import PyInstaller.__main__
+    # Create a temporary file using NamedTemporaryFile
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as temp_file:
+        temp_file.write(script_content)
+        temp_file_path = temp_file.name
 
-    PyInstaller.__main__.run(
-        [
-            temp_main,
-            "--onefile",
-            "--windowed",
-            "--noconfirm",
-            "--log-level=WARN",
-            "--onefile",
-            "--nowindow",
-            "--optimize=2",
-            "--strip",
-        ]
-    )
+    try:
+        # Run PyInstaller with the temporary script
+        PyInstaller.__main__.run(
+            [
+                temp_file_path,
+                "--onefile",
+                "--noconsole",
+                "--clean",
+                "--optimize=2",
+                f"--name=main_secure_v{VERSION}",
+            ]
+        )
+    finally:
+        # Clean up the temporary file
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)

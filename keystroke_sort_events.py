@@ -29,6 +29,7 @@ class KeystrokeSortEvents(tk.Toplevel):
         self.bind("<Escape>", self.close_window)
         self.protocol("WM_DELETE_WINDOW", self.close_window)
 
+        self.focus_force()
         self.load_window_state()
 
     def load_window_state(self):
