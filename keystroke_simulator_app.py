@@ -376,8 +376,24 @@ class KeystrokeSimulatorApp(tk.Tk):
         regular_engines = self._process_regular_events(
             regular_events, modification_keys
         )
+        need_mod_thread = False
+        for key in list(modification_keys.keys()):
+            if modification_keys[key]["enabled"]:
+                need_mod_thread = True
+                break
 
         self.keystroke_engines = independent_engines + regular_engines
+        if need_mod_thread:
+            self.keystroke_engines += [
+                KeystrokeEngine(
+                    self,
+                    self.selected_process.get(),
+                    [],
+                    modification_keys,
+                    self.terminate_event,
+                    is_mod_key_handler=True,
+                )
+            ]
 
         logger.debug(
             f"Independent events: {len(independent_events)}, "

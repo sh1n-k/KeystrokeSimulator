@@ -93,6 +93,7 @@ class ModificationKeyHandler(BaseKeyHandler):
     ):
         super().__init__(key_codes, loop_delay, key_pressed_time)
         self.modification_keys = self.init_mod_keys(modification_keys)
+        self.mod_key_pressed = threading.Event()
 
     def init_mod_keys(self, modification_keys):
         available_keys = {}
@@ -102,16 +103,15 @@ class ModificationKeyHandler(BaseKeyHandler):
         return available_keys
 
     def check_modification_keys(self) -> bool:
-        pressed_modification_key = False
         for key, value in self.modification_keys.items():
             if KeyUtils.mod_key_pressed(key):
-                if value["pass"]:
-                    pressed_modification_key = True
-                else:
+                self.mod_key_pressed.set()
+                if not value["pass"]:
                     self.simulate_keystroke(value["value"])
-                    time.sleep(self.get_sleep_time())
-                    pressed_modification_key = True
-        return pressed_modification_key
+                return True
+            else:
+                self.mod_key_pressed.clear()
+        return False
 
     def simulate_keystroke(self, key: str):
         key_code = self.key_codes[key.upper()]
@@ -134,6 +134,7 @@ class KeystrokeEngine(Thread):
         event_list: List[EventModel],
         modification_keys: dict,
         terminate_event: threading.Event,
+        is_mod_key_handler: bool = False,
     ):
         super().__init__()
         self.main = main
@@ -157,6 +158,7 @@ class KeystrokeEngine(Thread):
         self.mod_key_handler = ModificationKeyHandler(
             self.key_codes, self.loop_delay, self.key_pressed_time, modification_keys
         )
+        self.is_mod_key_handler = is_mod_key_handler
 
         # OS-specific initialization
         if platform.system() == "Windows":
@@ -206,10 +208,18 @@ class KeystrokeEngine(Thread):
 
                 # Check modification keys
                 if self.mod_key_handler.check_modification_keys():
-                    logger.debug(f"modification keys: True")
+                    if self.is_mod_key_handler:
+                        logger.debug(
+                            f"Modification keys pressed, handling in dedicated thread"
+                        )
+                    else:
+                        logger.debug(
+                            f"Modification keys pressed, skipping regular key input"
+                        )
+                        self.mod_key_handler.mod_key_pressed.wait()
                     time.sleep(
                         random.uniform(
-                            self.key_pressed_time[0], self.key_pressed_time[1]
+                            self.loop_delay[0], self.loop_delay[1]
                         )
                     )
                     continue
