@@ -1,4 +1,5 @@
 import base64
+from collections import deque
 import json
 import os
 from pathlib import Path
@@ -9,7 +10,7 @@ import threading
 import time
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import keyboard
 from loguru import logger
@@ -344,6 +345,22 @@ class KeystrokeSimulatorApp(tk.Tk):
         SoundUtils.play_sound(self.settings.start_sound)
         self.update_ui()
 
+    def _create_and_start_engines(
+        self, event_list: List[EventModel], modification_keys: Dict
+    ):
+        independent_events = [event for event in event_list if event.independent_thread]
+        regular_events = deque([event for event in event_list if not event.independent_thread])
+
+        self.keystroke_engines = []
+        self._process_independent_events(independent_events, modification_keys)
+        self._process_regular_events(regular_events, modification_keys)
+        self._process_mod_keys(modification_keys)
+
+        logger.debug(f"engines: {self.keystroke_engines}")
+
+        for engine in self.keystroke_engines:
+            engine.start()
+
     def _validate_simulation_prerequisites(self) -> bool:
         return (
             self.selected_process.get()
@@ -364,86 +381,36 @@ class KeystrokeSimulatorApp(tk.Tk):
             logger.info(f"Failed to load profile: {e}")
             return ProfileModel()
 
-    def _create_and_start_engines(
-        self, event_list: List[EventModel], modification_keys: dict
-    ):
-        independent_events = [event for event in event_list if event.independent_thread]
-        regular_events = [event for event in event_list if not event.independent_thread]
-
-        independent_engines = self._process_independent_events(
-            independent_events, modification_keys
-        )
-        regular_engines = self._process_regular_events(
-            regular_events, modification_keys
-        )
-        need_mod_thread = False
-        for key in list(modification_keys.keys()):
-            if modification_keys[key]["enabled"]:
-                need_mod_thread = True
-                break
-
-        self.keystroke_engines = independent_engines + regular_engines
-        if need_mod_thread:
-            self.keystroke_engines += [
-                KeystrokeEngine(
-                    self,
-                    self.selected_process.get(),
-                    [],
-                    modification_keys,
-                    self.terminate_event,
-                    is_mod_key_handler=True,
-                )
-            ]
-
-        logger.debug(
-            f"Independent events: {len(independent_events)}, "
-            f"Regular events: {len(regular_events)}, "
-            f"events_per_thread: {self.settings.events_per_thread}, "
-            f"num_engines: {len(self.keystroke_engines)}, "
-            f"events_per_engine: {[len(engine.event_list) for engine in self.keystroke_engines]}"
-        )
-
-        for engine in self.keystroke_engines:
-            engine.start()
-
     def _process_independent_events(
-        self, independent_events: List[EventModel], modification_keys: dict
-    ) -> List[KeystrokeEngine]:
-        return [
-            self._create_engine_for_event(event, modification_keys)
-            for event in independent_events
-        ]
+        self, independent_events: List[EventModel], modification_keys: Dict
+    ):
+        for event in independent_events:
+            engine = KeystrokeEngine(
+                self,
+                self.selected_process.get(),
+                [event],
+                modification_keys,
+                self.terminate_event,
+            )
+            logger.debug(f"independent engine: {engine}")
+            self.keystroke_engines.append(engine)
 
-    def _create_engine_for_event(
-        self, event: EventModel, modification_keys
-    ) -> KeystrokeEngine:
-        return KeystrokeEngine(
-            self,
-            self.selected_process.get(),
-            [event],
-            modification_keys,
-            self.terminate_event,
-        )
-
-    def _process_regular_events(
-        self, regular_events: List[EventModel], modification_keys: dict
-    ) -> List[KeystrokeEngine]:
+    def _process_regular_events(self, regular_events: List, modification_keys: Dict):
         num_regular_events = len(regular_events)
         events_per_thread = self.settings.events_per_thread
 
         if num_regular_events == 0:
-            return []
+            return
 
-        num_engines = (num_regular_events + events_per_thread - 1) // events_per_thread
-        num_engines = max(1, num_engines)
-        base_chunk_size = num_regular_events // num_engines
-        remainder = num_regular_events % num_engines
+        num_engines = max(
+            1, (num_regular_events + events_per_thread - 1) // events_per_thread
+        )
 
-        engines = []
-        start = 0
-        for i in range(num_engines):
-            chunk_size = base_chunk_size + (1 if i < remainder else 0)
-            chunk = regular_events[start : start + chunk_size]
+        for _ in range(num_engines):
+            chunk = [
+                regular_events.popleft()
+                for _ in range(min(events_per_thread, len(regular_events)))
+            ]
             engine = KeystrokeEngine(
                 self,
                 self.selected_process.get(),
@@ -451,10 +418,21 @@ class KeystrokeSimulatorApp(tk.Tk):
                 modification_keys,
                 self.terminate_event,
             )
-            engines.append(engine)
-            start += chunk_size
+            logger.debug(f"regular engine: {engine}")
+            self.keystroke_engines.append(engine)
 
-        return engines
+    def _process_mod_keys(self, modification_keys: Dict):
+        if any(modification_keys[key]["enabled"] for key in modification_keys):
+            engine = KeystrokeEngine(
+                self,
+                self.selected_process.get(),
+                [],
+                modification_keys,
+                self.terminate_event,
+                is_mod_key_handler=True,
+            )
+            logger.debug(f"mod engine: {engine}")
+            self.keystroke_engines.append(engine)
 
     def stop_simulation(self):
         self.terminate_event.set()

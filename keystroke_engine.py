@@ -70,16 +70,13 @@ class BaseKeyHandler:
 
 class RegularKeyHandler(BaseKeyHandler):
     def simulate_keystroke(self, key: str):
-        key_code = self.key_codes[key.upper()]
-        pressed_time = self.get_key_press_time()
-
+        key_code = self.key_codes.get(key.upper())
         if key_code is None:
-            logger.error(f"A key without a code was pressed: {key} / {key_code}")
-            time.sleep(pressed_time)
+            logger.error(f"A modification key without a code was pressed: {key}")
             return
 
         self.press_key(key_code)
-        time.sleep(pressed_time)
+        time.sleep(self.get_key_press_time())
         self.release_key(key_code)
 
 
@@ -96,22 +93,26 @@ class ModificationKeyHandler(BaseKeyHandler):
         self.mod_key_pressed = threading.Event()
 
     def init_mod_keys(self, modification_keys):
-        available_keys = {}
-        for key in ["ctrl", "alt", "shift"]:
-            if key in modification_keys and modification_keys[key]["enabled"]:
-                available_keys[key] = modification_keys[key]
-        return available_keys
+        return {
+            key: value for key, value in modification_keys.items() if value["enabled"]
+        }
 
-    def check_modification_keys(self) -> bool:
+    def check_modification_keys(self, is_mod_key_handler: bool = False) -> bool:
+        any_mod_key_pressed = False
         for key, value in self.modification_keys.items():
             if KeyUtils.mod_key_pressed(key):
-                self.mod_key_pressed.set()
-                if not value["pass"]:
+                logger.debug(f"modKey pressed: {key} - {threading.current_thread().name}")
+                any_mod_key_pressed = True
+                if not value["pass"] and is_mod_key_handler:
                     self.simulate_keystroke(value["value"])
-                return True
-            else:
-                self.mod_key_pressed.clear()
-        return False
+                    time.sleep(random.uniform(self.loop_delay[0], self.loop_delay[1]))
+
+        if any_mod_key_pressed:
+            self.mod_key_pressed.set()
+        else:
+            self.mod_key_pressed.clear()
+
+        return any_mod_key_pressed
 
     def simulate_keystroke(self, key: str):
         key_code = self.key_codes[key.upper()]
@@ -207,26 +208,19 @@ class KeystrokeEngine(Thread):
                     continue
 
                 # Check modification keys
-                if self.mod_key_handler.check_modification_keys():
-                    if self.is_mod_key_handler:
-                        logger.debug(
-                            f"Modification keys pressed, handling in dedicated thread"
-                        )
-                    else:
-                        logger.debug(
-                            f"Modification keys pressed, skipping regular key input"
-                        )
+                if self.mod_key_handler.check_modification_keys(self.is_mod_key_handler):
+                    if not self.is_mod_key_handler:
                         self.mod_key_handler.mod_key_pressed.wait()
-                    time.sleep(
-                        random.uniform(
-                            self.loop_delay[0], self.loop_delay[1]
-                        )
-                    )
+                    time.sleep(random.uniform(self.loop_delay[0], self.loop_delay[1]))
                     continue
 
+                if self.is_mod_key_handler:
+                    time.sleep(random.uniform(self.loop_delay[0], self.loop_delay[1]))
+                    continue
+
+                current_time = time.time()
                 for event in self.event_list:
                     x, y = event["click_position"]
-                    current_time = time.time()
 
                     if (
                         last_grab_result
