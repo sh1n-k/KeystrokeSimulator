@@ -101,10 +101,12 @@ class ModificationKeyHandler(BaseKeyHandler):
         any_mod_key_pressed = False
         for key, value in self.modification_keys.items():
             if KeyUtils.mod_key_pressed(key):
-                logger.debug(f"modKey pressed: {key} - {threading.current_thread().name}")
                 any_mod_key_pressed = True
                 if not value["pass"] and is_mod_key_handler:
                     self.simulate_keystroke(value["value"])
+                    logger.debug(
+                        f"Key '{value["value"]}' pressed with mod-key '{key.upper()}'"
+                    )
                     time.sleep(random.uniform(self.loop_delay[0], self.loop_delay[1]))
 
         if any_mod_key_pressed:
@@ -242,15 +244,17 @@ class KeystrokeEngine(Thread):
                             key_count += 1
                             if key_count <= max_key_count:
                                 self.regular_key_handler.simulate_keystroke(key)
+                                logger.debug(
+                                    f"{self.name:<10} Key '{key}' pressed with a {between_pressed}"
+                                )
                         else:
                             prev_key = key
                             key_count = 1
                             self.regular_key_handler.simulate_keystroke(key)
-                        last_pressed_time = current_time
-                        if between_pressed < 10:
                             logger.debug(
-                                f"{self.name:<10} pressed gap: {between_pressed}"
-                            )
+                                    f"{self.name:<10} Key '{key}' pressed with a {between_pressed}-seconds."
+                                )
+                        last_pressed_time = current_time
                         time.sleep(self.regular_key_handler.get_sleep_time())
                         break
 
