@@ -105,10 +105,8 @@ class ModificationKeyHandler(BaseKeyHandler):
         pressed_modification_key = False
         for key, value in self.modification_keys.items():
             if KeyUtils.mod_key_pressed(key):
-                logger.debug(f"ModKey Pressed - {key}")
                 if value["pass"]:
                     pressed_modification_key = True
-                    continue
                 else:
                     self.simulate_keystroke(value["value"])
                     time.sleep(self.get_sleep_time())
@@ -209,7 +207,11 @@ class KeystrokeEngine(Thread):
                 # Check modification keys
                 if self.mod_key_handler.check_modification_keys():
                     logger.debug(f"modification keys: True")
-                    time.sleep(random.uniform(self.key_pressed_time[0], self.key_pressed_time[1]))
+                    time.sleep(
+                        random.uniform(
+                            self.key_pressed_time[0], self.key_pressed_time[1]
+                        )
+                    )
                     continue
 
                 for event in self.event_list:

@@ -364,12 +364,18 @@ class KeystrokeSimulatorApp(tk.Tk):
             logger.info(f"Failed to load profile: {e}")
             return ProfileModel()
 
-    def _create_and_start_engines(self, event_list: List[EventModel], modification_keys: dict):
+    def _create_and_start_engines(
+        self, event_list: List[EventModel], modification_keys: dict
+    ):
         independent_events = [event for event in event_list if event.independent_thread]
         regular_events = [event for event in event_list if not event.independent_thread]
 
-        independent_engines = self._process_independent_events(independent_events, modification_keys)
-        regular_engines = self._process_regular_events(regular_events, modification_keys)
+        independent_engines = self._process_independent_events(
+            independent_events, modification_keys
+        )
+        regular_engines = self._process_regular_events(
+            regular_events, modification_keys
+        )
 
         self.keystroke_engines = independent_engines + regular_engines
 
@@ -384,15 +390,24 @@ class KeystrokeSimulatorApp(tk.Tk):
         for engine in self.keystroke_engines:
             engine.start()
 
-    def _create_engine_for_event(self, event: EventModel, modification_keys) -> KeystrokeEngine:
-        return KeystrokeEngine(
-            self, self.selected_process.get(), [event], modification_keys, self.terminate_event
-        )
-
     def _process_independent_events(
         self, independent_events: List[EventModel], modification_keys: dict
     ) -> List[KeystrokeEngine]:
-        return [self._create_engine_for_event(event, modification_keys) for event in independent_events]
+        return [
+            self._create_engine_for_event(event, modification_keys)
+            for event in independent_events
+        ]
+
+    def _create_engine_for_event(
+        self, event: EventModel, modification_keys
+    ) -> KeystrokeEngine:
+        return KeystrokeEngine(
+            self,
+            self.selected_process.get(),
+            [event],
+            modification_keys,
+            self.terminate_event,
+        )
 
     def _process_regular_events(
         self, regular_events: List[EventModel], modification_keys: dict
@@ -414,7 +429,11 @@ class KeystrokeSimulatorApp(tk.Tk):
             chunk_size = base_chunk_size + (1 if i < remainder else 0)
             chunk = regular_events[start : start + chunk_size]
             engine = KeystrokeEngine(
-                self, self.selected_process.get(), chunk, modification_keys, self.terminate_event
+                self,
+                self.selected_process.get(),
+                chunk,
+                modification_keys,
+                self.terminate_event,
             )
             engines.append(engine)
             start += chunk_size

@@ -336,36 +336,6 @@ class AuthApp:
             return device_id
 
 
-class MainApp:
-    def __init__(self, master, device_id):
-        self.master = master
-        self.device_id = device_id
-        master.title("Main Application")
-        master.geometry("400x300")
-
-        label = ttk.Label(master, text="Welcome to the Main Application!")
-        label.pack(pady=20)
-
-        device_label = ttk.Label(master, text=f"Device ID: {self.device_id}")
-        device_label.pack(pady=10)
-
-        quit_button = ttk.Button(master, text="Quit", command=self.quit_app)
-        quit_button.pack(pady=10)
-
-        master.protocol("WM_DELETE_WINDOW", self.quit_app)
-        self.master.after(100, self.set_window_focus)
-
-        WindowUtils.center_window(self.master)
-
-    def set_window_focus(self):
-        self.master.focus_force()
-        self.master.lift()
-
-    def quit_app(self):
-        self.master.quit()
-        self.master.destroy()
-
-
 def main():
     log_path = "logs"
     if not os.path.exists(log_path):

@@ -227,23 +227,27 @@ class KeyUtils:
 
     @staticmethod
     def mod_key_pressed(key_name: str) -> bool:
-        keycode = KeyUtils.get_keycode(key_name)
-        if not keycode:
-            logger.info(f"Invalid key: {key_name}")
-            return False
-
         if SYSTEM == "windows":
+            keycode = KeyUtils.get_keycode(key_name)
+            if not keycode:
+                logger.info(f"Invalid key: {key_name}")
+                return False
             return ctypes.windll.user32.GetAsyncKeyState(keycode) & 0x8000 != 0
+
         elif SYSTEM == "darwin":
             darwin_mod_keys = {
                 "shift": kCGEventFlagMaskShift,
                 "alt": kCGEventFlagMaskAlternate,
                 "ctrl": kCGEventFlagMaskControl,
             }
-            darwin_mod_key = darwin_mod_keys.get(key_name.lower())
+            try:
+                darwin_mod_key = darwin_mod_keys.get(key_name.lower())
+                event_flags = CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState)
+                return (event_flags & darwin_mod_key) != 0
+            except KeyError:
+                logger.info(f"Invalid key: {key_name}")
+                return False
 
-            event_flags = CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState)
-            return (event_flags & darwin_mod_key) != 0
         else:
             raise NotImplementedError(f"Key check not implemented for {SYSTEM}")
 
