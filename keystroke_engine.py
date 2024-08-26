@@ -198,7 +198,6 @@ class KeystrokeEngine(Thread):
         prev_key = None
         key_count = 0
         max_key_count = 25
-        sleep_duration = 0.1
         last_pressed_time = 0
         last_grab_result = None
         last_grab_time = 0
@@ -206,7 +205,7 @@ class KeystrokeEngine(Thread):
         with mss.mss() as sct:
             while not self.terminate_event.is_set():
                 if not self.is_process_active(self.target_process):
-                    time.sleep(sleep_duration)
+                    time.sleep(0.33)
                     continue
 
                 # Check modification keys
