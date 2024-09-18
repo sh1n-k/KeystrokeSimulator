@@ -10,7 +10,7 @@ import threading
 import time
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Deque
 
 import keyboard
 from loguru import logger
@@ -400,7 +400,9 @@ class KeystrokeSimulatorApp(tk.Tk):
             logger.debug(f"independent engine: {engine}")
             self.keystroke_engines.append(engine)
 
-    def _process_regular_events(self, regular_events: List, modification_keys: Dict):
+    def _process_regular_events(
+        self, regular_events: Deque[EventModel], modification_keys: Dict
+    ):
         num_regular_events = len(regular_events)
         events_per_thread = self.settings.events_per_thread
 

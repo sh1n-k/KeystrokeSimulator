@@ -89,12 +89,15 @@ class ModificationKeyHandler(BaseKeyHandler):
         modification_keys,
     ):
         super().__init__(key_codes, loop_delay, key_pressed_time)
-        self.modification_keys = self.init_mod_keys(modification_keys)
+        self.modification_keys = modification_keys
+        self.init_mod_keys()
         self.mod_key_pressed = threading.Event()
 
-    def init_mod_keys(self, modification_keys):
-        return {
-            key: value for key, value in modification_keys.items() if value["enabled"]
+    def init_mod_keys(self):
+        self.modification_keys = {
+            key: value
+            for key, value in self.modification_keys.items()
+            if value["enabled"]
         }
 
     def check_modification_keys(self, is_mod_key_handler: bool = False) -> bool:
@@ -209,7 +212,9 @@ class KeystrokeEngine(Thread):
                     continue
 
                 # Check modification keys
-                if self.mod_key_handler.check_modification_keys(self.is_mod_key_handler):
+                if self.mod_key_handler.check_modification_keys(
+                    self.is_mod_key_handler
+                ):
                     if not self.is_mod_key_handler:
                         self.mod_key_handler.mod_key_pressed.wait()
                     time.sleep(random.uniform(self.loop_delay[0], self.loop_delay[1]))
@@ -251,8 +256,8 @@ class KeystrokeEngine(Thread):
                             key_count = 1
                             self.regular_key_handler.simulate_keystroke(key)
                             logger.debug(
-                                    f"{self.name:<10} Key '{key}' pressed with a {between_pressed}-seconds."
-                                )
+                                f"{self.name:<10} Key '{key}' pressed with a {between_pressed}-seconds."
+                            )
                         last_pressed_time = current_time
                         time.sleep(self.regular_key_handler.get_sleep_time())
                         break
