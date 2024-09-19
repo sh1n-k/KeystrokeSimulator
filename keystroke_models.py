@@ -12,6 +12,7 @@ class UserSettings:
     delay_between_loop_min: int = 100
     delay_between_loop_max: int = 150
     events_per_thread: int = 10
+    max_key_count: Optional[int] = 10
     start_sound: str = "start.mp3"
     stop_sound: str = "stop.mp3"
 

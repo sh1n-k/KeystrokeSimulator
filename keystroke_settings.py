@@ -32,6 +32,7 @@ class KeystrokeSettings(tk.Toplevel):
         self._create_start_stop_key()
         self._create_time_entries()
         self._create_num_of_events_entry()
+        self._create_max_key_count_entry()
         self._create_sound_selectors()
         self._create_buttons()
         self._create_warning_label()
@@ -102,9 +103,24 @@ class KeystrokeSettings(tk.Toplevel):
         )
         getattr(self, f"events_per_thread").grid(row=3, column=1, padx=10, pady=5)
 
+    def _create_max_key_count_entry(self):
+        ttk.Label(self, text="Max Key Count").grid(
+            row=4, column=0, padx=10, pady=5, sticky=tk.W
+        )
+        setattr(
+            self,
+            f"max_key_count",
+            ttk.Entry(
+                self,
+                validate="key",
+                validatecommand=(self.register(self._validate_max_key_count), "%P"),
+            ),
+        )
+        getattr(self, f"max_key_count").grid(row=4, column=1, padx=10, pady=5)
+
     def _create_sound_selectors(self):
-        self._create_sound_selector("Start Sound:", 4, self._select_sound)
-        self._create_sound_selector("Stop Sound:", 5, self._select_sound)
+        self._create_sound_selector("Start Sound:", 5, self._select_sound)
+        self._create_sound_selector("Stop Sound:", 6, self._select_sound)
 
     def _create_sound_selector(self, label: str, row: int, command: Callable):
         ttk.Label(self, text=label).grid(
@@ -119,13 +135,13 @@ class KeystrokeSettings(tk.Toplevel):
 
     def _create_buttons(self):
         ttk.Button(self, text="Reset", command=self.on_reset).grid(
-            row=6, column=0, padx=10, pady=10
+            row=8, column=0, padx=10, pady=10
         )
         ttk.Button(self, text="OK", command=self.on_ok).grid(
-            row=6, column=1, padx=10, pady=10
+            row=8, column=1, padx=10, pady=10
         )
         ttk.Button(self, text="Cancel", command=self.on_close).grid(
-            row=6, column=2, padx=10, pady=10
+            row=8, column=2, padx=10, pady=10
         )
 
     def _create_warning_label(self):
@@ -155,6 +171,7 @@ class KeystrokeSettings(tk.Toplevel):
         self._update_start_stop_key()
         self._update_time_entries()
         self._update_num_of_events()
+        self._update_max_key_count()
         self._update_sound_labels()
 
     def _update_start_stop_key(self):
@@ -181,9 +198,15 @@ class KeystrokeSettings(tk.Toplevel):
     def _update_num_of_events(self):
         self._set_num_of_events_value()
 
+    def _update_max_key_count(self):
+        getattr(self, "max_key_count").delete(0, tk.END)
+        getattr(self, "max_key_count").insert(
+            0, str(getattr(self.settings, "max_key_count", "10"))
+        )
+
     def _update_sound_labels(self):
-        self._set_sound_label(4, self.settings.start_sound)
-        self._set_sound_label(5, self.settings.stop_sound)
+        self._set_sound_label(5, self.settings.start_sound)
+        self._set_sound_label(6, self.settings.stop_sound)
 
     def _set_entry_values(self, row, prefix):
         getattr(self, f"entry_min_{row}").delete(0, tk.END)
@@ -223,10 +246,10 @@ class KeystrokeSettings(tk.Toplevel):
 
     def _on_key_press(self, event):
         valid_keys = (
-            set(f"F{i}" for i in range(1, 13))
-            | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
-            | set(chr(i) for i in range(ord("0"), ord("9") + 1))
-            | set("`[];',./-=\\")
+                set(f"F{i}" for i in range(1, 13))
+                | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
+                | set(chr(i) for i in range(ord("0"), ord("9") + 1))
+                | set("`[];',./-=\\")
         )
 
         key = event.char.upper() or event.keysym.upper()
@@ -257,6 +280,17 @@ class KeystrokeSettings(tk.Toplevel):
         except ValueError:
             return False
 
+    @staticmethod
+    def _validate_max_key_count(P):
+        if P == "":
+            return True
+        if not P.isdigit():
+            return False
+        if P.startswith("0") and len(P) > 1:
+            return False
+        value = int(P)
+        return 1 <= value <= 50
+
     def validate_start_stop_key(self):
         if self.settings.start_stop_key in ["Press Key", ""]:
             self.show_warning("Please select a Start/Stop key.")
@@ -286,6 +320,19 @@ class KeystrokeSettings(tk.Toplevel):
             )
             return False
         setattr(self.settings, "events_per_thread", events_per_thread)
+
+        max_key_count = getattr(self, "max_key_count").get()
+        if max_key_count:
+            max_key_count = int(max_key_count)
+            if max_key_count < 10 or max_key_count > 50:
+                self.show_warning(
+                    "Max Key Count must be between 10 and 50.\nMax Key Count는 10에서 50 사이여야 합니다."
+                )
+                return False
+        else:
+            max_key_count = 10  # Default value if empty
+
+        self.settings.max_key_count = max_key_count
 
         return True
 
@@ -318,6 +365,7 @@ class KeystrokeSettings(tk.Toplevel):
 
         if not self.validate_and_set_time_settings():
             return
+        self.set_max_key_count()
         self.set_sound_settings()
         self.save_settings()
 
@@ -337,6 +385,17 @@ class KeystrokeSettings(tk.Toplevel):
             self.settings.start_stop_key = "W_DN"
         else:
             self.settings.start_stop_key = self.start_stop_key.get()
+
+    def set_max_key_count(self):
+        max_key_count = getattr(self, "max_key_count").get()
+        if max_key_count:
+            max_key_count = int(max_key_count)
+            if 10 <= max_key_count <= 50:
+                self.settings.max_key_count = max_key_count
+            else:
+                self.settings.max_key_count = 10  # Default if out of range
+        else:
+            self.settings.max_key_count = 10  # Default if empty
 
     def set_sound_settings(self):
         sound_settings = [(4, "start"), (5, "stop")]

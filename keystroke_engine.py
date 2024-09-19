@@ -246,7 +246,7 @@ class KeystrokeEngine(Thread):
                         between_pressed = current_time - last_pressed_time
                         if key == prev_key:
                             key_count += 1
-                            if key_count <= max_key_count:
+                            if key_count <= self.main.settings.max_key_count:
                                 self.regular_key_handler.simulate_keystroke(key)
                                 logger.debug(
                                     f"{self.name:<10} Key '{key}' pressed with a {between_pressed}"
