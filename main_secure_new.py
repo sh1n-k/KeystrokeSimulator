@@ -200,6 +200,8 @@ class AuthApp:
     def force_close_app(self):
         if self.main_app:
             self.main_app.on_closing()
+        else:
+            self.terminate_application()
 
 
 def main():
