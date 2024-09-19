@@ -1,6 +1,8 @@
+import http
 import json
 import os
 import time
+import urllib
 import uuid
 import boto3
 from botocore.exceptions import ClientError
@@ -15,7 +17,10 @@ auth_logs_table = dynamodb.Table(os.environ['AUTH_LOGS_TABLE_NAME'])
 MAX_RETRIES = 3
 BASE_DELAY = 0.1
 LOG_RETENTION_DAYS = int(os.environ['LOG_RETENTION_DAYS'])
+
 ADMIN_KEY = os.environ['ADMIN_KEY']
+BOT_TOKEN = os.environ['BOT_TOKEN']
+CHAT_ID = os.environ['CHAT_ID']
 
 def lambda_handler(event, context):
     method, path = event['routeKey'].split()
@@ -42,6 +47,7 @@ def authenticate(user_id, ip):
     try:
         user = retry_operation(users_table.get_item, Key={'userId': user_id})
         if 'Item' not in user:
+            send_telegram_message(user_id, ip, 'Authentication failed')
             return response(401, 'Authentication failed')
 
         current_time = int(time.time())
@@ -66,11 +72,13 @@ def authenticate(user_id, ip):
 
         # Log authentication
         log_auth_request(user_id, 'authenticate', ip, 'success')
+        send_telegram_message(user_id, ip, 'Authentication successful')
 
         return response(200, 'Authentication successful', {'sessionToken': session_token})
     except Exception as e:
         print(f"Error in authenticate: {str(e)}")
         log_auth_request(user_id, 'authenticate', ip, 'error')
+        send_telegram_message(user_id, ip, f'Internal server error: {str(e)}')
         return response(500, 'Internal server error')
 
 def validate_session(user_id, session_token, ip):
@@ -80,6 +88,8 @@ def validate_session(user_id, session_token, ip):
     try:
         session = retry_operation(sessions_table.get_item, Key={'userId': user_id})
         if 'Item' not in session or session_token != session['Item']['sessionToken']:
+            log_auth_request(user_id, 'validate', ip, 'invalid')
+            send_telegram_message(user_id, ip, 'Invalid session')
             return response(401, 'Invalid session')
 
         current_time = int(time.time())
@@ -89,6 +99,8 @@ def validate_session(user_id, session_token, ip):
                             UpdateExpression='SET isExpired = :expired',
                             ExpressionAttributeValues={':expired': True}
                             )
+            log_auth_request(user_id, 'validate', ip, 'expired')
+            send_telegram_message(user_id, ip, 'Session expired')
             return response(401, 'Session expired')
 
         # Update session
@@ -104,6 +116,7 @@ def validate_session(user_id, session_token, ip):
         return response(200, 'Session is valid')
     except Exception as e:
         print(f"Error in validate_session: {str(e)}")
+        send_telegram_message(user_id, ip, f'Internal server error: {str(e)}')
         return response(500, 'Internal server error')
 
 def retry_operation(operation, **kwargs):
@@ -185,3 +198,19 @@ def response(status_code, message, additional_data=None):
         'statusCode': status_code,
         'body': json.dumps(body)
     }
+
+def send_telegram_message(user_id, ip, status):
+    try:
+        message = f"User ID: {user_id}\nIP: {ip}\nStatus: {status}"
+        encoded_message = urllib.parse.quote(message)
+
+        url = f"api.telegram.org"
+        path = f"/bot{BOT_TOKEN}/sendMessage?chat_id={CHAT_ID}&text={encoded_message}"
+
+        conn = http.client.HTTPSConnection(url)
+        conn.request("GET", path)
+        telegram_response = conn.getresponse()
+        telegram_response.read()
+        conn.close()
+    except Exception as e:
+        print(f"Error sending message to Telegram: {str(e)}")
