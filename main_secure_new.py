@@ -1,80 +1,16 @@
-import hashlib
 import os
 import re
-import secrets
 import shutil
-import sys
 import tkinter as tk
 from datetime import datetime, timezone
 from tkinter import ttk
 
 import requests
-from Crypto.Cipher import AES
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
 
 from keystroke_simulator_app import KeystrokeSimulatorApp
-from keystroke_utils import WindowUtils  # Assuming this is still needed
-
-
-class CryptoManager:
-    @staticmethod
-    def derive_key(salt):
-        """
-        Derive a secure key using PBKDF2 with SHA256.
-        """
-        iterations = 100000
-        key_length = 32  # AES-256 key length
-        master_key = os.getenv("MASTER_KEY")
-        if not master_key:
-            raise Exception("MASTER_KEY not set in environment variables.")
-        dk = hashlib.pbkdf2_hmac(
-            "sha256", master_key.encode(), salt, iterations, key_length
-        )
-        return dk  # Return the raw bytes
-
-    @staticmethod
-    def encrypt(data):
-        """
-        Encrypt data using AES-256-CBC.
-        """
-        salt = secrets.token_bytes(16)
-        key = CryptoManager.derive_key(salt)
-        iv = secrets.token_bytes(16)
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        padded_data = CryptoManager._pad(data.encode())
-        encrypted_data = cipher.encrypt(padded_data)
-        return salt + iv + encrypted_data
-
-    @staticmethod
-    def decrypt(encrypted_data):
-        """
-        Decrypt data using AES-256-CBC.
-        """
-        salt = encrypted_data[:16]
-        iv = encrypted_data[16:32]
-        ciphertext = encrypted_data[32:]
-        key = CryptoManager.derive_key(salt)
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        padded_data = cipher.decrypt(ciphertext)
-        return CryptoManager._unpad(padded_data).decode()
-
-    @staticmethod
-    def _pad(data):
-        """
-        Apply PKCS7 padding.
-        """
-        padding_length = 16 - (len(data) % 16)
-        padding = bytes([padding_length] * padding_length)
-        return data + padding
-
-    @staticmethod
-    def _unpad(padded_data):
-        """
-        Remove PKCS7 padding.
-        """
-        padding_length = padded_data[-1]
-        return padded_data[:-padding_length]
+from keystroke_utils import WindowUtils
 
 
 class AuthApp:
@@ -82,8 +18,9 @@ class AuthApp:
         self.master = master
         self.setup_ui()
         self.failed_attempts = 0
+        self.user_id = None
         self.session_token = None
-        self.check_session_validity()
+        self.main_app = None
 
     def setup_ui(self):
         self.master.title("Authentication")
@@ -137,8 +74,7 @@ class AuthApp:
         return True
 
     def validate_input(self):
-        user_id = self.id_entry.get()
-        if not re.match(r"^[a-zA-Z0-9]{4,12}$", user_id):
+        if not re.match(r"^[a-zA-Z0-9]{4,12}$", self.user_id):
             self.show_error("User ID must be\n4-12 alphanumeric characters")
             return False
         self.clear_error()
@@ -174,15 +110,18 @@ class AuthApp:
             self.unlock_inputs()
 
     def validate_and_auth(self):
+        self.user_id = self.id_entry.get()
         if self.validate_input():
             self.ok_button.config(state="disabled")
+            logger.info(f"Attempting authentication for user: {self.user_id}")
             self.request_authentication()
+        else:
+            logger.warning(f"Invalid input for user ID: {self.user_id}")
 
     def request_authentication(self):
-        user_id = self.id_entry.get()
         timestamp = str(int(datetime.now(timezone.utc).timestamp()))
         payload = {
-            "userId": user_id,
+            "userId": self.user_id,
             "timestamp": timestamp,
         }
         resp_json = {}
@@ -190,32 +129,32 @@ class AuthApp:
         try:
             response = requests.post(os.getenv("AUTH_URL"), json=payload, timeout=5)
             resp_json = response.json()
-            logger.info(f"{response.status_code}: {resp_json}")
+            logger.info(f"Authentication response: {response.status_code}: {resp_json}")
             response.raise_for_status()
 
             # Update the session token in memory
             self.session_token = resp_json.get("sessionToken")
             if self.session_token:
+                logger.info(f"Authentication successful for user: {self.user_id}")
                 self.launch_next_step()
             else:
+                logger.error("No session token received in authentication response")
                 raise Exception("No session token received")
         except requests.Timeout:
+            logger.error(f"Authentication request timed out for user: {self.user_id}")
             self.show_error_and_reactivate("Authentication request timed out.")
         except requests.HTTPError as e:
             err_msg = resp_json.get("message", "Authentication failed.")
+            logger.error(f"HTTP error during authentication for user {self.user_id}: {err_msg}")
             self.show_error_and_reactivate(f"Failed to login: {err_msg}")
         except Exception as e:
+            logger.error(f"Unexpected error during authentication for user {self.user_id}: {str(e)}")
             self.show_error_and_reactivate(f"An error occurred: {str(e)}")
-
-    def check_session_validity(self):
-        if self.session_token and self.validate_session_token(self.session_token):
-            self.start_periodic_session_check()
-        else:
-            self.session_token = None
 
     def show_error_and_reactivate(self, message):
         self.failed_attempts += 1
         if self.failed_attempts >= 3:
+            logger.warning(f"User {self.user_id} locked out due to too many failed attempts")
             self.lock_inputs()
             self.start_countdown(10, final_message=message)
         else:
@@ -228,38 +167,39 @@ class AuthApp:
         self.master.withdraw()
 
         # Start periodic session validation before launching the main app
-        self.start_periodic_session_check()
+        self.check_session_and_schedule()
 
-        main_app = KeystrokeSimulatorApp()
-        main_app.mainloop()
+        self.main_app = KeystrokeSimulatorApp(secure_callback=self.terminate_application)
+        self.main_app.mainloop()
 
-    @staticmethod
-    def validate_session_token(token):
-        logger.info(f"sessionValidation: {token}")
-        payload = {"sessionToken": token}
+    def validate_session_token(self):
+        logger.info(f"Validating session for user: {self.user_id}")
+        payload = {"userId": self.user_id, "sessionToken": self.session_token}
         try:
             response = requests.post(os.getenv("VALIDATE_URL"), json=payload, timeout=5)
             response.raise_for_status()
+            logger.info(f"Session validation successful for user: {self.user_id}")
             return True
-        except requests.RequestException:
+        except requests.RequestException as e:
+            logger.error(f"Session validation failed for user '{self.user_id}'")
             return False
 
-    def start_periodic_session_check(self):
-        self.check_session_and_schedule()
-
     def check_session_and_schedule(self):
-        if self.session_token and self.validate_session_token(self.session_token):
-            # Schedule the next check in 60 seconds (1 minute)
-            self.master.after(3000, self.check_session_and_schedule)
+        if self.validate_session_token():
+            self.master.after(300000, self.check_session_and_schedule)
         else:
-            # Session is invalid, force quit the app
-            logger.info(f"Invalid session token: {self.session_token}")
+            logger.info(f"Invalid session token")
             self.force_close_app()
 
-    def force_close_app(self):
-        self.session_token = None
+    def terminate_application(self):
         self.master.destroy()
-        sys.exit(0)
+        self.master.quit()
+        self.master = None
+        logger.info("Application terminated")
+
+    def force_close_app(self):
+        if self.main_app:
+            self.main_app.on_closing()
 
 
 def main():

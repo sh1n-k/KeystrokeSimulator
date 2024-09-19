@@ -1,47 +1,72 @@
 import os
 import tempfile
+import sys
+import platform
 from dotenv import load_dotenv, find_dotenv
 import PyInstaller.__main__
 
-VERSION = "1.22"
+VERSION = "1.3"
 
 # Load environment variables
 load_dotenv(find_dotenv())
 
-# Function to create a temporary script with replaced environment variables
+def check_required_env_vars():
+    required_vars = ["AUTH_URL", "VALIDATE_URL"]
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    if missing_vars:
+        print(f"Error: The following required environment variables are missing: {', '.join(missing_vars)}")
+        sys.exit(1)
+
 def create_temp_script(filename):
     with open(filename, "r") as file:
         content = file.read()
 
-    # Replace environment variable references with actual values
     for key, value in os.environ.items():
         content = content.replace(f"os.getenv('{key}')", f"'{value}'")
         content = content.replace(f'os.getenv("{key}")', f"'{value}'")
 
     return content
 
-if __name__ == "__main__":
-    # Read the original script and replace environment variables
-    script_content = create_temp_script("main_secure.py")
+def get_platform_specific_options():
+    system = platform.system().lower()
+    machine = platform.machine().lower()
 
-    # Create a temporary file using NamedTemporaryFile
+    options = [
+        "--onefile",
+        "--clean",
+        "--optimize=2",
+    ]
+
+    if system == "windows":
+        options.append("--noconsole")
+    elif system == "darwin":
+        options.append("--windowed")
+
+    # Add architecture-specific options if needed
+    if "arm" in machine:
+        options.append("--target-arch=arm64")
+
+    return options
+
+if __name__ == "__main__":
+    check_required_env_vars()
+
+    script_content = create_temp_script("main_secure_new.py")
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as temp_file:
         temp_file.write(script_content)
         temp_file_path = temp_file.name
 
     try:
-        # Run PyInstaller with the temporary script
+        platform_options = get_platform_specific_options()
         PyInstaller.__main__.run(
             [
                 temp_file_path,
-                "--onefile",
-                "--noconsole",
-                "--clean",
-                "--optimize=2",
                 f"--name=main_secure_v{VERSION}",
-            ]
+            ] + platform_options
         )
     finally:
-        # Clean up the temporary file
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+
+print(f"Build completed for {platform.system()} on {platform.machine()}")

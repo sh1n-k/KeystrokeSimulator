@@ -1,20 +1,20 @@
 import base64
-from collections import deque
 import json
 import os
-from pathlib import Path
 import pickle
 import platform
 import shutil
 import threading
 import time
 import tkinter as tk
+from collections import deque
+from pathlib import Path
 from tkinter import ttk, messagebox
 from typing import Callable, Dict, List, Optional, Deque
 
 import keyboard
-from loguru import logger
 import pynput
+from loguru import logger
 
 from keystroke_engine import KeystrokeEngine
 from keystroke_models import ProfileModel, EventModel, UserSettings
@@ -131,13 +131,13 @@ class ProfileFrame(tk.Frame):
 
 class ButtonFrame(tk.Frame):
     def __init__(
-        self,
-        master,
-        toggle_callback: Callable,
-        events_callback: Callable,
-        settings_callback: Callable,
-        *args,
-        **kwargs,
+            self,
+            master,
+            toggle_callback: Callable,
+            events_callback: Callable,
+            settings_callback: Callable,
+            *args,
+            **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
         self.start_stop_button = tk.Button(
@@ -169,13 +169,13 @@ class ButtonFrame(tk.Frame):
 
 class ProfileButtonFrame(tk.Frame):
     def __init__(
-        self,
-        master,
-        modkeys_callback: Callable,
-        edit_callback: Callable,
-        sort_callback: Callable,
-        *args,
-        **kwargs,
+            self,
+            master,
+            modkeys_callback: Callable,
+            edit_callback: Callable,
+            sort_callback: Callable,
+            *args,
+            **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
         self.modkeys_button = tk.Button(  # Add this new button
@@ -206,17 +206,17 @@ class ProfileButtonFrame(tk.Frame):
 
 
 class KeystrokeSimulatorApp(tk.Tk):
-    def __init__(self, device_id=""):
+    def __init__(self, secure_callback=None):
         super().__init__()
-        self.initialize_app(device_id)
+        self.initialize_app()
         self.create_ui()
         self.load_settings_and_state()
         self.setup_event_handlers()
+        self.secure_callback = secure_callback
 
-    def initialize_app(self, device_id):
+    def initialize_app(self):
         self.title("Python 3.12")
         self.profiles_dir = "profiles"
-        self.device_id = device_id
         self.is_running = tk.BooleanVar(value=False)
         self.selected_process = tk.StringVar()
         self.selected_profile = tk.StringVar()
@@ -240,10 +240,10 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
 
         for frame in (
-            self.process_frame,
-            self.profile_frame,
-            self.button_frame,
-            self.profile_button_frame,
+                self.process_frame,
+                self.profile_frame,
+                self.button_frame,
+                self.profile_button_frame,
         ):
             frame.pack(pady=5)
 
@@ -306,7 +306,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def on_mouse_scroll(self, x, y, dx, dy):
         if not self.process_acvivation_func(
-            KeystrokeEngine.parse_process_id(self.selected_process.get())
+                KeystrokeEngine.parse_process_id(self.selected_process.get())
         ):
             return
 
@@ -315,7 +315,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             return
 
         if (self.settings.start_stop_key == "W_UP" and dy > 0) or (
-            self.settings.start_stop_key == "W_DN" and dy < 0
+                self.settings.start_stop_key == "W_DN" and dy < 0
         ):
             self.toggle_start_stop()
 
@@ -349,7 +349,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.update_ui()
 
     def _create_and_start_engines(
-        self, event_list: List[EventModel], modification_keys: Dict
+            self, event_list: List[EventModel], modification_keys: Dict
     ):
         independent_events = [event for event in event_list if event.independent_thread]
         regular_events = deque(
@@ -368,15 +368,15 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def _validate_simulation_prerequisites(self) -> bool:
         return (
-            self.selected_process.get()
-            and " (" in self.selected_process.get()
-            and self.selected_profile.get()
+                self.selected_process.get()
+                and " (" in self.selected_process.get()
+                and self.selected_profile.get()
         )
 
     def _load_profile(self) -> Optional[ProfileModel]:
         try:
             with open(
-                f"{self.profiles_dir}/{self.selected_profile.get()}.pkl", "rb"
+                    f"{self.profiles_dir}/{self.selected_profile.get()}.pkl", "rb"
             ) as f:
                 profile = pickle.load(f)
                 if not profile.event_list:
@@ -387,7 +387,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             return ProfileModel()
 
     def _process_independent_events(
-        self, independent_events: List[EventModel], modification_keys: Dict
+            self, independent_events: List[EventModel], modification_keys: Dict
     ):
         for event in independent_events:
             engine = KeystrokeEngine(
@@ -401,7 +401,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.keystroke_engines.append(engine)
 
     def _process_regular_events(
-        self, regular_events: Deque[EventModel], modification_keys: Dict
+            self, regular_events: Deque[EventModel], modification_keys: Dict
     ):
         num_regular_events = len(regular_events)
         events_per_thread = self.settings.events_per_thread
@@ -545,4 +545,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.save_latest_state()
         self.unbind_events()
         self.destroy()
+        self.quit()
+        if self.secure_callback:
+            self.secure_callback()
         logger.info("Bye")
