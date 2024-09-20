@@ -398,7 +398,7 @@ class KeystrokeSettings(tk.Toplevel):
             self.settings.max_key_count = 10  # Default if empty
 
     def set_sound_settings(self):
-        sound_settings = [(4, "start"), (5, "stop")]
+        sound_settings = [(5, "start"), (6, "stop")]
 
         for row, prefix in sound_settings:
             sound_label = self.grid_slaves(row=row, column=1)[0]
