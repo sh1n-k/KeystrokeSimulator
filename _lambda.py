@@ -1,13 +1,15 @@
 import http
 import json
 import os
+import random
+import threading
 import time
 import urllib
 import uuid
+
 import boto3
-from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Key
-import random
+from botocore.exceptions import ClientError
 
 dynamodb = boto3.resource('dynamodb')
 users_table = dynamodb.Table(os.environ['USERS_TABLE_NAME'])
@@ -21,6 +23,7 @@ LOG_RETENTION_DAYS = int(os.environ['LOG_RETENTION_DAYS'])
 ADMIN_KEY = os.environ['ADMIN_KEY']
 BOT_TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = os.environ['CHAT_ID']
+
 
 def lambda_handler(event, context):
     method, path = event['routeKey'].split()
@@ -42,6 +45,7 @@ def lambda_handler(event, context):
         return validate_session(user_id, body.get('sessionToken'), ip)
     else:
         return response(404, 'Not Found')
+
 
 def authenticate(user_id, ip):
     try:
@@ -81,6 +85,7 @@ def authenticate(user_id, ip):
         send_telegram_message(user_id, ip, f'Internal server error: {str(e)}')
         return response(500, 'Internal server error')
 
+
 def validate_session(user_id, session_token, ip):
     if not session_token:
         return response(400, 'Missing sessionToken')
@@ -119,6 +124,7 @@ def validate_session(user_id, session_token, ip):
         send_telegram_message(user_id, ip, f'Internal server error: {str(e)}')
         return response(500, 'Internal server error')
 
+
 def retry_operation(operation, **kwargs):
     retries = 0
     while retries < MAX_RETRIES:
@@ -132,6 +138,7 @@ def retry_operation(operation, **kwargs):
             else:
                 raise
     raise Exception("Max retries exceeded")
+
 
 def log_auth_request(user_id, action, ip, status):
     current_time = int(time.time())
@@ -149,6 +156,7 @@ def log_auth_request(user_id, action, ip, status):
     }
 
     retry_operation(auth_logs_table.put_item, Item=log_item)
+
 
 def cleanup_old_logs():
     current_time = int(time.time())
@@ -190,6 +198,7 @@ def cleanup_old_logs():
         print(f"Error in cleanup_old_logs: {str(e)}")
         return response(500, 'Internal server error during log cleanup')
 
+
 def response(status_code, message, additional_data=None):
     body = {'message': message}
     if additional_data:
@@ -199,7 +208,14 @@ def response(status_code, message, additional_data=None):
         'body': json.dumps(body)
     }
 
+
 def send_telegram_message(user_id, ip, status):
+    thread = threading.Thread(target=send_telegram_message_async, args=(user_id, ip, status))
+    thread.start()
+    thread.join(timeout=2)
+
+
+def send_telegram_message_async(user_id, ip, status):
     try:
         message = f"User ID: {user_id}\nIP: {ip}\nStatus: {status}"
         encoded_message = urllib.parse.quote(message)
