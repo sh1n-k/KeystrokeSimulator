@@ -4,6 +4,7 @@ import shutil
 from loguru import logger
 
 from keystroke_simulator_app import KeystrokeSimulatorApp
+from keystroke_simulator_app_v2 import KeystrokeSimulatorAppV2
 
 if __name__ == "__main__":
     # Configure Loguru
@@ -18,5 +19,5 @@ if __name__ == "__main__":
     if not os.path.exists("profiles"):
         os.makedirs("profiles")
 
-    app = KeystrokeSimulatorApp()
+    app = KeystrokeSimulatorAppV2()
     app.mainloop()

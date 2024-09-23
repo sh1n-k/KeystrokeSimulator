@@ -145,16 +145,22 @@ class AuthApp:
             self.show_error_and_reactivate("Authentication request timed out.")
         except requests.HTTPError as e:
             err_msg = resp_json.get("message", "Authentication failed.")
-            logger.error(f"HTTP error during authentication for user {self.user_id}: {err_msg}")
+            logger.error(
+                f"HTTP error during authentication for user {self.user_id}: {err_msg}"
+            )
             self.show_error_and_reactivate(f"Failed to login: {err_msg}")
         except Exception as e:
-            logger.error(f"Unexpected error during authentication for user {self.user_id}: {str(e)}")
+            logger.error(
+                f"Unexpected error during authentication for user {self.user_id}: {str(e)}"
+            )
             self.show_error_and_reactivate(f"An error occurred: {str(e)}")
 
     def show_error_and_reactivate(self, message):
         self.failed_attempts += 1
         if self.failed_attempts >= 3:
-            logger.warning(f"User {self.user_id} locked out due to too many failed attempts")
+            logger.warning(
+                f"User {self.user_id} locked out due to too many failed attempts"
+            )
             self.lock_inputs()
             self.start_countdown(10, final_message=message)
         else:
@@ -169,7 +175,9 @@ class AuthApp:
         # Start periodic session validation before launching the main app
         self.check_session_and_schedule()
 
-        self.main_app = KeystrokeSimulatorApp(secure_callback=self.terminate_application)
+        self.main_app = KeystrokeSimulatorApp(
+            secure_callback=self.terminate_application
+        )
         self.main_app.mainloop()
 
     def validate_session_token(self):

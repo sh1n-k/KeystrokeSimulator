@@ -5,22 +5,18 @@ import pickle
 import platform
 import shutil
 import threading
-import time
 import tkinter as tk
-from collections import deque, defaultdict
 from pathlib import Path
 from tkinter import ttk, messagebox
-from typing import Callable, Dict, List, Optional, Deque
+from typing import Callable, List, Dict, Optional
 
 import keyboard
-import numpy as np
-import pynput
+import pynput.mouse
 from loguru import logger
-from sklearn.cluster import DBSCAN
 
-from keystroke_engine import KeystrokeEngine
 from keystroke_models import ProfileModel, EventModel, UserSettings
 from keystroke_modkeys import ModificationKeysWindow
+from keystroke_processor import KeystrokeProcessor
 from keystroke_processors import ProcessCollector
 from keystroke_profiles import KeystrokeProfiles
 from keystroke_quick_event_editor import KeystrokeQuickEventEditor
@@ -207,7 +203,7 @@ class ProfileButtonFrame(tk.Frame):
         self.sort_button.pack(side=tk.LEFT, padx=5)
 
 
-class KeystrokeSimulatorApp(tk.Tk):
+class KeystrokeSimulatorAppV2(tk.Tk):
     def __init__(self, secure_callback=None):
         super().__init__()
         self.initialize_app()
@@ -222,7 +218,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.is_running = tk.BooleanVar(value=False)
         self.selected_process = tk.StringVar()
         self.selected_profile = tk.StringVar()
-        self.keystroke_engines = []
+        self.keystroke_processor = None
         self.terminate_event = threading.Event()
         self.settings_window = None
         self.latest_scroll_time = None
@@ -262,10 +258,10 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.setup_start_stop_handler()
 
-        self.process_acvivation_func = (
-            KeystrokeEngine._is_process_active_windows
+        self.process_activation_func = (
+            KeystrokeProcessor._is_process_active_windows
             if platform.system() == "Windows"
-            else KeystrokeEngine._is_process_active_darwin
+            else KeystrokeProcessor._is_process_active_darwin
         )
 
     def setup_start_stop_handler(self):
@@ -307,8 +303,8 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.settings = UserSettings()
 
     def on_mouse_scroll(self, x, y, dx, dy):
-        if not self.process_acvivation_func(
-            KeystrokeEngine.parse_process_id(self.selected_process.get())
+        if not self.process_activation_func(
+            KeystrokeProcessor.parse_process_id(self.selected_process.get())
         ):
             return
 
@@ -344,30 +340,27 @@ class KeystrokeSimulatorApp(tk.Tk):
             modification_keys = {}
 
         self.terminate_event.clear()
-        self._create_and_start_engines(event_list, modification_keys)
+        self._create_and_start_processor(event_list, modification_keys)
         self.save_latest_state()
 
         SoundUtils.play_sound(self.settings.start_sound)
         self.update_ui()
 
-    def _create_and_start_engines(
+    def _create_and_start_processor(
         self, event_list: List[EventModel], modification_keys: Dict
     ):
-        independent_events = [event for event in event_list if event.independent_thread]
-        regular_events = deque(
-            [event for event in event_list if not event.independent_thread]
+        """
+        Creates and starts the KeystrokeProcessor.
+        """
+        self.keystroke_processor = KeystrokeProcessor(
+            main_app=self,
+            target_process=self.selected_process.get(),
+            event_list=event_list,
+            modification_keys=modification_keys,
+            terminate_event=self.terminate_event,
         )
-
-        self.keystroke_engines = []
-        self._process_independent_events(independent_events, modification_keys)
-        # self._process_regular_events(regular_events, modification_keys)
-        self._process_regular_events_with_clustering(regular_events, modification_keys)
-        self._process_mod_keys(modification_keys)
-
-        logger.debug(f"engines: {self.keystroke_engines}")
-
-        for engine in self.keystroke_engines:
-            engine.start()
+        self.keystroke_processor.start()
+        logger.debug("KeystrokeProcessor started.")
 
     def _validate_simulation_prerequisites(self) -> bool:
         return (
@@ -389,111 +382,12 @@ class KeystrokeSimulatorApp(tk.Tk):
             logger.info(f"Failed to load profile: {e}")
             return ProfileModel()
 
-    def _process_independent_events(
-        self, independent_events: List[EventModel], modification_keys: Dict
-    ):
-        for event in independent_events:
-            engine = KeystrokeEngine(
-                self,
-                self.selected_process.get(),
-                [event],
-                modification_keys,
-                self.terminate_event,
-            )
-            logger.debug(f"independent engine: {engine}")
-            self.keystroke_engines.append(engine)
-
-    def _process_regular_events_with_clustering(
-        self, regular_events: Deque[EventModel], modification_keys: Dict
-    ):
-        num_regular_events = len(regular_events)
-        if num_regular_events == 0:
-            return
-
-        # Extract coordinates from regular events
-        coordinates = np.array(
-            [
-                (
-                    event.latest_position[0] + event.clicked_position[0],
-                    event.latest_position[1] + event.clicked_position[1],
-                )
-                for event in regular_events
-            ]
-        )
-
-        # Define DBSCAN parameters
-        epsilon = 100  # Maximum distance between two samples for them to be in the same neighborhood
-        min_samples = 1  # Minimum number of samples in a neighborhood for a point to be considered a core point
-
-        # Perform DBSCAN clustering
-        clustering = DBSCAN(eps=epsilon, min_samples=min_samples).fit(coordinates)
-        labels = clustering.labels_
-
-        # Group events by cluster label
-        clusters = defaultdict(list)
-        for label, event in zip(labels, regular_events):
-            clusters[label].append(event)
-
-        # Assign each cluster to a KeystrokeEngine thread
-        for cluster_events in clusters.values():
-            engine = KeystrokeEngine(
-                self,
-                self.selected_process.get(),
-                cluster_events,
-                modification_keys,
-                self.terminate_event,
-            )
-            self.keystroke_engines.append(engine)
-        logger.debug(
-            f"regular engine (cluster size {len(clusters.values())}): {self.keystroke_engines}"
-        )
-
-    def _process_regular_events(
-        self, regular_events: Deque[EventModel], modification_keys: Dict
-    ):
-        num_regular_events = len(regular_events)
-        events_per_thread = self.settings.events_per_thread
-
-        if num_regular_events == 0:
-            return
-
-        num_engines = max(
-            1, (num_regular_events + events_per_thread - 1) // events_per_thread
-        )
-
-        for _ in range(num_engines):
-            chunk = [
-                regular_events.popleft()
-                for _ in range(min(events_per_thread, len(regular_events)))
-            ]
-            engine = KeystrokeEngine(
-                self,
-                self.selected_process.get(),
-                chunk,
-                modification_keys,
-                self.terminate_event,
-            )
-            logger.debug(f"regular engine: {engine}")
-            self.keystroke_engines.append(engine)
-
-    def _process_mod_keys(self, modification_keys: Dict):
-        if any(modification_keys[key]["enabled"] for key in modification_keys):
-            engine = KeystrokeEngine(
-                self,
-                self.selected_process.get(),
-                [],
-                modification_keys,
-                self.terminate_event,
-                is_mod_key_handler=True,
-            )
-            logger.debug(f"mod engine: {engine}")
-            self.keystroke_engines.append(engine)
-
     def stop_simulation(self):
+        if self.keystroke_processor:
+            self.keystroke_processor.stop()
+            self.keystroke_processor = None
+
         self.terminate_event.set()
-        for engine in self.keystroke_engines:
-            engine.join(timeout=0.1)
-        self.keystroke_engines.clear()
         SoundUtils.play_sound(self.settings.stop_sound)
         self.update_ui()
 

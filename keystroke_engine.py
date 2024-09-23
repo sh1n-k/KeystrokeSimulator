@@ -1,5 +1,6 @@
 import platform
 import random
+import re
 import threading
 import time
 from threading import Thread
@@ -27,10 +28,10 @@ elif platform.system() == "Darwin":
 
 class BaseKeyHandler:
     def __init__(
-        self,
-        key_codes,
-        loop_delay: Tuple[float, float],
-        key_pressed_time: Tuple[float, float],
+            self,
+            key_codes,
+            loop_delay: Tuple[float, float],
+            key_pressed_time: Tuple[float, float],
     ):
         self.key_codes = key_codes
         self.loop_delay = loop_delay
@@ -67,12 +68,10 @@ class BaseKeyHandler:
     def get_key_press_time(self) -> float:
         return random.uniform(self.key_pressed_time[0], self.key_pressed_time[1])
 
-
-class RegularKeyHandler(BaseKeyHandler):
     def simulate_keystroke(self, key: str):
         key_code = self.key_codes.get(key.upper())
         if key_code is None:
-            logger.error(f"A modification key without a code was pressed: {key}")
+            logger.error(f"A key without a code was pressed: {key}")
             return
 
         self.press_key(key_code)
@@ -80,25 +79,24 @@ class RegularKeyHandler(BaseKeyHandler):
         self.release_key(key_code)
 
 
+class RegularKeyHandler(BaseKeyHandler):
+    def simulate_keystroke(self, key: str):
+        super().simulate_keystroke(key)
+
+
 class ModificationKeyHandler(BaseKeyHandler):
     def __init__(
-        self,
-        key_codes,
-        loop_delay: Tuple[float, float],
-        key_pressed_time: Tuple[float, float],
-        modification_keys,
+            self,
+            key_codes,
+            loop_delay: Tuple[float, float],
+            key_pressed_time: Tuple[float, float],
+            modification_keys,
     ):
         super().__init__(key_codes, loop_delay, key_pressed_time)
-        self.modification_keys = modification_keys
-        self.init_mod_keys()
-        self.mod_key_pressed = threading.Event()
-
-    def init_mod_keys(self):
         self.modification_keys = {
-            key: value
-            for key, value in self.modification_keys.items()
-            if value["enabled"]
+            key: value for key, value in modification_keys.items() if value.get("enabled")
         }
+        self.mod_key_pressed = threading.Event()
 
     def check_modification_keys(self, is_mod_key_handler: bool = False) -> bool:
         any_mod_key_pressed = False
@@ -120,27 +118,20 @@ class ModificationKeyHandler(BaseKeyHandler):
         return any_mod_key_pressed
 
     def simulate_keystroke(self, key: str):
-        key_code = self.key_codes[key.upper()]
-        if key_code is None:
-            logger.error(
-                f"A modification key without a code was pressed: {key} / {key_code}"
-            )
-            return
-
-        self.press_key(key_code)
-        time.sleep(self.get_key_press_time())
-        self.release_key(key_code)
+        super().simulate_keystroke(key)
 
 
 class KeystrokeEngine(Thread):
+    PROCESS_ID_PATTERN = re.compile(r"\((\d+)\)")
+
     def __init__(
-        self,
-        main,
-        target_process: str,
-        event_list: List[EventModel],
-        modification_keys: dict,
-        terminate_event: threading.Event,
-        is_mod_key_handler: bool = False,
+            self,
+            main,
+            target_process: str,
+            event_list: List[EventModel],
+            modification_keys: dict,
+            terminate_event: threading.Event,
+            is_mod_key_handler: bool = False,
     ):
         super().__init__()
         self.main = main
@@ -172,16 +163,51 @@ class KeystrokeEngine(Thread):
         elif platform.system() == "Darwin":
             self.is_process_active = self._is_process_active_darwin
 
+        if len(self.event_list) > 1 and not self.is_mod_key_handler:
+            # Precompute the minimal bounding rectangle for all events in the cluster
+            self.bounding_rect = self.compute_bounding_rectangle()
+
+            # Map events to their relative positions within the bounding rectangle
+            self.relative_events = self.map_events_to_relative_positions()
+
+            logger.info(f"bounding rect: {self.bounding_rect}, relative events: {self.relative_events}")
+
+    def compute_bounding_rectangle(self) -> Dict[str, int]:
+        """
+        Computes the minimal bounding rectangle that encompasses all event click positions.
+        """
+        xs = [event["click_position"][0] for event in self.event_list]
+        ys = [event["click_position"][1] for event in self.event_list]
+        left = min(xs)
+        top = min(ys)
+        right = max(xs)
+        bottom = max(ys)
+        width = right - left + 1
+        height = bottom - top + 1
+        return {"left": left, "top": top, "width": width, "height": height}
+
+    def map_events_to_relative_positions(self) -> List[Dict]:
+        """
+        Maps each event's click position to its relative position within the bounding rectangle.
+        """
+        relative_events = []
+        for event in self.event_list:
+            x, y = event["click_position"]
+            relative_x = x - self.bounding_rect["left"]
+            relative_y = y - self.bounding_rect["top"]
+            relative_events.append({
+                "ref_pixel_value": event["ref_pixel_value"],
+                "relative_position": (relative_x, relative_y),
+                "key": event["key"],
+            })
+        return relative_events
+
     @staticmethod
     def parse_process_id(target_process: str) -> Optional[int]:
-        try:
-            return int(
-                target_process[
-                    target_process.index("(") + 1 : target_process.index(")")
-                ]
-            )
-        except (ValueError, IndexError):
-            return None
+        match = KeystrokeEngine.PROCESS_ID_PATTERN.search(target_process)
+        if match:
+            return int(match.group(1))
+        return None
 
     @staticmethod
     def prepare_events(event_list: List[EventModel]) -> List[Dict]:
@@ -200,7 +226,7 @@ class KeystrokeEngine(Thread):
     def run(self):
         prev_key = None
         key_count = 0
-        max_key_count = 25
+        max_key_count = self.main.settings.max_key_count
         last_pressed_time = 0
         last_grab_result = None
         last_grab_time = 0
@@ -213,7 +239,7 @@ class KeystrokeEngine(Thread):
 
                 # Check modification keys
                 if self.mod_key_handler.check_modification_keys(
-                    self.is_mod_key_handler
+                        self.is_mod_key_handler
                 ):
                     if not self.is_mod_key_handler:
                         self.mod_key_handler.mod_key_pressed.wait()
@@ -225,13 +251,14 @@ class KeystrokeEngine(Thread):
                     continue
 
                 current_time = time.time()
+
                 for event in self.event_list:
                     x, y = event["click_position"]
 
                     if (
-                        last_grab_result
-                        and last_grab_result[1] == (x, y)
-                        and current_time - last_grab_time < 0.1
+                            last_grab_result
+                            and last_grab_result[1] == (x, y)
+                            and current_time - last_grab_time < 0.1
                     ):
                         current_pixel = last_grab_result[0]
                     else:
@@ -246,7 +273,7 @@ class KeystrokeEngine(Thread):
                         between_pressed = current_time - last_pressed_time
                         if key == prev_key:
                             key_count += 1
-                            if key_count <= self.main.settings.max_key_count:
+                            if key_count <= max_key_count:
                                 self.regular_key_handler.simulate_keystroke(key)
                                 logger.debug(
                                     f"{self.name:<10} Key '{key}' pressed with a {between_pressed}"
@@ -276,6 +303,6 @@ class KeystrokeEngine(Thread):
     def _is_process_active_darwin(process_id: int) -> bool:
         active_app = AppKit.NSWorkspace.sharedWorkspace().activeApplication()
         return (
-            active_app is not None
-            and active_app["NSApplicationProcessIdentifier"] == process_id
+                active_app is not None
+                and active_app["NSApplicationProcessIdentifier"] == process_id
         )

@@ -89,19 +89,22 @@ class KeystrokeSettings(tk.Toplevel):
         getattr(self, f"entry_max_{row}").grid(row=row, column=2, padx=10, pady=5)
 
     def _create_num_of_events_entry(self):
-        ttk.Label(self, text="Num of events per Thread").grid(
+        ttk.Label(self, text="Cluster epsilon value").grid(
             row=3, column=0, padx=10, pady=5, sticky=tk.W
         )
         setattr(
             self,
-            f"events_per_thread",
+            f"cluster_epsilon_value",
             ttk.Entry(
                 self,
                 validate="key",
-                validatecommand=(self.register(self._validate_events_per_thread), "%P"),
+                validatecommand=(
+                    self.register(self._validate_cluster_epsilon_value),
+                    "%P",
+                ),
             ),
         )
-        getattr(self, f"events_per_thread").grid(row=3, column=1, padx=10, pady=5)
+        getattr(self, f"cluster_epsilon_value").grid(row=3, column=1, padx=10, pady=5)
 
     def _create_max_key_count_entry(self):
         ttk.Label(self, text="Max Key Count").grid(
@@ -219,9 +222,9 @@ class KeystrokeSettings(tk.Toplevel):
         )
 
     def _set_num_of_events_value(self):
-        getattr(self, "events_per_thread").delete(0, tk.END)
-        getattr(self, "events_per_thread").insert(
-            0, str(getattr(self.settings, f"events_per_thread"))
+        getattr(self, "cluster_epsilon_value").delete(0, tk.END)
+        getattr(self, "cluster_epsilon_value").insert(
+            0, str(getattr(self.settings, f"cluster_epsilon_value"))
         )
 
     def _set_sound_label(self, row, filepath):
@@ -246,10 +249,10 @@ class KeystrokeSettings(tk.Toplevel):
 
     def _on_key_press(self, event):
         valid_keys = (
-                set(f"F{i}" for i in range(1, 13))
-                | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
-                | set(chr(i) for i in range(ord("0"), ord("9") + 1))
-                | set("`[];',./-=\\")
+            set(f"F{i}" for i in range(1, 13))
+            | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
+            | set(chr(i) for i in range(ord("0"), ord("9") + 1))
+            | set("`[];',./-=\\")
         )
 
         key = event.char.upper() or event.keysym.upper()
@@ -271,12 +274,16 @@ class KeystrokeSettings(tk.Toplevel):
         return P == "" or (P.isdigit() and 0 <= int(P) < 1000 and not P.startswith("0"))
 
     @staticmethod
-    def _validate_events_per_thread(P):
+    def _validate_cluster_epsilon_value(P):
         if P == "":
             return True
+        if not P.isdigit():
+            return False
+        if P.startswith("0") and len(P) > 1:
+            return False
         try:
             value = int(P)
-            return 1 <= value <= 15
+            return 0 <= value <= 200
         except ValueError:
             return False
 
@@ -313,13 +320,13 @@ class KeystrokeSettings(tk.Toplevel):
             setattr(self.settings, f"{prefix}_min", min_value)
             setattr(self.settings, f"{prefix}_max", max_value)
 
-        events_per_thread = int(getattr(self, f"events_per_thread").get() or 1)
-        if events_per_thread < 1 or events_per_thread > 15:
+        cluster_epsilon_value = int(getattr(self, f"cluster_epsilon_value").get() or 1)
+        if cluster_epsilon_value < 10 or cluster_epsilon_value > 200:
             self.show_warning(
-                "Select the number of events between 1-15.\n이벤트 수는 1-15 사이에서 선택하세요."
+                "Select the value of epsilon between 10-200.\n클러스터 입실론 값은 10-200 사이에서 선택하세요."
             )
             return False
-        setattr(self.settings, "events_per_thread", events_per_thread)
+        setattr(self.settings, "cluster_epsilon_value", cluster_epsilon_value)
 
         max_key_count = getattr(self, "max_key_count").get()
         if max_key_count:
@@ -340,10 +347,10 @@ class KeystrokeSettings(tk.Toplevel):
         if min_value >= max_value:
             self.show_warning("Check the Min and Max values.\n최소, 최대값을 확인하세요.")
             return False
-        if min_value < 75 or max_value > 200:
+        if min_value < 50 or max_value > 500:
             self.show_warning(
-                "The Min value cannot be set below 75 and the Max value cannot be set above 200.\n"
-                "Min 값은 75 미만,  Max 값은 200 초과할 수 없습니다."
+                "The Min value cannot be set below 50 and the Max value cannot be set above 500.\n"
+                "Min 값은 50 미만,  Max 값은 500 초과할 수 없습니다."
             )
             return False
         return True
