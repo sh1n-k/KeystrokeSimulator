@@ -1,12 +1,7 @@
-import hashlib
 import os
-import platform
 import re
-import secrets
 import shutil
-import subprocess
 import tkinter as tk
-import uuid
 from datetime import datetime, timezone
 from tkinter import ttk
 
@@ -18,181 +13,14 @@ from keystroke_simulator_app import KeystrokeSimulatorApp
 from keystroke_utils import WindowUtils
 
 
-class CryptoManager:
-    @staticmethod
-    def derive_key(machine_id, salt):
-        # Use PBKDF2 with SHA256
-        iterations = 100000
-        key_length = 32  # AES-256 key length
-        dk = hashlib.pbkdf2_hmac(
-            "sha256", machine_id.encode(), salt, iterations, key_length
-        )
-        return dk  # Return the raw bytes, not base64 encoded
-
-    @staticmethod
-    def obfuscate(data):
-        key = os.getenv("OBFUSCATION_KEY").encode("utf-8")
-        return bytes([data[i] ^ key[i % len(key)] for i in range(len(data))])
-
-
-class StorageManager:
-    @staticmethod
-    def store_device_id(device_id):
-        machine_id = DeviceManager.get_machine_id()
-        salt = secrets.token_bytes(16)
-        key = CryptoManager.derive_key(machine_id, salt)
-        encrypted_data = StorageManager._encrypt(key, device_id.encode())
-        obfuscated_data = CryptoManager.obfuscate(encrypted_data)
-        file_path = os.path.join(os.path.expanduser("~"), ".secure_app_data")
-        with open(file_path, "wb") as file:
-            file.write(salt + obfuscated_data)
-
-    @staticmethod
-    def retrieve_device_id():
-        file_path = os.path.join(os.path.expanduser("~"), ".secure_app_data")
-        try:
-            with open(file_path, "rb") as file:
-                data = file.read()
-                salt = data[:16]
-                obfuscated_data = data[16:]
-        except FileNotFoundError:
-            raise Exception("Device ID not found. Please register this device.")
-
-        deobfuscated_data = CryptoManager.obfuscate(obfuscated_data)
-        machine_id = DeviceManager.get_machine_id()
-        key = CryptoManager.derive_key(machine_id, salt)
-        try:
-            decrypted_data = StorageManager._decrypt(key, deobfuscated_data)
-            return decrypted_data.decode()
-        except Exception:
-            raise Exception(
-                "Failed to decrypt device ID. This may not be the original device."
-            )
-
-    @staticmethod
-    def _encrypt(key, data):
-        iv = secrets.token_bytes(16)
-        cipher = StorageManager._create_cipher(key, iv)
-        return iv + cipher.encrypt(data)
-
-    @staticmethod
-    def _decrypt(key, data):
-        iv = data[:16]
-        cipher = StorageManager._create_cipher(key, iv)
-        return cipher.decrypt(data[16:])
-
-    @staticmethod
-    def _create_cipher(key, iv):
-        return StorageManager._AESCipher(key, iv)
-
-    class _AESCipher:
-        def __init__(self, key, iv):
-            self.key = key
-            self.iv = iv
-
-        def encrypt(self, data):
-            padded_data = self._pad(data)
-            cipher = self._create_cipher()
-            return cipher.encrypt(padded_data)
-
-        def decrypt(self, data):
-            cipher = self._create_cipher()
-            padded_data = cipher.decrypt(data)
-            return self._unpad(padded_data)
-
-        def _create_cipher(self):
-            from Crypto.Cipher import AES
-
-            return AES.new(self.key, AES.MODE_CBC, self.iv)
-
-        def _pad(self, data):
-            padding_length = 16 - (len(data) % 16)
-            padding = bytes([padding_length] * padding_length)
-            return data + padding
-
-        def _unpad(self, padded_data):
-            padding_length = padded_data[-1]
-            return padded_data[:-padding_length]
-
-
-class DeviceManager:
-    @staticmethod
-    def generate_device_id():
-        return str(uuid.uuid4())
-
-    @staticmethod
-    def get_machine_id():
-        if platform.system() == "Windows":
-            bios_serial = DeviceManager._get_windows_serial(
-                "wmic bios get serialnumber", "unknown_bios"
-            )
-            board_serial = DeviceManager._get_windows_serial(
-                "wmic baseboard get serialnumber", "unknown_board"
-            )
-            memory_gb = DeviceManager._get_memory_gb()
-        elif platform.system() == "Darwin":
-            bios_serial, board_serial, memory_gb = DeviceManager._get_macos_serial()
-        else:
-            raise
-
-        os_name = os.name
-        user_name = os.getlogin()
-        machine_id = f"{bios_serial}:{board_serial}:{os_name}:{user_name}:{memory_gb}"
-        logger.debug(f"MachineId: {machine_id}")
-        return hashlib.md5(machine_id.encode()).hexdigest()
-
-    @staticmethod
-    def _get_windows_serial(command, default):
-        try:
-            return (
-                subprocess.check_output(command, shell=True)
-                .decode()
-                .split("\n")[1]
-                .strip()
-            )
-        except Exception:
-            return default
-
-    @staticmethod
-    def _get_macos_serial():
-        result = subprocess.run(
-            ["system_profiler", "SPHardwareDataType"], stdout=subprocess.PIPE
-        )
-        output = result.stdout.decode()
-
-        bios_serial = None
-        board_serial = None
-        memory = None
-
-        for line in output.split("\n"):
-            if "Serial Number (system)" in line:
-                bios_serial = line.split(":")[-1].strip()
-            if "Hardware UUID" in line:
-                board_serial = line.split(":")[-1].strip()
-            if "Memory" in line:
-                memory = line.split(":")[-1].strip()
-
-        return bios_serial, board_serial, memory
-
-    @staticmethod
-    def _get_memory_gb():
-        try:
-            output = subprocess.check_output(
-                ["wmic", "ComputerSystem", "get", "TotalPhysicalMemory"]
-            ).decode()
-            total_memory_str = output.split("\n")[1].strip()
-            total_memory_bytes = int(total_memory_str)
-            return total_memory_bytes
-        except Exception as e:
-            return f"Error retrieving memory: {e}"
-
-
 class AuthApp:
     def __init__(self, master):
         self.master = master
         self.setup_ui()
         self.failed_attempts = 0
-        self.device_id = self.get_or_create_device_id()
+        self.user_id = None
+        self.session_token = None
+        self.main_app = None
 
     def setup_ui(self):
         self.master.title("Authentication")
@@ -205,9 +33,9 @@ class AuthApp:
         self.id_entry = ttk.Entry(self.master)
         self.error_label = tk.Label(
             self.master,
-            text="Enter your username and click 'OK' or press Enter.",
+            text="Enter your User ID and click 'OK' or press Enter.",
             fg="black",
-            wraplength=250,
+            wraplength=300,
         )
         button_frame = ttk.Frame(self.master)
         self.ok_button = ttk.Button(
@@ -246,8 +74,7 @@ class AuthApp:
         return True
 
     def validate_input(self):
-        user_id = self.id_entry.get()
-        if not re.match(r"^[a-zA-Z0-9]{4,12}$", user_id):
+        if not re.match(r"^[a-zA-Z0-9]{4,12}$", self.user_id):
             self.show_error("User ID must be\n4-12 alphanumeric characters")
             return False
         self.clear_error()
@@ -269,7 +96,7 @@ class AuthApp:
         self.id_entry.config(state="normal")
         self.ok_button.config(state="normal")
         self.clear_error()
-        self.failed_attempts = 1
+        self.failed_attempts = 0
 
     def start_countdown(self, remaining_time, final_message=""):
         if remaining_time > 0:
@@ -283,16 +110,18 @@ class AuthApp:
             self.unlock_inputs()
 
     def validate_and_auth(self):
+        self.user_id = self.id_entry.get()
         if self.validate_input():
             self.ok_button.config(state="disabled")
+            logger.info(f"Attempting authentication for user: {self.user_id}")
             self.request_authentication()
+        else:
+            logger.warning(f"Invalid input for user ID: {self.user_id}")
 
     def request_authentication(self):
-        user_id = self.id_entry.get()
         timestamp = str(int(datetime.now(timezone.utc).timestamp()))
         payload = {
-            "userId": user_id,
-            "deviceId": self.device_id,
+            "userId": self.user_id,
             "timestamp": timestamp,
         }
         resp_json = {}
@@ -300,18 +129,38 @@ class AuthApp:
         try:
             response = requests.post(os.getenv("AUTH_URL"), json=payload, timeout=5)
             resp_json = response.json()
-            logger.info(f"{response.status_code}: {resp_json}")
+            logger.info(f"Authentication response: {response.status_code}: {resp_json}")
             response.raise_for_status()
-            self.launch_keystroke_simulator()
+
+            # Update the session token in memory
+            self.session_token = resp_json.get("sessionToken")
+            if self.session_token:
+                logger.info(f"Authentication successful for user: {self.user_id}")
+                self.launch_next_step()
+            else:
+                logger.error("No session token received in authentication response")
+                raise Exception("No session token received")
         except requests.Timeout:
+            logger.error(f"Authentication request timed out for user: {self.user_id}")
             self.show_error_and_reactivate("Authentication request timed out.")
-        except requests.RequestException as e:
-            err_msg = resp_json.get("message", "") if resp_json else ""
+        except requests.HTTPError as e:
+            err_msg = resp_json.get("message", "Authentication failed.")
+            logger.error(
+                f"HTTP error during authentication for user {self.user_id}: {err_msg}"
+            )
             self.show_error_and_reactivate(f"Failed to login: {err_msg}")
+        except Exception as e:
+            logger.error(
+                f"Unexpected error during authentication for user {self.user_id}: {str(e)}"
+            )
+            self.show_error_and_reactivate(f"An error occurred: {str(e)}")
 
     def show_error_and_reactivate(self, message):
         self.failed_attempts += 1
-        if self.failed_attempts >= 2:
+        if self.failed_attempts >= 3:
+            logger.warning(
+                f"User {self.user_id} locked out due to too many failed attempts"
+            )
             self.lock_inputs()
             self.start_countdown(10, final_message=message)
         else:
@@ -320,20 +169,47 @@ class AuthApp:
             self.master.deiconify()
             self.master.after(100, self.set_window_focus)
 
-    def launch_keystroke_simulator(self):
+    def launch_next_step(self):
         self.master.withdraw()
-        self.master.destroy()
-        keystroke_app = KeystrokeSimulatorApp()
-        keystroke_app.mainloop()
 
-    @staticmethod
-    def get_or_create_device_id():
+        # Start periodic session validation before launching the main app
+        self.check_session_and_schedule()
+
+        self.main_app = KeystrokeSimulatorApp(
+            secure_callback=self.terminate_application
+        )
+        self.main_app.mainloop()
+
+    def validate_session_token(self):
+        logger.info(f"Validating session for user: {self.user_id}")
+        payload = {"userId": self.user_id, "sessionToken": self.session_token}
         try:
-            return StorageManager.retrieve_device_id()
-        except Exception:
-            device_id = DeviceManager.generate_device_id()
-            StorageManager.store_device_id(device_id)
-            return device_id
+            response = requests.post(os.getenv("VALIDATE_URL"), json=payload, timeout=5)
+            response.raise_for_status()
+            logger.info(f"Session validation successful for user: {self.user_id}")
+            return True
+        except requests.RequestException as e:
+            logger.error(f"Session validation failed for user '{self.user_id}'")
+            return False
+
+    def check_session_and_schedule(self):
+        if self.validate_session_token():
+            self.master.after(300000, self.check_session_and_schedule)
+        else:
+            logger.info(f"Invalid session token")
+            self.force_close_app()
+
+    def terminate_application(self):
+        self.master.destroy()
+        self.master.quit()
+        self.master = None
+        logger.info("Application terminated")
+
+    def force_close_app(self):
+        if self.main_app:
+            self.main_app.on_closing()
+        else:
+            self.terminate_application()
 
 
 def main():
@@ -343,7 +219,9 @@ def main():
     if os.path.isfile(log_path):
         shutil.move(log_path, "logs.bak")
         os.makedirs(log_path)
-    logger.add(os.path.join(log_path, "keysym.log"), rotation="1 MB", level="INFO")
+    logger.add(os.path.join(log_path, "auth.log"), rotation="1 MB", level="INFO")
+
+    load_dotenv(find_dotenv())
 
     root = tk.Tk()
     app = AuthApp(root)
@@ -351,5 +229,4 @@ def main():
 
 
 if __name__ == "__main__":
-    load_dotenv(find_dotenv())
     main()

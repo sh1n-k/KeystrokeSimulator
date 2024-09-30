@@ -1,23 +1,27 @@
 import json
 import logging
+import ntpath
 import os
 import platform
-from pathlib import Path
 import subprocess
+import sys
+from pathlib import Path
 from threading import Thread
 from typing import Optional, Dict
 
-from loguru import logger
 import pygame
+from loguru import logger
 
 SYSTEM = platform.system().lower()
 
 if SYSTEM == "windows":
     import ctypes
+    import win32api
+    import win32gui
+    import win32process
 elif SYSTEM == "darwin":
+    import AppKit
     from Quartz import (
-        CGEventSourceKeyState,
-        CGEventSourceStateID,
         kCGEventFlagMaskShift,
         kCGEventFlagMaskAlternate,
         kCGEventFlagMaskControl,
@@ -33,7 +37,7 @@ class WindowUtils:
 
     @staticmethod
     def _calculate_window_size(
-        window, screen_width, screen_height, width_percent, height_percent
+            window, screen_width, screen_height, width_percent, height_percent
     ):
         window.update_idletasks()
         return (
@@ -322,3 +326,52 @@ class SoundUtils:
                 "SoundUtils not initialized. Call SoundUtils.initialize() first."
             )
         cls._play_sound_method(sound_file)
+
+
+class ProcessCollector:
+    @staticmethod
+    def get():
+        return (
+            ProcessCollector.get_processes_macos()
+            if sys.platform == "darwin"
+            else ProcessCollector.get_processes_windows()
+        )
+
+    @staticmethod
+    def get_processes_macos():
+        workspace = AppKit.NSWorkspace.sharedWorkspace()
+        app_list = workspace.runningApplications()
+
+        return [
+            (app.localizedName(), app.processIdentifier(), None)
+            for app in app_list
+            if app.activationPolicy() == 0
+        ]
+
+    @staticmethod
+    def get_processes_windows():
+        processes = {}
+        window_names = {}
+
+        def enum_window_callback(hwnd, lparam):
+            if win32gui.IsWindowVisible(hwnd):
+                tid, pid = win32process.GetWindowThreadProcessId(hwnd)
+                if pid not in processes:
+                    process_handle = win32api.OpenProcess(0x1000, False, pid)
+                    process_name = win32process.GetModuleFileNameEx(process_handle, 0)
+                    processes[pid] = process_name
+                    window_name = win32gui.GetWindowText(hwnd)
+                    window_names[pid] = [window_name]
+                    win32api.CloseHandle(process_handle)
+                else:
+                    window_name = win32gui.GetWindowText(hwnd)
+                    if window_name not in window_names[pid]:
+                        window_names[pid].append(window_name)
+            return True
+
+        win32gui.EnumWindows(enum_window_callback, None)
+
+        return [
+            (ntpath.basename(processes[pid]).split(".")[0], pid, window_names[pid])
+            for pid in processes
+        ]

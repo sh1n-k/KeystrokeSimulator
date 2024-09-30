@@ -51,7 +51,7 @@ def get_platform_specific_options():
 if __name__ == "__main__":
     check_required_env_vars()
 
-    script_content = create_temp_script("main_secure_new.py")
+    script_content = create_temp_script("main_secure.py")
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as temp_file:
         temp_file.write(script_content)
