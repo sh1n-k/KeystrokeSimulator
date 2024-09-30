@@ -202,7 +202,7 @@ class ProfileButtonFrame(tk.Frame):
         self.sort_button.pack(side=tk.LEFT, padx=5)
 
 
-class KeystrokeSimulatorAppV2(tk.Tk):
+class KeystrokeSimulatorApp(tk.Tk):
     def __init__(self, secure_callback=None):
         super().__init__()
         self.initialize_app()

@@ -29,6 +29,27 @@ elif platform.system() == "Darwin":
     )
 
 
+class KeySimulator:
+    def __init__(self, os_type: str):
+        self.os_type = os_type
+        self.press_key = self.press_key_win if os_type == "Windows" else self.press_key_darwin
+        self.release_key = self.release_key_win if os_type == "Windows" else self.release_key_darwin
+
+    def press_key_win(self, code: int):
+        ctypes.windll.user32.keybd_event(code, 0, 0, 0)
+
+    def release_key_win(self, code: int):
+        ctypes.windll.user32.keybd_event(code, 0, 2, 0)
+
+    def press_key_darwin(self, code: int):
+        event = CGEventCreateKeyboardEvent(None, code, True)
+        CGEventPost(kCGHIDEventTap, event)
+
+    def release_key_darwin(self, code: int):
+        event = CGEventCreateKeyboardEvent(None, code, False)
+        CGEventPost(kCGHIDEventTap, event)
+
+
 class ModificationKeyHandler:
     def __init__(
             self,
@@ -36,6 +57,7 @@ class ModificationKeyHandler:
             loop_delay: Tuple[float, float],
             key_pressed_time: Tuple[float, float],
             modification_keys: Dict[str, Dict],
+            os_type: str
     ):
         self.key_codes = key_codes
         self.loop_delay = loop_delay
@@ -45,6 +67,8 @@ class ModificationKeyHandler:
             for key, value in modification_keys.items()
             if value.get("enabled")
         }
+        self.os_type = os_type
+        self.key_simulator = KeySimulator(os_type)
         self.mod_key_pressed = threading.Event()
 
     def check_modification_keys(self, is_mod_key_handler: bool = False) -> bool:
@@ -85,33 +109,9 @@ class ModificationKeyHandler:
             )
             return
 
-        self.press_key(key_code)
+        self.key_simulator.press_key(key_code)
         time.sleep(random.uniform(*self.key_pressed_time))
-        self.release_key(key_code)
-
-    def press_key(self, code: int):
-        """
-        Presses a key based on the operating system.
-
-        :param code: The key code to press.
-        """
-        if platform.system() == "Windows":
-            ctypes.windll.user32.keybd_event(code, 0, 0, 0)
-        elif platform.system() == "Darwin":
-            event = CGEventCreateKeyboardEvent(None, code, True)
-            CGEventPost(kCGHIDEventTap, event)
-
-    def release_key(self, code: int):
-        """
-        Releases a key based on the operating system.
-
-        :param code: The key code to release.
-        """
-        if platform.system() == "Windows":
-            ctypes.windll.user32.keybd_event(code, 0, 2, 0)
-        elif platform.system() == "Darwin":
-            event = CGEventCreateKeyboardEvent(None, code, False)
-            CGEventPost(kCGHIDEventTap, event)
+        self.key_simulator.release_key(key_code)
 
 
 class KeystrokeProcessor:
@@ -139,6 +139,8 @@ class KeystrokeProcessor:
         self.event_list = self.prepare_events(event_list)
         self.modification_keys = modification_keys
         self.terminate_event = terminate_event
+        self.os_type = platform.system()
+        self.key_simulator = KeySimulator(self.os_type)
 
         self.key_codes = KeyUtils.get_key_list()
 
@@ -152,13 +154,13 @@ class KeystrokeProcessor:
         )
 
         self.mod_key_handler = ModificationKeyHandler(
-            self.key_codes, self.loop_delay, self.key_pressed_time, modification_keys
+            self.key_codes, self.loop_delay, self.key_pressed_time, modification_keys, self.os_type
         )
 
         # OS-specific initialization
-        if platform.system() == "Windows":
+        if self.os_type == "Windows":
             self.is_process_active = self._is_process_active_windows
-        elif platform.system() == "Darwin":
+        elif self.os_type == "Darwin":
             self.is_process_active = self._is_process_active_darwin
 
         # Perform clustering and compute bounding rectangles
@@ -394,10 +396,10 @@ class KeystrokeProcessor:
             logger.debug(f"Task {task_id}: Key '{key}' added to pressed_keys.")
 
         try:
-            self.press_key(key_code)
+            self.key_simulator.press_key(key_code)
             logger.debug(f"Task {task_id}: Key '{key}' pressed.")
             time.sleep(random.uniform(*self.key_pressed_time))
-            self.release_key(key_code)
+            self.key_simulator.release_key(key_code)
             logger.debug(f"Task {task_id}: Key '{key}' released.")
             logger.info(f"Task {task_id}: Key '{key}' simulated.")
         finally:
@@ -405,30 +407,6 @@ class KeystrokeProcessor:
             with self.pressed_keys_lock:
                 self.pressed_keys.discard(key)
                 logger.debug(f"Task {task_id}: Key '{key}' removed from pressed_keys.")
-
-    def press_key(self, code: int):
-        """
-        Presses a key based on the operating system.
-
-        :param code: The key code to press.
-        """
-        if platform.system() == "Windows":
-            ctypes.windll.user32.keybd_event(code, 0, 0, 0)
-        elif platform.system() == "Darwin":
-            event = CGEventCreateKeyboardEvent(None, code, True)
-            CGEventPost(kCGHIDEventTap, event)
-
-    def release_key(self, code: int):
-        """
-        Releases a key based on the operating system.
-
-        :param code: The key code to release.
-        """
-        if platform.system() == "Windows":
-            ctypes.windll.user32.keybd_event(code, 0, 2, 0)
-        elif platform.system() == "Darwin":
-            event = CGEventCreateKeyboardEvent(None, code, False)
-            CGEventPost(kCGHIDEventTap, event)
 
     def _is_process_active_windows(self, process_id: int) -> bool:
         """
