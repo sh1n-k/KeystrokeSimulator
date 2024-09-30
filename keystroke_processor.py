@@ -6,7 +6,6 @@ import re
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Tuple, Optional
 
 import mss
@@ -32,11 +31,11 @@ elif platform.system() == "Darwin":
 
 class ModificationKeyHandler:
     def __init__(
-        self,
-        key_codes: Dict[str, int],
-        loop_delay: Tuple[float, float],
-        key_pressed_time: Tuple[float, float],
-        modification_keys: Dict[str, Dict],
+            self,
+            key_codes: Dict[str, int],
+            loop_delay: Tuple[float, float],
+            key_pressed_time: Tuple[float, float],
+            modification_keys: Dict[str, Dict],
     ):
         self.key_codes = key_codes
         self.loop_delay = loop_delay
@@ -119,12 +118,12 @@ class KeystrokeProcessor:
     PROCESS_ID_PATTERN = re.compile(r"\((\d+)\)")
 
     def __init__(
-        self,
-        main_app,
-        target_process: str,
-        event_list: List[EventModel],
-        modification_keys: Dict[str, Dict],
-        terminate_event: threading.Event,
+            self,
+            main_app,
+            target_process: str,
+            event_list: List[EventModel],
+            modification_keys: Dict[str, Dict],
+            terminate_event: threading.Event,
     ):
         """
         Initializes the KeystrokeProcessor.
@@ -218,7 +217,7 @@ class KeystrokeProcessor:
         return prepared
 
     def _compute_clusters_and_bounding_rects(
-        self,
+            self,
     ) -> Tuple[Dict[int, List[Dict]], Dict[int, Dict]]:
         """
         Performs clustering on the event list and computes bounding rectangles for each cluster.
@@ -302,7 +301,7 @@ class KeystrokeProcessor:
 
                     # Check modification keys
                     if self.mod_key_handler.check_modification_keys(
-                        is_mod_key_handler=False
+                            is_mod_key_handler=False
                     ):
                         await asyncio.sleep(random.uniform(*self.loop_delay))
                         continue
@@ -332,7 +331,7 @@ class KeystrokeProcessor:
             logger.info("ThreadPoolExecutor has been shut down.")
 
     async def process_cluster(
-        self, sct: mss.mss, bounding_rect: Dict[str, int], events: List[Dict]
+            self, sct: mss.mss, bounding_rect: Dict[str, int], events: List[Dict]
     ):
         """
         Processes a single cluster of events by grabbing the minimal bounding rectangle and simulating keystrokes.
@@ -458,8 +457,8 @@ class KeystrokeProcessor:
         try:
             active_app = AppKit.NSWorkspace.sharedWorkspace().activeApplication()
             return (
-                active_app is not None
-                and active_app.get("NSApplicationProcessIdentifier") == process_id
+                    active_app is not None
+                    and active_app.get("NSApplicationProcessIdentifier") == process_id
             )
         except Exception as e:
             logger.error(f"Error checking active process on macOS: {e}")
