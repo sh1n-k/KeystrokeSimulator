@@ -31,7 +31,6 @@ elif platform.system() == "Darwin":
 
 class KeySimulator:
     def __init__(self, os_type: str):
-        self.os_type = os_type
         self.press_key = self.press_key_win if os_type == "Windows" else self.press_key_darwin
         self.release_key = self.release_key_win if os_type == "Windows" else self.release_key_darwin
 
@@ -71,18 +70,18 @@ class ModificationKeyHandler:
         self.key_simulator = KeySimulator(os_type)
         self.mod_key_pressed = threading.Event()
 
-    def check_modification_keys(self, is_mod_key_handler: bool = False) -> bool:
+    def check_modification_keys(self) -> bool:
         """
         Checks if any modification key is pressed.
 
-        :param is_mod_key_handler: Flag indicating if this handler is for modification keys.
         :return: True if any modification key is pressed, else False.
         """
         any_mod_key_pressed = False
         for key, value in self.modification_keys.items():
             if KeyUtils.mod_key_pressed(key):
                 any_mod_key_pressed = True
-                if not value.get("pass") and is_mod_key_handler:
+                logger.info(f"mod_key_pressed: {value.get('pass')} / {value}")
+                if not value.get("pass"):
                     self.simulate_keystroke(value["value"])
                     logger.debug(
                         f"Key '{value['value']}' pressed with mod-key '{key.upper()}'"
@@ -302,9 +301,7 @@ class KeystrokeProcessor:
                         continue
 
                     # Check modification keys
-                    if self.mod_key_handler.check_modification_keys(
-                            is_mod_key_handler=False
-                    ):
+                    if self.mod_key_handler.check_modification_keys():
                         await asyncio.sleep(random.uniform(*self.loop_delay))
                         continue
 
