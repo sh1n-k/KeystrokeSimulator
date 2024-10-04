@@ -31,8 +31,12 @@ elif platform.system() == "Darwin":
 
 class KeySimulator:
     def __init__(self, os_type: str):
-        self.press_key = self.press_key_win if os_type == "Windows" else self.press_key_darwin
-        self.release_key = self.release_key_win if os_type == "Windows" else self.release_key_darwin
+        self.press_key = (
+            self.press_key_win if os_type == "Windows" else self.press_key_darwin
+        )
+        self.release_key = (
+            self.release_key_win if os_type == "Windows" else self.release_key_darwin
+        )
 
     def press_key_win(self, code: int):
         ctypes.windll.user32.keybd_event(code, 0, 0, 0)
@@ -51,12 +55,12 @@ class KeySimulator:
 
 class ModificationKeyHandler:
     def __init__(
-            self,
-            key_codes: Dict[str, int],
-            loop_delay: Tuple[float, float],
-            key_pressed_time: Tuple[float, float],
-            modification_keys: Dict[str, Dict],
-            os_type: str
+        self,
+        key_codes: Dict[str, int],
+        loop_delay: Tuple[float, float],
+        key_pressed_time: Tuple[float, float],
+        modification_keys: Dict[str, Dict],
+        os_type: str,
     ):
         self.key_codes = key_codes
         self.loop_delay = loop_delay
@@ -117,12 +121,12 @@ class KeystrokeProcessor:
     PROCESS_ID_PATTERN = re.compile(r"\((\d+)\)")
 
     def __init__(
-            self,
-            main_app,
-            target_process: str,
-            event_list: List[EventModel],
-            modification_keys: Dict[str, Dict],
-            terminate_event: threading.Event,
+        self,
+        main_app,
+        target_process: str,
+        event_list: List[EventModel],
+        modification_keys: Dict[str, Dict],
+        terminate_event: threading.Event,
     ):
         """
         Initializes the KeystrokeProcessor.
@@ -153,7 +157,11 @@ class KeystrokeProcessor:
         )
 
         self.mod_key_handler = ModificationKeyHandler(
-            self.key_codes, self.loop_delay, self.key_pressed_time, modification_keys, self.os_type
+            self.key_codes,
+            self.loop_delay,
+            self.key_pressed_time,
+            modification_keys,
+            self.os_type,
         )
 
         # OS-specific initialization
@@ -218,7 +226,7 @@ class KeystrokeProcessor:
         return prepared
 
     def _compute_clusters_and_bounding_rects(
-            self,
+        self,
     ) -> Tuple[Dict[int, List[Dict]], Dict[int, Dict]]:
         """
         Performs clustering on the event list and computes bounding rectangles for each cluster.
@@ -330,7 +338,7 @@ class KeystrokeProcessor:
             logger.info("ThreadPoolExecutor has been shut down.")
 
     async def process_cluster(
-            self, sct: mss.mss, bounding_rect: Dict[str, int], events: List[Dict]
+        self, sct: mss.mss, bounding_rect: Dict[str, int], events: List[Dict]
     ):
         """
         Processes a single cluster of events by grabbing the minimal bounding rectangle and simulating keystrokes.
@@ -432,8 +440,8 @@ class KeystrokeProcessor:
         try:
             active_app = AppKit.NSWorkspace.sharedWorkspace().activeApplication()
             return (
-                    active_app is not None
-                    and active_app.get("NSApplicationProcessIdentifier") == process_id
+                active_app is not None
+                and active_app.get("NSApplicationProcessIdentifier") == process_id
             )
         except Exception as e:
             logger.error(f"Error checking active process on macOS: {e}")

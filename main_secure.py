@@ -1,9 +1,10 @@
 import os
 import re
-import shutil
+import sys
 import tkinter as tk
 from datetime import datetime, timezone
 from tkinter import ttk
+from typing import Dict, Optional
 
 import requests
 from dotenv import load_dotenv, find_dotenv
@@ -12,15 +13,69 @@ from loguru import logger
 from keystroke_simulator_app import KeystrokeSimulatorApp
 from keystroke_utils import WindowUtils
 
+load_dotenv(find_dotenv())
 
-class AuthApp:
-    def __init__(self, master):
+
+class Config:
+    AUTH_URL = os.getenv("AUTH_URL")
+    VALIDATE_URL = os.getenv("VALIDATE_URL")
+    MAX_USER_ID_LENGTH = 12
+    MIN_USER_ID_LENGTH = 4
+    MAX_FAILED_ATTEMPTS = 3
+    LOCKOUT_TIME = 10  # seconds
+
+    # Determine if the application is running as a bundled exe
+    IS_FROZEN = getattr(sys, 'frozen', False)
+    if IS_FROZEN:
+        # If the application is run as a bundle, the PyInstaller bootloader
+        # extends the sys module by a flag frozen=True and sets the app
+        # path into variable _MEIPASS'.
+        APPLICATION_PATH = sys._MEIPASS
+    else:
+        APPLICATION_PATH = os.path.dirname(os.path.abspath(__file__))
+
+    LOG_FILE = os.path.join(APPLICATION_PATH, 'app.log')
+
+
+class AuthService:
+    def __init__(self):
+        self.session_token: Optional[str] = None
+
+    def request_authentication(self, user_id: str) -> Dict[str, str]:
+        timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+        payload = {
+            "userId": user_id,
+            "timestamp": timestamp,
+        }
+        try:
+            response = requests.post(Config.AUTH_URL, json=payload, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            logger.error(f"Authentication error for user {user_id}: {str(e)}")
+            raise
+
+    def validate_session_token(self, user_id: str) -> bool:
+        if not self.session_token:
+            return False
+        payload = {"userId": user_id, "sessionToken": self.session_token}
+        try:
+            response = requests.post(Config.VALIDATE_URL, json=payload, timeout=5)
+            response.raise_for_status()
+            return True
+        except requests.RequestException:
+            logger.error(f"Session validation failed for user '{user_id}'")
+            return False
+
+
+class AuthUI:
+    def __init__(self, master: tk.Tk, auth_service: AuthService, on_success_callback):
         self.master = master
+        self.auth_service = auth_service
+        self.on_success_callback = on_success_callback
         self.setup_ui()
         self.failed_attempts = 0
         self.user_id = None
-        self.session_token = None
-        self.main_app = None
 
     def setup_ui(self):
         self.master.title("Authentication")
@@ -66,21 +121,28 @@ class AuthApp:
         self.master.lift()
         self.id_entry.focus_set()
 
-    def validate_user_id(self, new_value):
-        if len(new_value) > 12:
-            self.show_error("User ID must be\n12 characters or less")
+    def validate_user_id(self, new_value: str) -> bool:
+        if len(new_value) > Config.MAX_USER_ID_LENGTH:
+            self.show_error(
+                f"User ID must be\n{Config.MAX_USER_ID_LENGTH} characters or less"
+            )
             return False
         self.clear_error()
         return True
 
-    def validate_input(self):
-        if not re.match(r"^[a-zA-Z0-9]{4,12}$", self.user_id):
-            self.show_error("User ID must be\n4-12 alphanumeric characters")
+    def validate_input(self) -> bool:
+        if not re.match(
+                f"^[a-zA-Z0-9]{{{Config.MIN_USER_ID_LENGTH},{Config.MAX_USER_ID_LENGTH}}}$",
+                self.user_id,
+        ):
+            self.show_error(
+                f"User ID must be\n{Config.MIN_USER_ID_LENGTH}-{Config.MAX_USER_ID_LENGTH} alphanumeric characters"
+            )
             return False
         self.clear_error()
         return True
 
-    def show_error(self, message):
+    def show_error(self, message: str):
         self.error_label.config(text=message, fg="red")
         self.master.update_idletasks()
 
@@ -90,7 +152,7 @@ class AuthApp:
     def lock_inputs(self):
         self.id_entry.config(state="disabled")
         self.ok_button.config(state="disabled")
-        self.start_countdown(10)
+        self.start_countdown(Config.LOCKOUT_TIME)
 
     def unlock_inputs(self):
         self.id_entry.config(state="normal")
@@ -98,7 +160,7 @@ class AuthApp:
         self.clear_error()
         self.failed_attempts = 0
 
-    def start_countdown(self, remaining_time, final_message=""):
+    def start_countdown(self, remaining_time: int, final_message: str = ""):
         if remaining_time > 0:
             self.show_error(
                 f"{final_message}\n\nToo many failed attempts.\nTry again in {remaining_time} seconds."
@@ -119,90 +181,73 @@ class AuthApp:
             logger.warning(f"Invalid input for user ID: {self.user_id}")
 
     def request_authentication(self):
-        timestamp = str(int(datetime.now(timezone.utc).timestamp()))
-        payload = {
-            "userId": self.user_id,
-            "timestamp": timestamp,
-        }
-        resp_json = {}
-
         try:
-            response = requests.post(os.getenv("AUTH_URL"), json=payload, timeout=5)
-            resp_json = response.json()
-            logger.info(f"Authentication response: {response.status_code}: {resp_json}")
-            response.raise_for_status()
-
-            # Update the session token in memory
-            self.session_token = resp_json.get("sessionToken")
-            if self.session_token:
+            resp_json = self.auth_service.request_authentication(self.user_id)
+            session_token = resp_json.get("sessionToken")
+            if session_token:
                 logger.info(f"Authentication successful for user: {self.user_id}")
-                self.launch_next_step()
+                self.auth_service.session_token = session_token
+                self.on_success_callback()
             else:
                 logger.error("No session token received in authentication response")
                 raise Exception("No session token received")
-        except requests.Timeout:
-            logger.error(f"Authentication request timed out for user: {self.user_id}")
-            self.show_error_and_reactivate("Authentication request timed out.")
-        except requests.HTTPError as e:
-            err_msg = resp_json.get("message", "Authentication failed.")
-            logger.error(
-                f"HTTP error during authentication for user {self.user_id}: {err_msg}"
-            )
-            self.show_error_and_reactivate(f"Failed to login: {err_msg}")
         except Exception as e:
-            logger.error(
-                f"Unexpected error during authentication for user {self.user_id}: {str(e)}"
-            )
-            self.show_error_and_reactivate(f"An error occurred: {str(e)}")
+            self.show_error_and_reactivate(f"Authentication failed: {str(e)}")
 
-    def show_error_and_reactivate(self, message):
+    def show_error_and_reactivate(self, message: str):
         self.failed_attempts += 1
-        if self.failed_attempts >= 3:
+        if self.failed_attempts >= Config.MAX_FAILED_ATTEMPTS:
             logger.warning(
                 f"User {self.user_id} locked out due to too many failed attempts"
             )
             self.lock_inputs()
-            self.start_countdown(10, final_message=message)
+            self.start_countdown(Config.LOCKOUT_TIME, final_message=message)
         else:
             self.show_error(message)
             self.ok_button.config(state="normal")
             self.master.deiconify()
             self.master.after(100, self.set_window_focus)
 
-    def launch_next_step(self):
-        self.master.withdraw()
 
-        # Start periodic session validation before launching the main app
+def setup_logging():
+    # Remove any existing handlers
+    logger.remove()
+
+    if Config.IS_FROZEN:
+        # For PyInstaller executable, set level to INFO
+        logger.add(sys.stderr, level="INFO")
+        logger.add(Config.LOG_FILE, rotation="1 MB", level="INFO")
+    else:
+        # For running the script directly, set level to DEBUG
+        logger.add(sys.stderr, level="DEBUG")
+        logger.add(Config.LOG_FILE, rotation="1 MB", level="DEBUG")
+
+
+class Application:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.auth_service = AuthService()
+        self.auth_ui = AuthUI(self.root, self.auth_service, self.on_auth_success)
+        self.main_app = None
+
+    def on_auth_success(self):
+        self.root.withdraw()
         self.check_session_and_schedule()
-
         self.main_app = KeystrokeSimulatorApp(
             secure_callback=self.terminate_application
         )
         self.main_app.mainloop()
 
-    def validate_session_token(self):
-        logger.info(f"Validating session for user: {self.user_id}")
-        payload = {"userId": self.user_id, "sessionToken": self.session_token}
-        try:
-            response = requests.post(os.getenv("VALIDATE_URL"), json=payload, timeout=5)
-            response.raise_for_status()
-            logger.info(f"Session validation successful for user: {self.user_id}")
-            return True
-        except requests.RequestException as e:
-            logger.error(f"Session validation failed for user '{self.user_id}'")
-            return False
-
     def check_session_and_schedule(self):
-        if self.validate_session_token():
-            self.master.after(300000, self.check_session_and_schedule)
+        if self.auth_service.validate_session_token(self.auth_ui.user_id):
+            self.root.after(10000, self.check_session_and_schedule)
         else:
             logger.info(f"Invalid session token")
             self.force_close_app()
 
     def terminate_application(self):
-        self.master.destroy()
-        self.master.quit()
-        self.master = None
+        self.root.destroy()
+        self.root.quit()
         logger.info("Application terminated")
 
     def force_close_app(self):
@@ -211,21 +256,14 @@ class AuthApp:
         else:
             self.terminate_application()
 
+    def run(self):
+        self.root.mainloop()
+
 
 def main():
-    log_path = "logs"
-    if not os.path.exists(log_path):
-        os.mkdir(log_path)
-    if os.path.isfile(log_path):
-        shutil.move(log_path, "logs.bak")
-        os.makedirs(log_path)
-    logger.add(os.path.join(log_path, "auth.log"), rotation="1 MB", level="INFO")
-
-    load_dotenv(find_dotenv())
-
-    root = tk.Tk()
-    app = AuthApp(root)
-    root.mainloop()
+    setup_logging()
+    app = Application()
+    app.run()
 
 
 if __name__ == "__main__":

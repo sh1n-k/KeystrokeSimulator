@@ -21,7 +21,13 @@ from keystroke_profiles import KeystrokeProfiles
 from keystroke_quick_event_editor import KeystrokeQuickEventEditor
 from keystroke_settings import KeystrokeSettings
 from keystroke_sort_events import KeystrokeSortEvents
-from keystroke_utils import SoundUtils, StateUtils, WindowUtils, KeyUtils, ProcessCollector
+from keystroke_utils import (
+    SoundUtils,
+    StateUtils,
+    WindowUtils,
+    KeyUtils,
+    ProcessCollector,
+)
 
 
 class ProcessFrame(tk.Frame):

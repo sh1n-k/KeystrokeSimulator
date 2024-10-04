@@ -4,6 +4,8 @@ import string
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
 
+from loguru import logger
+
 
 class SimpleAuthServer(BaseHTTPRequestHandler):
     session_token = None
@@ -51,16 +53,17 @@ class SimpleAuthServer(BaseHTTPRequestHandler):
 
     def handle_validate(self, data):
         token = data.get("sessionToken")
+        logger.info(f"CurrentToken: {SimpleAuthServer.session_token} / UserToken: {token}")
 
         # Check if the token is valid and the counter is less than 4
         if (
             token == SimpleAuthServer.session_token
-            and SimpleAuthServer.validate_counter < 2
+            # and SimpleAuthServer.validate_counter < 2
         ):
             SimpleAuthServer.validate_counter += 1
             self._send_json_response({"message": "Token valid"})
         else:
-            SimpleAuthServer.session_token = None  # Invalidate token
+            # SimpleAuthServer.session_token = None  # Invalidate token
             self._send_json_response({"message": "Invalid token"}, status_code=401)
 
 
