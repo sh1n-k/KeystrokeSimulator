@@ -70,7 +70,6 @@ class ModificationKeyHandler:
             for key, value in modification_keys.items()
             if value.get("enabled")
         }
-        self.os_type = os_type
         self.key_simulator = KeySimulator(os_type)
         self.mod_key_pressed = threading.Event()
 
