@@ -140,9 +140,7 @@ def retry_operation(operation, **kwargs):
             return operation(**kwargs)
         except ClientError as e:
             if e.response["Error"]["Code"] == "ProvisionedThroughputExceededException":
-                sleep_time = (2**retries * BASE_DELAY) + (
-                    random.random() * BASE_DELAY
-                )
+                sleep_time = (2 ** retries * BASE_DELAY) + (random.random() * BASE_DELAY)
                 time.sleep(sleep_time)
                 retries += 1
             else:

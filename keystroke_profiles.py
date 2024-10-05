@@ -44,9 +44,7 @@ class EventRow(ttk.Frame):
         self.entry.pack(side=tk.LEFT, padx=5)
         if self.event and hasattr(self.event, "event_name"):
             self.entry.insert(0, self.event.event_name)
-        ttk.Button(self, text="⚙️", command=self._open_event_settings).pack(
-            side=tk.LEFT
-        )
+        ttk.Button(self, text="⚙️", command=self._open_event_settings).pack(side=tk.LEFT)
         ttk.Button(self, text="📝", command=self._copy_event).pack(side=tk.LEFT)
         ttk.Button(self, text="🗑️", command=self._remove_event).pack(side=tk.LEFT)
 

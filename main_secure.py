@@ -1,6 +1,6 @@
 import os
 import re
-import sys
+import shutil
 import tkinter as tk
 from datetime import datetime, timezone
 from tkinter import ttk
@@ -23,18 +23,6 @@ class Config:
     MIN_USER_ID_LENGTH = 4
     MAX_FAILED_ATTEMPTS = 3
     LOCKOUT_TIME = 10  # seconds
-
-    # Determine if the application is running as a bundled exe
-    IS_FROZEN = getattr(sys, 'frozen', False)
-    if IS_FROZEN:
-        # If the application is run as a bundle, the PyInstaller bootloader
-        # extends the sys module by a flag frozen=True and sets the app
-        # path into variable _MEIPASS'.
-        APPLICATION_PATH = sys._MEIPASS
-    else:
-        APPLICATION_PATH = os.path.dirname(os.path.abspath(__file__))
-
-    LOG_FILE = os.path.join(APPLICATION_PATH, 'app.log')
 
 
 class AuthService:
@@ -211,16 +199,13 @@ class AuthUI:
 
 def setup_logging():
     # Remove any existing handlers
-    logger.remove()
-
-    if Config.IS_FROZEN:
-        # For PyInstaller executable, set level to INFO
-        logger.add(sys.stderr, level="INFO")
-        logger.add(Config.LOG_FILE, rotation="1 MB", level="INFO")
-    else:
-        # For running the script directly, set level to DEBUG
-        logger.add(sys.stderr, level="DEBUG")
-        logger.add(Config.LOG_FILE, rotation="1 MB", level="DEBUG")
+    log_path = "logs"
+    if not os.path.exists(log_path):
+        os.mkdir(log_path)
+    if os.path.isfile(log_path):
+        shutil.move(log_path, "logs.bak")
+        os.makedirs(log_path)
+    logger.add(os.path.join(log_path, "keysym.log"), rotation="1 MB", level="INFO")
 
 
 class Application:
@@ -232,6 +217,7 @@ class Application:
 
     def on_auth_success(self):
         self.root.withdraw()
+        self.root.destroy()
         self.check_session_and_schedule()
         self.main_app = KeystrokeSimulatorApp(
             secure_callback=self.terminate_application
@@ -240,13 +226,12 @@ class Application:
 
     def check_session_and_schedule(self):
         if self.auth_service.validate_session_token(self.auth_ui.user_id):
-            self.root.after(10000, self.check_session_and_schedule)
+            self.root.after(5 * 60 * 1000, self.check_session_and_schedule)
         else:
             logger.info(f"Invalid session token")
             self.force_close_app()
 
     def terminate_application(self):
-        self.root.destroy()
         self.root.quit()
         logger.info("Application terminated")
 

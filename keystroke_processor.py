@@ -301,34 +301,33 @@ class KeystrokeProcessor:
             return
 
         try:
-            with mss.mss() as sct:
-                while not self.terminate_event.is_set():
-                    if not self.is_process_active(self.target_process):
-                        await asyncio.sleep(0.33)
-                        continue
+            while not self.terminate_event.is_set():
+                if not self.is_process_active(self.target_process):
+                    await asyncio.sleep(0.33)
+                    continue
 
-                    # Check modification keys
-                    if self.mod_key_handler.check_modification_keys():
-                        await asyncio.sleep(random.uniform(*self.loop_delay))
-                        continue
-
-                    # Process each cluster
-                    tasks = []
-                    for cluster_id, events in self.clusters.items():
-                        bounding_rect = self.bounding_rects.get(cluster_id)
-                        if not bounding_rect:
-                            logger.error(
-                                f"No bounding rectangle found for cluster {cluster_id}"
-                            )
-                            continue
-                        task = asyncio.create_task(
-                            self.process_cluster(sct, bounding_rect, events)
-                        )
-                        tasks.append(task)
-                    if tasks:
-                        await asyncio.gather(*tasks)
-
+                # Check modification keys
+                if self.mod_key_handler.check_modification_keys():
                     await asyncio.sleep(random.uniform(*self.loop_delay))
+                    continue
+
+                # Process each cluster
+                tasks = []
+                for cluster_id, events in self.clusters.items():
+                    bounding_rect = self.bounding_rects.get(cluster_id)
+                    if not bounding_rect:
+                        logger.error(
+                            f"No bounding rectangle found for cluster {cluster_id}"
+                        )
+                        continue
+                    task = asyncio.create_task(
+                        self.process_cluster(bounding_rect, events)
+                    )
+                    tasks.append(task)
+                if tasks:
+                    await asyncio.gather(*tasks)
+
+                await asyncio.sleep(random.uniform(*self.loop_delay))
 
         except asyncio.CancelledError:
             logger.info("run_processor received cancellation request.")
@@ -336,38 +335,32 @@ class KeystrokeProcessor:
         finally:
             logger.info("ThreadPoolExecutor has been shut down.")
 
-    async def process_cluster(
-        self, sct: mss.mss, bounding_rect: Dict[str, int], events: List[Dict]
-    ):
+    async def process_cluster(self, bounding_rect: Dict[str, int], events: List[Dict]):
         """
         Processes a single cluster of events by grabbing the minimal bounding rectangle and simulating keystrokes.
 
-        :param sct: The mss screen capture instance.
         :param bounding_rect: The bounding rectangle dictionary for the cluster.
         :param events: List of event dictionaries in the cluster.
         """
         # Grab the region asynchronously
-        try:
-            grabbed = await asyncio.to_thread(sct.grab, bounding_rect)
-        except Exception as e:
-            logger.error(f"Error grabbing screen region: {e}")
-            return
+        with mss.mss() as sct:
+            grabbed = sct.grab(bounding_rect)
 
-        # Process each event in the cluster
-        for event in events:
-            rel_x = event["click_position"][0] - bounding_rect["left"]
-            rel_y = event["click_position"][1] - bounding_rect["top"]
-            try:
-                pixel = grabbed.pixel(rel_x, rel_y)
-            except IndexError:
-                logger.error(
-                    f"Pixel ({rel_x}, {rel_y}) out of bounds in grabbed region."
-                )
-                continue
+            # Process each event in the cluster
+            for event in events:
+                rel_x = event["click_position"][0] - bounding_rect["left"]
+                rel_y = event["click_position"][1] - bounding_rect["top"]
+                try:
+                    pixel = grabbed.pixel(rel_x, rel_y)
+                except IndexError:
+                    logger.error(
+                        f"Pixel ({rel_x}, {rel_y}) out of bounds in grabbed region."
+                    )
+                    continue
 
-            if pixel[:3] == event["ref_pixel_value"]:
-                asyncio.create_task(self.simulate_keystroke(event["key"]))
-                await asyncio.sleep(random.uniform(0.025, 0.05))
+                if pixel[:3] == event["ref_pixel_value"]:
+                    asyncio.create_task(self.simulate_keystroke(event["key"]))
+                    await asyncio.sleep(random.uniform(0.025, 0.05))
 
     async def simulate_keystroke(self, key: str):
         """
