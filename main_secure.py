@@ -17,6 +17,7 @@ load_dotenv(find_dotenv())
 
 
 class Config:
+    APP_VERSION = "2.1"
     AUTH_URL = os.getenv("AUTH_URL")
     VALIDATE_URL = os.getenv("VALIDATE_URL")
     MAX_USER_ID_LENGTH = 12
@@ -34,6 +35,7 @@ class AuthService:
         payload = {
             "userId": user_id,
             "timestamp": timestamp,
+            "appVersion": Config.APP_VERSION
         }
         try:
             response = requests.post(Config.AUTH_URL, json=payload, timeout=5)
@@ -46,7 +48,7 @@ class AuthService:
     def validate_session_token(self, user_id: str) -> bool:
         if not self.session_token:
             return False
-        payload = {"userId": user_id, "sessionToken": self.session_token}
+        payload = {"userId": user_id, "sessionToken": self.session_token, "appVersion": Config.APP_VERSION}
         try:
             response = requests.post(Config.VALIDATE_URL, json=payload, timeout=5)
             response.raise_for_status()
