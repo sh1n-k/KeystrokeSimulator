@@ -5,14 +5,19 @@ import platform
 import tkinter as tk
 from typing import List, Tuple
 
-import keyboard
-import pynput
 from PIL import Image, ImageTk
 from loguru import logger
 
 from keystroke_capturer import ScreenshotCapturer
 from keystroke_models import EventModel, ProfileModel
 from keystroke_utils import StateUtils, WindowUtils, KeyUtils
+
+if platform.system() == "Darwin":
+    import keyboard
+
+
+else:
+    import pynput
 
 
 class KeystrokeQuickEventEditor:
@@ -58,7 +63,7 @@ class KeystrokeQuickEventEditor:
         self.create_image_frame()
         self.create_ref_pixel_frame()
         self.create_coordinate_frame()
-        self.create_close_button()
+        self.create_buttons_frame()
         self.create_info_label()
 
     def create_image_frame(self):
@@ -75,7 +80,7 @@ class KeystrokeQuickEventEditor:
         self.image2_placeholder.bind("<B1-Motion>", self.get_coordinates_of_held_image)
 
     def create_image_placeholder(
-        self, parent: tk.Frame, bg_color: str, row: int, column: int
+            self, parent: tk.Frame, bg_color: str, row: int, column: int
     ) -> tk.Label:
         placeholder = tk.Label(parent, width=10, height=5, bg=bg_color)
         placeholder.grid(row=row, column=column, padx=5)
@@ -96,20 +101,28 @@ class KeystrokeQuickEventEditor:
         coord_labels = ["X1:", "Y1:", "X2:", "Y2:"]
         self.coord_entries = self.create_coord_entries(coord_frame, coord_labels)
 
-    def create_close_button(self):
-        close_button = tk.Button(
-            self.event_window, text="Close(ESC)", command=self.close_window
+    def create_buttons_frame(self):  # 함수 이름 변경
+        button_frame = tk.Frame(self.event_window)  # 버튼들을 담을 Frame 생성
+        button_frame.pack(pady=5)  # button_frame 을 pack
+
+        grab_button = tk.Button(  # Grab 버튼 생성
+            button_frame, text="Grab(Ctrl)", command=self.handle_grab_button_click  # command 지정
         )
-        close_button.pack(pady=5)
+        grab_button.pack(side=tk.LEFT, padx=5)  # Grab 버튼을 왼쪽에 pack
+
+        close_button = tk.Button(  # Close 버튼 생성 (기존 코드 유지)
+            button_frame, text="Close(ESC)", command=self.close_window
+        )
+        close_button.pack(side=tk.LEFT, padx=5)  # Close 버튼을 오른쪽에 pack
 
     def create_info_label(self):
         self.info_label = tk.Label(
             self.event_window,
             text="ALT: Area selection\nCTRL: Grab current image\n"
-            + "Left-click on the collected image to set a Crossline and press CTRL to save it to a Quick Event."
-            + "\n\n"
-            + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
-            + "수집된 이미지에 왼쪽 클릭으로 교차선을 설정한 뒤\nCTRL 키를 누르면 Quick 이벤트에 저장됩니다.",
+                 + "Left-click on the collected image to set a Crossline and press CTRL to save it to a Quick Event."
+                 + "\n\n"
+                 + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
+                 + "수집된 이미지에 왼쪽 클릭으로 교차선을 설정한 뒤\nCTRL 키를 누르면 Quick 이벤트에 저장됩니다.",
             anchor="center",
             fg="black",
             wraplength=200,
@@ -125,12 +138,14 @@ class KeystrokeQuickEventEditor:
         if platform.system() == "Darwin":
 
             def on_cmd_press(e):
+                logger.info(f'Command pressed: {e.name}')
                 if e.event_type == "down":
                     self.screenshot_capturer.set_current_mouse_position(
                         self.event_window.winfo_pointerxy()
                     )
 
             def on_control_press(e):
+                logger.info(f'Control pressed: {e.name}')
                 if e.event_type == "down":
                     self.hold_image()
 
@@ -138,6 +153,7 @@ class KeystrokeQuickEventEditor:
             keyboard.hook_key(KeyUtils.get_keycode("control"), on_control_press)
 
         elif platform.system() == "Windows":
+            pass
 
             def on_press(key):
                 logger.debug(f"windows on_press()")
@@ -227,22 +243,30 @@ class KeystrokeQuickEventEditor:
 
     @staticmethod
     def update_image_placeholder(placeholder: tk.Label, image: Image.Image):
-        photo = ImageTk.PhotoImage(image)
-        placeholder.configure(image=photo, width=image.width, height=image.height)
-        placeholder.image = photo
+        try:
+            image = image.convert("RGB")
+            photo = ImageTk.PhotoImage(image, master=placeholder)
+            placeholder.configure(image=photo, width=image.width, height=image.height)
+            placeholder.image = photo
+        except tk.TclError as e:
+            logger.error(f"Failed to update image placeholder: {e}")
 
     @staticmethod
     def update_coordinate_entries(entries: List[tk.Entry], x, y):
         for idx, entry in enumerate(entries):
-            entry.configure(state="normal")
+            # entry.configure(state="normal")
             entry.delete(0, tk.END)
             entry.insert(0, str((x, y)[idx]))
-            entry.configure(state="readonly")
+            # entry.configure(state="readonly")
+
+    def handle_grab_button_click(self):  # 새로운 함수 추가
+        self.hold_image()  # Ctrl 키 입력과 동일한 hold_image 함수 호출
 
     def close_window(self, event=None):
         if platform.system() == "Darwin":
-            keyboard.unhook_key(KeyUtils.get_keycode("command"))
-            keyboard.unhook_key(KeyUtils.get_keycode("control"))
+            keyboard.unhook_all()
+            # keyboard.unhook_key(KeyUtils.get_keycode("command"))
+            # keyboard.unhook_key(KeyUtils.get_keycode("control"))
         self.stop_listeners()
         self.save_latest_position()
         self.event_window.grab_release()
@@ -254,8 +278,8 @@ class KeystrokeQuickEventEditor:
             self.keyboard_input_listener.join()
 
         if (
-            self.screenshot_capturer.capture_thread
-            and self.screenshot_capturer.capture_thread.is_alive()
+                self.screenshot_capturer.capture_thread
+                and self.screenshot_capturer.capture_thread.is_alive()
         ):
             self.screenshot_capturer.stop_capture()
             self.screenshot_capturer.capture_thread.join(timeout=0.1)
@@ -277,10 +301,11 @@ class KeystrokeQuickEventEditor:
 
         if state and "quick_pointer" in state:
             pointer_position = eval(state["quick_pointer"])
+            self.coord_entries[0].insert(0, pointer_position[0])
+            self.coord_entries[1].insert(0, pointer_position[1])
             self.screenshot_capturer.set_current_mouse_position(pointer_position)
 
-    @staticmethod
-    def create_coord_entries(parent: tk.Frame, labels: List[str]) -> List[tk.Entry]:
+    def create_coord_entries(self, parent: tk.Frame, labels: List[str]) -> List[tk.Entry]:
         entries = []
         for i, label_text in enumerate(labels):
             label = tk.Label(parent, text=label_text)
@@ -290,17 +315,31 @@ class KeystrokeQuickEventEditor:
             entry = tk.Entry(parent, width=4)
             entry.grid(row=row, column=column * 2 + 1, padx=4, sticky=tk.W)
             entries.append(entry)
+
+        entries[0].bind("<FocusOut>", self.update_position_from_entries)  # X1 Entry
+        entries[1].bind("<FocusOut>", self.update_position_from_entries)  # Y1 Entry
+
         return entries
+
+    def update_position_from_entries(self, event=None):
+        try:
+            x1 = int(self.coord_entries[0].get())
+            y1 = int(self.coord_entries[1].get())
+            self.screenshot_capturer.set_current_mouse_position((x1, y1))
+        except ValueError:
+            # Entry 에 숫자가 아닌 값이 입력된 경우 에러 처리 (옵션)
+            print("X1, Y1 좌표에 유효한 숫자를 입력하세요.")
+            pass
 
     def save_event(self):
         if all(
-            [
-                self.latest_position,
-                self.clicked_position,
-                self.latest_screenshot,
-                self.held_screenshot,
-                self.ref_pixel_value,
-            ]
+                [
+                    self.latest_position,
+                    self.clicked_position,
+                    self.latest_screenshot,
+                    self.held_screenshot,
+                    self.ref_pixel_value,
+                ]
         ):
             event = EventModel(
                 event_name=str(self.event_idx),

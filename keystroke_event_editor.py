@@ -30,11 +30,11 @@ def invert_pixels_by_coordinate(image: Image.Image, x: int, y: int, axis: str):
 
 class KeystrokeEventEditor:
     def __init__(
-        self,
-        profiles_window: tk.Tk | tk.Toplevel,
-        row_num: int,
-        save_callback: Optional[Callable[[EventModel, bool, int], None]],
-        event_function: Optional[Callable[[], EventModel]],
+            self,
+            profiles_window: tk.Tk | tk.Toplevel,
+            row_num: int,
+            save_callback: Optional[Callable[[EventModel, bool, int], None]],
+            event_function: Optional[Callable[[], EventModel]],
     ):
         self.profiles_window = profiles_window
         self.event_window = tk.Toplevel(profiles_window)
@@ -150,12 +150,12 @@ class KeystrokeEventEditor:
         info_label = tk.Label(
             self.event_window,
             text="ALT: Area selection\nCTRL: Grab current image\n"
-            + "1. Set a crossline by left-clicking on the collected image.\n"
-            + "2. select the key you want to set."
-            + "\n\n"
-            + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
-            + "1. 수집된 이미지에 왼쪽 클릭으로 교차선을 설정하세요.\n"
-            + "2. 설정할 키를 선택하세요.\n",
+                 + "1. Set a crossline by left-clicking on the collected image.\n"
+                 + "2. select the key you want to set."
+                 + "\n\n"
+                 + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
+                 + "1. 수집된 이미지에 왼쪽 클릭으로 교차선을 설정하세요.\n"
+                 + "2. 설정할 키를 선택하세요.\n",
             anchor="center",
             fg="black",
             wraplength=200,
@@ -284,14 +284,14 @@ class KeystrokeEventEditor:
     def save_event(self, event=None):
         try:
             if not all(
-                [
-                    self.latest_position,
-                    self.clicked_position,
-                    self.latest_screenshot,
-                    self.held_screenshot,
-                    self.ref_pixel_value,
-                    self.key_to_enter,
-                ]
+                    [
+                        self.latest_position,
+                        self.clicked_position,
+                        self.latest_screenshot,
+                        self.held_screenshot,
+                        self.ref_pixel_value,
+                        self.key_to_enter,
+                    ]
             ):
                 messagebox.showerror(
                     "Error",
@@ -330,8 +330,8 @@ class KeystrokeEventEditor:
             keyboard.unhook(KeyUtils.get_keycode("control"))
 
         if (
-            self.screenshot_capturer.capture_thread
-            and self.screenshot_capturer.capture_thread.is_alive()
+                self.screenshot_capturer.capture_thread
+                and self.screenshot_capturer.capture_thread.is_alive()
         ):
             self.screenshot_capturer.stop_capture()
             self.screenshot_capturer.capture_thread.join(timeout=0.1)
@@ -358,8 +358,7 @@ class KeystrokeEventEditor:
             pointer_position = eval(state["event_pointer"])
             self.screenshot_capturer.set_current_mouse_position(pointer_position)
 
-    @staticmethod
-    def create_coord_entries(parent: tk.Frame, labels: list[str]) -> list[tk.Entry]:
+    def create_coord_entries(self, parent: tk.Frame, labels: list[str]) -> list[tk.Entry]:
         entries = []
         for i, label_text in enumerate(labels):
             label = tk.Label(parent, text=label_text)
@@ -370,7 +369,21 @@ class KeystrokeEventEditor:
             entry = tk.Entry(parent, width=4)
             entry.grid(row=row, column=column + 1, padx=4, sticky=tk.W)
             entries.append(entry)
+
+        entries[0].bind("<FocusOut>", self.update_position_from_entries)  # X1 Entry
+        entries[1].bind("<FocusOut>", self.update_position_from_entries)  # Y1 Entry
+
         return entries
+
+    def update_position_from_entries(self, event=None):
+        try:
+            x1 = int(self.coord_entries[0].get())
+            y1 = int(self.coord_entries[1].get())
+            self.screenshot_capturer.set_current_mouse_position((x1, y1))
+        except ValueError:
+            # Entry 에 숫자가 아닌 값이 입력된 경우 에러 처리 (옵션)
+            print("X1, Y1 좌표에 유효한 숫자를 입력하세요.")
+            pass
 
     def update_key_to_enter(self, event):
         self.key_to_enter = self.key_combobox.get()

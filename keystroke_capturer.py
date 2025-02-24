@@ -6,6 +6,7 @@ from typing import Callable, Optional, Tuple
 import mss
 import screeninfo
 from PIL import Image
+from loguru import logger
 
 
 class ScreenshotCapturer:
@@ -28,8 +29,8 @@ class ScreenshotCapturer:
     def set_current_mouse_position(self, position):
         mouse_x, mouse_y = position
         if (
-            mouse_x + self.box_size >= self.screen_width
-            or mouse_y + self.box_size >= self.screen_height
+                mouse_x + self.box_size >= self.screen_width
+                or mouse_y + self.box_size >= self.screen_height
         ):
             return
 
@@ -65,7 +66,7 @@ class ScreenshotCapturer:
                         )
                         self.screenshot_callback(position, pil_image)
                 except tk.TclError as e:
-                    print(f"Event windows has been destroyed: {e}")
+                    logger.error(f"Event windows has been destroyed: {e}")
                     self.capturing.clear()
                     break
 
