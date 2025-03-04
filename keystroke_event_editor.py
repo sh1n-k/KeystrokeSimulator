@@ -79,7 +79,7 @@ class KeystrokeEventEditor:
         self.create_refresh_button()
         self.create_key_entry()
         self.create_independent_thread_checkbox()
-        self.create_ok_cancel_buttons()
+        self.create_buttons_frame()
         self.create_info_label()
 
     def create_image_placeholders(self):
@@ -134,17 +134,22 @@ class KeystrokeEventEditor:
         )
         self.independent_thread_checkbox.pack()
 
-    def create_ok_cancel_buttons(self):
+    def create_buttons_frame(self):
         button_frame = tk.Frame(self.event_window)
         button_frame.pack(pady=10)
 
+        grab_button = tk.Button(  # Grab 버튼 생성
+            button_frame, text="Grab(Ctrl)", command=self.handle_grab_button_click  # command 지정
+        )
+        grab_button.grid(row=0, column=0, padx=5, columnspan=2)  # Grab 버튼을 왼쪽에 pack
+
         ok_button = tk.Button(button_frame, text="OK(↩️)", command=self.save_event)
-        ok_button.grid(row=0, column=0, padx=5)
+        ok_button.grid(row=1, column=0, padx=5)
 
         cancel_button = tk.Button(
             button_frame, text="Cancel(ESC)", command=self.close_window
         )
-        cancel_button.grid(row=0, column=1, padx=5)
+        cancel_button.grid(row=1, column=1, padx=5)
 
     def create_info_label(self):
         info_label = tk.Label(
@@ -281,6 +286,9 @@ class KeystrokeEventEditor:
 
         self.update_image_placeholder(placeholder, image_to_apply)
 
+    def handle_grab_button_click(self):
+        self.hold_image()  # Ctrl 키 입력과 동일한 hold_image 함수 호출
+
     def save_event(self, event=None):
         try:
             if not all(
@@ -370,8 +378,14 @@ class KeystrokeEventEditor:
             entry.grid(row=row, column=column + 1, padx=4, sticky=tk.W)
             entries.append(entry)
 
+        # Bind events for X1 and Y1 entries
         entries[0].bind("<FocusOut>", self.update_position_from_entries)  # X1 Entry
         entries[1].bind("<FocusOut>", self.update_position_from_entries)  # Y1 Entry
+
+        # Add Up/Down arrow key functionality for all coordinate entries
+        for entry in entries:
+            entry.bind("<Up>", lambda event, e=entry: self.increment_entry_value(e))
+            entry.bind("<Down>", lambda event, e=entry: self.decrement_entry_value(e))
 
         return entries
 
@@ -384,6 +398,36 @@ class KeystrokeEventEditor:
             # Entry 에 숫자가 아닌 값이 입력된 경우 에러 처리 (옵션)
             print("X1, Y1 좌표에 유효한 숫자를 입력하세요.")
             pass
+
+    def increment_entry_value(self, entry):
+        """Increment the numeric value in the entry by 1"""
+        try:
+            current_value = int(entry.get())
+            entry.delete(0, tk.END)
+            entry.insert(0, str(current_value + 1))
+
+            # If this is one of the first two entries (X1, Y1), update position
+            if entry in self.coord_entries[:2]:
+                self.update_position_from_entries()
+        except ValueError:
+            # If the entry doesn't contain a valid integer, do nothing
+            pass
+        return "break"  # Prevent default behavior
+
+    def decrement_entry_value(self, entry):
+        """Decrement the numeric value in the entry by 1"""
+        try:
+            current_value = int(entry.get())
+            entry.delete(0, tk.END)
+            entry.insert(0, str(current_value - 1))
+
+            # If this is one of the first two entries (X1, Y1), update position
+            if entry in self.coord_entries[:2]:
+                self.update_position_from_entries()
+        except ValueError:
+            # If the entry doesn't contain a valid integer, do nothing
+            pass
+        return "break"  # Prevent default behavior
 
     def update_key_to_enter(self, event):
         self.key_to_enter = self.key_combobox.get()
@@ -418,8 +462,19 @@ class KeystrokeEventEditor:
 
         self.update_ref_pixel_placeholder(self.held_screenshot, self.clicked_position)
 
+        # Verify that key_to_enter exists in the key list
         if self.key_to_enter:
-            self.key_combobox.set(self.key_to_enter)
+            logger.debug(self.key_to_enter)
+
+            # Force update to ensure combobox is ready
+            self.event_window.update_idletasks()
+
+            # If the key exists in values, set it
+            if self.key_to_enter in self.key_combobox['values']:
+                self.key_combobox.set(self.key_to_enter)
+            else:
+                # If not found, log it for debugging
+                logger.debug(f"Key {self.key_to_enter} not found in combobox values")
 
         if hasattr(event, "independent_thread"):
             self.independent_thread.set(event.independent_thread)
@@ -427,10 +482,10 @@ class KeystrokeEventEditor:
     @staticmethod
     def update_coordinate_entries(entries: list[tk.Entry], x, y):
         for idx, entry in enumerate(entries):
-            entry.configure(state="normal")
+            # entry.configure(state="normal")
             entry.delete(0, tk.END)
             entry.insert(0, str((x, y)[idx]))
-            entry.configure(state="readonly")
+            # entry.configure(state="readonly")
 
     @staticmethod
     def update_image_placeholder(placeholder: tk.Label, image: Image.Image):
