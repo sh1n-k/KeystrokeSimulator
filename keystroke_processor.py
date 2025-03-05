@@ -83,7 +83,7 @@ class ModificationKeyHandler:
         for key, value in self.modification_keys.items():
             if KeyUtils.mod_key_pressed(key):
                 any_mod_key_pressed = True
-                logger.info(f"mod_key_pressed: {value.get('pass')} / {value}")
+                logger.debug(f"mod_key_pressed: {value.get('pass')} / {value}")
                 if not value.get("pass"):
                     self.simulate_keystroke(value["value"])
                     logger.debug(

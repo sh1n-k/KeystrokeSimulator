@@ -1,5 +1,6 @@
 import base64
 import json
+import platform
 import tkinter as tk
 from dataclasses import asdict
 from tkinter import ttk, filedialog, messagebox
@@ -17,6 +18,7 @@ class KeystrokeSettings(tk.Toplevel):
         self.master = master
         self.title("Settings")
         self.settings = UserSettings()
+        self.is_windows = platform.system() == "Windows"
         self._setup_window()
         self._create_widgets()
         self._load_settings()
@@ -43,28 +45,51 @@ class KeystrokeSettings(tk.Toplevel):
             row=0, column=0, padx=10, pady=5, sticky=tk.W
         )
 
-        self.start_stop_key = ttk.Combobox(self, values=["Press Key"], state="readonly")
-        self.start_stop_key.grid(row=0, column=1, padx=10, pady=5)
-        self.start_stop_key.current(0)
-        self.start_stop_key.bind("<Key>", self._on_key_press)
+        # Create frame for Start/Stop key controls
+        key_frame = ttk.Frame(self)
+        key_frame.grid(row=0, column=1, columnspan=3, padx=10, pady=5, sticky=tk.W)
 
-        self.wheel_up_var = tk.BooleanVar()
-        self.wheel_up_checkbox = ttk.Checkbutton(
-            self,
-            text="Wheel UP",
-            variable=self.wheel_up_var,
-            command=self._on_checkbox_change,
-        )
-        self.wheel_up_checkbox.grid(row=0, column=2, padx=5, pady=5)
+        # For macOS, only show enable/disable checkbox
+        if not self.is_windows:
+            self.enable_key_var = tk.BooleanVar(value=True)
+            self.enable_key_checkbox = ttk.Checkbutton(
+                key_frame,
+                text="Enable Start/Stop Key",
+                variable=self.enable_key_var,
+                command=self._on_enable_key_change,
+            )
+            self.enable_key_checkbox.pack(side=tk.LEFT, padx=(0, 10))
 
-        self.wheel_down_var = tk.BooleanVar()
-        self.wheel_down_checkbox = ttk.Checkbutton(
-            self,
-            text="Wheel Down",
-            variable=self.wheel_down_var,
-            command=self._on_checkbox_change,
-        )
-        self.wheel_down_checkbox.grid(row=0, column=3, padx=5, pady=5)
+            # Create but don't display the combo box (needed for internal logic)
+            self.start_stop_key = ttk.Combobox(self, values=["Press Key"], state="readonly")
+            self.start_stop_key.current(0)
+            self.start_stop_key.bind("<Key>", self._on_key_press)
+        else:
+            # Add key selection dropdown (Windows only)
+            self.start_stop_key = ttk.Combobox(key_frame, values=["Press Key"], state="readonly")
+            self.start_stop_key.pack(side=tk.LEFT, padx=(0, 10))
+            self.start_stop_key.current(0)
+            self.start_stop_key.bind("<Key>", self._on_key_press)
+
+        # Wheel options are only available on Windows
+        if self.is_windows:
+            self.wheel_up_var = tk.BooleanVar()
+            self.wheel_up_checkbox = ttk.Checkbutton(
+                key_frame,
+                text="Wheel UP",
+                variable=self.wheel_up_var,
+                command=self._on_checkbox_change,
+            )
+            self.wheel_up_checkbox.pack(side=tk.LEFT, padx=(0, 10))
+
+            self.wheel_down_var = tk.BooleanVar()
+            self.wheel_down_checkbox = ttk.Checkbutton(
+                key_frame,
+                text="Wheel Down",
+                variable=self.wheel_down_var,
+                command=self._on_checkbox_change,
+            )
+            self.wheel_down_checkbox.pack(side=tk.LEFT, padx=(0, 10))
 
     def _create_time_entries(self):
         validation_command = (self.register(self._validate_numeric_entry), "%P")
@@ -152,9 +177,13 @@ class KeystrokeSettings(tk.Toplevel):
             self, text="\n", background="white", foreground="red"
         )
         self.warning_label.grid(row=7, column=0, columnspan=5, pady=5)
-        self.warning_label.config(
-            text="For Start/Stop, set only A-Z, 0-9, and special character keys.\n\nStart/Stop 은 A-Z, 0-9, 특수문자 키만 설정하세요."
-        )
+
+        if self.is_windows:
+            warning_text = "For Start/Stop, set only A-Z, 0-9, and special character keys.\n\nStart/Stop 은 A-Z, 0-9, 특수문자 키만 설정하세요."
+        else:
+            warning_text = "On macOS, you can only enable/disable the start/stop key function.\n\nmacOS에서는 start/stop key 기능의 사용 여부만 선택할 수 있습니다."
+
+        self.warning_label.config(text=warning_text)
 
     # Settings Management Methods
     def _load_settings(self):
@@ -178,21 +207,26 @@ class KeystrokeSettings(tk.Toplevel):
         self._update_sound_labels()
 
     def _update_start_stop_key(self):
-        if self.settings.start_stop_key == "W_UP":
-            self.wheel_up_var.set(True)
-            self.start_stop_key.config(state="disabled")
-            self.wheel_down_checkbox.config(state="disabled")
-        elif self.settings.start_stop_key == "W_DN":
-            self.wheel_down_var.set(True)
-            self.start_stop_key.config(state="disabled")
-            self.wheel_up_checkbox.config(state="disabled")
+        if not self.is_windows:
+            # For macOS, use the toggle_start_stop_mac property to set checkbox state
+            self.enable_key_var.set(self.settings.toggle_start_stop_mac)
         else:
-            self.start_stop_key.set(self.settings.start_stop_key)
-            self.wheel_up_var.set(False)
-            self.wheel_down_var.set(False)
-            self.start_stop_key.config(state="readonly")
-            self.wheel_up_checkbox.config(state="normal")
-            self.wheel_down_checkbox.config(state="normal")
+            # For Windows, handle wheel options and key selection
+            if self.settings.start_stop_key == "W_UP":
+                self.wheel_up_var.set(True)
+                self.start_stop_key.config(state="disabled")
+                self.wheel_down_checkbox.config(state="disabled")
+            elif self.settings.start_stop_key == "W_DN":
+                self.wheel_down_var.set(True)
+                self.start_stop_key.config(state="disabled")
+                self.wheel_up_checkbox.config(state="disabled")
+            else:
+                self.start_stop_key.set(self.settings.start_stop_key)
+                self.wheel_up_var.set(False)
+                self.wheel_down_var.set(False)
+                self.start_stop_key.config(state="readonly")
+                self.wheel_up_checkbox.config(state="normal")
+                self.wheel_down_checkbox.config(state="normal")
 
     def _update_time_entries(self):
         self._set_entry_values(1, "key_pressed_time")
@@ -232,7 +266,26 @@ class KeystrokeSettings(tk.Toplevel):
         sound_label.config(text=filepath)
 
     # Event Handlers
+    def _on_enable_key_change(self):
+        # For macOS: Enable/disable the start/stop key
+        if not self.is_windows:
+            key_enabled = self.enable_key_var.get()
+
+            # Update toggle state in settings
+            self.settings.toggle_start_stop_mac = key_enabled
+
+            # Update the stored key setting
+            if not key_enabled:
+                self.settings.start_stop_key = "DISABLED"
+            elif self.settings.start_stop_key == "DISABLED":
+                # If re-enabling, set to default key
+                self.settings.start_stop_key = "`"
+
     def _on_checkbox_change(self):
+        # For Windows: Handle wheel checkboxes
+        if not self.is_windows:
+            return
+
         if self.wheel_up_var.get() or self.wheel_down_var.get():
             self.start_stop_key.config(state="disabled")
         else:
@@ -248,11 +301,14 @@ class KeystrokeSettings(tk.Toplevel):
         self._store_wheel_settings()
 
     def _on_key_press(self, event):
+        if not self.is_windows and not self.enable_key_var.get():
+            return  # Ignore key press if key is disabled on macOS
+
         valid_keys = (
-            set(f"F{i}" for i in range(1, 13))
-            | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
-            | set(chr(i) for i in range(ord("0"), ord("9") + 1))
-            | set("`[];',./-=\\")
+                set(f"F{i}" for i in range(1, 13))
+                | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
+                | set(chr(i) for i in range(ord("0"), ord("9") + 1))
+                | set("`[];',./-=\\")
         )
 
         key = event.char.upper() or event.keysym.upper()
@@ -299,7 +355,11 @@ class KeystrokeSettings(tk.Toplevel):
         return 1 <= value <= 50
 
     def validate_start_stop_key(self):
-        if self.settings.start_stop_key in ["Press Key", ""]:
+        # Skip validation if on macOS and key is disabled
+        if not self.is_windows and not self.enable_key_var.get():
+            return True
+
+        if self.settings.start_stop_key in ["Press Key", "", "DISABLED"]:
             self.show_warning("Please select a Start/Stop key.")
             return False
         return True
@@ -369,10 +429,20 @@ class KeystrokeSettings(tk.Toplevel):
             )
 
     def on_ok(self):
-        if not self.validate_start_stop_key():
-            return
+        # For macOS, handle key enable/disable differently
+        if not self.is_windows:
+            # Save the toggle state
+            self.settings.toggle_start_stop_mac = self.enable_key_var.get()
 
-        self._store_wheel_settings()
+            if not self.enable_key_var.get():
+                self.settings.start_stop_key = "DISABLED"
+            elif self.settings.start_stop_key == "DISABLED" or self.settings.start_stop_key in ["Press Key", ""]:
+                self.show_warning("Please select a Start/Stop key.")
+                return
+        else:
+            if not self.validate_start_stop_key():
+                return
+            self._store_wheel_settings()
 
         if not self.validate_and_set_time_settings():
             return
@@ -385,11 +455,14 @@ class KeystrokeSettings(tk.Toplevel):
     def on_close(self, event=None):
         self.master.settings_window = None
         self.master.load_settings()
-        self.master.bind_events()
+        self.master.setup_event_handlers()
         self.destroy()
 
     # Helper Methods
     def _store_wheel_settings(self):
+        if not self.is_windows:
+            return
+
         if self.wheel_up_var.get():
             self.settings.start_stop_key = "W_UP"
         elif self.wheel_down_var.get():

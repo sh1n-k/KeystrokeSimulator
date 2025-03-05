@@ -280,7 +280,7 @@ class KeystrokeSortEvents(tk.Toplevel):
     def close_window(self, event=None):
         self.save_window_state()
         self.master.load_settings()
-        self.master.bind_events()
+        self.master.setup_event_handlers()
         self.destroy()
 
     def save_window_state(self):

@@ -5,13 +5,13 @@ import pickle
 import platform
 import shutil
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, messagebox
 from typing import Callable, List, Dict, Optional
 
 import keyboard
-import pynput.mouse
 from loguru import logger
 
 from keystroke_models import ProfileModel, EventModel, UserSettings
@@ -97,6 +97,7 @@ class ProfileFrame(tk.Frame):
             for f in os.listdir(self.profiles_dir)
             if f.endswith(".pkl")
         ]
+        profile_files.sort(reverse=False)
         if "Quick" in profile_files:
             profile_files.insert(0, profile_files.pop(profile_files.index("Quick")))
         self.profile_combobox["values"] = profile_files
@@ -134,13 +135,13 @@ class ProfileFrame(tk.Frame):
 
 class ButtonFrame(tk.Frame):
     def __init__(
-        self,
-        master,
-        toggle_callback: Callable,
-        events_callback: Callable,
-        settings_callback: Callable,
-        *args,
-        **kwargs,
+            self,
+            master,
+            toggle_callback: Callable,
+            events_callback: Callable,
+            settings_callback: Callable,
+            *args,
+            **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
         self.start_stop_button = tk.Button(
@@ -172,13 +173,13 @@ class ButtonFrame(tk.Frame):
 
 class ProfileButtonFrame(tk.Frame):
     def __init__(
-        self,
-        master,
-        modkeys_callback: Callable,
-        edit_callback: Callable,
-        sort_callback: Callable,
-        *args,
-        **kwargs,
+            self,
+            master,
+            modkeys_callback: Callable,
+            edit_callback: Callable,
+            sort_callback: Callable,
+            *args,
+            **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
         self.modkeys_button = tk.Button(  # Add this new button
@@ -227,7 +228,13 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.terminate_event = threading.Event()
         self.settings_window = None
         self.latest_scroll_time = None
+
+        # Variables for Start/Stop toggle
         self.start_stop_mouse_listener = None
+        self.last_ctrl_press_time = 0
+        self.ctrl_check_thread = None
+        self.ctrl_check_active = False
+
         SoundUtils.initialize()
 
     def create_ui(self):
@@ -243,10 +250,10 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
 
         for frame in (
-            self.process_frame,
-            self.profile_frame,
-            self.button_frame,
-            self.profile_button_frame,
+                self.process_frame,
+                self.profile_frame,
+                self.button_frame,
+                self.profile_button_frame,
         ):
             frame.pack(pady=5)
 
@@ -270,19 +277,73 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
 
     def setup_start_stop_handler(self):
-        start_stop_key = self.settings.start_stop_key
-        if start_stop_key.startswith("W_"):
-            self.start_stop_mouse_listener = pynput.mouse.Listener(
-                on_scroll=self.on_mouse_scroll
-            )
-            self.start_stop_mouse_listener.start()
+        if platform.system() == "Darwin":
+            if self.settings.toggle_start_stop_mac:
+                # Setup double Ctrl press detection for macOS
+                self.setup_ctrl_double_press_handler()
         else:
-            key = (
-                KeyUtils.get_keycode(start_stop_key)
-                if platform.system() == "Darwin"
-                else start_stop_key
-            )
-            keyboard.on_press_key(key, self.toggle_start_stop)
+            # Existing code for Windows
+            start_stop_key = self.settings.start_stop_key
+            if start_stop_key.startswith("W_"):
+                import pynput
+                self.start_stop_mouse_listener = pynput.mouse.Listener(
+                    on_scroll=self.on_mouse_scroll
+                )
+                self.start_stop_mouse_listener.start()
+            else:
+                key = (
+                    KeyUtils.get_keycode(start_stop_key)
+                    if platform.system() == "Darwin"
+                    else start_stop_key
+                )
+                keyboard.on_press_key(key, self.toggle_start_stop)
+
+    def setup_ctrl_double_press_handler(self):
+        """Sets up a thread to detect double Ctrl presses on macOS"""
+
+        # Start a thread to check for Ctrl key presses
+        self.ctrl_check_active = True
+        self.ctrl_check_thread = threading.Thread(target=self.check_for_double_ctrl)
+        self.ctrl_check_thread.daemon = True
+        self.ctrl_check_thread.start()
+
+    def check_for_double_ctrl(self):
+        """Thread method to detect double Ctrl key presses on macOS"""
+        import time
+
+        last_ctrl_state = False
+        last_toggle_time = 0
+        toggle_cooldown = 1.0
+        while self.ctrl_check_active:
+            try:
+                current_time = time.time()
+                if current_time - last_toggle_time < toggle_cooldown:
+                    time.sleep(0.05)
+                    continue
+
+                current_ctrl_state = KeyUtils.mod_key_pressed("ctrl")
+
+                # Detect rising edge (key just pressed)
+                if current_ctrl_state and not last_ctrl_state:
+                    time_diff = current_time - self.last_ctrl_press_time
+
+                    # If second press is within 0.75 seconds of first press
+                    if 0 < time_diff <= 0.5:
+                        # Use after() to call toggle_start_stop from the main thread
+                        self.after(0, self.toggle_start_stop)
+                        last_toggle_time = current_time
+
+                    # Update the last press time
+                    self.last_ctrl_press_time = current_time
+
+                # Update the last state
+                last_ctrl_state = current_ctrl_state
+
+                # Small delay to prevent high CPU usage
+                time.sleep(0.05)
+            except Exception as e:
+                logger.error(f"Error in check_for_double_ctrl: {e}")
+                time.sleep(0.1)
 
     def init_profiles(self):
         os.makedirs(self.profiles_dir, exist_ok=True)
@@ -309,7 +370,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def on_mouse_scroll(self, x, y, dx, dy):
         if not self.process_activation_func(
-            KeystrokeProcessor.parse_process_id(self.selected_process.get())
+                KeystrokeProcessor.parse_process_id(self.selected_process.get())
         ):
             return
 
@@ -318,7 +379,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             return
 
         if (self.settings.start_stop_key == "W_UP" and dy > 0) or (
-            self.settings.start_stop_key == "W_DN" and dy < 0
+                self.settings.start_stop_key == "W_DN" and dy < 0
         ):
             self.toggle_start_stop()
 
@@ -352,7 +413,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.update_ui()
 
     def _create_and_start_processor(
-        self, event_list: List[EventModel], modification_keys: Dict
+            self, event_list: List[EventModel], modification_keys: Dict
     ):
         """
         Creates and starts the KeystrokeProcessor.
@@ -369,15 +430,15 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def _validate_simulation_prerequisites(self) -> bool:
         return (
-            self.selected_process.get()
-            and " (" in self.selected_process.get()
-            and self.selected_profile.get()
+                self.selected_process.get()
+                and " (" in self.selected_process.get()
+                and self.selected_profile.get()
         )
 
     def _load_profile(self) -> Optional[ProfileModel]:
         try:
             with open(
-                f"{self.profiles_dir}/{self.selected_profile.get()}.pkl", "rb"
+                    f"{self.profiles_dir}/{self.selected_profile.get()}.pkl", "rb"
             ) as f:
                 profile = pickle.load(f)
                 if not profile.event_list:
@@ -460,30 +521,38 @@ class KeystrokeSimulatorApp(tk.Tk):
             profile=self.selected_profile.get(),
         )
 
-    def bind_events(self):
-        self.bind("<Escape>", self.on_closing)
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-        start_stop_key = self.settings.start_stop_key
-        if start_stop_key.startswith("W_"):
-            self.start_stop_mouse_listener = pynput.mouse.Listener(
-                on_scroll=self.on_mouse_scroll
-            )
-            self.start_stop_mouse_listener.start()
-        else:
-            key = (
-                KeyUtils.get_keycode(start_stop_key)
-                if platform.system() == "Darwin"
-                else start_stop_key
-            )
-            keyboard.on_press_key(key, self.toggle_start_stop)
+    # def bind_events(self):
+    #     self.bind("<Escape>", self.on_closing)
+    #     self.protocol("WM_DELETE_WINDOW", self.on_closing)
+    #
+    #     start_stop_key = self.settings.start_stop_key
+    #     if start_stop_key.startswith("W_"):
+    #         import pynput
+    #         self.start_stop_mouse_listener = pynput.mouse.Listener(
+    #             on_scroll=self.on_mouse_scroll
+    #         )
+    #         self.start_stop_mouse_listener.start()
+    #     else:
+    #         key = (
+    #             KeyUtils.get_keycode(start_stop_key)
+    #             if platform.system() == "Darwin"
+    #             else start_stop_key
+    #         )
+    #         keyboard.on_press_key(key, self.toggle_start_stop)
 
     def unbind_events(self):
         self.unbind("<Escape>")
-        keyboard.unhook_all()
+
+        if platform.system() != "Darwin":
+            keyboard.unhook_all()
         if self.start_stop_mouse_listener:
             self.start_stop_mouse_listener.stop()
             self.start_stop_mouse_listener = None
+
+        # Stop the Ctrl check thread (MacOS)
+        self.ctrl_check_active = False
+        if self.ctrl_check_thread and self.ctrl_check_thread.is_alive():
+            self.ctrl_check_thread.join(timeout=0.5)
 
     def on_closing(self, event=None):
         logger.info("Shutting down the application and terminating threads...")

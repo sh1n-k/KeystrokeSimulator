@@ -1,12 +1,11 @@
 import copy
-import platform
+import time
 import tkinter as tk
 import tkinter.ttk as ttk
+from threading import Thread
 from tkinter import messagebox
 from typing import Callable, Optional
 
-import keyboard
-import pynput
 from PIL import ImageTk, Image
 from loguru import logger
 
@@ -57,7 +56,6 @@ class KeystrokeEventEditor:
         self.held_screenshot: Optional[Image.Image] = None
         self.ref_pixel_value = None
         self.key_to_enter = None
-        self.keyboard_input_listener = None
         self.independent_thread = tk.BooleanVar(value=False)
 
         self.create_ui()
@@ -68,6 +66,11 @@ class KeystrokeEventEditor:
         self.is_edit = bool(event_function())
         self.load_stored_event(event_function)
         self.screenshot_capturer.start_capture()
+
+        self.key_check_active = True
+        self.key_check_thread = Thread(target=self.check_key_states)
+        self.key_check_thread.daemon = True
+        self.key_check_thread.start()
 
         self.load_latest_position()
         self.key_combobox.focus_set()
@@ -167,8 +170,26 @@ class KeystrokeEventEditor:
         )
         info_label.pack(pady=5, fill="both")
 
+    def check_key_states(self):
+        """Thread function to check key states periodically without admin privileges"""
+        while self.key_check_active:
+            # Check for ALT key (for setting mouse position)
+            if KeyUtils.mod_key_pressed("alt"):
+                self.screenshot_capturer.set_current_mouse_position(
+                    self.event_window.winfo_pointerxy()
+                )
+
+            # Check for CTRL key (for holding image)
+            if KeyUtils.mod_key_pressed("ctrl"):
+                self.hold_image()
+
+                # Small delay to prevent multiple triggers
+                time.sleep(0.2)
+
+            # Check less frequently to reduce CPU usage
+            time.sleep(0.1)
+
     def bind_events(self):
-        self.bind_hotkey()
         self.event_window.bind("<Escape>", self.close_window)
         self.event_window.bind("<Return>", self.save_event)
         self.event_window.protocol("WM_DELETE_WINDOW", self.close_window)
@@ -189,47 +210,6 @@ class KeystrokeEventEditor:
                 if filtered_values:
                     self.key_combobox.set(filtered_values[0])
                     self.update_key_to_enter(event)
-
-    def bind_hotkey(self):
-        if platform.system() == "Darwin":
-
-            def on_cmd_press(e):
-                if e.event_type == "down":
-                    self.screenshot_capturer.set_current_mouse_position(
-                        self.event_window.winfo_pointerxy()
-                    )
-
-            def on_control_press(e):
-                if e.event_type == "down":
-                    self.hold_image()
-
-            keyboard.hook_key(KeyUtils.get_keycode("command"), on_cmd_press)
-            keyboard.hook_key(KeyUtils.get_keycode("control"), on_control_press)
-
-        elif platform.system() == "Windows":
-            position_trigger_key = (
-                pynput.keyboard.Key.cmd_l
-                if platform.system() == "Darwin"
-                else pynput.keyboard.Key.alt_l
-            )
-
-            def on_press(key):
-                if key == position_trigger_key:
-                    logger.debug(f"reset position")
-                    self.screenshot_capturer.set_current_mouse_position(
-                        self.event_window.winfo_pointerxy()
-                    )
-                elif key == pynput.keyboard.Key.ctrl_l:
-                    logger.debug(f"hold current image")
-                    self.hold_image()
-
-            def on_release(key):
-                pass
-
-            self.keyboard_input_listener = pynput.keyboard.Listener(
-                on_press=on_press, on_release=on_release
-            )
-            self.keyboard_input_listener.start()
 
     def update_capture_image(self, position: tuple, image: Image.Image):
         if position and image:
@@ -287,7 +267,7 @@ class KeystrokeEventEditor:
         self.update_image_placeholder(placeholder, image_to_apply)
 
     def handle_grab_button_click(self):
-        self.hold_image()  # Ctrl 키 입력과 동일한 hold_image 함수 호출
+        self.hold_image()
 
     def save_event(self, event=None):
         try:
@@ -329,13 +309,10 @@ class KeystrokeEventEditor:
         self.key_combobox.unbind("<<ComboboxSelected>>")
         self.key_combobox.unbind("<KeyPress>")
 
-        if self.keyboard_input_listener:
-            self.keyboard_input_listener.stop()
-            self.keyboard_input_listener.join()
-
-        if platform.system() == "Darwin":
-            keyboard.unhook(KeyUtils.get_keycode("command"))
-            keyboard.unhook(KeyUtils.get_keycode("control"))
+        # Stop the key checking thread
+        self.key_check_active = False
+        if hasattr(self, 'key_check_thread') and self.key_check_thread.is_alive():
+            self.key_check_thread.join(timeout=0.5)
 
         if (
                 self.screenshot_capturer.capture_thread
@@ -464,9 +441,6 @@ class KeystrokeEventEditor:
 
         # Verify that key_to_enter exists in the key list
         if self.key_to_enter:
-            logger.debug(self.key_to_enter)
-
-            # Force update to ensure combobox is ready
             self.event_window.update_idletasks()
 
             # If the key exists in values, set it

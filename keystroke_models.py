@@ -6,6 +6,7 @@ from PIL import Image
 
 @dataclass
 class UserSettings:
+    # On macOS, start_stop_key can be set to "DISABLED" to indicate the key is disabled
     start_stop_key: str = "`"
     key_pressed_time_min: int = 95
     key_pressed_time_max: int = 135
@@ -15,6 +16,11 @@ class UserSettings:
     max_key_count: Optional[int] = 10
     start_sound: str = "start.mp3"
     stop_sound: str = "stop.mp3"
+    toggle_start_stop_mac: bool = True
+
+    def is_start_stop_key_enabled(self) -> bool:
+        """Check if the start/stop key is enabled (not set to DISABLED)"""
+        return self.start_stop_key != "DISABLED"
 
 
 @dataclass
