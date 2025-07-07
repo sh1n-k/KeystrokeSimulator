@@ -54,13 +54,36 @@ class ProcessFrame(tk.Frame):
         self.refresh_processes()
 
     def refresh_processes(self):
+        # 현재 선택된 값에서 Process Name 추출
+        current_value = self.process_combobox.get()
+        current_process_name = None
+
+        if current_value:
+            # "Process Name (PID)" 형태에서 Process Name 추출
+            # 마지막 괄호와 그 내용을 제거
+            if current_value.endswith(")") and "(" in current_value:
+                current_process_name = current_value.rsplit(" (", 1)[0]
+
+        # 새로운 프로세스 목록 가져오기
         processes = ProcessCollector.get()
         sorted_processes = sorted(processes, key=lambda x: x[0].lower())
-        self.process_combobox["values"] = [
-            f"{name} ({pid})" for name, pid, _ in sorted_processes
-        ]
+
+        # 콤보박스 값 설정
+        process_values = [f"{name} ({pid})" for name, pid, _ in sorted_processes]
+        self.process_combobox["values"] = process_values
+
+        # 이전에 선택된 Process Name과 일치하는 항목 찾기
+        selected_index = 0  # 기본값
+
+        if current_process_name:
+            for i, (name, pid, _) in enumerate(sorted_processes):
+                if name == current_process_name:
+                    selected_index = i
+                    break
+
+        # 콤보박스 선택 설정
         if sorted_processes:
-            self.process_combobox.current(0)
+            self.process_combobox.current(selected_index)
             self.process_combobox.event_generate("<<ComboboxSelected>>")
 
 
@@ -135,13 +158,13 @@ class ProfileFrame(tk.Frame):
 
 class ButtonFrame(tk.Frame):
     def __init__(
-            self,
-            master,
-            toggle_callback: Callable,
-            events_callback: Callable,
-            settings_callback: Callable,
-            *args,
-            **kwargs,
+        self,
+        master,
+        toggle_callback: Callable,
+        events_callback: Callable,
+        settings_callback: Callable,
+        *args,
+        **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
         self.start_stop_button = tk.Button(
@@ -173,13 +196,13 @@ class ButtonFrame(tk.Frame):
 
 class ProfileButtonFrame(tk.Frame):
     def __init__(
-            self,
-            master,
-            modkeys_callback: Callable,
-            edit_callback: Callable,
-            sort_callback: Callable,
-            *args,
-            **kwargs,
+        self,
+        master,
+        modkeys_callback: Callable,
+        edit_callback: Callable,
+        sort_callback: Callable,
+        *args,
+        **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
         self.modkeys_button = tk.Button(  # Add this new button
@@ -250,10 +273,10 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
 
         for frame in (
-                self.process_frame,
-                self.profile_frame,
-                self.button_frame,
-                self.profile_button_frame,
+            self.process_frame,
+            self.profile_frame,
+            self.button_frame,
+            self.profile_button_frame,
         ):
             frame.pack(pady=5)
 
@@ -286,6 +309,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             start_stop_key = self.settings.start_stop_key
             if start_stop_key.startswith("W_"):
                 import pynput
+
                 self.start_stop_mouse_listener = pynput.mouse.Listener(
                     on_scroll=self.on_mouse_scroll
                 )
@@ -336,25 +360,30 @@ class KeystrokeSimulatorApp(tk.Tk):
                 # Alt+Shift 조합이 방금 눌렸을 때 (rising edge)
                 if current_combo_state and not last_combo_state:
                     combo_press_start_time = current_time
-                    toggle_executed = False  # 새로운 키 조합 누름이므로 토글 실행 플래그 리셋
-                    logger.info(f"[{time.ctime(current_time)}] Alt+Shift 키 조합이 눌렸습니다.")
+                    toggle_executed = (
+                        False  # 새로운 키 조합 누름이므로 토글 실행 플래그 리셋
+                    )
 
                 # Alt+Shift 조합이 방금 떼어졌을 때 (falling edge)
                 elif not current_combo_state and last_combo_state:
                     press_duration = current_time - combo_press_start_time
-                    logger.info(f"[{time.ctime(current_time)}] Alt+Shift 키 조합이 떼어졌습니다. (눌린 시간: {press_duration:.4f}s)")
                     combo_press_start_time = 0
                     toggle_executed = False  # 키가 떼어졌으므로 토글 실행 플래그 리셋
 
                 # Alt+Shift 조합이 계속 눌려있는 상태에서 1초가 지났을 때 토글 실행
-                elif current_combo_state and last_combo_state and combo_press_start_time > 0 and not toggle_executed:
+                elif (
+                    current_combo_state
+                    and last_combo_state
+                    and combo_press_start_time > 0
+                    and not toggle_executed
+                ):
                     press_duration = current_time - combo_press_start_time
 
                     # 정확히 1초 지났을 때 토글 (키를 떼지 않아도)
-                    if press_duration >= long_press_threshold and (current_time - last_toggle_time) >= toggle_cooldown:
-                        logger.info(f"[{time.ctime(current_time)}] Alt+Shift 키 롱 프레스 감지! (현재 지속 시간: {press_duration:.4f}s)")
-
-                        # 메인 스레드에서 토글 함수 호출
+                    if (
+                        press_duration >= long_press_threshold
+                        and (current_time - last_toggle_time) >= toggle_cooldown
+                    ):
                         self.after(0, self.toggle_start_stop)
                         last_toggle_time = current_time
                         toggle_executed = True  # 토글이 실행되었음을 표시
@@ -394,7 +423,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def on_mouse_scroll(self, x, y, dx, dy):
         if not self.process_activation_func(
-                KeystrokeProcessor.parse_process_id(self.selected_process.get())
+            KeystrokeProcessor.parse_process_id(self.selected_process.get())
         ):
             return
 
@@ -403,7 +432,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             return
 
         if (self.settings.start_stop_key == "W_UP" and dy > 0) or (
-                self.settings.start_stop_key == "W_DN" and dy < 0
+            self.settings.start_stop_key == "W_DN" and dy < 0
         ):
             self.toggle_start_stop()
 
@@ -437,7 +466,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.update_ui()
 
     def _create_and_start_processor(
-            self, event_list: List[EventModel], modification_keys: Dict
+        self, event_list: List[EventModel], modification_keys: Dict
     ):
         """
         Creates and starts the KeystrokeProcessor.
@@ -454,15 +483,15 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def _validate_simulation_prerequisites(self) -> bool:
         return (
-                self.selected_process.get()
-                and " (" in self.selected_process.get()
-                and self.selected_profile.get()
+            self.selected_process.get()
+            and " (" in self.selected_process.get()
+            and self.selected_profile.get()
         )
 
     def _load_profile(self) -> Optional[ProfileModel]:
         try:
             with open(
-                    f"{self.profiles_dir}/{self.selected_profile.get()}.pkl", "rb"
+                f"{self.profiles_dir}/{self.selected_profile.get()}.pkl", "rb"
             ) as f:
                 profile = pickle.load(f)
                 if not profile.event_list:

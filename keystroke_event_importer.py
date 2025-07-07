@@ -137,6 +137,7 @@ class EventImporter:
     def load_profiles(self):
         profile_names = self.get_profile_names()
 
+        profile_names.sort(reverse=False)
         if "_Quick" in profile_names:
             profile_names.insert(0, profile_names.pop(profile_names.index("_Quick")))
 
