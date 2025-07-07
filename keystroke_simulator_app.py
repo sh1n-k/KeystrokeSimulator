@@ -303,46 +303,70 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         # Start a thread to check for Ctrl key presses
         self.ctrl_check_active = True
-        self.ctrl_check_thread = threading.Thread(target=self.check_for_double_ctrl)
+        self.ctrl_check_thread = threading.Thread(target=self.check_for_long_alt_shift)
         self.ctrl_check_thread.daemon = True
         self.ctrl_check_thread.start()
 
-    def check_for_double_ctrl(self):
-        """Thread method to detect double Ctrl key presses on macOS"""
+    def check_for_long_alt_shift(self):
+        """Thread method to detect long Alt+Shift key press (1+ seconds) on macOS"""
         import time
 
-        last_ctrl_state = False
+        last_combo_state = False
+        combo_press_start_time = 0
         last_toggle_time = 0
-        toggle_cooldown = 1.0
+        toggle_cooldown = 0.25
+        long_press_threshold = 0.01  # 1초 이상 눌러야 함
+        toggle_executed = False  # 한 번의 키 조합 누름에 대해 토글이 실행되었는지 추적
+
         while self.ctrl_check_active:
             try:
                 current_time = time.time()
+
+                # 쿨다운 체크
                 if current_time - last_toggle_time < toggle_cooldown:
+                    # logger.debug(f"[{time.ctime(current_time)}] 쿨다운 중... (남은 시간: {toggle_cooldown - (current_time - last_toggle_time):.4f}s)")
                     time.sleep(0.05)
                     continue
 
-                current_ctrl_state = KeyUtils.mod_key_pressed("ctrl")
+                # Alt와 Shift 키가 모두 눌렸는지 확인
+                alt_pressed = KeyUtils.mod_key_pressed("alt")
+                shift_pressed = KeyUtils.mod_key_pressed("shift")
+                current_combo_state = alt_pressed and shift_pressed
 
-                # Detect rising edge (key just pressed)
-                if current_ctrl_state and not last_ctrl_state:
-                    time_diff = current_time - self.last_ctrl_press_time
+                # Alt+Shift 조합이 방금 눌렸을 때 (rising edge)
+                if current_combo_state and not last_combo_state:
+                    combo_press_start_time = current_time
+                    toggle_executed = False  # 새로운 키 조합 누름이므로 토글 실행 플래그 리셋
+                    logger.info(f"[{time.ctime(current_time)}] Alt+Shift 키 조합이 눌렸습니다.")
 
-                    # If second press is within 0.75 seconds of first press
-                    if 0 < time_diff <= 0.5:
-                        # Use after() to call toggle_start_stop from the main thread
+                # Alt+Shift 조합이 방금 떼어졌을 때 (falling edge)
+                elif not current_combo_state and last_combo_state:
+                    press_duration = current_time - combo_press_start_time
+                    logger.info(f"[{time.ctime(current_time)}] Alt+Shift 키 조합이 떼어졌습니다. (눌린 시간: {press_duration:.4f}s)")
+                    combo_press_start_time = 0
+                    toggle_executed = False  # 키가 떼어졌으므로 토글 실행 플래그 리셋
+
+                # Alt+Shift 조합이 계속 눌려있는 상태에서 1초가 지났을 때 토글 실행
+                elif current_combo_state and last_combo_state and combo_press_start_time > 0 and not toggle_executed:
+                    press_duration = current_time - combo_press_start_time
+
+                    # 정확히 1초 지났을 때 토글 (키를 떼지 않아도)
+                    if press_duration >= long_press_threshold and (current_time - last_toggle_time) >= toggle_cooldown:
+                        logger.info(f"[{time.ctime(current_time)}] Alt+Shift 키 롱 프레스 감지! (현재 지속 시간: {press_duration:.4f}s)")
+
+                        # 메인 스레드에서 토글 함수 호출
                         self.after(0, self.toggle_start_stop)
                         last_toggle_time = current_time
+                        toggle_executed = True  # 토글이 실행되었음을 표시
 
-                    # Update the last press time
-                    self.last_ctrl_press_time = current_time
+                # 이전 상태 업데이트
+                last_combo_state = current_combo_state
 
-                # Update the last state
-                last_ctrl_state = current_ctrl_state
+                # CPU 사용량 방지를 위한 짧은 대기
+                time.sleep(0.01)
 
-                # Small delay to prevent high CPU usage
-                time.sleep(0.05)
             except Exception as e:
-                logger.error(f"Error in check_for_double_ctrl: {e}")
+                logger.error(f"Error in check_for_long_ctrl: {e}")
                 time.sleep(0.1)
 
     def init_profiles(self):
