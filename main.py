@@ -13,7 +13,7 @@ if __name__ == "__main__":
     if os.path.isfile(log_path):
         shutil.move(log_path, "logs.bak")
         os.makedirs(log_path)
-    logger.add(os.path.join(log_path, "keysym.log"), rotation="1 MB", level="DEBUG")
+    logger.add(os.path.join(log_path, "keysym.log"), rotation="1 MB", level="INFO")
 
     if not os.path.exists("profiles"):
         os.makedirs("profiles")

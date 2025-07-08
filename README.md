@@ -5,9 +5,19 @@
 <a name="english"></a>
 ## English
 
-Keystroke Simulator is a Python application that allows users to create, manage, and execute automated keystroke sequences for various processes and applications.
+A Python application to create, manage, and execute automated keystroke sequences.
 
-### Features
+### Table of Contents
+- [Features](#features)
+- [Project Structure](#project-structure)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Security Features](#security-features)
+- [Contributing](#contributing)
+- [License](#license)
+
+<h3 id="features">Features</h3>
 
 - Process selection for targeting specific applications
 - Profile management for organizing keystroke sequences
@@ -16,25 +26,28 @@ Keystroke Simulator is a Python application that allows users to create, manage,
 - Sound notifications for start and stop actions
 - Secure device authentication system
 
-### Project Structure
+<h3 id="project-structure">Project Structure</h3>
 
 The project consists of several Python files, each responsible for different functionalities:
 
-- `main.py`: Entry point for the application
-- `main_secure.py`: Secure version with device authentication
-- `keystroke_simulator_app.py`: Main application GUI and logic
-- `keystroke_engine.py`: Core engine for executing keystroke sequences
-- `keystroke_event_editor.py`: GUI for editing individual keystroke events
-- `keystroke_event_importer.py`: Functionality for importing events from other profiles
-- `keystroke_models.py`: Data models for the application
-- `keystroke_processors.py`: Process management and collection
-- `keystroke_profiles.py`: Profile management system
-- `keystroke_quick_event_editor.py`: Quick event creation and editing
-- `keystroke_settings.py`: Application settings management
-- `keystroke_sort_events.py`: Event sorting functionality
-- `keystroke_utils.py`: Utility functions and classes
+- `_lambda.py`: AWS Lambda function for server-side device authentication.
+- `_local_test_server.py`: A local test server to simulate the authentication backend.
+- `main.py`: Entry point for the application.
+- `main_secure.py`: Secure version with device authentication.
+- `keystroke_simulator_app.py`: Main application GUI and logic.
+- `keystroke_capturer.py`: Module to capture keystroke sequences from the user.
+- `keystroke_event_editor.py`: GUI for editing individual keystroke events.
+- `keystroke_event_importer.py`: Functionality for importing events from other profiles.
+- `keystroke_models.py`: Data models for the application.
+- `keystroke_modkeys.py`: Manages modifier keys (e.g., Shift, Ctrl, Alt).
+- `keystroke_processor.py`: Process management and collection.
+- `keystroke_profiles.py`: Profile management system.
+- `keystroke_quick_event_editor.py`: Quick event creation and editing.
+- `keystroke_settings.py`: Application settings management.
+- `keystroke_sort_events.py`: Event sorting functionality.
+- `keystroke_utils.py`: Utility functions and classes.
 
-### Requirements
+<h3 id="requirements">Requirements</h3>
 
 - Python 3.x
 - Required Python packages (install via `pip install -r requirements.txt`):
@@ -47,7 +60,7 @@ The project consists of several Python files, each responsible for different fun
     - python-dotenv
     - cryptography
 
-### Installation
+<h3 id="installation">Installation</h3>
 
 1. Clone the repository:
    ```
@@ -62,7 +75,7 @@ The project consists of several Python files, each responsible for different fun
    pip install -r requirements.txt
    ```
 
-### Usage
+<h3 id="usage">Usage</h3>
 
 1. Run the main application:
    ```
@@ -78,27 +91,39 @@ The project consists of several Python files, each responsible for different fun
 4. Use the "Quick Events" or "Edit Profile" buttons to set up your keystroke patterns.
 5. Click "Start" to begin the keystroke simulation.
 
-### Security Features
+<h3 id="security-features">Security Features</h3>
 
 The secure version (`main_secure.py`) includes:
 - Device ID generation and storage
 - Encrypted local storage of device information
 - Server-side authentication
 
-### Contributing
+<h3 id="contributing">Contributing</h3>
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-### License
+<h3 id="license">License</h3>
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+---
 
 <a name="korean"></a>
 ## 한국어
 
-키스트로크 시뮬레이터는 다양한 프로세스와 애플리케이션에 대해 자동화된 키스트로크 시퀀스를 생성, 관리 및 실행할 수 있는 Python 애플리케이션입니다.
+자동화된 키스트로크 시퀀스를 생성, 관리 및 실행하는 Python 애플리케이션입니다.
 
-### 기능
+### 목차
+- [기능](#기능)
+- [프로젝트 구조](#프로젝트-구조)
+- [요구사항](#요구사항)
+- [설치](#설치)
+- [사용법](#사용법)
+- [보안 기능](#보안-기능)
+- [기여](#기여)
+- [라이선스](#라이선스)
+
+<h3 id="기능">기능</h3>
 
 - 특정 애플리케이션을 대상으로 하는 프로세스 선택
 - 키스트로크 시퀀스를 구성하기 위한 프로필 관리
@@ -107,25 +132,28 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - 시작 및 중지 작업에 대한 사운드 알림
 - 보안 장치 인증 시스템
 
-### 프로젝트 구조
+<h3 id="프로젝트-구조">프로젝트 구조</h3>
 
 프로젝트는 각각 다른 기능을 담당하는 여러 Python 파일로 구성되어 있습니다:
 
-- `main.py`: 애플리케이션의 진입점
-- `main_secure.py`: 장치 인증이 포함된 보안 버전
-- `keystroke_simulator_app.py`: 메인 애플리케이션 GUI 및 로직
-- `keystroke_engine.py`: 키스트로크 시퀀스 실행을 위한 핵심 엔진
-- `keystroke_event_editor.py`: 개별 키스트로크 이벤트 편집을 위한 GUI
-- `keystroke_event_importer.py`: 다른 프로필에서 이벤트를 가져오는 기능
-- `keystroke_models.py`: 애플리케이션의 데이터 모델
-- `keystroke_processors.py`: 프로세스 관리 및 수집
-- `keystroke_profiles.py`: 프로필 관리 시스템
-- `keystroke_quick_event_editor.py`: 퀵 이벤트 생성 및 편집
-- `keystroke_settings.py`: 애플리케이션 설정 관리
-- `keystroke_sort_events.py`: 이벤트 정렬 기능
-- `keystroke_utils.py`: 유틸리티 함수 및 클래스
+- `_lambda.py`: 서버 측 장치 인증을 위한 AWS Lambda 함수.
+- `_local_test_server.py`: 인증 백엔드를 시뮬레이션하기 위한 로컬 테스트 서버.
+- `main.py`: 애플리케이션의 진입점.
+- `main_secure.py`: 장치 인증이 포함된 보안 버전.
+- `keystroke_simulator_app.py`: 메인 애플리케이션 GUI 및 로직.
+- `keystroke_capturer.py`: 사용자로부터 키스트로크 시퀀스를 캡처하는 모듈.
+- `keystroke_event_editor.py`: 개별 키스트로크 이벤트 편집을 위한 GUI.
+- `keystroke_event_importer.py`: 다른 프로필에서 이벤트를 가져오는 기능.
+- `keystroke_models.py`: 애플리케이션의 데이터 모델.
+- `keystroke_modkeys.py`: 보조 키(예: Shift, Ctrl, Alt)를 관리.
+- `keystroke_processor.py`: 프로세스 관리 및 수집.
+- `keystroke_profiles.py`: 프로필 관리 시스템.
+- `keystroke_quick_event_editor.py`: 퀵 이벤트 생성 및 편집.
+- `keystroke_settings.py`: 애플리케이션 설정 관리.
+- `keystroke_sort_events.py`: 이벤트 정렬 기능.
+- `keystroke_utils.py`: 유틸리티 함수 및 클래스.
 
-### 요구사항
+<h3 id="요구사항">요구사항</h3>
 
 - Python 3.x
 - 필요한 Python 패키지 (`pip install -r requirements.txt`로 설치):
@@ -138,7 +166,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
     - python-dotenv
     - cryptography
 
-### 설치
+<h3 id="설치">설치</h3>
 
 1. 저장소 복제:
    ```
@@ -153,7 +181,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
    pip install -r requirements.txt
    ```
 
-### 사용법
+<h3 id="사용법">사용법</h3>
 
 1. 메인 애플리케이션 실행:
    ```
@@ -169,17 +197,17 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 4. "퀵 이벤트" 또는 "프로필 편집" 버튼을 사용하여 키스트로크 패턴을 설정합니다.
 5. "시작"을 클릭하여 키스트로크 시뮬레이션을 시작합니다.
 
-### 보안 기능
+<h3 id="보안-기능">보안 기능</h3>
 
 보안 버전(`main_secure.py`)에는 다음이 포함됩니다:
 - 장치 ID 생성 및 저장
 - 장치 정보의 암호화된 로컬 저장
 - 서버 측 인증
 
-### 기여
+<h3 id="기여">기여</h3>
 
 기여는 환영합니다! Pull Request를 자유롭게 제출해 주세요.
 
-### 라이선스
+<h3 id="라이선스">라이선스</h3>
 
 이 프로젝트는 MIT 라이선스에 따라 라이선스가 부여됩니다 - 자세한 내용은 LICENSE 파일을 참조하세요.

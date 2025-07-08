@@ -31,12 +31,13 @@ elif platform.system() == "Darwin":
 
 class KeySimulator:
     def __init__(self, os_type: str):
-        self.press_key = (
-            self.press_key_win if os_type == "Windows" else self.press_key_darwin
-        )
-        self.release_key = (
-            self.release_key_win if os_type == "Windows" else self.release_key_darwin
-        )
+        os_map = {
+            "Windows": "_win",
+            "Darwin": "_darwin",
+        }
+        suffix = os_map.get(os_type, "_unsupported")  # 기본값 처리
+        self.press_key = getattr(self, f"press_key{suffix}")
+        self.release_key = getattr(self, f"release_key{suffix}")
 
     def press_key_win(self, code: int):
         ctypes.windll.user32.keybd_event(code, 0, 0, 0)
@@ -73,7 +74,7 @@ class ModificationKeyHandler:
         self.key_simulator = KeySimulator(os_type)
         self.mod_key_pressed = threading.Event()
 
-    def check_modification_keys(self) -> bool:
+    async def check_modification_keys(self) -> bool:
         """
         Checks if any modification key is pressed.
 
@@ -89,7 +90,7 @@ class ModificationKeyHandler:
                     logger.debug(
                         f"Key '{value['value']}' pressed with mod-key '{key.upper()}'"
                     )
-                    time.sleep(random.uniform(*self.loop_delay))
+                    await asyncio.sleep(random.uniform(*self.loop_delay))
 
         if any_mod_key_pressed:
             self.mod_key_pressed.set()
@@ -180,6 +181,8 @@ class KeystrokeProcessor:
         # Initialize set to track pressed keys and a lock for thread safety
         self.pressed_keys = set()
         self.pressed_keys_lock = threading.Lock()
+
+        self.sct = mss.mss()
 
     @staticmethod
     def parse_process_id(target_process: str) -> Optional[int]:
@@ -283,6 +286,25 @@ class KeystrokeProcessor:
         logger.info(
             f"Total clusters formed: {len(clusters)} / bounding rects: {bounding_rects}"
         )
+
+        # 전체 클러스터를 감싸는 하나의 큰 바운딩 박스 계산
+        self.mega_bounding_rect = None
+        if bounding_rects:
+            all_lefts = [r["left"] for r in bounding_rects.values()]
+            all_tops = [r["top"] for r in bounding_rects.values()]
+            all_rights = [r["left"] + r["width"] for r in bounding_rects.values()]
+            all_bottoms = [r["top"] + r["height"] for r in bounding_rects.values()]
+
+            mega_left = min(all_lefts)
+            mega_top = min(all_tops)
+            self.mega_bounding_rect = {
+                "left": mega_left,
+                "top": mega_top,
+                "width": max(all_rights) - mega_left,
+                "height": max(all_bottoms) - mega_top,
+            }
+
+        logger.info(f"Mega bounding rect calculated: {self.mega_bounding_rect}")
         return clusters, bounding_rects
 
     def _start_loop(self):
@@ -307,23 +329,26 @@ class KeystrokeProcessor:
                     continue
 
                 # Check modification keys
-                if self.mod_key_handler.check_modification_keys():
+                if await self.mod_key_handler.check_modification_keys():
                     await asyncio.sleep(random.uniform(*self.loop_delay))
                     continue
 
                 # Process each cluster
+                if not self.mega_bounding_rect:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                # 큰 영역을 한 번만 캡처
+                grabbed_mega_image = self.sct.grab(self.mega_bounding_rect)
+
                 tasks = []
                 for cluster_id, events in self.clusters.items():
-                    bounding_rect = self.bounding_rects.get(cluster_id)
-                    if not bounding_rect:
-                        logger.error(
-                            f"No bounding rectangle found for cluster {cluster_id}"
-                        )
-                        continue
                     task = asyncio.create_task(
-                        self.process_cluster(bounding_rect, events)
+                        # 캡처된 이미지와 메가 박스 정보를 전달
+                        self.process_cluster(grabbed_mega_image, events)
                     )
                     tasks.append(task)
+
                 if tasks:
                     await asyncio.gather(*tasks)
 
@@ -335,40 +360,34 @@ class KeystrokeProcessor:
         finally:
             logger.info("ThreadPoolExecutor has been shut down.")
 
-    async def process_cluster(self, bounding_rect: Dict[str, int], events: List[Dict]):
+    async def process_cluster(self, grabbed_mega_image, events: List[Dict]):
         """
         Processes a single cluster of events by grabbing the minimal bounding rectangle and simulating keystrokes.
 
         :param bounding_rect: The bounding rectangle dictionary for the cluster.
         :param events: List of event dictionaries in the cluster.
         """
-        # Grab the region asynchronously
-        with mss.mss() as sct:
-            grabbed = sct.grab(bounding_rect)
+        # Process each event in the cluster
+        for event in events:
+            # 메가 캡처 이미지 내에서의 상대 좌표 계산
+            rel_x = event["click_position"][0] - self.mega_bounding_rect["left"]
+            rel_y = event["click_position"][1] - self.mega_bounding_rect["top"]
 
-            # Process each event in the cluster
-            for event in events:
-                rel_x = event["click_position"][0] - bounding_rect["left"]
-                rel_y = event["click_position"][1] - bounding_rect["top"]
-                try:
-                    pixel = grabbed.pixel(rel_x, rel_y)
-                except IndexError:
-                    logger.error(
-                        f"Pixel ({rel_x}, {rel_y}) out of bounds in grabbed region."
+            try:
+                pixel = grabbed_mega_image.pixel(rel_x, rel_y)
+            except IndexError:
+                logger.error(
+                    f"Pixel ({rel_x}, {rel_y}) out of bounds in grabbed region."
+                )
+                continue
+
+            if pixel[:3] == event["ref_pixel_value"]:
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        self._simulate_keystroke_sync, event["key"], uuid.uuid4()
                     )
-                    continue
-
-                if pixel[:3] == event["ref_pixel_value"]:
-                    asyncio.create_task(self.simulate_keystroke(event["key"]))
-                    await asyncio.sleep(random.uniform(0.025, 0.05))
-
-    async def simulate_keystroke(self, key: str):
-        """
-        Simulates a keystroke asynchronously.
-
-        :param key: The key to simulate.
-        """
-        await asyncio.to_thread(self._simulate_keystroke_sync, key, uuid.uuid4())
+                )
+                await asyncio.sleep(random.uniform(0.025, 0.05))
 
     def _simulate_keystroke_sync(self, key: str, task_id: uuid.UUID):
         """
@@ -449,6 +468,7 @@ class KeystrokeProcessor:
         """
         Stops the KeystrokeProcessor.
         """
+        self.sct.close()
         self.terminate_event.set()
         self.thread.join()
         logger.info("KeystrokeProcessor stopped.")
