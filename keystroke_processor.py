@@ -1,4 +1,3 @@
-# 최종 리팩토링된 코드
 import asyncio
 import ctypes
 import platform
@@ -16,6 +15,7 @@ from sklearn.cluster import DBSCAN
 
 # 가정: keystroke_models와 keystroke_utils는 올바르게 임포트 가능
 from keystroke_models import EventModel
+from keystroke_simulator_app import KeystrokeSimulatorApp
 from keystroke_utils import KeyUtils, ProcessUtils
 
 # OS-specific imports
@@ -140,7 +140,7 @@ class KeystrokeProcessor:
 
     def __init__(
         self,
-        main_app,  # main_app의 타입을 명시하면 더 좋습니다 (e.g., "MainApplication")
+        main_app: KeystrokeSimulatorApp,
         target_process: str,
         event_list: List[EventModel],
         modification_keys: Dict[str, Dict],
