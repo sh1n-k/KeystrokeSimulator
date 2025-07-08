@@ -3,6 +3,7 @@ import json
 import os
 import pickle
 import platform
+import re
 import shutil
 import threading
 import time
@@ -22,6 +23,7 @@ from keystroke_quick_event_editor import KeystrokeQuickEventEditor
 from keystroke_settings import KeystrokeSettings
 from keystroke_sort_events import KeystrokeSortEvents
 from keystroke_utils import (
+    ProcessUtils,
     SoundUtils,
     StateUtils,
     WindowUtils,
@@ -293,12 +295,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.setup_start_stop_handler()
 
-        self.process_activation_func = (
-            KeystrokeProcessor._is_process_active_windows
-            if platform.system() == "Windows"
-            else KeystrokeProcessor._is_process_active_darwin
-        )
-
     def setup_start_stop_handler(self):
         if platform.system() == "Darwin":
             if self.settings.toggle_start_stop_mac:
@@ -422,9 +418,12 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.settings = UserSettings()
 
     def on_mouse_scroll(self, x, y, dx, dy):
-        if not self.process_activation_func(
-            KeystrokeProcessor.parse_process_id(self.selected_process.get())
-        ):
+        def parse_process_id_from_string(target_process: str) -> Optional[int]:
+            match = re.search(r"\((\d+)\)", target_process)
+            return int(match.group(1)) if match else None
+
+        pid = parse_process_id_from_string(self.selected_process.get())
+        if not ProcessUtils.is_process_active(pid):
             return
 
         current_time = time.time()

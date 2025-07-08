@@ -12,6 +12,15 @@ from typing import Optional, Dict
 import pygame
 from loguru import logger
 
+import platform
+
+if platform.system() == "Windows":
+    import win32gui
+    import win32process
+elif platform.system() == "Darwin":
+    import AppKit
+
+
 SYSTEM = platform.system().lower()
 
 if SYSTEM == "windows":
@@ -375,3 +384,31 @@ class ProcessCollector:
             (ntpath.basename(processes[pid]).split(".")[0], pid, window_names[pid])
             for pid in processes
         ]
+
+
+class ProcessUtils:  # 또는 독립 함수로 만들어도 됨
+    @staticmethod
+    def is_process_active(pid: int | None) -> bool:
+        """지정된 PID를 가진 프로세스가 현재 활성 창인지 확인합니다."""
+        if not pid:
+            return False
+
+        os_type = platform.system()
+        try:
+            if os_type == "Windows":
+                active_window = win32gui.GetForegroundWindow()
+                if not active_window:
+                    return False
+                _, active_pid = win32process.GetWindowThreadProcessId(active_window)
+                return pid == active_pid
+            elif os_type == "Darwin":
+                active_app = AppKit.NSWorkspace.sharedWorkspace().activeApplication()
+                return (
+                    active_app
+                    and active_app.get("NSApplicationProcessIdentifier") == pid
+                )
+        except Exception as e:
+            # logger가 있다면 로깅 추가
+            print(f"Error checking active process on {os_type}: {e}")
+            return False
+        return False

@@ -1,3 +1,4 @@
+# 최종 리팩토링된 코드
 import asyncio
 import ctypes
 import platform
@@ -13,8 +14,9 @@ import numpy as np
 from loguru import logger
 from sklearn.cluster import DBSCAN
 
+# 가정: keystroke_models와 keystroke_utils는 올바르게 임포트 가능
 from keystroke_models import EventModel
-from keystroke_utils import KeyUtils
+from keystroke_utils import KeyUtils, ProcessUtils
 
 # OS-specific imports
 if platform.system() == "Windows":
@@ -22,39 +24,47 @@ if platform.system() == "Windows":
     import win32process
 elif platform.system() == "Darwin":
     import AppKit
-    from Quartz import (
-        CGEventCreateKeyboardEvent,
-        CGEventPost,
-        kCGHIDEventTap,
-    )
+    from Quartz import CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap
+else:
+    # 지원되지 않는 OS에 대한 처리
+    pass
 
 
 class KeySimulator:
-    def __init__(self, os_type: str):
-        os_map = {
-            "Windows": "_win",
-            "Darwin": "_darwin",
-        }
-        suffix = os_map.get(os_type, "_unsupported")  # 기본값 처리
-        self.press_key = getattr(self, f"press_key{suffix}")
-        self.release_key = getattr(self, f"release_key{suffix}")
+    """OS에 맞는 키 입력을 시뮬레이션하는 클래스."""
 
-    def press_key_win(self, code: int):
+    def __init__(self, os_type: str):
+        os_map = {"Windows": "_win", "Darwin": "_darwin"}
+        suffix = os_map.get(os_type, "_unsupported")
+        try:
+            self.press_key = getattr(self, f"_press_key{suffix}")
+            self.release_key = getattr(self, f"_release_key{suffix}")
+        except AttributeError:
+            # 지원되지 않는 OS인 경우, 에러를 발생시키거나 비활성 함수를 할당
+            logger.error(f"Unsupported OS for KeySimulator: {os_type}")
+            self.press_key = self.release_key = self._unsupported_op
+
+    def _press_key_win(self, code: int):
         ctypes.windll.user32.keybd_event(code, 0, 0, 0)
 
-    def release_key_win(self, code: int):
+    def _release_key_win(self, code: int):
         ctypes.windll.user32.keybd_event(code, 0, 2, 0)
 
-    def press_key_darwin(self, code: int):
+    def _press_key_darwin(self, code: int):
         event = CGEventCreateKeyboardEvent(None, code, True)
         CGEventPost(kCGHIDEventTap, event)
 
-    def release_key_darwin(self, code: int):
+    def _release_key_darwin(self, code: int):
         event = CGEventCreateKeyboardEvent(None, code, False)
         CGEventPost(kCGHIDEventTap, event)
 
+    def _unsupported_op(self, code: int):
+        pass
+
 
 class ModificationKeyHandler:
+    """수식 키(Modifier key) 입력을 처리하는 클래스."""
+
     def __init__(
         self,
         key_codes: Dict[str, int],
@@ -74,23 +84,25 @@ class ModificationKeyHandler:
         self.key_simulator = KeySimulator(os_type)
         self.mod_key_pressed = threading.Event()
 
-    async def check_modification_keys(self) -> bool:
+    async def check_and_process(self) -> bool:
         """
-        Checks if any modification key is pressed.
-
-        :return: True if any modification key is pressed, else False.
+        수식 키 입력을 확인하고, 눌렸을 경우 관련 동작을 수행합니다.
+        :return: 수식 키가 하나라도 눌렸으면 True, 아니면 False.
         """
         any_mod_key_pressed = False
+        tasks = []
         for key, value in self.modification_keys.items():
             if KeyUtils.mod_key_pressed(key):
                 any_mod_key_pressed = True
-                logger.debug(f"mod_key_pressed: {value.get('pass')} / {value}")
+                logger.debug(
+                    f"Modification key '{key}' pressed. Pass: {value.get('pass')}"
+                )
                 if not value.get("pass"):
-                    self.simulate_keystroke(value["value"])
-                    logger.debug(
-                        f"Key '{value['value']}' pressed with mod-key '{key.upper()}'"
-                    )
-                    await asyncio.sleep(random.uniform(*self.loop_delay))
+                    # 키 입력을 비동기 태스크로 만들어 동시에 처리할 수 있도록 함
+                    tasks.append(self.simulate_keystroke(value["value"]))
+
+        if tasks:
+            await asyncio.gather(*tasks)
 
         if any_mod_key_pressed:
             self.mod_key_pressed.set()
@@ -99,63 +111,60 @@ class ModificationKeyHandler:
 
         return any_mod_key_pressed
 
-    def simulate_keystroke(self, key: str):
+    async def simulate_keystroke(self, key: str):
         """
-        Simulates a single keystroke.
-
-        :param key: The key to simulate.
+        단일 키 입력을 비동기적으로 시뮬레이션합니다.
+        :param key: 시뮬레이션할 키.
         """
         key_code = self.key_codes.get(key.upper())
         if key_code is None:
-            logger.error(
-                f"A modification key without a code was pressed: {key} / {key_code}"
-            )
+            logger.error(f"A modification key without a code was pressed: {key}")
             return
 
+        logger.debug(f"Simulating keystroke for '{key}' with modification.")
         self.key_simulator.press_key(key_code)
-        time.sleep(random.uniform(*self.key_pressed_time))
+        await asyncio.sleep(random.uniform(*self.key_pressed_time))
         self.key_simulator.release_key(key_code)
 
 
 class KeystrokeProcessor:
+    """
+    화면 픽셀 감지를 통해 키 입력을 자동화하는 메인 프로세서 클래스.
+    """
+
     PROCESS_ID_PATTERN = re.compile(r"\((\d+)\)")
+    INACTIVE_PROCESS_CHECK_INTERVAL = 0.33
+    SHORT_DELAY_INTERVAL = 0.1
+    KEY_SIMULATION_PAUSE_MIN = 0.025
+    KEY_SIMULATION_PAUSE_MAX = 0.050
 
     def __init__(
         self,
-        main_app,
+        main_app,  # main_app의 타입을 명시하면 더 좋습니다 (e.g., "MainApplication")
         target_process: str,
         event_list: List[EventModel],
         modification_keys: Dict[str, Dict],
         terminate_event: threading.Event,
     ):
-        """
-        Initializes the KeystrokeProcessor.
-
-        :param main_app: Reference to the main application.
-        :param target_process: The target process string (e.g., "Notepad (1234)").
-        :param event_list: List of EventModel instances.
-        :param modification_keys: Dictionary of modification keys.
-        :param terminate_event: threading.Event to signal termination.
-        """
         self.main_app = main_app
-        self.target_process = self.parse_process_id(target_process)
-        self.event_list = self.prepare_events(event_list)
-        self.modification_keys = modification_keys
+        self.target_process_pid = self._parse_process_id(target_process)
         self.terminate_event = terminate_event
         self.os_type = platform.system()
-        self.key_simulator = KeySimulator(self.os_type)
 
-        self.key_codes = KeyUtils.get_key_list()
-
+        # 설정값 초기화
+        settings = self.main_app.settings
         self.loop_delay = (
-            self.main_app.settings.delay_between_loop_min / 1000,
-            self.main_app.settings.delay_between_loop_max / 1000,
+            settings.delay_between_loop_min / 1000,
+            settings.delay_between_loop_max / 1000,
         )
         self.key_pressed_time = (
-            self.main_app.settings.key_pressed_time_min / 1000,
-            self.main_app.settings.key_pressed_time_max / 1000,
+            settings.key_pressed_time_min / 1000,
+            settings.key_pressed_time_max / 1000,
         )
 
+        # 의존성 객체 초기화
+        self.key_codes = KeyUtils.get_key_list()
+        self.key_simulator = KeySimulator(self.os_type)
         self.mod_key_handler = ModificationKeyHandler(
             self.key_codes,
             self.loop_delay,
@@ -163,312 +172,219 @@ class KeystrokeProcessor:
             modification_keys,
             self.os_type,
         )
+        self.sct = mss.mss()
 
-        # OS-specific initialization
-        if self.os_type == "Windows":
-            self.is_process_active = self._is_process_active_windows
-        elif self.os_type == "Darwin":
-            self.is_process_active = self._is_process_active_darwin
+        # 데이터 처리 및 클러스터링
+        prepared_events = self._prepare_events(event_list)
+        self.clusters, self.mega_bounding_rect = self._compute_clusters_and_mega_rect(
+            prepared_events
+        )
 
-        # Perform clustering and compute bounding rectangles
-        self.clusters, self.bounding_rects = self._compute_clusters_and_bounding_rects()
-
-        # Initialize asyncio loop in a separate thread
-        self.loop = asyncio.new_event_loop()
-        self.thread = threading.Thread(target=self._start_loop, daemon=True)
-        self.thread.start()
-
-        # Initialize set to track pressed keys and a lock for thread safety
+        # 동시성 관련 초기화
         self.pressed_keys = set()
         self.pressed_keys_lock = threading.Lock()
 
-        self.sct = mss.mss()
+        # 비동기 루프를 위한 스레드 시작
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(target=self._start_async_loop, daemon=True)
+
+    def start(self):
+        """프로세서를 시작합니다."""
+        logger.info("KeystrokeProcessor starting...")
+        self.thread.start()
+
+    def stop(self):
+        """프로세서를 안전하게 중지합니다."""
+        logger.info("KeystrokeProcessor stopping...")
+        self.terminate_event.set()
+        self.sct.close()
+        # 스레드가 완전히 종료될 때까지 대기
+        if self.thread.is_alive():
+            self.thread.join()
+        logger.info("KeystrokeProcessor stopped.")
+
+    # --- Private Helper Methods (Initialization & Setup) ---
 
     @staticmethod
-    def parse_process_id(target_process: str) -> Optional[int]:
-        """
-        Extracts the process ID from the target process string.
-
-        :param target_process: The target process string.
-        :return: Process ID as integer or None.
-        """
+    def _parse_process_id(target_process: str) -> Optional[int]:
         match = KeystrokeProcessor.PROCESS_ID_PATTERN.search(target_process)
-        if match:
-            return int(match.group(1))
-        return None
+        return int(match.group(1)) if match else None
 
-    def prepare_events(self, event_list: List[EventModel]) -> List[Dict]:
-        """
-        Prepares events by computing absolute click positions and reference pixel values.
-
-        :param event_list: List of EventModel instances.
-        :return: List of event dictionaries.
-        """
+    def _prepare_events(self, event_list: List[EventModel]) -> List[Dict]:
         prepared = []
         seen_events = set()
         for event in event_list:
             x = event.latest_position[0] + event.clicked_position[0]
             y = event.latest_position[1] + event.clicked_position[1]
-            event_key = (
-                (x, y),
-                tuple(event.ref_pixel_value[:3]),
-                event.key_to_enter.upper(),
-            )
+
+            # 기준 픽셀 값은 (R, G, B) 순서로 저장
+            ref_pixel = tuple(event.ref_pixel_value[:3])
+            key_to_enter = event.key_to_enter.upper()
+
+            event_key = ((x, y), ref_pixel, key_to_enter)
             if event_key not in seen_events:
                 seen_events.add(event_key)
                 prepared.append(
                     {
-                        "ref_pixel_value": tuple(event.ref_pixel_value[:3]),
+                        "ref_pixel_value": ref_pixel,
                         "click_position": (x, y),
-                        "key": event.key_to_enter.upper(),
+                        "key": key_to_enter,
                     }
                 )
-            else:
-                logger.debug(f"Duplicate event detected and skipped: {event_key}")
         return prepared
 
-    def _compute_clusters_and_bounding_rects(
-        self,
-    ) -> Tuple[Dict[int, List[Dict]], Dict[int, Dict]]:
-        """
-        Performs clustering on the event list and computes bounding rectangles for each cluster.
+    def _compute_clusters_and_mega_rect(
+        self, events: List[Dict]
+    ) -> Tuple[Dict, Optional[Dict]]:
+        if not events:
+            logger.warning("No events to process for clustering.")
+            return {}, None
 
-        :return: A tuple containing:
-                 - clusters: Dictionary mapping cluster labels to lists of event dictionaries.
-                 - bounding_rects: Dictionary mapping cluster labels to their bounding rectangle dictionaries.
-        """
-        # Perform clustering using DBSCAN
-        coordinates = np.array([event["click_position"] for event in self.event_list])
-        if len(coordinates) == 0:
-            logger.warning("No events to process.")
-            return {}, {}
+        coordinates = np.array([event["click_position"] for event in events])
+        epsilon = self.main_app.settings.cluster_epsilon_value
+        clustering = DBSCAN(eps=epsilon, min_samples=1).fit(coordinates)
 
-        # Define DBSCAN parameters
-        epsilon = (
-            self.main_app.settings.cluster_epsilon_value
-        )  # Maximum distance between two samples for a cluster
-        min_samples = 1  # Minimum number of samples in a neighborhood for a point to be a core point
-
-        clustering = DBSCAN(eps=epsilon, min_samples=min_samples).fit(coordinates)
-        labels = clustering.labels_
-
-        # Group events by cluster label and compute bounding_rects once
         clusters = {}
-        bounding_rects = {}
-        for label, event in zip(labels, self.event_list):
-            if label not in clusters:
-                clusters[label] = []
-                # Initialize bounding_rect for the new cluster
-                x, y = event["click_position"]
-                bounding_rects[label] = {
-                    "left": x,
-                    "top": y,
-                    "right": x,
-                    "bottom": y,
-                }
-            clusters[label].append(event)
-            # Update bounding_rect
-            rect = bounding_rects[label]
-            rect["left"] = min(rect["left"], event["click_position"][0])
-            rect["top"] = min(rect["top"], event["click_position"][1])
-            rect["right"] = max(rect["right"], event["click_position"][0])
-            rect["bottom"] = max(rect["bottom"], event["click_position"][1])
+        for label, event in zip(clustering.labels_, events):
+            clusters.setdefault(label, []).append(event)
 
-        # Finalize bounding_rects
-        for label, rect in bounding_rects.items():
-            bounding_rects[label] = {
-                "left": rect["left"],
-                "top": rect["top"],
-                "width": rect["right"] - rect["left"] + 1,
-                "height": rect["bottom"] - rect["top"] + 1,
-            }
+        logger.info(f"Total {len(clusters)} clusters formed.")
 
-        logger.info(
-            f"Total clusters formed: {len(clusters)} / bounding rects: {bounding_rects}"
-        )
+        bounding_rects = {
+            label: self._get_bounding_rect_for_events(cluster_events)
+            for label, cluster_events in clusters.items()
+        }
 
-        # 전체 클러스터를 감싸는 하나의 큰 바운딩 박스 계산
-        self.mega_bounding_rect = None
-        if bounding_rects:
-            all_lefts = [r["left"] for r in bounding_rects.values()]
-            all_tops = [r["top"] for r in bounding_rects.values()]
-            all_rights = [r["left"] + r["width"] for r in bounding_rects.values()]
-            all_bottoms = [r["top"] + r["height"] for r in bounding_rects.values()]
+        mega_rect = self._calculate_mega_bounding_rect(list(bounding_rects.values()))
+        logger.info(f"Mega bounding rect calculated: {mega_rect}")
 
-            mega_left = min(all_lefts)
-            mega_top = min(all_tops)
-            self.mega_bounding_rect = {
-                "left": mega_left,
-                "top": mega_top,
-                "width": max(all_rights) - mega_left,
-                "height": max(all_bottoms) - mega_top,
-            }
+        return clusters, mega_rect
 
-        logger.info(f"Mega bounding rect calculated: {self.mega_bounding_rect}")
-        return clusters, bounding_rects
+    @staticmethod
+    def _get_bounding_rect_for_events(events: List[Dict]) -> Dict[str, int]:
+        coords = np.array([e["click_position"] for e in events])
+        x_min, y_min = coords.min(axis=0)
+        x_max, y_max = coords.max(axis=0)
+        return {
+            "left": x_min,
+            "top": y_min,
+            "width": x_max - x_min + 1,
+            "height": y_max - y_min + 1,
+        }
 
-    def _start_loop(self):
-        """
-        Starts the asyncio event loop.
-        """
+    @staticmethod
+    def _calculate_mega_bounding_rect(rects: List[Dict]) -> Optional[Dict[str, int]]:
+        if not rects:
+            return None
+
+        min_left = min(r["left"] for r in rects)
+        min_top = min(r["top"] for r in rects)
+        max_right = max(r["left"] + r["width"] for r in rects)
+        max_bottom = max(r["top"] + r["height"] for r in rects)
+
+        return {
+            "left": min_left,
+            "top": min_top,
+            "width": max_right - min_left,
+            "height": max_bottom - min_top,
+        }
+
+    # --- Main Asynchronous Loop Logic ---
+
+    def _start_async_loop(self):
         asyncio.set_event_loop(self.loop)
-        self.loop.run_until_complete(self.run_processor())
+        try:
+            self.loop.run_until_complete(self._run_processor())
+        finally:
+            self.loop.close()
 
-    async def run_processor(self):
-        """
-        The main asynchronous processor that handles clustering and keystroke simulation.
-        """
+    async def _run_processor(self):
         if not self.clusters:
-            logger.warning("No clusters to process.")
+            logger.warning("No clusters to process. Processor will not run.")
             return
 
         try:
             while not self.terminate_event.is_set():
-                if not self.is_process_active(self.target_process):
-                    await asyncio.sleep(0.33)
+                if not self._is_target_process_active():
+                    await asyncio.sleep(self.INACTIVE_PROCESS_CHECK_INTERVAL)
                     continue
 
-                # Check modification keys
-                if await self.mod_key_handler.check_modification_keys():
+                if await self.mod_key_handler.check_and_process():
                     await asyncio.sleep(random.uniform(*self.loop_delay))
                     continue
 
-                # Process each cluster
                 if not self.mega_bounding_rect:
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(self.SHORT_DELAY_INTERVAL)
                     continue
 
-                # 큰 영역을 한 번만 캡처
-                grabbed_mega_image = self.sct.grab(self.mega_bounding_rect)
-
-                tasks = []
-                for cluster_id, events in self.clusters.items():
-                    task = asyncio.create_task(
-                        # 캡처된 이미지와 메가 박스 정보를 전달
-                        self.process_cluster(grabbed_mega_image, events)
-                    )
-                    tasks.append(task)
-
-                if tasks:
-                    await asyncio.gather(*tasks)
+                # 캡처 및 처리를 비동기적으로 실행
+                await self._capture_and_process_clusters()
 
                 await asyncio.sleep(random.uniform(*self.loop_delay))
 
         except asyncio.CancelledError:
-            logger.info("run_processor received cancellation request.")
-
+            logger.info("Processor task was cancelled.")
         finally:
-            logger.info("ThreadPoolExecutor has been shut down.")
+            logger.info("Processor loop finished.")
 
-    async def process_cluster(self, grabbed_mega_image, events: List[Dict]):
-        """
-        Processes a single cluster of events by grabbing the minimal bounding rectangle and simulating keystrokes.
+    async def _capture_and_process_clusters(self):
+        # 화면을 한 번 캡처하고 NumPy 배열로 변환
+        grabbed_image = self.sct.grab(self.mega_bounding_rect)
+        image_np = np.array(grabbed_image)
 
-        :param bounding_rect: The bounding rectangle dictionary for the cluster.
-        :param events: List of event dictionaries in the cluster.
-        """
-        # Process each event in the cluster
+        # 각 클러스터를 병렬로 처리
+        tasks = [
+            self._process_cluster(image_np, events) for events in self.clusters.values()
+        ]
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    async def _process_cluster(self, image_np: np.ndarray, events: List[Dict]):
         for event in events:
-            # 메가 캡처 이미지 내에서의 상대 좌표 계산
             rel_x = event["click_position"][0] - self.mega_bounding_rect["left"]
             rel_y = event["click_position"][1] - self.mega_bounding_rect["top"]
 
             try:
-                pixel = grabbed_mega_image.pixel(rel_x, rel_y)
+                # NumPy 배열에서 BGRA 픽셀 값을 가져옴
+                pixel_bgra = image_np[rel_y, rel_x]
             except IndexError:
-                logger.error(
-                    f"Pixel ({rel_x}, {rel_y}) out of bounds in grabbed region."
-                )
                 continue
 
-            if pixel[:3] == event["ref_pixel_value"]:
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        self._simulate_keystroke_sync, event["key"], uuid.uuid4()
-                    )
-                )
-                await asyncio.sleep(random.uniform(0.025, 0.05))
+            # BGRA를 RGB 튜플로 변환하여 기준 값과 비교
+            current_pixel_rgb = (pixel_bgra[2], pixel_bgra[1], pixel_bgra[0])
+            if current_pixel_rgb == event["ref_pixel_value"]:
+                await self._schedule_keystroke(event["key"])
+
+    async def _schedule_keystroke(self, key: str):
+        # 스레드 풀에서 동기 함수를 실행하여 키 입력을 시뮬레이션
+        task = asyncio.to_thread(self._simulate_keystroke_sync, key, uuid.uuid4())
+        asyncio.create_task(task)
+        # 키 입력 후 짧은 지연을 주어 동시 다발적인 입력을 방지
+        await asyncio.sleep(
+            random.uniform(self.KEY_SIMULATION_PAUSE_MIN, self.KEY_SIMULATION_PAUSE_MAX)
+        )
 
     def _simulate_keystroke_sync(self, key: str, task_id: uuid.UUID):
-        """
-        Synchronously simulates a keystroke.
-
-        :param key: The key to simulate.
-        :param task_id: Unique identifier for the task.
-        """
         key_code = self.key_codes.get(key.upper())
         if key_code is None:
-            logger.error(f"Task {task_id}: A key without a code was pressed: {key}")
+            logger.error(f"Task {task_id}: Key '{key}' has no valid key code.")
             return
 
-        # Acquire lock to check and update pressed_keys
         with self.pressed_keys_lock:
             if key in self.pressed_keys:
-                logger.debug(
-                    f"Task {task_id}: Key '{key}' is already pressed. Skipping."
-                )
-                return
+                return  # 이미 눌린 키는 무시
             self.pressed_keys.add(key)
-            logger.debug(f"Task {task_id}: Key '{key}' added to pressed_keys.")
 
         try:
             self.key_simulator.press_key(key_code)
-            logger.debug(f"Task {task_id}: Key '{key}' pressed.")
             time.sleep(random.uniform(*self.key_pressed_time))
             self.key_simulator.release_key(key_code)
-            logger.debug(f"Task {task_id}: Key '{key}' released.")
             logger.info(f"Task {task_id}: Key '{key}' simulated.")
         finally:
-            # Ensure the key is removed from pressed_keys even if an error occurs
             with self.pressed_keys_lock:
                 self.pressed_keys.discard(key)
-                logger.debug(f"Task {task_id}: Key '{key}' removed from pressed_keys.")
 
-    def _is_process_active_windows(self, process_id: int) -> bool:
-        """
-        Checks if the specified process is active on Windows.
+    # --- OS-specific Methods ---
 
-        :param process_id: The process ID to check.
-        :return: True if active, else False.
-        """
-        try:
-            active_window = win32gui.GetForegroundWindow()
-            if not active_window:
-                return False
-            _, active_pid = win32process.GetWindowThreadProcessId(active_window)
-            return process_id == active_pid
-        except Exception as e:
-            logger.error(f"Error checking active process on Windows: {e}")
-            return False
-
-    def _is_process_active_darwin(self, process_id: int) -> bool:
-        """
-        Checks if the specified process is active on macOS.
-
-        :param process_id: The process ID to check.
-        :return: True if active, else False.
-        """
-        try:
-            active_app = AppKit.NSWorkspace.sharedWorkspace().activeApplication()
-            return (
-                active_app is not None
-                and active_app.get("NSApplicationProcessIdentifier") == process_id
-            )
-        except Exception as e:
-            logger.error(f"Error checking active process on macOS: {e}")
-            return False
-
-    def start(self):
-        """
-        Starts the KeystrokeProcessor.
-        """
-        logger.info("KeystrokeProcessor started.")
-
-    def stop(self):
-        """
-        Stops the KeystrokeProcessor.
-        """
-        self.sct.close()
-        self.terminate_event.set()
-        self.thread.join()
-        logger.info("KeystrokeProcessor stopped.")
+    def _is_target_process_active(self) -> bool:
+        return ProcessUtils.is_process_active(self.target_process_pid)
