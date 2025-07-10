@@ -197,11 +197,12 @@ def validate_session(user_id, session_token, ip):
     if not session_token:
         return response(400, "Missing sessionToken")
     try:
-        # BUG FIX: get_item이 아닌 query를 사용해야 함
+        # BUG FIX: KeyConditionExpression에는 파티션 키만 사용하고,
+        # 일반 속성인 sessionToken은 FilterExpression으로 처리합니다.
         session_response = retry_operation(
             sessions_table.query,
-            KeyConditionExpression=Key("userId").eq(user_id)
-            & Key("sessionToken").eq(session_token),
+            KeyConditionExpression=Key("userId").eq(user_id),
+            FilterExpression=Key("sessionToken").eq(session_token),
         )
 
         if not session_response.get("Items"):
@@ -213,21 +214,18 @@ def validate_session(user_id, session_token, ip):
         current_time = int(time.time())
 
         if current_time > session_item["expirationTime"]:
-            # 세션이 만료된 경우 isExpired 같은 플래그 대신 그냥 삭제하는 것이 더 깔끔할 수 있습니다.
-            # 여기서는 원본 로직을 유지합니다.
-            retry_operation(
-                sessions_table.update_item,
-                Key={"userId": user_id, "sessionToken": session_token},
-                UpdateExpression="SET isExpired = :expired",
-                ExpressionAttributeValues={":expired": True},
-            )
+            # 지시사항: 만료된 세션은 업데이트 대신 삭제합니다.
+            # 이 때, 테이블 스키마에 맞는 올바른 기본 키를 제공합니다.
+            retry_operation(sessions_table.delete_item, Key={"userId": user_id})
+
             log_auth_request(user_id, "validate", ip, "expired")
             send_telegram_message(user_id, ip, "Session expired")
             return response(401, "Session expired")
 
+        # 세션 유효 시간 갱신
         retry_operation(
             sessions_table.update_item,
-            Key={"userId": user_id, "sessionToken": session_token},
+            Key={"userId": user_id},
             UpdateExpression="SET lastAccessedAt = :time, lastIpAddress = :ip, expirationTime = :new_expiration",
             ExpressionAttributeValues={
                 ":time": current_time,
