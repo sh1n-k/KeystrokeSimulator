@@ -15,7 +15,6 @@ from sklearn.cluster import DBSCAN
 
 # 가정: keystroke_models와 keystroke_utils는 올바르게 임포트 가능
 from keystroke_models import EventModel
-from keystroke_simulator_app import KeystrokeSimulatorApp
 from keystroke_utils import KeyUtils, ProcessUtils
 
 # OS-specific imports
@@ -140,7 +139,7 @@ class KeystrokeProcessor:
 
     def __init__(
         self,
-        main_app: KeystrokeSimulatorApp,
+        main_app,
         target_process: str,
         event_list: List[EventModel],
         modification_keys: Dict[str, Dict],
@@ -210,10 +209,13 @@ class KeystrokeProcessor:
         match = KeystrokeProcessor.PROCESS_ID_PATTERN.search(target_process)
         return int(match.group(1)) if match else None
 
-    def _prepare_events(self, event_list: List[EventModel]) -> List[Dict]:
+    def _prepare_events(self, event_list: List[EventModel]) -> List[EventModel]:
         prepared = []
         seen_events = set()
         for event in event_list:
+            if not event.use_event:
+                continue
+
             x = event.latest_position[0] + event.clicked_position[0]
             y = event.latest_position[1] + event.clicked_position[1]
 
@@ -224,13 +226,16 @@ class KeystrokeProcessor:
             event_key = ((x, y), ref_pixel, key_to_enter)
             if event_key not in seen_events:
                 seen_events.add(event_key)
-                prepared.append(
-                    {
-                        "ref_pixel_value": ref_pixel,
-                        "click_position": (x, y),
-                        "key": key_to_enter,
-                    }
-                )
+                # Create a new dictionary to avoid modifying the original event
+                event_data = {
+                    "event_name": event.event_name,
+                    "ref_pixel_value": ref_pixel,
+                    "click_position": (x, y),
+                    "key": key_to_enter,
+                    "press_duration_ms": event.press_duration_ms,
+                    "randomization_ms": event.randomization_ms,
+                }
+                prepared.append(event_data)
         return prepared
 
     def _compute_clusters_and_mega_rect(
@@ -353,21 +358,23 @@ class KeystrokeProcessor:
             # BGRA를 RGB 튜플로 변환하여 기준 값과 비교
             current_pixel_rgb = (pixel_bgra[2], pixel_bgra[1], pixel_bgra[0])
             if current_pixel_rgb == event["ref_pixel_value"]:
-                await self._schedule_keystroke(event["key"])
+                await self._schedule_keystroke(event)
 
-    async def _schedule_keystroke(self, key: str):
+    async def _schedule_keystroke(self, event: Dict):
         # 스레드 풀에서 동기 함수를 실행하여 키 입력을 시뮬레이션
-        task = asyncio.to_thread(self._simulate_keystroke_sync, key, uuid.uuid4())
+        task = asyncio.to_thread(self._simulate_keystroke_sync, event)
         asyncio.create_task(task)
         # 키 입력 후 짧은 지연을 주어 동시 다발적인 입력을 방지
         await asyncio.sleep(
             random.uniform(self.KEY_SIMULATION_PAUSE_MIN, self.KEY_SIMULATION_PAUSE_MAX)
         )
 
-    def _simulate_keystroke_sync(self, key: str, task_id: uuid.UUID):
+    def _simulate_keystroke_sync(self, event: Dict):
+        key = event["key"]
+        event_name = event.get("event_name", "Unnamed Event")
         key_code = self.key_codes.get(key.upper())
         if key_code is None:
-            logger.error(f"Task {task_id}: Key '{key}' has no valid key code.")
+            logger.error(f"Event '{event_name}': Key '{key}' has no valid key code.")
             return
 
         with self.pressed_keys_lock:
@@ -377,9 +384,20 @@ class KeystrokeProcessor:
 
         try:
             self.key_simulator.press_key(key_code)
-            time.sleep(random.uniform(*self.key_pressed_time))
+
+            # 개별 이벤트에 설정된 press_duration_ms를 확인
+            press_duration_ms = event.get("press_duration_ms")
+            if press_duration_ms is not None:
+                randomization_ms = event.get("randomization_ms", 0) or 0
+                delay = (press_duration_ms / 1000) + (random.uniform(-randomization_ms, randomization_ms) / 1000)
+            else:
+                # 기존 전역 설정 사용
+                delay = random.uniform(*self.key_pressed_time)
+            
+            time.sleep(max(0, delay)) # 음수 딜레이 방지
+
             self.key_simulator.release_key(key_code)
-            logger.info(f"Task {task_id}: Key '{key}' simulated.")
+            logger.info(f"Event '{event_name}': Key '{key}' simulated with delay {delay:.4f}s.")
         finally:
             with self.pressed_keys_lock:
                 self.pressed_keys.discard(key)

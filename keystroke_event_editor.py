@@ -81,6 +81,7 @@ class KeystrokeEventEditor:
         self.create_coordinate_entries()
         self.create_refresh_button()
         self.create_key_entry()
+        self.create_duration_entries()
         self.create_independent_thread_checkbox()
         self.create_buttons_frame()
         self.create_info_label()
@@ -127,6 +128,18 @@ class KeystrokeEventEditor:
             key_frame, state="readonly", values=KeyUtils.get_key_name_list()
         )
         self.key_combobox.grid(row=0, column=1)
+
+    def create_duration_entries(self):
+        duration_frame = tk.Frame(self.event_window)
+        duration_frame.pack(pady=5)
+
+        tk.Label(duration_frame, text="Press Duration (ms):").grid(row=0, column=0, padx=5)
+        self.press_duration_entry = tk.Entry(duration_frame, width=10)
+        self.press_duration_entry.grid(row=0, column=1, padx=5)
+
+        tk.Label(duration_frame, text="Randomization (ms):").grid(row=1, column=0, padx=5)
+        self.randomization_entry = tk.Entry(duration_frame, width=10)
+        self.randomization_entry.grid(row=1, column=1, padx=5)
 
     def create_independent_thread_checkbox(self):
         checkbox_frame = tk.Frame(self.event_window)
@@ -287,6 +300,9 @@ class KeystrokeEventEditor:
                 )
                 return
 
+            press_duration_ms = float(self.press_duration_entry.get()) if self.press_duration_entry.get() else None
+            randomization_ms = float(self.randomization_entry.get()) if self.randomization_entry.get() else None
+
             event = EventModel(
                 self.event_name,
                 self.latest_position,
@@ -295,6 +311,8 @@ class KeystrokeEventEditor:
                 self.held_screenshot,
                 self.ref_pixel_value,
                 self.key_to_enter,
+                press_duration_ms=press_duration_ms,
+                randomization_ms=randomization_ms,
                 independent_thread=self.independent_thread.get(),
             )
             self.save_callback(event, self.is_edit, self.row_num)
@@ -452,6 +470,12 @@ class KeystrokeEventEditor:
 
         if hasattr(event, "independent_thread"):
             self.independent_thread.set(event.independent_thread)
+
+        if hasattr(event, "press_duration_ms") and event.press_duration_ms is not None:
+            self.press_duration_entry.insert(0, str(event.press_duration_ms))
+
+        if hasattr(event, "randomization_ms") and event.randomization_ms is not None:
+            self.randomization_entry.insert(0, str(event.randomization_ms))
 
     @staticmethod
     def update_coordinate_entries(entries: list[tk.Entry], x, y):

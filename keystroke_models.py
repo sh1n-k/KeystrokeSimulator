@@ -32,6 +32,8 @@ class EventModel:
     held_screenshot: Optional[Image.Image] = None
     ref_pixel_value: Optional[tuple] = None
     key_to_enter: Optional[str] = None
+    press_duration_ms: Optional[float] = None
+    randomization_ms: Optional[float] = None
     independent_thread: Optional[bool] = False
     use_event: bool = True
 

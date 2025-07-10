@@ -223,8 +223,20 @@ class KeystrokeProfiles:
     def _load_profile(self) -> ProfileModel:
         try:
             with open(f"{self.profiles_dir}/{self.profile_name}.pkl", "rb") as f:
-                return pickle.load(f)
+                profile = pickle.load(f)
+                # For backward compatibility, ensure new fields exist.
+                if profile.event_list:
+                    for event in profile.event_list:
+                        if not hasattr(event, 'press_duration_ms'):
+                            event.press_duration_ms = None
+                        if not hasattr(event, 'randomization_ms'):
+                            event.randomization_ms = None
+                return profile
         except FileNotFoundError:
+            return ProfileModel(name=self.profile_name, event_list=[])
+        except Exception as e:
+            # Handle other potential errors during loading, like corrupted files
+            messagebox.showerror("Error", f"Failed to load profile: {e}")
             return ProfileModel(name=self.profile_name, event_list=[])
 
     def _pack_frames(self):
