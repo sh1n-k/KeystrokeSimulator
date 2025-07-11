@@ -35,7 +35,6 @@ class KeystrokeSettings(tk.Toplevel):
         self._create_time_entries()
         self._create_num_of_events_entry()
         self._create_max_key_count_entry()
-        self._create_sound_selectors()
         self._create_buttons()
         self._create_warning_label()
 
@@ -126,21 +125,6 @@ class KeystrokeSettings(tk.Toplevel):
         )
         getattr(self, f"max_key_count").grid(row=4, column=1, padx=10, pady=5)
 
-    def _create_sound_selectors(self):
-        self._create_sound_selector("Start Sound:", 5, self._select_sound)
-        self._create_sound_selector("Stop Sound:", 6, self._select_sound)
-
-    def _create_sound_selector(self, label: str, row: int, command: Callable):
-        ttk.Label(self, text=label).grid(
-            row=row, column=0, padx=10, pady=5, sticky=tk.W
-        )
-        sound_label = ttk.Label(self, text="Select file", wraplength=140)
-        sound_label.grid(row=row, column=1, padx=10, pady=5, sticky=tk.W)
-        sound_button = ttk.Button(
-            self, text="Browse", command=lambda: command(sound_label)
-        )
-        sound_button.grid(row=row, column=2, padx=10, pady=5)
-
     def _create_buttons(self):
         ttk.Button(self, text="Reset", command=self.on_reset).grid(
             row=8, column=0, padx=10, pady=10
@@ -184,7 +168,6 @@ class KeystrokeSettings(tk.Toplevel):
         self._update_time_entries()
         self._update_num_of_events()
         self._update_max_key_count()
-        self._update_sound_labels()
 
     def _update_start_stop_key(self):
         if not self.is_windows:
@@ -208,10 +191,6 @@ class KeystrokeSettings(tk.Toplevel):
             0, str(getattr(self.settings, "max_key_count", "10"))
         )
 
-    def _update_sound_labels(self):
-        self._set_sound_label(5, self.settings.start_sound)
-        self._set_sound_label(6, self.settings.stop_sound)
-
     def _set_entry_values(self, row, prefix):
         getattr(self, f"entry_min_{row}").delete(0, tk.END)
         getattr(self, f"entry_min_{row}").insert(
@@ -227,10 +206,6 @@ class KeystrokeSettings(tk.Toplevel):
         getattr(self, "cluster_epsilon_value").insert(
             0, str(getattr(self.settings, f"cluster_epsilon_value"))
         )
-
-    def _set_sound_label(self, row, filepath):
-        sound_label = self.grid_slaves(row=row, column=1)[0]
-        sound_label.config(text=filepath)
 
     # Event Handlers
     def _on_enable_key_change(self):
@@ -263,14 +238,6 @@ class KeystrokeSettings(tk.Toplevel):
         if key in valid_keys:
             self.start_stop_key.set(key)
             self.settings.start_stop_key = self.start_stop_key.get()
-
-    def _select_sound(self, label):
-        filepath = filedialog.askopenfilename(
-            title="Select Sound File",
-            filetypes=[("Sound Files", "*.mp3 *.wav *.ogg"), ("All Files", "*.*")],
-        )
-        if filepath:
-            label.config(text=filepath)
 
     # Validation Methods
     @staticmethod
@@ -394,7 +361,6 @@ class KeystrokeSettings(tk.Toplevel):
         if not self.validate_and_set_time_settings():
             return
         self.set_max_key_count()
-        self.set_sound_settings()
         self.save_settings()
 
         self.on_close()
@@ -416,21 +382,6 @@ class KeystrokeSettings(tk.Toplevel):
                 self.settings.max_key_count = 10  # Default if out of range
         else:
             self.settings.max_key_count = 10  # Default if empty
-
-    def set_sound_settings(self):
-        sound_settings = [(5, "start"), (6, "stop")]
-
-        for row, prefix in sound_settings:
-            sound_label = self.grid_slaves(row=row, column=1)[0]
-            setattr(
-                self.settings,
-                f"{prefix}_sound",
-                (
-                    sound_label["text"]
-                    if sound_label["text"] != "Select file"
-                    else f"{prefix}.mp3"
-                ),
-            )
 
     def save_settings(self):
         settings_dict = asdict(self.settings)

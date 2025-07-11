@@ -23,9 +23,9 @@ from keystroke_profiles import KeystrokeProfiles
 from keystroke_quick_event_editor import KeystrokeQuickEventEditor
 from keystroke_settings import KeystrokeSettings
 from keystroke_sort_events import KeystrokeSortEvents
+from keystroke_sounds import SoundPlayer, START_SOUND, STOP_SOUND
 from keystroke_utils import (
     ProcessUtils,
-    SoundUtils,
     StateUtils,
     WindowUtils,
     KeyUtils,
@@ -261,7 +261,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.ctrl_check_thread = None
         self.ctrl_check_active = False
 
-        SoundUtils.initialize()
+        self.sound_player = SoundPlayer()
 
     def create_ui(self):
         self.process_frame = ProcessFrame(self, textvariable=self.selected_process)
@@ -494,7 +494,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self._create_and_start_processor(event_list, modification_keys)
         self.save_latest_state()
 
-        SoundUtils.play_sound(self.settings.start_sound)
+        self.sound_player.play_sound(START_SOUND)
         self.update_ui()
 
     def _create_and_start_processor(
@@ -539,7 +539,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.keystroke_processor = None
 
         self.terminate_event.set()
-        SoundUtils.play_sound(self.settings.stop_sound)
+        self.sound_player.play_sound(STOP_SOUND)
         self.update_ui()
 
     def update_ui(self):

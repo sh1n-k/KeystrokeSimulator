@@ -14,8 +14,6 @@ class UserSettings:
     delay_between_loop_max: int = 150
     cluster_epsilon_value: int = 20
     max_key_count: Optional[int] = 10
-    start_sound: str = "start.mp3"
-    stop_sound: str = "stop.mp3"
     toggle_start_stop_mac: bool = True
 
     def is_start_stop_key_enabled(self) -> bool:
