@@ -8,6 +8,7 @@ import shutil
 import threading
 import time
 import tkinter as tk
+from dataclasses import fields
 from pathlib import Path
 from tkinter import ttk, messagebox
 from typing import Callable, List, Dict, Optional
@@ -413,9 +414,41 @@ class KeystrokeSimulatorApp(tk.Tk):
         try:
             with open("user_settings.b64", "r") as file:
                 settings_json = base64.b64decode(file.read()).decode("utf-8")
-            self.settings = UserSettings(**json.loads(settings_json))
+            settings_data = json.loads(settings_json)
+
+            # Get the field names from the UserSettings dataclass
+            user_settings_fields = {f.name for f in fields(UserSettings)}
+
+            # Filter the loaded settings to include only the fields defined in UserSettings
+            filtered_settings = {
+                key: value
+                for key, value in settings_data.items()
+                if key in user_settings_fields
+            }
+
+            # If the settings were filtered, save the cleaned version back
+            if len(filtered_settings) != len(settings_data):
+                with open("user_settings.b64", "w") as file:
+                    cleaned_json = json.dumps(filtered_settings, indent=4)
+                    encoded_json = base64.b64encode(
+                        cleaned_json.encode("utf-8")
+                    ).decode("utf-8")
+                    file.write(encoded_json)
+
+            self.settings = UserSettings(**filtered_settings)
+
         except FileNotFoundError:
             self.settings = UserSettings()
+            # Also save the default settings to create the file
+            with open("user_settings.b64", "w") as file:
+                import dataclasses
+
+                default_settings_dict = dataclasses.asdict(self.settings)
+                default_json = json.dumps(default_settings_dict, indent=4)
+                encoded_json = base64.b64encode(
+                    default_json.encode("utf-8")
+                ).decode("utf-8")
+                file.write(encoded_json)
 
     def on_mouse_scroll(self, x, y, dx, dy):
         def parse_process_id_from_string(target_process: str) -> Optional[int]:

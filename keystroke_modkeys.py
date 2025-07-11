@@ -67,26 +67,39 @@ class ModificationKeysWindow(tk.Toplevel):
 
     def load_profile(self):
         profile_path = os.path.join(self.profiles_dir, f"{self.profile_name}.pkl")
-        if os.path.exists(profile_path):
-            try:
-                with open(profile_path, "rb") as f:
-                    profile = pickle.load(f)
-                if hasattr(profile, "modification_keys"):
-                    self.display_saved_values(profile.modification_keys)
-                    logger.info(
-                        f"Loaded modification keys for profile '{self.profile_name}'"
-                    )
-                else:
-                    logger.info(
-                        f"No modification keys found in profile '{self.profile_name}'"
-                    )
-            except Exception as e:
-                logger.error(f"Error loading profile '{self.profile_name}': {str(e)}")
-        else:
-            logger.info(
-                f"Profile '{self.profile_name}' does not exist. Starting with default values."
+        if not os.path.exists(profile_path):
+            logger.warning(
+                f"Profile '{self.profile_name}' does not exist. This window should not have been opened."
             )
             self.destroy()
+            return
+
+        try:
+            with open(profile_path, "rb") as f:
+                profile = pickle.load(f)
+
+            mod_keys = getattr(profile, "modification_keys", None)
+
+            if mod_keys is None:
+                logger.info(
+                    f"No modification keys found for profile '{self.profile_name}'. Creating defaults."
+                )
+                mod_keys = {
+                    label.lower(): {"enabled": True, "value": "Pass", "pass": True}
+                    for label in self.labels
+                }
+                profile.modification_keys = mod_keys
+                with open(profile_path, "wb") as f:
+                    pickle.dump(profile, f)
+                logger.info(f"Saved default mod keys for '{self.profile_name}'")
+
+            self.display_saved_values(mod_keys)
+            logger.info(
+                f"Loaded modification keys for profile '{self.profile_name}'"
+            )
+
+        except Exception as e:
+            logger.error(f"Error loading profile '{self.profile_name}': {e}", exc_info=True)
 
     def display_saved_values(self, modification_keys: Dict[str, Any]):
         for idx, key in enumerate(self.labels):

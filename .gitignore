@@ -715,4 +715,4 @@ _build.py
 _timestamp.py
 
 .DS_Store
-diff.txt
+*.txt
