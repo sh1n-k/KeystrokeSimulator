@@ -171,7 +171,7 @@ class KeystrokeProcessor:
             modification_keys,
             self.os_type,
         )
-        self.sct = mss.mss()
+        self.sct = None
 
         # 데이터 처리 및 클러스터링
         prepared_events = self._prepare_events(event_list)
@@ -196,8 +196,8 @@ class KeystrokeProcessor:
         """프로세서를 안전하게 중지합니다."""
         logger.info("KeystrokeProcessor stopping...")
         self.terminate_event.set()
-        self.sct.close()
-        # 스레드가 완전히 종료될 때까지 대기
+        
+        # 스레드가 완전히 종료될 때까지 대기 (sct는 워커 스레드에서 정리)
         if self.thread.is_alive():
             self.thread.join()
         logger.info("KeystrokeProcessor stopped.")
@@ -271,10 +271,10 @@ class KeystrokeProcessor:
         x_min, y_min = coords.min(axis=0)
         x_max, y_max = coords.max(axis=0)
         return {
-            "left": x_min,
-            "top": y_min,
-            "width": x_max - x_min + 1,
-            "height": y_max - y_min + 1,
+            "left": int(x_min),
+            "top": int(y_min),
+            "width": int(x_max - x_min + 1),
+            "height": int(y_max - y_min + 1),
         }
 
     @staticmethod
@@ -288,19 +288,29 @@ class KeystrokeProcessor:
         max_bottom = max(r["top"] + r["height"] for r in rects)
 
         return {
-            "left": min_left,
-            "top": min_top,
-            "width": max_right - min_left,
-            "height": max_bottom - min_top,
+            "left": int(min_left),
+            "top": int(min_top),
+            "width": int(max_right - min_left),
+            "height": int(max_bottom - min_top),
         }
 
     # --- Main Asynchronous Loop Logic ---
 
     def _start_async_loop(self):
         asyncio.set_event_loop(self.loop)
+        # 스레드 안전성을 위해 mss 객체를 스레드 내부에서 생성
+        logger.debug("Creating mss object...")
+        self.sct = mss.mss()
+        logger.debug("mss object created, starting processor...")
         try:
             self.loop.run_until_complete(self._run_processor())
         finally:
+            # sct 정리를 워커 스레드에서 처리
+            if self.sct is not None:
+                try:
+                    self.sct.close()
+                except Exception as e:
+                    logger.debug(f"sct.close() failed: {e}")
             self.loop.close()
 
     async def _run_processor(self):
@@ -308,6 +318,7 @@ class KeystrokeProcessor:
             logger.warning("No clusters to process. Processor will not run.")
             return
 
+        logger.debug("Processor loop starting...")
         try:
             while not self.terminate_event.is_set():
                 if not self._is_target_process_active():
@@ -361,9 +372,8 @@ class KeystrokeProcessor:
                 await self._schedule_keystroke(event)
 
     async def _schedule_keystroke(self, event: Dict):
-        # 스레드 풀에서 동기 함수를 실행하여 키 입력을 시뮬레이션
-        task = asyncio.to_thread(self._simulate_keystroke_sync, event)
-        asyncio.create_task(task)
+        # 키 입력을 시뮬레이션
+        self._simulate_keystroke_sync(event)
         # 키 입력 후 짧은 지연을 주어 동시 다발적인 입력을 방지
         await asyncio.sleep(
             random.uniform(self.KEY_SIMULATION_PAUSE_MIN, self.KEY_SIMULATION_PAUSE_MAX)
