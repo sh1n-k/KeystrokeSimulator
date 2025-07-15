@@ -4,7 +4,7 @@ import tempfile
 import PyInstaller.__main__
 from dotenv import load_dotenv, find_dotenv
 
-VERSION = "2.1"
+VERSION = "2.2"
 
 # Load environment variables
 load_dotenv(find_dotenv())
@@ -21,6 +21,7 @@ def create_temp_script(filename):
         content = content.replace(f'os.getenv("{key}")', f"'{value}'")
 
     return content
+
 
 if __name__ == "__main__":
     # Read the original script and replace environment variables
