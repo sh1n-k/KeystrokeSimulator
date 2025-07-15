@@ -57,26 +57,20 @@ class ProcessFrame(tk.Frame):
         self.refresh_processes()
 
     def refresh_processes(self):
-        # 현재 선택된 값에서 Process Name 추출
         current_value = self.process_combobox.get()
         current_process_name = None
 
         if current_value:
-            # "Process Name (PID)" 형태에서 Process Name 추출
-            # 마지막 괄호와 그 내용을 제거
             if current_value.endswith(")") and "(" in current_value:
                 current_process_name = current_value.rsplit(" (", 1)[0]
 
-        # 새로운 프로세스 목록 가져오기
         processes = ProcessCollector.get()
         sorted_processes = sorted(processes, key=lambda x: x[0].lower())
 
-        # 콤보박스 값 설정
         process_values = [f"{name} ({pid})" for name, pid, _ in sorted_processes]
         self.process_combobox["values"] = process_values
 
-        # 이전에 선택된 Process Name과 일치하는 항목 찾기
-        selected_index = 0  # 기본값
+        selected_index = 0
 
         if current_process_name:
             for i, (name, pid, _) in enumerate(sorted_processes):
@@ -84,7 +78,6 @@ class ProcessFrame(tk.Frame):
                     selected_index = i
                     break
 
-        # 콤보박스 선택 설정
         if sorted_processes:
             self.process_combobox.current(selected_index)
             self.process_combobox.event_generate("<<ComboboxSelected>>")
@@ -159,6 +152,7 @@ class ProfileFrame(tk.Frame):
             os.remove(profile_file)
 
 
+# [수정됨] clear_logs_callback 인자 추가
 class ButtonFrame(tk.Frame):
     def __init__(
         self,
@@ -166,6 +160,7 @@ class ButtonFrame(tk.Frame):
         toggle_callback: Callable,
         events_callback: Callable,
         settings_callback: Callable,
+        clear_logs_callback: Callable,
         *args,
         **kwargs,
     ):
@@ -191,10 +186,19 @@ class ButtonFrame(tk.Frame):
             height=1,
             command=settings_callback,
         )
+        # [추가됨] 로그 비우기 버튼
+        self.clear_logs_button = tk.Button(
+            self,
+            text="Clear Logs",
+            width=10,
+            height=1,
+            command=clear_logs_callback,
+        )
 
         self.start_stop_button.pack(side=tk.LEFT, padx=5)
         self.events_button.pack(side=tk.LEFT, padx=5)
         self.settings_button.pack(side=tk.LEFT, padx=5)
+        self.clear_logs_button.pack(side=tk.LEFT, padx=5)
 
 
 class ProfileButtonFrame(tk.Frame):
@@ -208,7 +212,7 @@ class ProfileButtonFrame(tk.Frame):
         **kwargs,
     ):
         super().__init__(master, *args, **kwargs)
-        self.modkeys_button = tk.Button(  # Add this new button
+        self.modkeys_button = tk.Button(
             self,
             text="ModKeys",
             width=10,
@@ -255,7 +259,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.settings_window = None
         self.latest_scroll_time = None
 
-        # Variables for Start/Stop toggle
         self.start_stop_mouse_listener = None
         self.last_ctrl_press_time = 0
         self.ctrl_check_thread = None
@@ -263,13 +266,18 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         self.sound_player = SoundPlayer()
 
+    # [수정됨] clear_local_logs 콜백 전달
     def create_ui(self):
         self.process_frame = ProcessFrame(self, textvariable=self.selected_process)
         self.profile_frame = ProfileFrame(
             self, textvariable=self.selected_profile, profiles_dir=self.profiles_dir
         )
         self.button_frame = ButtonFrame(
-            self, self.toggle_start_stop, self.open_quick_events, self.open_settings
+            self,
+            self.toggle_start_stop,
+            self.open_quick_events,
+            self.open_settings,
+            self.clear_local_logs,
         )
         self.profile_button_frame = ProfileButtonFrame(
             self, self.open_modkeys, self.open_profile, self.sort_profile_events
@@ -286,6 +294,77 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.set_ttk_style()
         WindowUtils.center_window(self)
 
+    # [수정됨] 로컬 로그 파일 삭제 기능 + 삭제 용량 계산
+    def clear_local_logs(self):
+        """
+        Deletes old log files in the local 'logs' directory after confirmation,
+        calculates the total size of deleted files, and skips the active log file.
+        """
+        log_dir = "logs"
+        active_log_filename = "keysym.log"
+
+        if not messagebox.askokcancel(
+            "Confirm", "Delete all old log files?\nThe current log file will be kept."
+        ):
+            return
+
+        try:
+            if not os.path.exists(log_dir) or not os.path.isdir(log_dir):
+                messagebox.showinfo(
+                    "Info", "Log directory does not exist. Nothing to clear."
+                )
+                return
+
+            files_to_delete = [
+                f
+                for f in os.listdir(log_dir)
+                if f != active_log_filename and os.path.isfile(os.path.join(log_dir, f))
+            ]
+
+            if not files_to_delete:
+                messagebox.showinfo("Info", "No old log files to clear.")
+                return
+
+            cleared_count = 0
+            # [추가됨] 삭제된 파일의 총용량을 저장할 변수
+            total_size_bytes = 0
+
+            for filename in files_to_delete:
+                file_path = os.path.join(log_dir, filename)
+                try:
+                    # [추가됨] 파일 삭제 전, 크기를 합산
+                    total_size_bytes += os.path.getsize(file_path)
+
+                    os.remove(file_path)
+                    cleared_count += 1
+                except Exception as e:
+                    logger.warning(f"Could not delete {file_path}: {e}")
+
+            if cleared_count > 0:
+                # [추가됨] 바이트를 메가바이트로 변환
+                total_size_mb = total_size_bytes / (1024 * 1024)
+
+                # [수정됨] 메시지 박스에 삭제된 용량 정보 추가
+                success_message = (
+                    f"{cleared_count} old log file(s) have been cleared.\n"
+                    f"Total space saved: {total_size_mb:.2f} MB"
+                )
+                messagebox.showinfo("Success", success_message)
+                logger.info(
+                    f"{cleared_count} old log files cleared by user, saving {total_size_mb:.2f} MB."
+                )
+            else:
+                messagebox.showwarning(
+                    "Warning",
+                    "Could not clear some old log files. Check file permissions.",
+                )
+
+        except Exception as e:
+            messagebox.showerror(
+                "Error", f"An unexpected error occurred while clearing logs: {e}"
+            )
+            logger.error(f"Error clearing local logs: {e}")
+
     def load_settings_and_state(self):
         self.init_profiles()
         self.load_settings()
@@ -299,10 +378,8 @@ class KeystrokeSimulatorApp(tk.Tk):
     def setup_start_stop_handler(self):
         if platform.system() == "Darwin":
             if self.settings.toggle_start_stop_mac:
-                # Setup double Ctrl press detection for macOS
                 self.setup_ctrl_double_press_handler()
         else:
-            # Existing code for Windows
             start_stop_key = self.settings.start_stop_key
             if start_stop_key.startswith("W_"):
                 import pynput
@@ -321,8 +398,6 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def setup_ctrl_double_press_handler(self):
         """Sets up a thread to detect double Ctrl presses on macOS"""
-
-        # Start a thread to check for Ctrl key presses
         self.ctrl_check_active = True
         self.ctrl_check_thread = threading.Thread(target=self.check_for_long_alt_shift)
         self.ctrl_check_thread.daemon = True
@@ -336,38 +411,29 @@ class KeystrokeSimulatorApp(tk.Tk):
         combo_press_start_time = 0
         last_toggle_time = 0
         toggle_cooldown = 0.25
-        long_press_threshold = 0.01  # 1초 이상 눌러야 함
-        toggle_executed = False  # 한 번의 키 조합 누름에 대해 토글이 실행되었는지 추적
+        long_press_threshold = 0.01
+        toggle_executed = False
 
         while self.ctrl_check_active:
             try:
                 current_time = time.time()
 
-                # 쿨다운 체크
                 if current_time - last_toggle_time < toggle_cooldown:
-                    # logger.debug(f"[{time.ctime(current_time)}] 쿨다운 중... (남은 시간: {toggle_cooldown - (current_time - last_toggle_time):.4f}s)")
                     time.sleep(0.05)
                     continue
 
-                # Alt와 Shift 키가 모두 눌렸는지 확인
                 alt_pressed = KeyUtils.mod_key_pressed("alt")
                 shift_pressed = KeyUtils.mod_key_pressed("shift")
                 current_combo_state = alt_pressed and shift_pressed
 
-                # Alt+Shift 조합이 방금 눌렸을 때 (rising edge)
                 if current_combo_state and not last_combo_state:
                     combo_press_start_time = current_time
-                    toggle_executed = (
-                        False  # 새로운 키 조합 누름이므로 토글 실행 플래그 리셋
-                    )
+                    toggle_executed = False
 
-                # Alt+Shift 조합이 방금 떼어졌을 때 (falling edge)
                 elif not current_combo_state and last_combo_state:
-                    press_duration = current_time - combo_press_start_time
                     combo_press_start_time = 0
-                    toggle_executed = False  # 키가 떼어졌으므로 토글 실행 플래그 리셋
+                    toggle_executed = False
 
-                # Alt+Shift 조합이 계속 눌려있는 상태에서 1초가 지났을 때 토글 실행
                 elif (
                     current_combo_state
                     and last_combo_state
@@ -376,19 +442,15 @@ class KeystrokeSimulatorApp(tk.Tk):
                 ):
                     press_duration = current_time - combo_press_start_time
 
-                    # 정확히 1초 지났을 때 토글 (키를 떼지 않아도)
                     if (
                         press_duration >= long_press_threshold
                         and (current_time - last_toggle_time) >= toggle_cooldown
                     ):
                         self.after(0, self.toggle_start_stop)
                         last_toggle_time = current_time
-                        toggle_executed = True  # 토글이 실행되었음을 표시
+                        toggle_executed = True
 
-                # 이전 상태 업데이트
                 last_combo_state = current_combo_state
-
-                # CPU 사용량 방지를 위한 짧은 대기
                 time.sleep(0.01)
 
             except Exception as e:
@@ -415,18 +477,12 @@ class KeystrokeSimulatorApp(tk.Tk):
             with open("user_settings.b64", "r") as file:
                 settings_json = base64.b64decode(file.read()).decode("utf-8")
             settings_data = json.loads(settings_json)
-
-            # Get the field names from the UserSettings dataclass
             user_settings_fields = {f.name for f in fields(UserSettings)}
-
-            # Filter the loaded settings to include only the fields defined in UserSettings
             filtered_settings = {
                 key: value
                 for key, value in settings_data.items()
                 if key in user_settings_fields
             }
-
-            # If the settings were filtered, save the cleaned version back
             if len(filtered_settings) != len(settings_data):
                 with open("user_settings.b64", "w") as file:
                     cleaned_json = json.dumps(filtered_settings, indent=4)
@@ -434,20 +490,18 @@ class KeystrokeSimulatorApp(tk.Tk):
                         cleaned_json.encode("utf-8")
                     ).decode("utf-8")
                     file.write(encoded_json)
-
             self.settings = UserSettings(**filtered_settings)
 
         except FileNotFoundError:
             self.settings = UserSettings()
-            # Also save the default settings to create the file
             with open("user_settings.b64", "w") as file:
                 import dataclasses
 
                 default_settings_dict = dataclasses.asdict(self.settings)
                 default_json = json.dumps(default_settings_dict, indent=4)
-                encoded_json = base64.b64encode(
-                    default_json.encode("utf-8")
-                ).decode("utf-8")
+                encoded_json = base64.b64encode(default_json.encode("utf-8")).decode(
+                    "utf-8"
+                )
                 file.write(encoded_json)
 
     def on_mouse_scroll(self, x, y, dx, dy):
@@ -500,9 +554,6 @@ class KeystrokeSimulatorApp(tk.Tk):
     def _create_and_start_processor(
         self, event_list: List[EventModel], modification_keys: Dict
     ):
-        """
-        Creates and starts the KeystrokeProcessor.
-        """
         self.keystroke_processor = KeystrokeProcessor(
             main_app=self,
             target_process=self.selected_process.get(),
@@ -559,6 +610,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.button_frame.settings_button.config(state=state)
         self.profile_button_frame.sort_button.config(state=state)
 
+        # [추가됨] 로그 비우기 버튼 상태 업데이트
+        self.button_frame.clear_logs_button.config(state=state)
+
     def open_modkeys(self):
         if self.selected_profile.get():
             self.modkeys_window = ModificationKeysWindow(
@@ -606,25 +660,6 @@ class KeystrokeSimulatorApp(tk.Tk):
             profile=self.selected_profile.get(),
         )
 
-    # def bind_events(self):
-    #     self.bind("<Escape>", self.on_closing)
-    #     self.protocol("WM_DELETE_WINDOW", self.on_closing)
-    #
-    #     start_stop_key = self.settings.start_stop_key
-    #     if start_stop_key.startswith("W_"):
-    #         import pynput
-    #         self.start_stop_mouse_listener = pynput.mouse.Listener(
-    #             on_scroll=self.on_mouse_scroll
-    #         )
-    #         self.start_stop_mouse_listener.start()
-    #     else:
-    #         key = (
-    #             KeyUtils.get_keycode(start_stop_key)
-    #             if platform.system() == "Darwin"
-    #             else start_stop_key
-    #         )
-    #         keyboard.on_press_key(key, self.toggle_start_stop)
-
     def unbind_events(self):
         self.unbind("<Escape>")
 
@@ -634,7 +669,6 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.start_stop_mouse_listener.stop()
             self.start_stop_mouse_listener = None
 
-        # Stop the Ctrl check thread (MacOS)
         self.ctrl_check_active = False
         if self.ctrl_check_thread and self.ctrl_check_thread.is_alive():
             self.ctrl_check_thread.join(timeout=0.5)

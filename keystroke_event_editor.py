@@ -29,17 +29,17 @@ def invert_pixels_by_coordinate(image: Image.Image, x: int, y: int, axis: str):
 
 class KeystrokeEventEditor:
     def __init__(
-            self,
-            profiles_window: tk.Tk | tk.Toplevel,
-            row_num: int,
-            save_callback: Optional[Callable[[EventModel, bool, int], None]],
-            event_function: Optional[Callable[[], EventModel]],
+        self,
+        profiles_window: tk.Tk | tk.Toplevel,
+        row_num: int,
+        save_callback: Optional[Callable[[EventModel, bool, int], None]],
+        event_function: Optional[Callable[[], EventModel]],
     ):
         self.profiles_window = profiles_window
         self.event_window = tk.Toplevel(profiles_window)
         self.event_window.title(f"Event Settings - Row {row_num + 1}")
-        self.event_window.transient(profiles_window)  # Set parent window
-        self.event_window.grab_set()  # Make the window modal
+        self.event_window.transient(profiles_window)
+        self.event_window.grab_set()
         self.event_window.focus_force()
         self.event_window.attributes("-topmost", True)
         self.event_window.update_idletasks()
@@ -79,7 +79,6 @@ class KeystrokeEventEditor:
         self.create_image_placeholders()
         self.create_ref_pixel_placeholder()
         self.create_coordinate_entries()
-        self.create_refresh_button()
         self.create_key_entry()
         self.create_duration_entries()
         self.create_independent_thread_checkbox()
@@ -110,14 +109,8 @@ class KeystrokeEventEditor:
         coord_frame = tk.Frame(self.event_window)
         coord_frame.pack()
 
-        coord_labels = ["X1:", "Y1:", "X2:", "Y2:"]
+        coord_labels = ["Area X:", "Area Y:", "Pixel X:", "Pixel Y:"]
         self.coord_entries = self.create_coord_entries(coord_frame, coord_labels)
-
-    def create_refresh_button(self):
-        refresh_button = tk.Button(
-            self.event_window, text="Refresh", command=self.handle_refresh_btn
-        )
-        refresh_button.pack(pady=5)
 
     def create_key_entry(self):
         key_frame = tk.Frame(self.event_window)
@@ -129,16 +122,35 @@ class KeystrokeEventEditor:
         )
         self.key_combobox.grid(row=0, column=1)
 
+    # [추가됨] 숫자만 입력되도록 하는 유효성 검사 함수
+    def _validate_numeric_input(self, P):
+        """Allow only digits or an empty string."""
+        if P == "" or P.isdigit():
+            return True
+        return False
+
+    # [수정됨] 유효성 검사 적용
     def create_duration_entries(self):
         duration_frame = tk.Frame(self.event_window)
         duration_frame.pack(pady=5)
 
-        tk.Label(duration_frame, text="Press Duration (ms):").grid(row=0, column=0, padx=5)
-        self.press_duration_entry = tk.Entry(duration_frame, width=10)
+        # Register the validation command
+        vcmd = (self.event_window.register(self._validate_numeric_input), "%P")
+
+        tk.Label(duration_frame, text="Press Duration (ms):").grid(
+            row=0, column=0, padx=5
+        )
+        self.press_duration_entry = tk.Entry(
+            duration_frame, width=10, validate="key", validatecommand=vcmd
+        )
         self.press_duration_entry.grid(row=0, column=1, padx=5)
 
-        tk.Label(duration_frame, text="Randomization (ms):").grid(row=1, column=0, padx=5)
-        self.randomization_entry = tk.Entry(duration_frame, width=10)
+        tk.Label(duration_frame, text="Randomization (ms):").grid(
+            row=1, column=0, padx=5
+        )
+        self.randomization_entry = tk.Entry(
+            duration_frame, width=10, validate="key", validatecommand=vcmd
+        )
         self.randomization_entry.grid(row=1, column=1, padx=5)
 
     def create_independent_thread_checkbox(self):
@@ -154,10 +166,10 @@ class KeystrokeEventEditor:
         button_frame = tk.Frame(self.event_window)
         button_frame.pack(pady=10)
 
-        grab_button = tk.Button(  # Grab 버튼 생성
-            button_frame, text="Grab(Ctrl)", command=self.handle_grab_button_click  # command 지정
+        grab_button = tk.Button(
+            button_frame, text="Grab(Ctrl)", command=self.handle_grab_button_click
         )
-        grab_button.grid(row=0, column=0, padx=5, columnspan=2)  # Grab 버튼을 왼쪽에 pack
+        grab_button.grid(row=0, column=0, padx=5, columnspan=2)
 
         ok_button = tk.Button(button_frame, text="OK(↩️)", command=self.save_event)
         ok_button.grid(row=1, column=0, padx=5)
@@ -170,36 +182,30 @@ class KeystrokeEventEditor:
     def create_info_label(self):
         info_label = tk.Label(
             self.event_window,
-            text="ALT: Area selection\nCTRL: Grab current image\n"
-                 + "1. Set a crossline by left-clicking on the collected image.\n"
-                 + "2. select the key you want to set."
-                 + "\n\n"
-                 + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
-                 + "1. 수집된 이미지에 왼쪽 클릭으로 교차선을 설정하세요.\n"
-                 + "2. 설정할 키를 선택하세요.\n",
+            text="ALT: Area selection\nCTRL: Grab current image\n\n"
+            + "1. Left-click the right image (grabbed image)\n   to select the reference pixel.\n"
+            + "2. Select the key you want to set.\n\n"
+            + "ALT: 캡처 영역 선택\nCTRL: 현재 이미지 가져오기\n\n"
+            + "1. 오른쪽 이미지(가져온 이미지)를 클릭하여\n   기준이 될 픽셀을 선택하세요.\n"
+            + "2. 설정할 키를 선택하세요.",
             anchor="center",
             fg="black",
-            wraplength=200,
+            wraplength=250,
         )
         info_label.pack(pady=5, fill="both")
 
     def check_key_states(self):
-        """Thread function to check key states periodically without admin privileges"""
+        """Thread function to check key states periodically."""
         while self.key_check_active:
-            # Check for ALT key (for setting mouse position)
             if KeyUtils.mod_key_pressed("alt"):
                 self.screenshot_capturer.set_current_mouse_position(
                     self.event_window.winfo_pointerxy()
                 )
 
-            # Check for CTRL key (for holding image)
             if KeyUtils.mod_key_pressed("ctrl"):
                 self.hold_image()
-
-                # Small delay to prevent multiple triggers
                 time.sleep(0.2)
 
-            # Check less frequently to reduce CPU usage
             time.sleep(0.1)
 
     def bind_events(self):
@@ -250,7 +256,9 @@ class KeystrokeEventEditor:
                 self.apply_crosshair_to_placeholder(
                     self.held_screenshot, self.image2_placeholder
                 )
-                self.handle_refresh_btn()
+                self.update_ref_pixel_placeholder(
+                    self.held_screenshot, self.clicked_position
+                )
 
     def get_coordinates_of_held_image(self, event):
         image = copy.deepcopy(self.held_screenshot)
@@ -282,17 +290,18 @@ class KeystrokeEventEditor:
     def handle_grab_button_click(self):
         self.hold_image()
 
+    # [수정됨] 저장 시 유효성 검사 로직 추가
     def save_event(self, event=None):
         try:
             if not all(
-                    [
-                        self.latest_position,
-                        self.clicked_position,
-                        self.latest_screenshot,
-                        self.held_screenshot,
-                        self.ref_pixel_value,
-                        self.key_to_enter,
-                    ]
+                [
+                    self.latest_position,
+                    self.clicked_position,
+                    self.latest_screenshot,
+                    self.held_screenshot,
+                    self.ref_pixel_value,
+                    self.key_to_enter,
+                ]
             ):
                 messagebox.showerror(
                     "Error",
@@ -300,8 +309,32 @@ class KeystrokeEventEditor:
                 )
                 return
 
-            press_duration_ms = float(self.press_duration_entry.get()) if self.press_duration_entry.get() else None
-            randomization_ms = float(self.randomization_entry.get()) if self.randomization_entry.get() else None
+            # --- 유효성 검사 로직 시작 ---
+            press_duration_str = self.press_duration_entry.get()
+            randomization_str = self.randomization_entry.get()
+
+            if press_duration_str:
+                press_duration_val = int(press_duration_str)
+                if press_duration_val < 50:
+                    messagebox.showerror(
+                        "Validation Error", "Press Duration must be at least 50 ms."
+                    )
+                    return
+
+                if randomization_str:
+                    randomization_val = int(randomization_str)
+                    if randomization_val < 30:
+                        messagebox.showerror(
+                            "Validation Error",
+                            "Randomization must be at least 30 ms when Press Duration is set.",
+                        )
+                        return
+            # --- 유효성 검사 로직 끝 ---
+
+            press_duration_ms = (
+                float(press_duration_str) if press_duration_str else None
+            )
+            randomization_ms = float(randomization_str) if randomization_str else None
 
             event = EventModel(
                 self.event_name,
@@ -327,14 +360,13 @@ class KeystrokeEventEditor:
         self.key_combobox.unbind("<<ComboboxSelected>>")
         self.key_combobox.unbind("<KeyPress>")
 
-        # Stop the key checking thread
         self.key_check_active = False
-        if hasattr(self, 'key_check_thread') and self.key_check_thread.is_alive():
+        if hasattr(self, "key_check_thread") and self.key_check_thread.is_alive():
             self.key_check_thread.join(timeout=0.5)
 
         if (
-                self.screenshot_capturer.capture_thread
-                and self.screenshot_capturer.capture_thread.is_alive()
+            self.screenshot_capturer.capture_thread
+            and self.screenshot_capturer.capture_thread.is_alive()
         ):
             self.screenshot_capturer.stop_capture()
             self.screenshot_capturer.capture_thread.join(timeout=0.1)
@@ -361,7 +393,9 @@ class KeystrokeEventEditor:
             pointer_position = eval(state["event_pointer"])
             self.screenshot_capturer.set_current_mouse_position(pointer_position)
 
-    def create_coord_entries(self, parent: tk.Frame, labels: list[str]) -> list[tk.Entry]:
+    def create_coord_entries(
+        self, parent: tk.Frame, labels: list[str]
+    ) -> list[tk.Entry]:
         entries = []
         for i, label_text in enumerate(labels):
             label = tk.Label(parent, text=label_text)
@@ -373,11 +407,9 @@ class KeystrokeEventEditor:
             entry.grid(row=row, column=column + 1, padx=4, sticky=tk.W)
             entries.append(entry)
 
-        # Bind events for X1 and Y1 entries
-        entries[0].bind("<FocusOut>", self.update_position_from_entries)  # X1 Entry
-        entries[1].bind("<FocusOut>", self.update_position_from_entries)  # Y1 Entry
+        entries[0].bind("<FocusOut>", self.update_position_from_entries)
+        entries[1].bind("<FocusOut>", self.update_position_from_entries)
 
-        # Add Up/Down arrow key functionality for all coordinate entries
         for entry in entries:
             entry.bind("<Up>", lambda event, e=entry: self.increment_entry_value(e))
             entry.bind("<Down>", lambda event, e=entry: self.decrement_entry_value(e))
@@ -390,45 +422,33 @@ class KeystrokeEventEditor:
             y1 = int(self.coord_entries[1].get())
             self.screenshot_capturer.set_current_mouse_position((x1, y1))
         except ValueError:
-            # Entry 에 숫자가 아닌 값이 입력된 경우 에러 처리 (옵션)
-            print("X1, Y1 좌표에 유효한 숫자를 입력하세요.")
+            print("Please enter valid numbers for Area X and Area Y coordinates.")
             pass
 
     def increment_entry_value(self, entry):
-        """Increment the numeric value in the entry by 1"""
         try:
             current_value = int(entry.get())
             entry.delete(0, tk.END)
             entry.insert(0, str(current_value + 1))
-
-            # If this is one of the first two entries (X1, Y1), update position
             if entry in self.coord_entries[:2]:
                 self.update_position_from_entries()
         except ValueError:
-            # If the entry doesn't contain a valid integer, do nothing
             pass
-        return "break"  # Prevent default behavior
+        return "break"
 
     def decrement_entry_value(self, entry):
-        """Decrement the numeric value in the entry by 1"""
         try:
             current_value = int(entry.get())
             entry.delete(0, tk.END)
             entry.insert(0, str(current_value - 1))
-
-            # If this is one of the first two entries (X1, Y1), update position
             if entry in self.coord_entries[:2]:
                 self.update_position_from_entries()
         except ValueError:
-            # If the entry doesn't contain a valid integer, do nothing
             pass
-        return "break"  # Prevent default behavior
+        return "break"
 
     def update_key_to_enter(self, event):
         self.key_to_enter = self.key_combobox.get()
-
-    def handle_refresh_btn(self):
-        self.update_ref_pixel_placeholder(self.held_screenshot, self.clicked_position)
 
     def load_stored_event(self, event_function):
         event: EventModel = event_function()
@@ -457,33 +477,27 @@ class KeystrokeEventEditor:
 
         self.update_ref_pixel_placeholder(self.held_screenshot, self.clicked_position)
 
-        # Verify that key_to_enter exists in the key list
         if self.key_to_enter:
             self.event_window.update_idletasks()
-
-            # If the key exists in values, set it
-            if self.key_to_enter in self.key_combobox['values']:
+            if self.key_to_enter in self.key_combobox["values"]:
                 self.key_combobox.set(self.key_to_enter)
             else:
-                # If not found, log it for debugging
                 logger.debug(f"Key {self.key_to_enter} not found in combobox values")
 
         if hasattr(event, "independent_thread"):
             self.independent_thread.set(event.independent_thread)
 
         if hasattr(event, "press_duration_ms") and event.press_duration_ms is not None:
-            self.press_duration_entry.insert(0, str(event.press_duration_ms))
+            self.press_duration_entry.insert(0, str(int(event.press_duration_ms)))
 
         if hasattr(event, "randomization_ms") and event.randomization_ms is not None:
-            self.randomization_entry.insert(0, str(event.randomization_ms))
+            self.randomization_entry.insert(0, str(int(event.randomization_ms)))
 
     @staticmethod
     def update_coordinate_entries(entries: list[tk.Entry], x, y):
         for idx, entry in enumerate(entries):
-            # entry.configure(state="normal")
             entry.delete(0, tk.END)
             entry.insert(0, str((x, y)[idx]))
-            # entry.configure(state="readonly")
 
     @staticmethod
     def update_image_placeholder(placeholder: tk.Label, image: Image.Image):
