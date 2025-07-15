@@ -227,9 +227,9 @@ class KeystrokeProfiles:
                 # For backward compatibility, ensure new fields exist.
                 if profile.event_list:
                     for event in profile.event_list:
-                        if not hasattr(event, 'press_duration_ms'):
+                        if not hasattr(event, "press_duration_ms"):
                             event.press_duration_ms = None
-                        if not hasattr(event, 'randomization_ms'):
+                        if not hasattr(event, "randomization_ms"):
                             event.randomization_ms = None
                 return profile
         except FileNotFoundError:

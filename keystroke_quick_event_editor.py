@@ -78,7 +78,7 @@ class KeystrokeQuickEventEditor:
         self.image2_placeholder.bind("<B1-Motion>", self.get_coordinates_of_held_image)
 
     def create_image_placeholder(
-            self, parent: tk.Frame, bg_color: str, row: int, column: int
+        self, parent: tk.Frame, bg_color: str, row: int, column: int
     ) -> tk.Label:
         placeholder = tk.Label(parent, width=10, height=5, bg=bg_color)
         placeholder.grid(row=row, column=column, padx=5)
@@ -104,7 +104,9 @@ class KeystrokeQuickEventEditor:
         button_frame.pack(pady=5)  # button_frame 을 pack
 
         grab_button = tk.Button(  # Grab 버튼 생성
-            button_frame, text="Grab(Ctrl)", command=self.handle_grab_button_click  # command 지정
+            button_frame,
+            text="Grab(Ctrl)",
+            command=self.handle_grab_button_click,  # command 지정
         )
         grab_button.pack(side=tk.LEFT, padx=5)  # Grab 버튼을 왼쪽에 pack
 
@@ -117,10 +119,10 @@ class KeystrokeQuickEventEditor:
         self.info_label = tk.Label(
             self.event_window,
             text="ALT: Area selection\nCTRL: Grab current image\n"
-                 + "Left-click on the collected image to set a Crossline and press CTRL to save it to a Quick Event."
-                 + "\n\n"
-                 + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
-                 + "수집된 이미지에 왼쪽 클릭으로 교차선을 설정한 뒤\nCTRL 키를 누르면 Quick 이벤트에 저장됩니다.",
+            + "Left-click on the collected image to set a Crossline and press CTRL to save it to a Quick Event."
+            + "\n\n"
+            + "ALT: 영역 선택\nCTRL: 현재 이미지 가져오기\n"
+            + "수집된 이미지에 왼쪽 클릭으로 교차선을 설정한 뒤\nCTRL 키를 누르면 Quick 이벤트에 저장됩니다.",
             anchor="center",
             fg="black",
             wraplength=200,
@@ -242,7 +244,7 @@ class KeystrokeQuickEventEditor:
     def close_window(self, event=None):
         # Stop the key checking thread
         self.key_check_active = False
-        if hasattr(self, 'key_check_thread') and self.key_check_thread.is_alive():
+        if hasattr(self, "key_check_thread") and self.key_check_thread.is_alive():
             self.key_check_thread.join(timeout=0.5)
 
         self.stop_listeners()
@@ -252,8 +254,8 @@ class KeystrokeQuickEventEditor:
 
     def stop_listeners(self):
         if (
-                self.screenshot_capturer.capture_thread
-                and self.screenshot_capturer.capture_thread.is_alive()
+            self.screenshot_capturer.capture_thread
+            and self.screenshot_capturer.capture_thread.is_alive()
         ):
             self.screenshot_capturer.stop_capture()
             self.screenshot_capturer.capture_thread.join(timeout=0.1)
@@ -279,7 +281,9 @@ class KeystrokeQuickEventEditor:
             self.coord_entries[1].insert(0, pointer_position[1])
             self.screenshot_capturer.set_current_mouse_position(pointer_position)
 
-    def create_coord_entries(self, parent: tk.Frame, labels: List[str]) -> List[tk.Entry]:
+    def create_coord_entries(
+        self, parent: tk.Frame, labels: List[str]
+    ) -> List[tk.Entry]:
         entries = []
         for i, label_text in enumerate(labels):
             label = tk.Label(parent, text=label_text)
@@ -343,13 +347,13 @@ class KeystrokeQuickEventEditor:
 
     def save_event(self):
         if all(
-                [
-                    self.latest_position,
-                    self.clicked_position,
-                    self.latest_screenshot,
-                    self.held_screenshot,
-                    self.ref_pixel_value,
-                ]
+            [
+                self.latest_position,
+                self.clicked_position,
+                self.latest_screenshot,
+                self.held_screenshot,
+                self.ref_pixel_value,
+            ]
         ):
             event = EventModel(
                 event_name=str(self.event_idx),

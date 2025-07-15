@@ -196,7 +196,7 @@ class KeystrokeProcessor:
         """프로세서를 안전하게 중지합니다."""
         logger.info("KeystrokeProcessor stopping...")
         self.terminate_event.set()
-        
+
         # 스레드가 완전히 종료될 때까지 대기 (sct는 워커 스레드에서 정리)
         if self.thread.is_alive():
             self.thread.join()
@@ -399,15 +399,19 @@ class KeystrokeProcessor:
             press_duration_ms = event.get("press_duration_ms")
             if press_duration_ms is not None:
                 randomization_ms = event.get("randomization_ms", 0) or 0
-                delay = (press_duration_ms / 1000) + (random.uniform(-randomization_ms, randomization_ms) / 1000)
+                delay = (press_duration_ms / 1000) + (
+                    random.uniform(-randomization_ms, randomization_ms) / 1000
+                )
             else:
                 # 기존 전역 설정 사용
                 delay = random.uniform(*self.key_pressed_time)
-            
-            time.sleep(max(0, delay)) # 음수 딜레이 방지
+
+            time.sleep(max(0, delay))  # 음수 딜레이 방지
 
             self.key_simulator.release_key(key_code)
-            logger.info(f"Event '{event_name}': Key '{key}' simulated with delay {delay:.4f}s.")
+            logger.info(
+                f"Event '{event_name}': Key '{key}' simulated with delay {delay:.4f}s."
+            )
         finally:
             with self.pressed_keys_lock:
                 self.pressed_keys.discard(key)

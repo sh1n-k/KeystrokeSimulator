@@ -35,7 +35,7 @@ class AuthService:
         payload = {
             "userId": user_id,
             "timestamp": timestamp,
-            "appVersion": Config.APP_VERSION
+            "appVersion": Config.APP_VERSION,
         }
         try:
             response = requests.post(Config.AUTH_URL, json=payload, timeout=5)
@@ -48,7 +48,11 @@ class AuthService:
     def validate_session_token(self, user_id: str) -> bool:
         if not self.session_token:
             return False
-        payload = {"userId": user_id, "sessionToken": self.session_token, "appVersion": Config.APP_VERSION}
+        payload = {
+            "userId": user_id,
+            "sessionToken": self.session_token,
+            "appVersion": Config.APP_VERSION,
+        }
         try:
             response = requests.post(Config.VALIDATE_URL, json=payload, timeout=5)
             response.raise_for_status()
@@ -122,8 +126,8 @@ class AuthUI:
 
     def validate_input(self) -> bool:
         if not re.match(
-                f"^[a-zA-Z0-9]{{{Config.MIN_USER_ID_LENGTH},{Config.MAX_USER_ID_LENGTH}}}$",
-                self.user_id,
+            f"^[a-zA-Z0-9]{{{Config.MIN_USER_ID_LENGTH},{Config.MAX_USER_ID_LENGTH}}}$",
+            self.user_id,
         ):
             self.show_error(
                 f"User ID must be\n{Config.MIN_USER_ID_LENGTH}-{Config.MAX_USER_ID_LENGTH} alphanumeric characters"

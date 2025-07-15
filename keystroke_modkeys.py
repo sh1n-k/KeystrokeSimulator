@@ -94,12 +94,12 @@ class ModificationKeysWindow(tk.Toplevel):
                 logger.info(f"Saved default mod keys for '{self.profile_name}'")
 
             self.display_saved_values(mod_keys)
-            logger.info(
-                f"Loaded modification keys for profile '{self.profile_name}'"
-            )
+            logger.info(f"Loaded modification keys for profile '{self.profile_name}'")
 
         except Exception as e:
-            logger.error(f"Error loading profile '{self.profile_name}': {e}", exc_info=True)
+            logger.error(
+                f"Error loading profile '{self.profile_name}': {e}", exc_info=True
+            )
 
     def display_saved_values(self, modification_keys: Dict[str, Any]):
         for idx, key in enumerate(self.labels):

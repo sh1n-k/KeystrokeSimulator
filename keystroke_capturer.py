@@ -29,8 +29,8 @@ class ScreenshotCapturer:
     def set_current_mouse_position(self, position):
         mouse_x, mouse_y = position
         if (
-                mouse_x + self.box_size >= self.screen_width
-                or mouse_y + self.box_size >= self.screen_height
+            mouse_x + self.box_size >= self.screen_width
+            or mouse_y + self.box_size >= self.screen_height
         ):
             return
 

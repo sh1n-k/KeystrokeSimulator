@@ -59,8 +59,8 @@ class SimpleAuthServer(BaseHTTPRequestHandler):
 
         # Check if the token is valid and the counter is less than 4
         if (
-                token
-                == SimpleAuthServer.session_token
+            token
+            == SimpleAuthServer.session_token
             # and SimpleAuthServer.validate_counter < 2
         ):
             SimpleAuthServer.validate_counter += 1

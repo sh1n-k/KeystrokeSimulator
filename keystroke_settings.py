@@ -60,12 +60,16 @@ class KeystrokeSettings(tk.Toplevel):
             self.enable_key_checkbox.pack(side=tk.LEFT, padx=(0, 10))
 
             # Create but don't display the combo box (needed for internal logic)
-            self.start_stop_key = ttk.Combobox(self, values=["Press Key"], state="readonly")
+            self.start_stop_key = ttk.Combobox(
+                self, values=["Press Key"], state="readonly"
+            )
             self.start_stop_key.current(0)
             self.start_stop_key.bind("<Key>", self._on_key_press)
         else:
             # Add key selection dropdown (Windows only)
-            self.start_stop_key = ttk.Combobox(key_frame, values=["Press Key"], state="readonly")
+            self.start_stop_key = ttk.Combobox(
+                key_frame, values=["Press Key"], state="readonly"
+            )
             self.start_stop_key.pack(side=tk.LEFT, padx=(0, 10))
             self.start_stop_key.current(0)
             self.start_stop_key.bind("<Key>", self._on_key_press)
@@ -228,10 +232,10 @@ class KeystrokeSettings(tk.Toplevel):
             return  # Ignore key press if key is disabled on macOS
 
         valid_keys = (
-                set(f"F{i}" for i in range(1, 13))
-                | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
-                | set(chr(i) for i in range(ord("0"), ord("9") + 1))
-                | set("`[];',./-=\"")
+            set(f"F{i}" for i in range(1, 13))
+            | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
+            | set(chr(i) for i in range(ord("0"), ord("9") + 1))
+            | set("`[];',./-=\"")
         )
 
         key = event.char.upper() or event.keysym.upper()
@@ -335,7 +339,7 @@ class KeystrokeSettings(tk.Toplevel):
     # Action Methods
     def on_reset(self):
         if messagebox.askokcancel(
-                "Warning", f"Resets the values.\n설정값이 초기화 됩니다."
+            "Warning", f"Resets the values.\n설정값이 초기화 됩니다."
         ):
             self.settings = UserSettings()  # Reset to default values
             self._update_ui_from_settings()
@@ -351,7 +355,10 @@ class KeystrokeSettings(tk.Toplevel):
 
             if not self.enable_key_var.get():
                 self.settings.start_stop_key = "DISABLED"
-            elif self.settings.start_stop_key == "DISABLED" or self.settings.start_stop_key in ["Press Key", ""]:
+            elif (
+                self.settings.start_stop_key == "DISABLED"
+                or self.settings.start_stop_key in ["Press Key", ""]
+            ):
                 self.show_warning("Please select a Start/Stop key.")
                 return
         else:
