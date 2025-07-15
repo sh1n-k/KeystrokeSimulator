@@ -17,7 +17,7 @@ load_dotenv(find_dotenv())
 
 
 class Config:
-    APP_VERSION = "2.2"
+    APP_VERSION = "2.21"
     AUTH_URL = os.getenv("AUTH_URL")
     VALIDATE_URL = os.getenv("VALIDATE_URL")
     MAX_USER_ID_LENGTH = 12
@@ -41,9 +41,21 @@ class AuthService:
             response = requests.post(Config.AUTH_URL, json=payload, timeout=5)
             response.raise_for_status()
             return response.json()
+        except requests.HTTPError as e:
+            logger.error(
+                f"Authentication HTTP error for user {user_id}: {e.response.status_code}"
+            )
+            # 서버 응답이 있는 경우 message 필드 추출
+            try:
+                error_data = e.response.json()
+                error_message = error_data.get("message", "Authentication failed")
+            except:
+                error_message = f"Server error: {e.response.status_code}"
+            raise Exception(error_message)
         except requests.RequestException as e:
-            logger.error(f"Authentication error for user {user_id}: {str(e)}")
-            raise
+            logger.error(f"Authentication network error for user {user_id}: {str(e)}")
+            # 네트워크 오류
+            raise Exception("Network connection failed")
 
     def validate_session_token(self, user_id: str) -> bool:
         if not self.session_token:
@@ -57,8 +69,15 @@ class AuthService:
             response = requests.post(Config.VALIDATE_URL, json=payload, timeout=5)
             response.raise_for_status()
             return True
-        except requests.RequestException:
-            logger.error(f"Session validation failed for user '{user_id}'")
+        except requests.HTTPError as e:
+            logger.error(
+                f"Session validation HTTP error for user '{user_id}': {e.response.status_code}"
+            )
+            return False
+        except requests.RequestException as e:
+            logger.error(
+                f"Session validation network error for user '{user_id}': {str(e)}"
+            )
             return False
 
 

@@ -25,7 +25,7 @@ ADMIN_KEY = os.environ["ADMIN_KEY"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
-APP_VERSION = "2.1"
+APP_VERSION = "2.21"
 
 
 # --- 메인 핸들러 ---

@@ -4,7 +4,7 @@ import tempfile
 import PyInstaller.__main__
 from dotenv import load_dotenv, find_dotenv
 
-VERSION = "2.2"
+VERSION = "2.21"
 
 # Load environment variables
 load_dotenv(find_dotenv())
@@ -12,7 +12,7 @@ load_dotenv(find_dotenv())
 
 # Function to create a temporary script with replaced environment variables
 def create_temp_script(filename):
-    with open(filename, "r") as file:
+    with open(filename, "r", encoding="utf-8") as file:
         content = file.read()
 
     # Replace environment variable references with actual values
@@ -28,7 +28,7 @@ if __name__ == "__main__":
     script_content = create_temp_script("main_secure.py")
 
     # Create a temporary file using NamedTemporaryFile
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as temp_file:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as temp_file:
         temp_file.write(script_content)
         temp_file_path = temp_file.name
 
