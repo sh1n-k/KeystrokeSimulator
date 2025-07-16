@@ -29,7 +29,7 @@ def update_sound_variable(sound_type: str, new_sound_path: str):
         )
         return
 
-    target_file = "keystroke_sounds.py"
+    target_file = os.path.join(os.path.dirname(__file__), "keystroke_sounds.py")
     if not os.path.exists(target_file):
         print(f"Error: Target file '{target_file}' not found.")
         return
@@ -51,8 +51,8 @@ def update_sound_variable(sound_type: str, new_sound_path: str):
         variable_name = "START_SOUND" if sound_type.lower() == "start" else "STOP_SOUND"
 
         # Regex to find the variable assignment and replace its value
-        # It looks for `VARIABLE_NAME = '...'` and replaces the content inside the quotes.
-        pattern = re.compile(f"({variable_name} = ')_?.*(')")
+        # It looks for `VARIABLE_NAME = "..."` and replaces the content inside the quotes.
+        pattern = re.compile(f'^({variable_name} = ").*(")', re.MULTILINE)
 
         if not pattern.search(content):
             print(

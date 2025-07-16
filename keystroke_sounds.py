@@ -7,11 +7,40 @@ class SoundPlayer:
     def __init__(self):
         pygame.mixer.init()
 
-    def play_sound(self, sound_data_base64):
+        # 앱에서 사용하는 두 사운드를 시작시 미리 디코딩
+        self.start_sound_data = None
+        self.stop_sound_data = None
+
+        # 사운드 데이터 초기화
+        self._init_sounds()
+
+    def _init_sounds(self):
+        """앱 시작시 사운드 데이터를 미리 디코딩"""
         try:
-            sound_data = base64.b64decode(sound_data_base64)
-            sound_file = io.BytesIO(sound_data)
-            pygame.mixer.music.load(sound_file, "mp3")
+            # 바이트 데이터를 직접 저장 (BytesIO 객체가 아닌)
+            self.start_sound_data = base64.b64decode(START_SOUND)
+            self.stop_sound_data = base64.b64decode(STOP_SOUND)
+
+        except Exception as e:
+            print(f"Error initializing sounds: {e}")
+
+    def play_start_sound(self):
+        """시작 사운드 재생"""
+        self._play_sound_data(self.start_sound_data)
+
+    def play_stop_sound(self):
+        """종료 사운드 재생"""
+        self._play_sound_data(self.stop_sound_data)
+
+    def _play_sound_data(self, sound_data):
+        """실제 사운드 재생 로직"""
+        if sound_data is None:
+            return
+
+        try:
+            # 바이트 데이터로부터 새로운 BytesIO 객체 생성
+            temp_sound = io.BytesIO(sound_data)
+            pygame.mixer.music.load(temp_sound, "mp3")
             pygame.mixer.music.play()
         except Exception as e:
             print(f"Error playing sound: {e}")
