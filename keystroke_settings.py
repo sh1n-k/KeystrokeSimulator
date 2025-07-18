@@ -35,12 +35,13 @@ class KeystrokeSettings(tk.Toplevel):
         self._create_time_entries()
         self._create_num_of_events_entry()
         self._create_max_key_count_entry()
+        self._create_epsilon_explanation()
         self._create_buttons()
         self._create_warning_label()
 
     # UI Creation Methods
     def _create_start_stop_key(self):
-        ttk.Label(self, text="Start/Stop Key:").grid(
+        ttk.Label(self, text="Start/Stop Key (시작/중지 키):").grid(
             row=0, column=0, padx=10, pady=5, sticky=tk.W
         )
 
@@ -53,7 +54,7 @@ class KeystrokeSettings(tk.Toplevel):
             self.enable_key_var = tk.BooleanVar(value=True)
             self.enable_key_checkbox = ttk.Checkbutton(
                 key_frame,
-                text="Enable Start/Stop Key",
+                text="Enable Start/Stop Key (시작/중지 키 활성화)",
                 variable=self.enable_key_var,
                 command=self._on_enable_key_change,
             )
@@ -76,8 +77,12 @@ class KeystrokeSettings(tk.Toplevel):
 
     def _create_time_entries(self):
         validation_command = (self.register(self._validate_numeric_entry), "%P")
-        self._create_entry_pair("Key pressed time (min, max):", 1, validation_command)
-        self._create_entry_pair("Delay between loop (min, max):", 2, validation_command)
+        self._create_entry_pair(
+            "Key pressed time (키 누름 시간) (min, max):", 1, validation_command
+        )
+        self._create_entry_pair(
+            "Delay between loop (루프 간 지연) (min, max):", 2, validation_command
+        )
 
     def _create_entry_pair(self, label: str, row: int, validation_command: Callable):
         ttk.Label(self, text=label).grid(
@@ -97,7 +102,7 @@ class KeystrokeSettings(tk.Toplevel):
         getattr(self, f"entry_max_{row}").grid(row=row, column=2, padx=10, pady=5)
 
     def _create_num_of_events_entry(self):
-        ttk.Label(self, text="Cluster epsilon value").grid(
+        ttk.Label(self, text="Cluster epsilon value (클러스터 엡실론 값)").grid(
             row=3, column=0, padx=10, pady=5, sticky=tk.W
         )
         setattr(
@@ -115,36 +120,50 @@ class KeystrokeSettings(tk.Toplevel):
         getattr(self, f"cluster_epsilon_value").grid(row=3, column=1, padx=10, pady=5)
 
     def _create_max_key_count_entry(self):
-        ttk.Label(self, text="Max Key Count").grid(
-            row=4, column=0, padx=10, pady=5, sticky=tk.W
+        # 이 옵션은 현재 프로세서에서 사용되지 않으므로 제거
+        # TODO: 향후 필요시 실제 기능에 맞게 재구현
+        pass
+
+    def _create_epsilon_explanation(self):
+        # Create explanation frame
+        explanation_frame = ttk.LabelFrame(
+            self, text="클러스터 엡실론 값 설명 (Cluster Epsilon Value Explanation)"
         )
-        setattr(
-            self,
-            f"max_key_count",
-            ttk.Entry(
-                self,
-                validate="key",
-                validatecommand=(self.register(self._validate_max_key_count), "%P"),
-            ),
+        explanation_frame.grid(
+            row=5, column=0, columnspan=3, padx=10, pady=10, sticky="ew"
         )
-        getattr(self, f"max_key_count").grid(row=4, column=1, padx=10, pady=5)
+
+        # Explanation text
+        explanation_text = (
+            "• 화면에서 감지할 영역들을 그룹화하는 데 사용되는 값입니다\n"
+            "• 값이 클수록 더 넓은 범위의 점들이 하나의 그룹으로 묶입니다\n"
+            "• 값이 작을수록 더 세밀하게 영역을 구분합니다\n"
+            "• 권장 범위: 8-12 (정밀), 15-25 (일반), 30-40 (큰 요소), 50+ (넓은 영역)\n"
+            "• 기본값: 20 (100x100 캡처 이미지에 최적화)\n"
+            "• 캡처 이미지 크기: 100x100 픽셀"
+        )
+
+        explanation_label = ttk.Label(
+            explanation_frame, text=explanation_text, justify=tk.LEFT
+        )
+        explanation_label.pack(padx=10, pady=5, anchor="w")
 
     def _create_buttons(self):
         ttk.Button(self, text="Reset", command=self.on_reset).grid(
-            row=8, column=0, padx=10, pady=10
+            row=9, column=0, padx=10, pady=10
         )
         ttk.Button(self, text="OK", command=self.on_ok).grid(
-            row=8, column=1, padx=10, pady=10
+            row=9, column=1, padx=10, pady=10
         )
         ttk.Button(self, text="Cancel", command=self.on_close).grid(
-            row=8, column=2, padx=10, pady=10
+            row=9, column=2, padx=10, pady=10
         )
 
     def _create_warning_label(self):
         self.warning_label = ttk.Label(
             self, text="\n", background="white", foreground="red"
         )
-        self.warning_label.grid(row=7, column=0, columnspan=5, pady=5)
+        self.warning_label.grid(row=8, column=0, columnspan=5, pady=5)
 
         if self.is_windows:
             warning_text = "For Start/Stop, set only A-Z, 0-9, and special character keys.\n\nStart/Stop 은 A-Z, 0-9, 특수문자 키만 설정하세요."
@@ -190,10 +209,8 @@ class KeystrokeSettings(tk.Toplevel):
         self._set_num_of_events_value()
 
     def _update_max_key_count(self):
-        getattr(self, "max_key_count").delete(0, tk.END)
-        getattr(self, "max_key_count").insert(
-            0, str(getattr(self.settings, "max_key_count", "10"))
-        )
+        # Max Key Count 옵션이 제거되었으므로 비어있는 메서드
+        pass
 
     def _set_entry_values(self, row, prefix):
         getattr(self, f"entry_min_{row}").delete(0, tk.END)
@@ -264,14 +281,8 @@ class KeystrokeSettings(tk.Toplevel):
 
     @staticmethod
     def _validate_max_key_count(P):
-        if P == "":
-            return True
-        if not P.isdigit():
-            return False
-        if P.startswith("0") and len(P) > 1:
-            return False
-        value = int(P)
-        return 1 <= value <= 50
+        # Max Key Count 옵션이 제거되었으므로 비어있는 메서드
+        return True
 
     def validate_start_stop_key(self):
         # Skip validation if on macOS and key is disabled
@@ -307,18 +318,8 @@ class KeystrokeSettings(tk.Toplevel):
             return False
         setattr(self.settings, "cluster_epsilon_value", cluster_epsilon_value)
 
-        max_key_count = getattr(self, "max_key_count").get()
-        if max_key_count:
-            max_key_count = int(max_key_count)
-            if max_key_count < 10 or max_key_count > 50:
-                self.show_warning(
-                    "Max Key Count must be between 10 and 50.\nMax Key Count는 10에서 50 사이여야 합니다."
-                )
-                return False
-        else:
-            max_key_count = 10  # Default value if empty
-
-        self.settings.max_key_count = max_key_count
+        # Max Key Count 옵션이 제거되었으므로 삭제
+        # max_key_count 처리 제거
 
         return True
 
@@ -367,7 +368,7 @@ class KeystrokeSettings(tk.Toplevel):
 
         if not self.validate_and_set_time_settings():
             return
-        self.set_max_key_count()
+        # Max Key Count 옵션이 제거되었으므로 set_max_key_count() 호출 제거
         self.save_settings()
 
         self.on_close()
@@ -380,15 +381,8 @@ class KeystrokeSettings(tk.Toplevel):
 
     # Helper Methods
     def set_max_key_count(self):
-        max_key_count = getattr(self, "max_key_count").get()
-        if max_key_count:
-            max_key_count = int(max_key_count)
-            if 10 <= max_key_count <= 50:
-                self.settings.max_key_count = max_key_count
-            else:
-                self.settings.max_key_count = 10  # Default if out of range
-        else:
-            self.settings.max_key_count = 10  # Default if empty
+        # Max Key Count 옵션이 제거되었으므로 비어있는 메서드
+        pass
 
     def save_settings(self):
         settings_dict = asdict(self.settings)
