@@ -318,9 +318,6 @@ class KeystrokeSettings(tk.Toplevel):
             return False
         setattr(self.settings, "cluster_epsilon_value", cluster_epsilon_value)
 
-        # Max Key Count 옵션이 제거되었으므로 삭제
-        # max_key_count 처리 제거
-
         return True
 
     def validate_min_max_values(self, min_value, max_value):
