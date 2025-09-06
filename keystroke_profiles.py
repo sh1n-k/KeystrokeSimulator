@@ -12,9 +12,10 @@ from keystroke_utils import WindowUtils, StateUtils
 
 
 class ProfileFrame(ttk.Frame):
-    def __init__(self, master, profile_name: str):
+    def __init__(self, master, profile_name: str, favorite_status: bool):
         super().__init__(master)
         self.profile_name = profile_name
+        self.favorite_status = tk.BooleanVar(value=favorite_status)
         self._create_widgets()
 
     def _create_widgets(self):
@@ -24,8 +25,16 @@ class ProfileFrame(ttk.Frame):
         self.profile_entry.grid(row=0, column=1, padx=1)
         self.profile_entry.insert(0, self.profile_name)
 
+        self.favorite_checkbox = ttk.Checkbutton(
+            self, text="Favorite", variable=self.favorite_status
+        )
+        self.favorite_checkbox.grid(row=0, column=2, padx=5)
+
     def get_profile_name(self) -> str:
         return self.profile_entry.get()
+
+    def get_favorite_status(self) -> bool:
+        return self.favorite_status.get()
 
 
 class EventRow(ttk.Frame):
@@ -200,7 +209,9 @@ class KeystrokeProfiles:
         self.settings_window = self._create_settings_window()
         self.profile = self._load_profile()
 
-        self.profile_frame = ProfileFrame(self.settings_window, profile_name)
+        self.profile_frame = ProfileFrame(
+            self.settings_window, profile_name, self.profile.favorite
+        )
         self.event_list_frame = EventListFrame(
             self.settings_window, self.profile, self._save_profile
         )
@@ -231,13 +242,15 @@ class KeystrokeProfiles:
                             event.press_duration_ms = None
                         if not hasattr(event, "randomization_ms"):
                             event.randomization_ms = None
+                if not hasattr(profile, "favorite"):
+                    profile.favorite = False
                 return profile
         except FileNotFoundError:
-            return ProfileModel(name=self.profile_name, event_list=[])
+            return ProfileModel(name=self.profile_name, event_list=[], favorite=False)
         except Exception as e:
             # Handle other potential errors during loading, like corrupted files
             messagebox.showerror("Error", f"Failed to load profile: {e}")
-            return ProfileModel(name=self.profile_name, event_list=[])
+            return ProfileModel(name=self.profile_name, event_list=[], favorite=False)
 
     def _pack_frames(self):
         self.profile_frame.pack()
@@ -260,6 +273,8 @@ class KeystrokeProfiles:
         new_profile_name = self.profile_frame.get_profile_name()
         if check_profile_name and not new_profile_name:
             raise ValueError("Enter the profile name to save")
+
+        self.profile.favorite = self.profile_frame.get_favorite_status()
 
         if new_profile_name != self.profile_name:
             new_file_path = f"{self.profiles_dir}/{new_profile_name}.pkl"

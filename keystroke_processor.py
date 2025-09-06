@@ -373,13 +373,13 @@ class KeystrokeProcessor:
 
     async def _schedule_keystroke(self, event: Dict):
         # 키 입력을 시뮬레이션
-        self._simulate_keystroke_sync(event)
+        await self._simulate_keystroke_async(event)
         # 키 입력 후 짧은 지연을 주어 동시 다발적인 입력을 방지
         await asyncio.sleep(
             random.uniform(self.KEY_SIMULATION_PAUSE_MIN, self.KEY_SIMULATION_PAUSE_MAX)
         )
 
-    def _simulate_keystroke_sync(self, event: Dict):
+    async def _simulate_keystroke_async(self, event: Dict):
         key = event["key"]
         event_name = event.get("event_name", "Unnamed Event")
         key_code = self.key_codes.get(key.upper())
@@ -406,7 +406,7 @@ class KeystrokeProcessor:
                 # 기존 전역 설정 사용
                 delay = random.uniform(*self.key_pressed_time)
 
-            time.sleep(max(0, delay))  # 음수 딜레이 방지
+            await asyncio.sleep(max(0, delay))  # 음수 딜레이 방지
 
             self.key_simulator.release_key(key_code)
             logger.info(

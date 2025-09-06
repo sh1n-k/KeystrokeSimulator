@@ -111,16 +111,48 @@ class ProfileFrame(tk.Frame):
             os.makedirs(self.profiles_dir)
             with open(f"{self.profiles_dir}/Quick.pkl", "wb") as f:
                 pickle.dump(ProfileModel(), f)
+
         profile_files = [
-            os.path.splitext(f)[0]
-            for f in os.listdir(self.profiles_dir)
-            if f.endswith(".pkl")
+            f for f in os.listdir(self.profiles_dir) if f.endswith(".pkl")
         ]
-        profile_files.sort(reverse=False)
-        if "Quick" in profile_files:
-            profile_files.insert(0, profile_files.pop(profile_files.index("Quick")))
-        self.profile_combobox["values"] = profile_files
-        if profile_files:
+
+        favorites = []
+        non_favorites = []
+
+        quick_profile_file = "Quick.pkl"
+        if quick_profile_file in profile_files:
+            profile_files.remove(quick_profile_file)
+        else:
+            quick_profile_file = None
+
+        for file_name in profile_files:
+            profile_path = os.path.join(self.profiles_dir, file_name)
+            try:
+                with open(profile_path, "rb") as f:
+                    profile_data = pickle.load(f)
+                    is_favorite = getattr(profile_data, "favorite", False)
+                    profile_name = os.path.splitext(file_name)[0]
+
+                    if is_favorite:
+                        favorites.append(profile_name)
+                    else:
+                        non_favorites.append(profile_name)
+            except (pickle.UnpicklingError, EOFError, AttributeError) as e:
+                logger.warning(f"Could not load profile {file_name}: {e}")
+                non_favorites.append(os.path.splitext(file_name)[0])
+
+        favorites.sort()
+        non_favorites.sort()
+
+        sorted_profiles = []
+        if quick_profile_file:
+            sorted_profiles.append("Quick")
+
+        sorted_profiles.extend(favorites)
+        sorted_profiles.extend(non_favorites)
+
+        self.profile_combobox["values"] = sorted_profiles
+        if sorted_profiles:
             self.profile_combobox.current(0)
 
     def copy_profile(self):
@@ -404,57 +436,37 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.ctrl_check_thread.start()
 
     def check_for_long_alt_shift(self):
-        """Thread method to detect long Alt+Shift key press (1+ seconds) on macOS"""
+        """Thread method to detect Alt+Shift key press and toggle immediately on macOS"""
         import time
 
         last_combo_state = False
-        combo_press_start_time = 0
         last_toggle_time = 0
-        toggle_cooldown = 0.25
-        long_press_threshold = 0.01
-        toggle_executed = False
+        toggle_cooldown = 0.1  # 연속 토글 방지를 위한 쿨다운
 
         while self.ctrl_check_active:
             try:
                 current_time = time.time()
 
+                # 쿨다운 체크
                 if current_time - last_toggle_time < toggle_cooldown:
-                    time.sleep(0.05)
+                    time.sleep(0.01)
                     continue
 
                 alt_pressed = KeyUtils.mod_key_pressed("alt")
                 shift_pressed = KeyUtils.mod_key_pressed("shift")
                 current_combo_state = alt_pressed and shift_pressed
 
+                # Alt+Shift 키 조합이 새로 눌렸을 때 (이전에는 안 눌려있었는데 지금 눌림)
                 if current_combo_state and not last_combo_state:
-                    combo_press_start_time = current_time
-                    toggle_executed = False
-
-                elif not current_combo_state and last_combo_state:
-                    combo_press_start_time = 0
-                    toggle_executed = False
-
-                elif (
-                    current_combo_state
-                    and last_combo_state
-                    and combo_press_start_time > 0
-                    and not toggle_executed
-                ):
-                    press_duration = current_time - combo_press_start_time
-
-                    if (
-                        press_duration >= long_press_threshold
-                        and (current_time - last_toggle_time) >= toggle_cooldown
-                    ):
-                        self.after(0, self.toggle_start_stop)
-                        last_toggle_time = current_time
-                        toggle_executed = True
+                    # 즉시 토글 실행
+                    self.after(0, self.toggle_start_stop)
+                    last_toggle_time = current_time
 
                 last_combo_state = current_combo_state
                 time.sleep(0.01)
 
             except Exception as e:
-                logger.error(f"Error in check_for_long_ctrl: {e}")
+                logger.error(f"Error in check_for_alt_shift_toggle: {e}")
                 time.sleep(0.1)
 
     def init_profiles(self):
