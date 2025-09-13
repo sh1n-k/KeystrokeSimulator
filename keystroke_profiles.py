@@ -43,19 +43,33 @@ class EventRow(ttk.Frame):
         self.row_num = row_num
         self.event = event
         self.callbacks = callbacks
+        self.widgets = []  # [추가됨] 위젯 리스트
         self._create_widgets()
+        self._bind_events()  # [추가됨] 이벤트 바인딩 호출
 
     def _create_widgets(self):
-        ttk.Label(self, text=str(self.row_num + 1), width=2, anchor="center").pack(
-            side=tk.LEFT
-        )
+        label = ttk.Label(self, text=str(self.row_num + 1), width=2, anchor="center")
+        label.pack(side=tk.LEFT)
         self.entry = ttk.Entry(self)
         self.entry.pack(side=tk.LEFT, padx=5)
         if self.event and hasattr(self.event, "event_name"):
             self.entry.insert(0, self.event.event_name)
-        ttk.Button(self, text="⚙️", command=self._open_event_settings).pack(side=tk.LEFT)
-        ttk.Button(self, text="📝", command=self._copy_event).pack(side=tk.LEFT)
-        ttk.Button(self, text="🗑️", command=self._remove_event).pack(side=tk.LEFT)
+
+        # [수정됨] 버튼들을 리스트에 추가
+        self.widgets = [self, label, self.entry]
+        for text, command in [
+            ("⚙️", self._open_event_settings),
+            ("📝", self._copy_event),
+            ("🗑️", self._remove_event),
+        ]:
+            button = ttk.Button(self, text=text, command=command)
+            button.pack(side=tk.LEFT)
+            self.widgets.append(button)
+
+    # [추가됨] 우클릭 이벤트를 모든 위젯에 바인딩하는 함수
+    def _bind_events(self):
+        for widget in self.widgets:
+            widget.bind("<Button-3>", self._show_context_menu)
 
     def _open_event_settings(self):
         self.callbacks["open_event_settings"](self.row_num, self.event)
@@ -65,6 +79,10 @@ class EventRow(ttk.Frame):
 
     def _remove_event(self):
         self.callbacks["remove_event"](self, self.row_num)
+
+    # [추가됨] 컨텍스트 메뉴를 표시하는 콜백 호출
+    def _show_context_menu(self, event):
+        self.callbacks["show_context_menu"](event, self.row_num)
 
     def get_event_name(self) -> str:
         return self.entry.get()
@@ -77,10 +95,12 @@ class EventListFrame(ttk.Frame):
         self.profile = profile
         self.save_callback = save_callback
         self.event_rows: List[EventRow] = []
+        self.context_menu_source_row = None  # [추가됨] 우클릭된 행의 인덱스 저장
         self._create_widgets()
 
     def _create_widgets(self):
         self._create_buttons()
+        self._create_context_menu()  # [추가됨] 컨텍스트 메뉴 생성
         self._load_events()
 
     def _create_buttons(self):
@@ -90,6 +110,88 @@ class EventListFrame(ttk.Frame):
         ttk.Button(self, text="Import From", command=self._open_importer).grid(
             row=1, column=1, columnspan=1, pady=5, sticky="we"
         )
+
+    # [추가됨] 우클릭 컨텍스트 메뉴 생성
+    def _create_context_menu(self):
+        self.context_menu = tk.Menu(self, tearoff=0)
+        self.context_menu.add_command(
+            label="Apply Pixel Info to Similar Areas",
+            command=self._apply_pixel_info_to_similar,
+        )
+
+    # [추가됨] 컨텍스트 메뉴를 표시하는 함수
+    def _show_context_menu(self, event, row_num):
+        self.context_menu_source_row = row_num
+        try:
+            self.context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.context_menu.grab_release()
+
+    # [수정됨] 일괄 적용 시 각 이벤트의 스크린샷에서 직접 컬러 값을 다시 읽도록 수정
+    def _apply_pixel_info_to_similar(self):
+        if self.context_menu_source_row is None:
+            return
+
+        source_event = self.profile.event_list[self.context_menu_source_row]
+        source_area = source_event.latest_position
+        new_pixel_pos = source_event.clicked_position
+
+        if not all([source_area, new_pixel_pos]):
+            messagebox.showwarning(
+                "Warning",
+                "Source event is not configured correctly.",
+                parent=self.settings_window,
+            )
+            return
+
+        if not messagebox.askyesno(
+            "Confirm Batch Update",
+            f"Apply Pixel Info from this event to all others with Area ({source_area[0]}, {source_area[1]})?\n\n"
+            f"이 이벤트의 Pixel 정보를 동일한 Area({source_area[0]}, {source_area[1]}) 좌표를 가진\n"
+            "다른 모든 이벤트에 일괄 적용하시겠습니까?",
+            parent=self.settings_window,
+        ):
+            return
+
+        update_count = 0
+        for i, target_event in enumerate(self.profile.event_list):
+            if i == self.context_menu_source_row:
+                continue
+
+            # Area 좌표가 일치하고, 대상 이벤트에 스크린샷이 있는지 확인
+            if (
+                target_event.latest_position == source_area
+                and target_event.held_screenshot
+            ):
+                try:
+                    # 1. Pixel 좌표를 새로운 좌표로 갱신
+                    target_event.clicked_position = new_pixel_pos
+
+                    # 2. 대상 이벤트의 스크린샷에서, 새로운 Pixel 좌표의 컬러 값을 직접 가져와 갱신
+                    new_color = target_event.held_screenshot.getpixel(new_pixel_pos)
+                    target_event.ref_pixel_value = new_color
+
+                    update_count += 1
+                except IndexError:
+                    # new_pixel_pos가 이미지 범위를 벗어나는 경우 등 예외 처리
+                    print(
+                        f"Warning: Could not update event '{target_event.event_name}' due to an invalid pixel coordinate."
+                    )
+                    continue
+
+        if update_count > 0:
+            self.save_callback()  # 변경사항 저장
+            messagebox.showinfo(
+                "Batch Update Complete",
+                f"{update_count} event(s) have been updated successfully.",
+                parent=self.settings_window,
+            )
+        else:
+            messagebox.showinfo(
+                "Info",
+                "No other events with the same Area coordinates were found.",
+                parent=self.settings_window,
+            )
 
     def _load_events(self):
         if self.profile.event_list:
@@ -104,6 +206,7 @@ class EventListFrame(ttk.Frame):
             "open_event_settings": self._open_event_settings,
             "copy_event": self._copy_event_row,
             "remove_event": self._remove_event_row,
+            "show_context_menu": self._show_context_menu,  # [추가됨] 콜백 전달
         }
 
         event_row = EventRow(self, row_num, event, callbacks)
@@ -129,9 +232,7 @@ class EventListFrame(ttk.Frame):
         if event:
             try:
                 new_event = copy.deepcopy(event)
-                new_event.event_name = (
-                    f"Copy of {event.event_name}"  # Set a default name for the copy
-                )
+                new_event.event_name = f"Copy of {event.event_name}"
                 self.profile.event_list.append(new_event)
                 self._add_event_row(event=new_event)
                 self.save_callback()
@@ -150,8 +251,6 @@ class EventListFrame(ttk.Frame):
         if 0 <= row_num < len(self.profile.event_list):
             self.profile.event_list.pop(row_num)
         self.save_callback()
-
-        # Adjust the window size after removing
         self.settings_window.update_idletasks()
 
     def _open_importer(self):
@@ -167,20 +266,17 @@ class EventListFrame(ttk.Frame):
         current_row_count = len(self.event_rows)
         new_row_count = len(self.profile.event_list)
 
-        # Update existing rows
         for idx in range(min(current_row_count, new_row_count)):
             event = self.profile.event_list[idx]
             self.event_rows[idx].event = event
             self.event_rows[idx].entry.delete(0, tk.END)
             self.event_rows[idx].entry.insert(0, event.event_name)
 
-        # Remove excess rows
         if current_row_count > new_row_count:
             for row in self.event_rows[new_row_count:]:
                 row.destroy()
             self.event_rows = self.event_rows[:new_row_count]
 
-        # Add new rows
         for idx in range(current_row_count, new_row_count):
             self._add_event_row(
                 row_num=idx, event=self.profile.event_list[idx], resize=False
@@ -195,6 +291,7 @@ class EventListFrame(ttk.Frame):
 
 
 class KeystrokeProfiles:
+    # ... (KeystrokeProfiles 클래스의 나머지 코드는 변경 없음)
     def __init__(
         self,
         main_window: tk.Tk,
@@ -235,7 +332,6 @@ class KeystrokeProfiles:
         try:
             with open(f"{self.profiles_dir}/{self.profile_name}.pkl", "rb") as f:
                 profile = pickle.load(f)
-                # For backward compatibility, ensure new fields exist.
                 if profile.event_list:
                     for event in profile.event_list:
                         if not hasattr(event, "press_duration_ms"):
@@ -248,7 +344,6 @@ class KeystrokeProfiles:
         except FileNotFoundError:
             return ProfileModel(name=self.profile_name, event_list=[], favorite=False)
         except Exception as e:
-            # Handle other potential errors during loading, like corrupted files
             messagebox.showerror("Error", f"Failed to load profile: {e}")
             return ProfileModel(name=self.profile_name, event_list=[], favorite=False)
 
@@ -285,7 +380,6 @@ class KeystrokeProfiles:
             self._remove_old_profile()
             self.profile_name = new_profile_name
 
-        # Save event names before saving the profile
         if reload_event_frame:
             self.event_list_frame.save_event_names()
 
@@ -293,7 +387,6 @@ class KeystrokeProfiles:
             pickle.dump(self.profile, f)
 
         if reload_event_frame:
-            # Update UI to reflect saved changes
             self.event_list_frame.update_events()
 
     def _remove_old_profile(self):

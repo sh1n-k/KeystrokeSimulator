@@ -13,8 +13,11 @@ from pathlib import Path
 from tkinter import ttk, messagebox
 from typing import Callable, List, Dict, Optional
 
-import keyboard
 from loguru import logger
+
+import pynput.keyboard
+import pynput.mouse
+
 
 from keystroke_models import ProfileModel, EventModel, UserSettings
 from keystroke_modkeys import ModificationKeysWindow
@@ -112,9 +115,7 @@ class ProfileFrame(tk.Frame):
             with open(f"{self.profiles_dir}/Quick.pkl", "wb") as f:
                 pickle.dump(ProfileModel(), f)
 
-        profile_files = [
-            f for f in os.listdir(self.profiles_dir) if f.endswith(".pkl")
-        ]
+        profile_files = [f for f in os.listdir(self.profiles_dir) if f.endswith(".pkl")]
 
         favorites = []
         non_favorites = []
@@ -290,6 +291,12 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.latest_scroll_time = None
 
         self.start_stop_mouse_listener = None
+        # [추가됨] pynput 키보드 리스너 관련 변수
+        self.keyboard_listener = None
+        self.alt_pressed = False
+        self.shift_pressed = False
+        self.last_alt_shift_toggle_time = 0
+
         self.last_ctrl_press_time = 0
         self.ctrl_check_thread = None
         self.ctrl_check_active = False
@@ -383,59 +390,120 @@ class KeystrokeSimulatorApp(tk.Tk):
     def setup_event_handlers(self):
         self.bind("<Escape>", self.on_closing)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        # 기존에 등록된 이벤트 핸들러가 있다면 모두 해제
+        self.unbind_events()
         self.setup_start_stop_handler()
 
-    # [수정됨] Windows 환경에서 Alt+Shift 단축키 등록 로직 추가
     def setup_start_stop_handler(self):
         system = platform.system()
+
         if system == "Darwin":
             if self.settings.toggle_start_stop_mac:
                 self.setup_ctrl_double_press_handler()
-        else:
-            if system == "Windows" and self.settings.use_alt_shift_hotkey:
-                try:
-                    keyboard.add_hotkey('alt+shift', self.toggle_start_stop)
-                    return
-                except Exception as e:
-                    logger.error(f"Failed to register hotkey 'alt+shift': {e}")
-            
-            start_stop_key = self.settings.start_stop_key
-            if start_stop_key.startswith("W_"):
-                import pynput
+            return
 
+        if system == "Windows" and self.settings.use_alt_shift_hotkey:
+            if self.keyboard_listener is None:
+                self.keyboard_listener = pynput.keyboard.Listener(
+                    on_press=self._on_key_press_pynput,
+                    on_release=self._on_key_release_pynput,
+                )
+                self.keyboard_listener.start()
+            logger.info("Windows Alt+Shift hotkey listener started.")
+            return
+
+        start_stop_key = self.settings.start_stop_key
+        if start_stop_key.startswith("W_"):
+            if self.start_stop_mouse_listener is None:
                 self.start_stop_mouse_listener = pynput.mouse.Listener(
                     on_scroll=self.on_mouse_scroll
                 )
                 self.start_stop_mouse_listener.start()
-            else:
-                keyboard.on_press_key(start_stop_key, self.toggle_start_stop)
+            logger.info(f"Mouse scroll hotkey listener for '{start_stop_key}' started.")
+        elif (
+            start_stop_key != "DISABLED"
+        ):  # 키가 DISABLED가 아닐 때만 일반 키보드 핫키 등록
+            # pynput.keyboard.GlobalHotKeys를 사용할 수도 있지만,
+            # keyboard 모듈이 더 간편하므로 여기서는 유지
+            # 단, pynput 리스너가 이미 작동 중이면 충돌 가능성이 있어 주의 필요
+            # keyboard 모듈 대신 pynput.keyboard.Listener를 통한 개별 키 감지도 고려 가능
+            # 현재는 `keyboard` 모듈을 완전히 제거했으므로, 여기도 pynput으로 변경해야 함.
+            # 하지만 단일 키 감지는 더 복잡하므로, 일단은 `keyboard` 모듈의 on_press_key를 대체하기 위해 `_on_key_press_pynput`에서 처리하는 방식으로 변경 (아래 _on_key_press_pynput_for_single_key 추가)
+            if self.keyboard_listener is None:
+                self.keyboard_listener = pynput.keyboard.Listener(
+                    on_press=self._on_key_press_pynput_for_single_key,
+                    on_release=self._on_key_release_pynput,
+                )
+                self.keyboard_listener.start()
+            logger.info(f"Keyboard hotkey listener for '{start_stop_key}' started.")
+
+    def _on_key_press_pynput(self, key):
+        current_time = time.time()
+        toggle_cooldown = 0.2
+
+        if current_time - self.last_alt_shift_toggle_time < toggle_cooldown:
+            return
+
+        if key == pynput.keyboard.Key.alt_l or key == pynput.keyboard.Key.alt_r:
+            self.alt_pressed = True
+        elif key == pynput.keyboard.Key.shift_l or key == pynput.keyboard.Key.shift_r:
+            self.shift_pressed = True
+
+        if self.alt_pressed and self.shift_pressed:
+            self.last_alt_shift_toggle_time = current_time
+            self.after(0, self.toggle_start_stop)
+
+    def _on_key_release_pynput(self, key):
+        if key == pynput.keyboard.Key.alt_l or key == pynput.keyboard.Key.alt_r:
+            self.alt_pressed = False
+        elif key == pynput.keyboard.Key.shift_l or key == pynput.keyboard.Key.shift_r:
+            self.shift_pressed = False
+
+    def _on_key_press_pynput_for_single_key(self, key):
+        start_stop_key_str = self.settings.start_stop_key
+
+        key_name = str(key).replace("Key.", "").replace("'", "").upper()
+
+        if key_name == start_stop_key_str.upper():
+            self.after(0, self.toggle_start_stop)  # Tkinter mainloop에서 실행
 
     def setup_ctrl_double_press_handler(self):
+        """Sets up a thread to detect double Ctrl presses on macOS"""
         self.ctrl_check_active = True
         self.ctrl_check_thread = threading.Thread(target=self.check_for_long_alt_shift)
         self.ctrl_check_thread.daemon = True
         self.ctrl_check_thread.start()
 
     def check_for_long_alt_shift(self):
+        """Thread method to detect Alt+Shift key press and toggle immediately on macOS"""
         import time
 
         last_combo_state = False
         last_toggle_time = 0
-        toggle_cooldown = 0.1
+        toggle_cooldown = 0.1  # 연속 토글 방지를 위한 쿨다운
+
         while self.ctrl_check_active:
             try:
                 current_time = time.time()
+
+                # 쿨다운 체크
                 if current_time - last_toggle_time < toggle_cooldown:
                     time.sleep(0.01)
                     continue
+
                 alt_pressed = KeyUtils.mod_key_pressed("alt")
                 shift_pressed = KeyUtils.mod_key_pressed("shift")
                 current_combo_state = alt_pressed and shift_pressed
+
+                # Alt+Shift 키 조합이 새로 눌렸을 때 (이전에는 안 눌려있었는데 지금 눌림)
                 if current_combo_state and not last_combo_state:
+                    # 즉시 토글 실행
                     self.after(0, self.toggle_start_stop)
                     last_toggle_time = current_time
+
                 last_combo_state = current_combo_state
                 time.sleep(0.01)
+
             except Exception as e:
                 logger.error(f"Error in check_for_alt_shift_toggle: {e}")
                 time.sleep(0.1)
@@ -495,13 +563,16 @@ class KeystrokeSimulatorApp(tk.Tk):
         pid = parse_process_id_from_string(self.selected_process.get())
         if not ProcessUtils.is_process_active(pid):
             return
+
         current_time = time.time()
         if self.latest_scroll_time and current_time - self.latest_scroll_time <= 0.75:
             return
+
         if (self.settings.start_stop_key == "W_UP" and dy > 0) or (
             self.settings.start_stop_key == "W_DN" and dy < 0
         ):
             self.toggle_start_stop()
+
         self.latest_scroll_time = current_time
 
     def toggle_start_stop(self, event=None):
@@ -514,16 +585,20 @@ class KeystrokeSimulatorApp(tk.Tk):
     def start_simulation(self):
         if not self._validate_simulation_prerequisites():
             return
+
         profile = self._load_profile()
         event_list = [p for p in profile.event_list if p.key_to_enter and p.use_event]
         if not event_list:
             return
+
         modification_keys = profile.modification_keys
         if not modification_keys:
             modification_keys = {}
+
         self.terminate_event.clear()
         self._create_and_start_processor(event_list, modification_keys)
         self.save_latest_state()
+
         self.sound_player.play_start_sound()
         self.update_ui()
 
@@ -564,6 +639,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         if self.keystroke_processor:
             self.keystroke_processor.stop()
             self.keystroke_processor = None
+
         self.terminate_event.set()
         self.sound_player.play_stop_sound()
         self.update_ui()
@@ -572,6 +648,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         is_running = self.is_running.get()
         state = "disable" if is_running else "normal"
         readonly_state = "disable" if is_running else "readonly"
+
         self.process_frame.process_combobox.config(state=readonly_state)
         self.process_frame.refresh_button.config(state=state)
         self.profile_button_frame.settings_button.config(state=state)
@@ -583,6 +660,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         self.button_frame.settings_button.config(state=state)
         self.profile_button_frame.sort_button.config(state=state)
+
         self.button_frame.clear_logs_button.config(state=state)
 
     def open_modkeys(self):
@@ -632,23 +710,45 @@ class KeystrokeSimulatorApp(tk.Tk):
             profile=self.selected_profile.get(),
         )
 
+    # [수정됨] pynput 리스너 중지 로직 추가
     def unbind_events(self):
         self.unbind("<Escape>")
-        if platform.system() != "Darwin":
-            keyboard.unhook_all()
+
+        # Windows Alt+Shift 핫키 리스너 중지
+        if self.keyboard_listener:
+            try:
+                self.keyboard_listener.stop()
+                self.keyboard_listener.join(timeout=0.5)
+            except Exception as e:
+                logger.warning(f"Error stopping pynput keyboard listener: {e}")
+            self.keyboard_listener = None
+            self.alt_pressed = False
+            self.shift_pressed = False
+
+        # 마우스 리스너 중지 (기존과 동일)
         if self.start_stop_mouse_listener:
-            self.start_stop_mouse_listener.stop()
+            try:
+                self.start_stop_mouse_listener.stop()
+                self.start_stop_mouse_listener.join(timeout=0.5)
+            except Exception as e:
+                logger.warning(f"Error stopping pynput mouse listener: {e}")
             self.start_stop_mouse_listener = None
+
+        # macOS Alt+Shift 감지 쓰레드 중지 (기존과 동일)
         self.ctrl_check_active = False
         if self.ctrl_check_thread and self.ctrl_check_thread.is_alive():
-            self.ctrl_check_thread.join(timeout=0.5)
+            try:
+                self.ctrl_check_thread.join(timeout=0.5)
+            except Exception as e:
+                logger.warning(f"Error joining macOS Alt+Shift thread: {e}")
+            self.ctrl_check_thread = None
 
     def on_closing(self, event=None):
         logger.info("Shutting down the application and terminating threads...")
         self.terminate_event.set()
         self.stop_simulation()
         self.save_latest_state()
-        self.unbind_events()
+        self.unbind_events()  # [수정됨] unbind_events 호출
         self.destroy()
         self.quit()
         if self.secure_callback:
