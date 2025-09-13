@@ -19,6 +19,9 @@ class KeystrokeSettings(tk.Toplevel):
         self.title("Settings")
         self.settings = UserSettings()
         self.is_windows = platform.system() == "Windows"
+        # [추가됨] Windows 전용 BooleanVar 초기화
+        if self.is_windows:
+            self.use_alt_shift_var = tk.BooleanVar()
         self._setup_window()
         self._create_widgets()
         self._load_settings()
@@ -40,40 +43,53 @@ class KeystrokeSettings(tk.Toplevel):
         self._create_warning_label()
 
     # UI Creation Methods
+    # [수정됨] Windows 환경에 Alt+Shift 체크박스 추가
     def _create_start_stop_key(self):
         ttk.Label(self, text="Start/Stop Key (시작/중지 키):").grid(
             row=0, column=0, padx=10, pady=5, sticky=tk.W
         )
 
-        # Create frame for Start/Stop key controls
         key_frame = ttk.Frame(self)
         key_frame.grid(row=0, column=1, columnspan=3, padx=10, pady=5, sticky=tk.W)
 
-        # For macOS, only show enable/disable checkbox
         if not self.is_windows:
             self.enable_key_var = tk.BooleanVar(value=True)
             self.enable_key_checkbox = ttk.Checkbutton(
                 key_frame,
-                text="Enable Start/Stop Key (시작/중지 키 활성화)",
+                text="Enable Start/Stop Key (Alt+Shift)",
                 variable=self.enable_key_var,
                 command=self._on_enable_key_change,
             )
             self.enable_key_checkbox.pack(side=tk.LEFT, padx=(0, 10))
-
-            # Create but don't display the combo box (needed for internal logic)
             self.start_stop_key = ttk.Combobox(
                 self, values=["Press Key"], state="readonly"
             )
             self.start_stop_key.current(0)
             self.start_stop_key.bind("<Key>", self._on_key_press)
         else:
-            # Add key selection dropdown (Windows only)
             self.start_stop_key = ttk.Combobox(
                 key_frame, values=["Press Key"], state="readonly"
             )
             self.start_stop_key.pack(side=tk.LEFT, padx=(0, 10))
             self.start_stop_key.current(0)
             self.start_stop_key.bind("<Key>", self._on_key_press)
+
+            # [추가됨] Alt+Shift 단축키 사용 체크박스
+            self.alt_shift_checkbox = ttk.Checkbutton(
+                key_frame,
+                text="Use Alt+Shift",
+                variable=self.use_alt_shift_var,
+                command=self._on_alt_shift_toggle,
+            )
+            self.alt_shift_checkbox.pack(side=tk.LEFT)
+
+    # [추가됨] Alt+Shift 체크박스 상태에 따라 Combobox 활성화/비활성화 처리
+    def _on_alt_shift_toggle(self):
+        """Disables or enables the key selection combobox based on the checkbox state."""
+        if self.use_alt_shift_var.get():
+            self.start_stop_key.config(state="disabled")
+        else:
+            self.start_stop_key.config(state="readonly")
 
     def _create_time_entries(self):
         validation_command = (self.register(self._validate_numeric_entry), "%P")
@@ -120,20 +136,15 @@ class KeystrokeSettings(tk.Toplevel):
         getattr(self, f"cluster_epsilon_value").grid(row=3, column=1, padx=10, pady=5)
 
     def _create_max_key_count_entry(self):
-        # 이 옵션은 현재 프로세서에서 사용되지 않으므로 제거
-        # TODO: 향후 필요시 실제 기능에 맞게 재구현
         pass
 
     def _create_epsilon_explanation(self):
-        # Create explanation frame
         explanation_frame = ttk.LabelFrame(
             self, text="클러스터 엡실론 값 설명 (Cluster Epsilon Value Explanation)"
         )
         explanation_frame.grid(
             row=5, column=0, columnspan=3, padx=10, pady=10, sticky="ew"
         )
-
-        # Explanation text
         explanation_text = (
             "• 화면에서 감지할 영역들을 그룹화하는 데 사용되는 값입니다\n"
             "• 값이 클수록 더 넓은 범위의 점들이 하나의 그룹으로 묶입니다\n"
@@ -142,7 +153,6 @@ class KeystrokeSettings(tk.Toplevel):
             "• 기본값: 20 (100x100 캡처 이미지에 최적화)\n"
             "• 캡처 이미지 크기: 100x100 픽셀"
         )
-
         explanation_label = ttk.Label(
             explanation_frame, text=explanation_text, justify=tk.LEFT
         )
@@ -164,15 +174,12 @@ class KeystrokeSettings(tk.Toplevel):
             self, text="\n", background="white", foreground="red"
         )
         self.warning_label.grid(row=8, column=0, columnspan=5, pady=5)
-
         if self.is_windows:
             warning_text = "For Start/Stop, set only A-Z, 0-9, and special character keys.\n\nStart/Stop 은 A-Z, 0-9, 특수문자 키만 설정하세요."
         else:
-            warning_text = "On macOS, you can only enable/disable the start/stop key function.\n\nmacOS에서는 start/stop key 기능의 사용 여부만 선택할 수 있습니다."
-
+            warning_text = "On macOS, the start/stop hotkey is Alt+Shift.\n\nmacOS에서는 start/stop 단축키가 Alt+Shift로 고정됩니다."
         self.warning_label.config(text=warning_text)
 
-    # Settings Management Methods
     def _load_settings(self):
         try:
             with open("user_settings.b64", "r") as file:
@@ -192,14 +199,14 @@ class KeystrokeSettings(tk.Toplevel):
         self._update_num_of_events()
         self._update_max_key_count()
 
+    # [수정됨] 설정 파일 로드 시 Windows Alt+Shift 체크박스 상태 반영
     def _update_start_stop_key(self):
         if not self.is_windows:
-            # For macOS, use the toggle_start_stop_mac property to set checkbox state
             self.enable_key_var.set(self.settings.toggle_start_stop_mac)
         else:
-            # For Windows, handle key selection
             self.start_stop_key.set(self.settings.start_stop_key)
-            self.start_stop_key.config(state="readonly")
+            self.use_alt_shift_var.set(self.settings.use_alt_shift_hotkey)
+            self._on_alt_shift_toggle()
 
     def _update_time_entries(self):
         self._set_entry_values(1, "key_pressed_time")
@@ -209,7 +216,6 @@ class KeystrokeSettings(tk.Toplevel):
         self._set_num_of_events_value()
 
     def _update_max_key_count(self):
-        # Max Key Count 옵션이 제거되었으므로 비어있는 메서드
         pass
 
     def _set_entry_values(self, row, prefix):
@@ -228,39 +234,29 @@ class KeystrokeSettings(tk.Toplevel):
             0, str(getattr(self.settings, f"cluster_epsilon_value"))
         )
 
-    # Event Handlers
     def _on_enable_key_change(self):
-        # For macOS: Enable/disable the start/stop key
         if not self.is_windows:
             key_enabled = self.enable_key_var.get()
-
-            # Update toggle state in settings
             self.settings.toggle_start_stop_mac = key_enabled
-
-            # Update the stored key setting
             if not key_enabled:
                 self.settings.start_stop_key = "DISABLED"
             elif self.settings.start_stop_key == "DISABLED":
-                # If re-enabling, set to default key
                 self.settings.start_stop_key = "`"
 
     def _on_key_press(self, event):
         if not self.is_windows and not self.enable_key_var.get():
-            return  # Ignore key press if key is disabled on macOS
-
+            return
         valid_keys = (
             set(f"F{i}" for i in range(1, 13))
             | set(chr(i) for i in range(ord("A"), ord("Z") + 1))
             | set(chr(i) for i in range(ord("0"), ord("9") + 1))
             | set("`[];',./-=\"")
         )
-
         key = event.char.upper() or event.keysym.upper()
         if key in valid_keys:
             self.start_stop_key.set(key)
             self.settings.start_stop_key = self.start_stop_key.get()
 
-    # Validation Methods
     @staticmethod
     def _validate_numeric_entry(P):
         return P == "" or (P.isdigit() and 0 <= int(P) < 1000 and not P.startswith("0"))
@@ -281,14 +277,11 @@ class KeystrokeSettings(tk.Toplevel):
 
     @staticmethod
     def _validate_max_key_count(P):
-        # Max Key Count 옵션이 제거되었으므로 비어있는 메서드
         return True
 
     def validate_start_stop_key(self):
-        # Skip validation if on macOS and key is disabled
         if not self.is_windows and not self.enable_key_var.get():
             return True
-
         if self.settings.start_stop_key in ["Press Key", "", "DISABLED"]:
             self.show_warning("Please select a Start/Stop key.")
             return False
@@ -299,17 +292,13 @@ class KeystrokeSettings(tk.Toplevel):
             (1, "key_pressed_time", 95, 135),
             (2, "delay_between_loop", 100, 150),
         ]
-
         for row, prefix, min_default, max_default in time_settings:
             min_value = int(getattr(self, f"entry_min_{row}").get() or min_default)
             max_value = int(getattr(self, f"entry_max_{row}").get() or max_default)
-
             if not self.validate_min_max_values(min_value, max_value):
                 return False
-
             setattr(self.settings, f"{prefix}_min", min_value)
             setattr(self.settings, f"{prefix}_max", max_value)
-
         cluster_epsilon_value = int(getattr(self, f"cluster_epsilon_value").get() or 1)
         if cluster_epsilon_value < 10 or cluster_epsilon_value > 200:
             self.show_warning(
@@ -317,7 +306,6 @@ class KeystrokeSettings(tk.Toplevel):
             )
             return False
         setattr(self.settings, "cluster_epsilon_value", cluster_epsilon_value)
-
         return True
 
     def validate_min_max_values(self, min_value, max_value):
@@ -334,23 +322,20 @@ class KeystrokeSettings(tk.Toplevel):
             return False
         return True
 
-    # Action Methods
     def on_reset(self):
         if messagebox.askokcancel(
             "Warning", f"Resets the values.\n설정값이 초기화 됩니다."
         ):
-            self.settings = UserSettings()  # Reset to default values
+            self.settings = UserSettings()
             self._update_ui_from_settings()
             self.warning_label.config(
                 text="Settings have been reset to default values."
             )
 
+    # [수정됨] OK 버튼 클릭 시 Windows Alt+Shift 설정 저장
     def on_ok(self):
-        # For macOS, handle key enable/disable differently
         if not self.is_windows:
-            # Save the toggle state
             self.settings.toggle_start_stop_mac = self.enable_key_var.get()
-
             if not self.enable_key_var.get():
                 self.settings.start_stop_key = "DISABLED"
             elif (
@@ -360,14 +345,13 @@ class KeystrokeSettings(tk.Toplevel):
                 self.show_warning("Please select a Start/Stop key.")
                 return
         else:
-            if not self.validate_start_stop_key():
-                return
-
+            self.settings.use_alt_shift_hotkey = self.use_alt_shift_var.get()
+            if not self.settings.use_alt_shift_hotkey:
+                if not self.validate_start_stop_key():
+                    return
         if not self.validate_and_set_time_settings():
             return
-        # Max Key Count 옵션이 제거되었으므로 set_max_key_count() 호출 제거
         self.save_settings()
-
         self.on_close()
 
     def on_close(self, event=None):
@@ -376,9 +360,7 @@ class KeystrokeSettings(tk.Toplevel):
         self.master.setup_event_handlers()
         self.destroy()
 
-    # Helper Methods
     def set_max_key_count(self):
-        # Max Key Count 옵션이 제거되었으므로 비어있는 메서드
         pass
 
     def save_settings(self):
@@ -387,7 +369,6 @@ class KeystrokeSettings(tk.Toplevel):
         settings_base64 = base64.b64encode(settings_json).decode("utf-8")
         with open("user_settings.b64", "w") as file:
             file.write(settings_base64)
-
         logger.debug(f"Saved settings: {settings_dict}")
 
     def show_warning(self, message):

@@ -184,7 +184,6 @@ class ProfileFrame(tk.Frame):
             os.remove(profile_file)
 
 
-# [수정됨] clear_logs_callback 인자 추가
 class ButtonFrame(tk.Frame):
     def __init__(
         self,
@@ -218,7 +217,6 @@ class ButtonFrame(tk.Frame):
             height=1,
             command=settings_callback,
         )
-        # [추가됨] 로그 비우기 버튼
         self.clear_logs_button = tk.Button(
             self,
             text="Clear Logs",
@@ -298,7 +296,6 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         self.sound_player = SoundPlayer()
 
-    # [수정됨] clear_local_logs 콜백 전달
     def create_ui(self):
         self.process_frame = ProcessFrame(self, textvariable=self.selected_process)
         self.profile_frame = ProfileFrame(
@@ -326,57 +323,39 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.set_ttk_style()
         WindowUtils.center_window(self)
 
-    # [수정됨] 로컬 로그 파일 삭제 기능 + 삭제 용량 계산
     def clear_local_logs(self):
-        """
-        Deletes old log files in the local 'logs' directory after confirmation,
-        calculates the total size of deleted files, and skips the active log file.
-        """
         log_dir = "logs"
         active_log_filename = "keysym.log"
-
         if not messagebox.askokcancel(
             "Confirm", "Delete all old log files?\nThe current log file will be kept."
         ):
             return
-
         try:
             if not os.path.exists(log_dir) or not os.path.isdir(log_dir):
                 messagebox.showinfo(
                     "Info", "Log directory does not exist. Nothing to clear."
                 )
                 return
-
             files_to_delete = [
                 f
                 for f in os.listdir(log_dir)
                 if f != active_log_filename and os.path.isfile(os.path.join(log_dir, f))
             ]
-
             if not files_to_delete:
                 messagebox.showinfo("Info", "No old log files to clear.")
                 return
-
             cleared_count = 0
-            # [추가됨] 삭제된 파일의 총용량을 저장할 변수
             total_size_bytes = 0
-
             for filename in files_to_delete:
                 file_path = os.path.join(log_dir, filename)
                 try:
-                    # [추가됨] 파일 삭제 전, 크기를 합산
                     total_size_bytes += os.path.getsize(file_path)
-
                     os.remove(file_path)
                     cleared_count += 1
                 except Exception as e:
                     logger.warning(f"Could not delete {file_path}: {e}")
-
             if cleared_count > 0:
-                # [추가됨] 바이트를 메가바이트로 변환
                 total_size_mb = total_size_bytes / (1024 * 1024)
-
-                # [수정됨] 메시지 박스에 삭제된 용량 정보 추가
                 success_message = (
                     f"{cleared_count} old log file(s) have been cleared.\n"
                     f"Total space saved: {total_size_mb:.2f} MB"
@@ -390,7 +369,6 @@ class KeystrokeSimulatorApp(tk.Tk):
                     "Warning",
                     "Could not clear some old log files. Check file permissions.",
                 )
-
         except Exception as e:
             messagebox.showerror(
                 "Error", f"An unexpected error occurred while clearing logs: {e}"
@@ -407,11 +385,20 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.setup_start_stop_handler()
 
+    # [수정됨] Windows 환경에서 Alt+Shift 단축키 등록 로직 추가
     def setup_start_stop_handler(self):
-        if platform.system() == "Darwin":
+        system = platform.system()
+        if system == "Darwin":
             if self.settings.toggle_start_stop_mac:
                 self.setup_ctrl_double_press_handler()
         else:
+            if system == "Windows" and self.settings.use_alt_shift_hotkey:
+                try:
+                    keyboard.add_hotkey('alt+shift', self.toggle_start_stop)
+                    return
+                except Exception as e:
+                    logger.error(f"Failed to register hotkey 'alt+shift': {e}")
+            
             start_stop_key = self.settings.start_stop_key
             if start_stop_key.startswith("W_"):
                 import pynput
@@ -421,50 +408,34 @@ class KeystrokeSimulatorApp(tk.Tk):
                 )
                 self.start_stop_mouse_listener.start()
             else:
-                key = (
-                    KeyUtils.get_keycode(start_stop_key)
-                    if platform.system() == "Darwin"
-                    else start_stop_key
-                )
-                keyboard.on_press_key(key, self.toggle_start_stop)
+                keyboard.on_press_key(start_stop_key, self.toggle_start_stop)
 
     def setup_ctrl_double_press_handler(self):
-        """Sets up a thread to detect double Ctrl presses on macOS"""
         self.ctrl_check_active = True
         self.ctrl_check_thread = threading.Thread(target=self.check_for_long_alt_shift)
         self.ctrl_check_thread.daemon = True
         self.ctrl_check_thread.start()
 
     def check_for_long_alt_shift(self):
-        """Thread method to detect Alt+Shift key press and toggle immediately on macOS"""
         import time
 
         last_combo_state = False
         last_toggle_time = 0
-        toggle_cooldown = 0.1  # 연속 토글 방지를 위한 쿨다운
-
+        toggle_cooldown = 0.1
         while self.ctrl_check_active:
             try:
                 current_time = time.time()
-
-                # 쿨다운 체크
                 if current_time - last_toggle_time < toggle_cooldown:
                     time.sleep(0.01)
                     continue
-
                 alt_pressed = KeyUtils.mod_key_pressed("alt")
                 shift_pressed = KeyUtils.mod_key_pressed("shift")
                 current_combo_state = alt_pressed and shift_pressed
-
-                # Alt+Shift 키 조합이 새로 눌렸을 때 (이전에는 안 눌려있었는데 지금 눌림)
                 if current_combo_state and not last_combo_state:
-                    # 즉시 토글 실행
                     self.after(0, self.toggle_start_stop)
                     last_toggle_time = current_time
-
                 last_combo_state = current_combo_state
                 time.sleep(0.01)
-
             except Exception as e:
                 logger.error(f"Error in check_for_alt_shift_toggle: {e}")
                 time.sleep(0.1)
@@ -524,16 +495,13 @@ class KeystrokeSimulatorApp(tk.Tk):
         pid = parse_process_id_from_string(self.selected_process.get())
         if not ProcessUtils.is_process_active(pid):
             return
-
         current_time = time.time()
         if self.latest_scroll_time and current_time - self.latest_scroll_time <= 0.75:
             return
-
         if (self.settings.start_stop_key == "W_UP" and dy > 0) or (
             self.settings.start_stop_key == "W_DN" and dy < 0
         ):
             self.toggle_start_stop()
-
         self.latest_scroll_time = current_time
 
     def toggle_start_stop(self, event=None):
@@ -546,20 +514,16 @@ class KeystrokeSimulatorApp(tk.Tk):
     def start_simulation(self):
         if not self._validate_simulation_prerequisites():
             return
-
         profile = self._load_profile()
         event_list = [p for p in profile.event_list if p.key_to_enter and p.use_event]
         if not event_list:
             return
-
         modification_keys = profile.modification_keys
         if not modification_keys:
             modification_keys = {}
-
         self.terminate_event.clear()
         self._create_and_start_processor(event_list, modification_keys)
         self.save_latest_state()
-
         self.sound_player.play_start_sound()
         self.update_ui()
 
@@ -600,7 +564,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         if self.keystroke_processor:
             self.keystroke_processor.stop()
             self.keystroke_processor = None
-
         self.terminate_event.set()
         self.sound_player.play_stop_sound()
         self.update_ui()
@@ -609,7 +572,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         is_running = self.is_running.get()
         state = "disable" if is_running else "normal"
         readonly_state = "disable" if is_running else "readonly"
-
         self.process_frame.process_combobox.config(state=readonly_state)
         self.process_frame.refresh_button.config(state=state)
         self.profile_button_frame.settings_button.config(state=state)
@@ -621,8 +583,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         self.button_frame.settings_button.config(state=state)
         self.profile_button_frame.sort_button.config(state=state)
-
-        # [추가됨] 로그 비우기 버튼 상태 업데이트
         self.button_frame.clear_logs_button.config(state=state)
 
     def open_modkeys(self):
@@ -674,13 +634,11 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def unbind_events(self):
         self.unbind("<Escape>")
-
         if platform.system() != "Darwin":
             keyboard.unhook_all()
         if self.start_stop_mouse_listener:
             self.start_stop_mouse_listener.stop()
             self.start_stop_mouse_listener = None
-
         self.ctrl_check_active = False
         if self.ctrl_check_thread and self.ctrl_check_thread.is_alive():
             self.ctrl_check_thread.join(timeout=0.5)

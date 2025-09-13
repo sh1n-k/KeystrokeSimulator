@@ -15,6 +15,7 @@ class UserSettings:
     cluster_epsilon_value: int = 20
     max_key_count: Optional[int] = 10
     toggle_start_stop_mac: bool = True
+    use_alt_shift_hotkey: bool = False
 
     def is_start_stop_key_enabled(self) -> bool:
         """Check if the start/stop key is enabled (not set to DISABLED)"""
