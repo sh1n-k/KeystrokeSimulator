@@ -364,12 +364,13 @@ class KeystrokeEventEditor:
         if hasattr(self, "key_check_thread") and self.key_check_thread.is_alive():
             self.key_check_thread.join(timeout=0.5)
 
-        if (
-            self.screenshot_capturer.capture_thread
-            and self.screenshot_capturer.capture_thread.is_alive()
-        ):
+        if self.screenshot_capturer:
             self.screenshot_capturer.stop_capture()
-            self.screenshot_capturer.capture_thread.join(timeout=0.1)
+            if (
+                self.screenshot_capturer.capture_thread
+                and self.screenshot_capturer.capture_thread.is_alive()
+            ):
+                self.screenshot_capturer.capture_thread.join(timeout=0.1)
 
         self.save_latest_position()
         self.event_window.grab_release()
