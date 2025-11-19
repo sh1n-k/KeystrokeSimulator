@@ -1,42 +1,30 @@
 import base64
 import io
 import pygame
+from typing import Optional
 
 
 class SoundPlayer:
     def __init__(self):
         pygame.mixer.init()
-        self.start_sound = self._load_sound_from_base64(START_SOUND)
-        self.stop_sound = self._load_sound_from_base64(STOP_SOUND)
+        self.start_sound = self._load_sound(START_SOUND)
+        self.stop_sound = self._load_sound(STOP_SOUND)
 
-    def _init_sounds(self):
-        """앱 시작시 사운드 데이터를 미리 디코딩"""
-        try:
-            # 바이트 데이터를 직접 저장 (BytesIO 객체가 아닌)
-            self.start_sound_data = base64.b64decode(START_SOUND)
-            self.stop_sound_data = base64.b64decode(STOP_SOUND)
-
-        except Exception as e:
-            print(f"Error initializing sounds: {e}")
-
-    def _load_sound_from_base64(self, b64_data):
-        """Base64 데이터를 디코딩하여 pygame.mixer.Sound 객체로 반환"""
+    def _load_sound(self, b64_data: str) -> Optional[pygame.mixer.Sound]:
+        """Base64 디코딩 및 Sound 객체 생성 (실패 시 None 반환)"""
         if not b64_data:
             return None
         try:
-            sound_bytes = base64.b64decode(b64_data)
-            return pygame.mixer.Sound(io.BytesIO(sound_bytes))
+            return pygame.mixer.Sound(io.BytesIO(base64.b64decode(b64_data)))
         except Exception as e:
-            print(f"Error loading sound from base64: {e}")
+            print(f"Sound load error: {e}")
             return None
 
     def play_start_sound(self):
-        """시작 사운드 재생"""
         if self.start_sound:
             self.start_sound.play()
 
     def play_stop_sound(self):
-        """종료 사운드 재생"""
         if self.stop_sound:
             self.stop_sound.play()
 

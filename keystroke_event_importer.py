@@ -1,14 +1,13 @@
-import os
 import pickle
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
-from tkinter.ttk import Scrollbar
 from typing import Callable, Optional
 
 from loguru import logger
 
 from keystroke_models import EventModel
-from keystroke_utils import WindowUtils, StateUtils
+from keystroke_utils import StateUtils
 
 
 class EventImporter:
@@ -17,193 +16,124 @@ class EventImporter:
         profiles_window: tk.Toplevel,
         confirm_callback: Optional[Callable[[list[EventModel]], None]] = None,
     ):
-        self.event_importer = tk.Toplevel(profiles_window)
-        self.event_importer.title("Import events")
-        self.event_importer.focus_force()
-        self.event_importer.attributes("-topmost", True)
-        self.event_importer.grab_set()
-        self.profile_dir = "profiles"
-        self.selected_profile = None
-        self.confirm_callback = confirm_callback
+        self.win = tk.Toplevel(profiles_window)
+        self.win.title("Import events")
+        self.win.focus_force()
+        self.win.attributes("-topmost", True)
+        self.win.grab_set()
+
+        self.profile_dir = Path("profiles")
+        self.confirm_cb = confirm_callback
         self.checkboxes = []
-        self.current_profile = None
+        self.current_profile_data = None
 
-        self.event_importer.protocol("WM_DELETE_WINDOW", self.cancel_button_clicked)
-        self.event_importer.bind("<Escape>", self.cancel_button_clicked)
+        self.win.protocol("WM_DELETE_WINDOW", self.close)
+        self.win.bind("<Escape>", self.close)
 
-        self.create_profile_frame()
-        self.create_event_frame()
-        self.create_button_frame()
-
+        self.create_ui()
         self.load_profiles()
-        self.load_latest_position()
+        self.load_pos()
 
-    def create_profile_frame(self):
-        self.profile_frame = ttk.Frame(self.event_importer)
-        self.profile_frame.pack(pady=10)
+    def create_ui(self):
+        # Profile Selection
+        f_prof = ttk.Frame(self.win)
+        f_prof.pack(pady=10)
+        ttk.Label(f_prof, text="Profile:").pack(side="left", padx=5)
+        self.cb_prof = ttk.Combobox(f_prof, state="readonly")
+        self.cb_prof.bind("<<ComboboxSelected>>", self.load_events)
+        self.cb_prof.pack(side="left", padx=5)
 
-        self.profile_label = ttk.Entry(self.profile_frame)
-        self.profile_label.insert(0, "Profile:")
-        self.profile_label.config(state="readonly")
-        self.profile_label.pack(side="left", padx=5)
+        # Events Area
+        self.f_events = ttk.LabelFrame(self.win, text="Events")
+        self.f_events.pack(pady=20, padx=20, fill="both", expand=True)
 
-        self.profile_combobox = ttk.Combobox(self.profile_frame)
-        self.profile_combobox.bind("<<ComboboxSelected>>", self.load_events)
-        self.profile_combobox.config(state="readonly")
-        self.profile_combobox.pack(side="left", padx=5)
+        # Scrollable Canvas for Events (Optional but good for many events)
+        # For simplicity, keeping it packed directly as requested, but using a canvas is better for scalability.
+        # Here we stick to the original structure but cleaner.
 
-    def create_event_frame(self):
-        self.event_frame = ttk.LabelFrame(self.event_importer, text="Events")
-        self.event_frame.pack(pady=20, padx=20, fill="both", expand=True)
-
-    def create_button_frame(self):
-        button_frame = ttk.Frame(self.event_importer)
-        button_frame.pack(side="bottom", pady=10, fill="x")
-
-        ok_button = ttk.Button(
-            button_frame,
-            text="OK",
-            command=self.ok_button_clicked,
+        # Buttons
+        f_btn = ttk.Frame(self.win)
+        f_btn.pack(side="bottom", pady=10, fill="x")
+        ttk.Button(f_btn, text="OK", command=self.on_ok).pack(side="left", padx=5)
+        ttk.Button(f_btn, text="Cancel", command=self.close).pack(side="left", padx=5)
+        ttk.Button(f_btn, text="Select/Deselect All", command=self.toggle_all).pack(
+            side="right", padx=5
         )
-        cancel_button = ttk.Button(
-            button_frame,
-            text="Cancel",
-            command=self.cancel_button_clicked,
-        )
-        select_button = ttk.Button(
-            button_frame,
-            text="Select/Deselect All",
-            command=self.select_button_clicked,
-        )
-
-        ok_button.pack(side="left", padx=5)
-        cancel_button.pack(side="left", padx=5)
-        select_button.pack(side="right", padx=5)
-
-    def ok_button_clicked(self):
-        selected_events = []
-        profile_name = self.profile_combobox.get()
-        for i, var in enumerate(self.checkboxes):
-            if var.get() == 1:
-                profile_model = self.get_profile_model(profile_name)
-                if profile_model and profile_model.event_list:
-                    selected_events.append(profile_model.event_list[i])
-
-        if not selected_events:
-            return
-
-        if self.confirm_callback:
-            self.confirm_callback(selected_events)
-            logger.info(
-                f"{len(selected_events)} events selected in profile '{profile_name}'"
-            )
-
-        self.event_importer.destroy()
-
-    def save_latest_position(self):
-        StateUtils.save_main_app_state(
-            importer_position=f"{self.event_importer.winfo_x()}/{self.event_importer.winfo_y()}",
-        )
-
-    def load_latest_position(self):
-        state = StateUtils.load_main_app_state()
-        if state and "importer_position" in state:
-            x, y = state["importer_position"].split("/")
-            self.event_importer.geometry(f"+{x}+{y}")
-            self.event_importer.update_idletasks()
-
-    def cancel_button_clicked(self, event=None):
-        self.save_latest_position()
-        self.event_importer.destroy()
-
-    def select_button_clicked(self):
-        if any(var.get() == 0 for var in self.checkboxes):
-            self.select_all()
-
-        elif all(var.get() == 1 for var in self.checkboxes):
-            self.deselect_all()
-
-        else:
-            self.select_all()
-
-    def select_all(self):
-        for var in self.checkboxes:
-            var.set(1)
-
-    def deselect_all(self):
-        for var in self.checkboxes:
-            var.set(0)
 
     def load_profiles(self):
-        profile_names = self.get_profile_names()
+        self.profile_dir.mkdir(exist_ok=True)
+        names = sorted([p.stem for p in self.profile_dir.glob("*.pkl")])
+        if "Quick" in names:  # Assuming 'Quick' or '_Quick' handling
+            names.remove("Quick")
+            names.insert(0, "Quick")
 
-        profile_names.sort(reverse=False)
-        if "_Quick" in profile_names:
-            profile_names.insert(0, profile_names.pop(profile_names.index("_Quick")))
+        self.cb_prof["values"] = names
+        if names:
+            self.cb_prof.current(0)
+            self.load_events()
 
-        self.profile_combobox["values"] = profile_names
+    def load_events(self, event=None):
+        prof_name = self.cb_prof.get()
+        try:
+            with open(self.profile_dir / f"{prof_name}.pkl", "rb") as f:
+                self.current_profile_data = pickle.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load profile {prof_name}: {e}")
+            self.current_profile_data = None
 
-        if profile_names:
-            self.profile_combobox.current(0)
-            self.load_events(None)
+        for w in self.f_events.winfo_children():
+            w.destroy()
+        self.checkboxes.clear()
 
-    def get_profile_names(self):
-        return [
-            os.path.splitext(f)[0]
-            for f in os.listdir(self.profile_dir)
-            if f.endswith(".pkl")
+        if self.current_profile_data and self.current_profile_data.event_list:
+            for i, evt in enumerate(self.current_profile_data.event_list):
+                self._add_event_row(i, evt)
+
+    def _add_event_row(self, idx, evt):
+        var = tk.IntVar()
+        ttk.Checkbutton(self.f_events, text=f"{idx + 1}", variable=var).grid(
+            row=idx, column=0, sticky="w", padx=10
+        )
+
+        e_name = ttk.Entry(self.f_events)
+        e_name.insert(0, evt.event_name)
+        e_name.config(state="readonly")
+        e_name.grid(row=idx, column=1, padx=10)
+
+        e_key = ttk.Entry(self.f_events, width=5)
+        e_key.insert(0, evt.key_to_enter or "")
+        e_key.config(state="readonly")
+        e_key.grid(row=idx, column=2, padx=5)
+
+        self.checkboxes.append(var)
+
+    def toggle_all(self):
+        target = 1 if any(v.get() == 0 for v in self.checkboxes) else 0
+        for v in self.checkboxes:
+            v.set(target)
+
+    def on_ok(self):
+        if not self.current_profile_data:
+            return
+
+        selected = [
+            self.current_profile_data.event_list[i]
+            for i, var in enumerate(self.checkboxes)
+            if var.get()
         ]
 
-    def load_events(self, event):
-        profile_name = self.profile_combobox.get()
-        profile_model = self.get_profile_model(profile_name)
+        if selected and self.confirm_cb:
+            self.confirm_cb(selected)
+            logger.info(f"Imported {len(selected)} events from '{self.cb_prof.get()}'")
 
-        # Clear existing event widgets
-        for widget in self.event_frame.winfo_children():
-            widget.destroy()
-        self.checkboxes = []
+        self.close()
 
-        if profile_model and profile_model.event_list:
-            for idx, event_model in enumerate(profile_model.event_list):
-                self.create_event_widget(idx, event_model)
-
-        self.current_profile = profile_model
-
-    def get_profile_model(self, profile_name):
-        try:
-            with open(f"{self.profile_dir}/{profile_name}.pkl", "rb") as f:
-                return pickle.load(f)
-        except Exception as e:
-            print(f"Failed to load profile: {e}")
-            return None
-
-    def create_event_widget(self, row, event_model):
-        entry = ttk.Entry(self.event_frame)
-        entry.insert(0, event_model.event_name)
-        entry.config(state="readonly")
-        entry_status = ttk.Entry(self.event_frame, width=2)
-        entry_status.insert(0, event_model.key_to_enter or "")
-        entry_status.config(state="readonly")
-        checkbox_var = tk.IntVar()
-        checkbox = ttk.Checkbutton(
-            self.event_frame,
-            state="",
-            text=f"{row + 1}",
-            variable=checkbox_var,
-            command=lambda: self.checkbox_clicked(
-                event_model, entry, entry_status, checkbox_var
-            ),
+    def close(self, event=None):
+        StateUtils.save_main_app_state(
+            importer_pos=f"{self.win.winfo_x()}/{self.win.winfo_y()}"
         )
-        checkbox.grid(row=row, column=0, sticky="w", padx=10)
-        entry.grid(row=row, column=1, padx=10)
-        entry_status.grid(row=row, column=2, padx=5)
+        self.win.destroy()
 
-        self.checkboxes.append(checkbox_var)
-
-    def checkbox_clicked(self, event_model, entry, entry_status, checkbox_var):
-        if checkbox_var.get():
-            entry.insert(0, event_model.event_name)
-            entry_status.insert(0, event_model.key_to_enter or "")
-        else:
-            entry.delete(0, tk.END)
-            entry_status.delete(0, tk.END)
+    def load_pos(self):
+        if pos := StateUtils.load_main_app_state().get("importer_pos"):
+            self.win.geometry(f"+{pos.split('/')[0]}+{pos.split('/')[1]}")

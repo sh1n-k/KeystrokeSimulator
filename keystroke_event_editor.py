@@ -14,19 +14,6 @@ from keystroke_models import EventModel
 from keystroke_utils import KeyUtils, StateUtils
 
 
-def invert_pixels_by_coordinate(image: Image.Image, x: int, y: int, axis: str):
-    width, height = image.width, image.height
-    for coord in range(width) if axis == "x" else range(height):
-        current_pixel = image.getpixel((x, coord) if axis == "y" else (coord, y))
-        inverted_pixel = (
-            255 - current_pixel[0],
-            255 - current_pixel[1],
-            255 - current_pixel[2],
-            255,
-        )
-        image.putpixel((x, coord) if axis == "y" else (coord, y), inverted_pixel)
-
-
 class KeystrokeEventEditor:
     def __init__(
         self,
@@ -35,477 +22,335 @@ class KeystrokeEventEditor:
         save_callback: Optional[Callable[[EventModel, bool, int], None]],
         event_function: Optional[Callable[[], EventModel]],
     ):
-        self.profiles_window = profiles_window
-        self.event_window = tk.Toplevel(profiles_window)
-        self.event_window.title(f"Event Settings - Row {row_num + 1}")
-        self.event_window.transient(profiles_window)
-        self.event_window.grab_set()
-        self.event_window.focus_force()
-        self.event_window.attributes("-topmost", True)
-        self.event_window.update_idletasks()
-        self.event_window.grid_rowconfigure(0, weight=1)
-        self.event_window.grid_columnconfigure(0, weight=1)
+        self.win = tk.Toplevel(profiles_window)
+        self.win.title(f"Event Settings - Row {row_num + 1}")
+        self.win.transient(profiles_window)
+        self.win.grab_set()
+        self.win.focus_force()
+        self.win.attributes("-topmost", True)
+        self.win.grid_rowconfigure(0, weight=1)
+        self.win.grid_columnconfigure(0, weight=1)
 
-        self.save_callback = save_callback
-        self.screenshot_capturer = ScreenshotCapturer()
-        self.screenshot_capturer.screenshot_callback = self.update_capture_image
-        self.event_name: Optional[str] = ""
-        self.latest_position: Optional[tuple] = None
-        self.clicked_position: Optional[tuple] = None
-        self.latest_screenshot: Optional[Image.Image] = None
-        self.held_screenshot: Optional[Image.Image] = None
-        self.ref_pixel_value = None
+        self.save_cb = save_callback
+        self.capturer = ScreenshotCapturer()
+        self.capturer.screenshot_callback = self.update_capture_image
+
+        self.event_name = ""
+        self.latest_pos = None
+        self.clicked_pos = None
+        self.latest_img = None
+        self.held_img = None
+        self.ref_pixel = None
         self.key_to_enter = None
         self.independent_thread = tk.BooleanVar(value=False)
 
         self.create_ui()
         self.bind_events()
 
-        self.event_window.update_idletasks()
         self.row_num = row_num
         self.is_edit = bool(event_function())
         self.load_stored_event(event_function)
-        self.screenshot_capturer.start_capture()
+        self.capturer.start_capture()
 
         self.key_check_active = True
-        self.key_check_thread = Thread(target=self.check_key_states)
-        self.key_check_thread.daemon = True
+        self.key_check_thread = Thread(target=self.check_key_states, daemon=True)
         self.key_check_thread.start()
 
         self.load_latest_position()
         self.key_combobox.focus_set()
 
     def create_ui(self):
-        self.create_image_placeholders()
-        self.create_ref_pixel_placeholder()
-        self.create_coordinate_entries()
-        self.create_key_entry()
-        self.create_duration_entries()
-        self.create_independent_thread_checkbox()
-        self.create_buttons_frame()
-        self.create_info_label()
+        # Image Placeholders
+        f_img = tk.Frame(self.win)
+        f_img.pack(pady=5)
+        self.lbl_img1 = tk.Label(f_img, width=10, height=5, bg="red")
+        self.lbl_img1.grid(row=0, column=0, padx=5)
+        self.lbl_img2 = tk.Label(f_img, width=10, height=5, bg="gray")
+        self.lbl_img2.grid(row=0, column=1, padx=5)
+        for seq in ("<Button-1>", "<B1-Motion>"):
+            self.lbl_img2.bind(seq, self.get_coordinates_of_held_image)
 
-    def create_image_placeholders(self):
-        image_frame = tk.Frame(self.event_window)
-        image_frame.pack(pady=5)
+        # Ref Pixel
+        f_ref = tk.Frame(self.win)
+        f_ref.pack(pady=5)
+        self.lbl_ref = tk.Label(f_ref, width=2, height=1, bg="gray")
+        self.lbl_ref.grid(row=0, column=1, padx=5)
 
-        self.image1_placeholder = tk.Label(image_frame, width=10, height=5, bg="red")
-        self.image1_placeholder.grid(row=0, column=0, padx=5)
-
-        self.image2_placeholder = tk.Label(image_frame, width=10, height=5, bg="gray")
-        self.image2_placeholder.grid(row=0, column=1, padx=5)
-        self.image2_placeholder.bind("<Button-1>", self.get_coordinates_of_held_image)
-        self.image2_placeholder.bind("<B1-Motion>", self.get_coordinates_of_held_image)
-
-    def create_ref_pixel_placeholder(self):
-        ref_pixel_frame = tk.Frame(self.event_window)
-        ref_pixel_frame.pack(pady=5)
-        self.ref_pixel_placeholder = tk.Label(
-            ref_pixel_frame, width=2, height=1, bg="gray"
+        # Coordinates
+        self.coord_entries = self.create_coord_entries(
+            tk.Frame(self.win), ["Area X:", "Area Y:", "Pixel X:", "Pixel Y:"]
         )
-        self.ref_pixel_placeholder.grid(row=0, column=1, padx=5)
+        self.coord_entries[0].master.pack()
 
-    def create_coordinate_entries(self):
-        coord_frame = tk.Frame(self.event_window)
-        coord_frame.pack()
-
-        coord_labels = ["Area X:", "Area Y:", "Pixel X:", "Pixel Y:"]
-        self.coord_entries = self.create_coord_entries(coord_frame, coord_labels)
-
-    def create_key_entry(self):
-        key_frame = tk.Frame(self.event_window)
-        key_frame.pack(pady=5)
-
-        tk.Label(key_frame, text="Key:", anchor="w").grid(row=0, column=0)
+        # Key Entry
+        f_key = tk.Frame(self.win)
+        f_key.pack(pady=5)
+        tk.Label(f_key, text="Key:", anchor="w").grid(row=0, column=0)
         self.key_combobox = ttk.Combobox(
-            key_frame, state="readonly", values=KeyUtils.get_key_name_list()
+            f_key, state="readonly", values=KeyUtils.get_key_name_list()
         )
         self.key_combobox.grid(row=0, column=1)
 
-    # [추가됨] 숫자만 입력되도록 하는 유효성 검사 함수
-    def _validate_numeric_input(self, P):
-        """Allow only digits or an empty string."""
-        if P == "" or P.isdigit():
-            return True
-        return False
-
-    # [수정됨] 유효성 검사 적용
-    def create_duration_entries(self):
-        duration_frame = tk.Frame(self.event_window)
-        duration_frame.pack(pady=5)
-
-        # Register the validation command
-        vcmd = (self.event_window.register(self._validate_numeric_input), "%P")
-
-        tk.Label(duration_frame, text="Press Duration (ms):").grid(
-            row=0, column=0, padx=5
+        # Duration
+        f_dur = tk.Frame(self.win)
+        f_dur.pack(pady=5)
+        vcmd = (self.win.register(lambda P: P == "" or P.isdigit()), "%P")
+        self.entry_dur = self._create_labeled_entry(
+            f_dur, "Press Duration (ms):", 0, vcmd
         )
-        self.press_duration_entry = tk.Entry(
-            duration_frame, width=10, validate="key", validatecommand=vcmd
+        self.entry_rand = self._create_labeled_entry(
+            f_dur, "Randomization (ms):", 1, vcmd
         )
-        self.press_duration_entry.grid(row=0, column=1, padx=5)
 
-        tk.Label(duration_frame, text="Randomization (ms):").grid(
+        # Checkbox & Buttons & Info
+        tk.Checkbutton(
+            self.win, text="Independent Thread", variable=self.independent_thread
+        ).pack(pady=5)
+
+        f_btn = tk.Frame(self.win)
+        f_btn.pack(pady=10)
+        tk.Button(f_btn, text="Grab(Ctrl)", command=self.hold_image).grid(
+            row=0, column=0, columnspan=2, padx=5
+        )
+        tk.Button(f_btn, text="OK(↩️)", command=self.save_event).grid(
             row=1, column=0, padx=5
         )
-        self.randomization_entry = tk.Entry(
-            duration_frame, width=10, validate="key", validatecommand=vcmd
+        tk.Button(f_btn, text="Cancel(ESC)", command=self.close_window).grid(
+            row=1, column=1, padx=5
         )
-        self.randomization_entry.grid(row=1, column=1, padx=5)
 
-    def create_independent_thread_checkbox(self):
-        checkbox_frame = tk.Frame(self.event_window)
-        checkbox_frame.pack(pady=5)
-
-        self.independent_thread_checkbox = tk.Checkbutton(
-            checkbox_frame, text="Independent Thread", variable=self.independent_thread
-        )
-        self.independent_thread_checkbox.pack()
-
-    def create_buttons_frame(self):
-        button_frame = tk.Frame(self.event_window)
-        button_frame.pack(pady=10)
-
-        grab_button = tk.Button(
-            button_frame, text="Grab(Ctrl)", command=self.handle_grab_button_click
-        )
-        grab_button.grid(row=0, column=0, padx=5, columnspan=2)
-
-        ok_button = tk.Button(button_frame, text="OK(↩️)", command=self.save_event)
-        ok_button.grid(row=1, column=0, padx=5)
-
-        cancel_button = tk.Button(
-            button_frame, text="Cancel(ESC)", command=self.close_window
-        )
-        cancel_button.grid(row=1, column=1, padx=5)
-
-    def create_info_label(self):
-        info_label = tk.Label(
-            self.event_window,
-            text="ALT: Area selection\nCTRL: Grab current image\n\n"
-            + "1. Left-click the right image (grabbed image)\n   to select the reference pixel.\n"
-            + "2. Select the key you want to set.\n\n"
-            + "ALT: 캡처 영역 선택\nCTRL: 현재 이미지 가져오기\n\n"
-            + "1. 오른쪽 이미지(가져온 이미지)를 클릭하여\n   기준이 될 픽셀을 선택하세요.\n"
-            + "2. 설정할 키를 선택하세요.",
+        tk.Label(
+            self.win,
+            text="ALT: Area selection\nCTRL: Grab current image\n\n1. Click right image to select ref pixel.\n2. Select key.",
             anchor="center",
             fg="black",
             wraplength=250,
-        )
-        info_label.pack(pady=5, fill="both")
+        ).pack(pady=5, fill="both")
+
+    def _create_labeled_entry(self, parent, text, row, vcmd):
+        tk.Label(parent, text=text).grid(row=row, column=0, padx=5)
+        e = tk.Entry(parent, width=10, validate="key", validatecommand=vcmd)
+        e.grid(row=row, column=1, padx=5)
+        return e
+
+    def create_coord_entries(self, parent, labels):
+        entries = []
+        for i, txt in enumerate(labels):
+            r, c = i // 2, (i % 2) * 2
+            tk.Label(parent, text=txt).grid(row=r, column=c, padx=1, sticky=tk.E)
+            e = tk.Entry(parent, width=4)
+            e.grid(row=r, column=c + 1, padx=4, sticky=tk.W)
+            e.bind("<Up>", lambda ev, en=e: self._adj_entry(en, 1))
+            e.bind("<Down>", lambda ev, en=e: self._adj_entry(en, -1))
+            entries.append(e)
+
+        for e in entries[:2]:
+            e.bind("<FocusOut>", self.update_position_from_entries)
+        return entries
+
+    def _adj_entry(self, entry, delta):
+        try:
+            val = int(entry.get()) + delta
+            entry.delete(0, tk.END)
+            entry.insert(0, str(val))
+            if entry in self.coord_entries[:2]:
+                self.update_position_from_entries()
+        except ValueError:
+            pass
+        return "break"
 
     def check_key_states(self):
-        """Thread function to check key states periodically."""
         while self.key_check_active:
             if KeyUtils.mod_key_pressed("alt"):
-                self.screenshot_capturer.set_current_mouse_position(
-                    self.event_window.winfo_pointerxy()
-                )
-
+                self.capturer.set_current_mouse_position(self.win.winfo_pointerxy())
             if KeyUtils.mod_key_pressed("ctrl"):
                 self.hold_image()
                 time.sleep(0.2)
-
             time.sleep(0.1)
 
     def bind_events(self):
-        self.event_window.bind("<Escape>", self.close_window)
-        self.event_window.bind("<Return>", self.save_event)
-        self.event_window.protocol("WM_DELETE_WINDOW", self.close_window)
-        self.key_combobox.bind("<<ComboboxSelected>>", self.update_key_to_enter)
+        self.win.bind("<Escape>", self.close_window)
+        self.win.bind("<Return>", self.save_event)
+        self.win.protocol("WM_DELETE_WINDOW", self.close_window)
+        self.key_combobox.bind(
+            "<<ComboboxSelected>>",
+            lambda e: setattr(self, "key_to_enter", self.key_combobox.get()),
+        )
         self.key_combobox.bind("<KeyPress>", self.filter_key_combobox)
 
     def filter_key_combobox(self, event):
-        key_name = (event.keysym or event.char).upper()
-        if key_name.startswith("F") and key_name[1:].isdigit():
-            self.key_combobox.set(key_name)
-            self.update_key_to_enter(event)
-        else:
-            value = event.char.upper()
-            if value:
-                filtered_values = [
-                    k for k in self.key_combobox["values"] if k.startswith(value)
-                ]
-                if filtered_values:
-                    self.key_combobox.set(filtered_values[0])
-                    self.update_key_to_enter(event)
+        key = (event.keysym or event.char).upper()
+        if key.startswith("F") and key[1:].isdigit():
+            self.key_combobox.set(key)
+            self.key_to_enter = key
+        elif val := event.char.upper():
+            if match := [k for k in self.key_combobox["values"] if k.startswith(val)]:
+                self.key_combobox.set(match[0])
+                self.key_to_enter = match[0]
 
-    def update_capture_image(self, position: tuple, image: Image.Image):
-        if position and image:
-            self.latest_position = position
-            self.latest_screenshot = image
-            if self.image1_placeholder.winfo_exists():
-                self.update_image_placeholder(self.image1_placeholder, image)
-
-    def update_ref_pixel_placeholder(self, image, coordinates):
-        self.ref_pixel_value = image.getpixel(coordinates)
-        color_square = Image.new("RGBA", (25, 25), color=self.ref_pixel_value)
-        self.update_image_placeholder(self.ref_pixel_placeholder, color_square)
+    def update_capture_image(self, pos, img):
+        if pos and img:
+            self.latest_pos, self.latest_img = pos, img
+            if self.lbl_img1.winfo_exists():
+                self._update_img_lbl(self.lbl_img1, img)
 
     def hold_image(self):
-        if self.latest_position and self.latest_screenshot:
-            x, y = self.latest_position
-            self.update_coordinate_entries(self.coord_entries[:2], x, y)
-
-            self.held_screenshot = self.latest_screenshot
-            self.update_image_placeholder(
-                self.image2_placeholder, self.latest_screenshot
-            )
-
-            if self.clicked_position:
-                self.apply_crosshair_to_placeholder(
-                    self.held_screenshot, self.image2_placeholder
-                )
-                self.update_ref_pixel_placeholder(
-                    self.held_screenshot, self.clicked_position
-                )
+        if self.latest_pos and self.latest_img:
+            self._set_entries(self.coord_entries[:2], *self.latest_pos)
+            self.held_img = self.latest_img
+            self._update_img_lbl(self.lbl_img2, self.latest_img)
+            if self.clicked_pos:
+                self._apply_crosshair(self.held_img, self.lbl_img2)
+                self._update_ref_pixel(self.held_img, self.clicked_pos)
 
     def get_coordinates_of_held_image(self, event):
-        image = copy.deepcopy(self.held_screenshot)
-
-        if not self.held_screenshot:
+        if (
+            not self.held_img
+            or event.x >= self.held_img.width
+            or event.y >= self.held_img.height
+        ):
             return
-        if event.x >= image.width or event.y >= image.height:
+        w_ratio = self.held_img.width / self.lbl_img2.winfo_width()
+        h_ratio = self.held_img.height / self.lbl_img2.winfo_height()
+
+        ix, iy = int(event.x * w_ratio), int(event.y * h_ratio)
+        self.clicked_pos = (ix, iy)
+        self._update_ref_pixel(copy.deepcopy(self.held_img), (ix, iy))
+        self._set_entries(self.coord_entries[2:], ix, iy)
+        self._apply_crosshair(self.held_img, self.lbl_img2)
+
+    def _apply_crosshair(self, img, lbl):
+        if not self.clicked_pos:
             return
+        res_img = copy.deepcopy(img)
+        pixels = res_img.load()
+        cx, cy = self.clicked_pos
+        w, h = res_img.size
 
-        image_x = int(event.x * image.width / self.image2_placeholder.winfo_width())
-        image_y = int(event.y * image.height / self.image2_placeholder.winfo_height())
+        for x in range(w):
+            pixels[x, cy] = tuple(255 - c for c in pixels[x, cy][:3]) + (255,)
+        for y in range(h):
+            pixels[cx, y] = tuple(255 - c for c in pixels[cx, y][:3]) + (255,)
+        self._update_img_lbl(lbl, res_img)
 
-        self.update_ref_pixel_placeholder(image, (image_x, image_y))
-
-        self.clicked_position = (image_x, image_y)
-        self.update_coordinate_entries(self.coord_entries[2:], image_x, image_y)
-
-        self.apply_crosshair_to_placeholder(image, self.image2_placeholder)
-
-    def apply_crosshair_to_placeholder(self, image: Image.Image, placeholder: tk.Label):
-        image_to_apply = copy.deepcopy(image)
-        image_x, image_y = self.clicked_position
-
-        invert_pixels_by_coordinate(image_to_apply, image_x, image_y, "x")
-        invert_pixels_by_coordinate(image_to_apply, image_x, image_y, "y")
-
-        self.update_image_placeholder(placeholder, image_to_apply)
-
-    def handle_grab_button_click(self):
-        self.hold_image()
-
-    # [수정됨] 저장 시 유효성 검사 로직 추가
-    def save_event(self, event=None):
-        try:
-            if not all(
-                [
-                    self.latest_position,
-                    self.clicked_position,
-                    self.latest_screenshot,
-                    self.held_screenshot,
-                    self.ref_pixel_value,
-                    self.key_to_enter,
-                ]
-            ):
-                messagebox.showerror(
-                    "Error",
-                    "You must set the image, coordinates, key\n이미지와 좌표 및 키를 설정하세요.",
-                )
-                return
-
-            # --- 유효성 검사 로직 시작 ---
-            press_duration_str = self.press_duration_entry.get()
-            randomization_str = self.randomization_entry.get()
-
-            if press_duration_str:
-                press_duration_val = int(press_duration_str)
-                if press_duration_val < 50:
-                    messagebox.showerror(
-                        "Validation Error", "Press Duration must be at least 50 ms."
-                    )
-                    return
-
-                if randomization_str:
-                    randomization_val = int(randomization_str)
-                    if randomization_val < 30:
-                        messagebox.showerror(
-                            "Validation Error",
-                            "Randomization must be at least 30 ms when Press Duration is set.",
-                        )
-                        return
-            # --- 유효성 검사 로직 끝 ---
-
-            press_duration_ms = (
-                float(press_duration_str) if press_duration_str else None
-            )
-            randomization_ms = float(randomization_str) if randomization_str else None
-
-            event = EventModel(
-                self.event_name,
-                self.latest_position,
-                self.clicked_position,
-                self.latest_screenshot,
-                self.held_screenshot,
-                self.ref_pixel_value,
-                self.key_to_enter,
-                press_duration_ms=press_duration_ms,
-                randomization_ms=randomization_ms,
-                independent_thread=self.independent_thread.get(),
-            )
-            self.save_callback(event, self.is_edit, self.row_num)
-            self.update_image_placeholder(self.image2_placeholder, self.held_screenshot)
-            self.close_window()
-
-        except Exception as e:
-            logger.debug(f"Failed to save event: {e}")
-            messagebox.showerror("Error", f"Failed to save event: {str(e)}")
-
-    def close_window(self, event=None):
-        self.key_combobox.unbind("<<ComboboxSelected>>")
-        self.key_combobox.unbind("<KeyPress>")
-
-        self.key_check_active = False
-        if hasattr(self, "key_check_thread") and self.key_check_thread.is_alive():
-            self.key_check_thread.join(timeout=0.5)
-
-        if self.screenshot_capturer:
-            self.screenshot_capturer.stop_capture()
-            if (
-                self.screenshot_capturer.capture_thread
-                and self.screenshot_capturer.capture_thread.is_alive()
-            ):
-                self.screenshot_capturer.capture_thread.join(timeout=0.1)
-
-        self.save_latest_position()
-        self.event_window.grab_release()
-        self.event_window.destroy()
-
-    def save_latest_position(self):
-        StateUtils.save_main_app_state(
-            event_position=f"{self.event_window.winfo_x()}/{self.event_window.winfo_y()}",
-            event_pointer=str(self.screenshot_capturer.get_current_mouse_position()),
-            clicked_position=str(self.clicked_position),
+    def _update_ref_pixel(self, img, coords):
+        self.ref_pixel = img.getpixel(coords)
+        self._update_img_lbl(
+            self.lbl_ref, Image.new("RGBA", (25, 25), color=self.ref_pixel)
         )
 
+    def save_event(self, event=None):
+        if not all(
+            [
+                self.latest_pos,
+                self.clicked_pos,
+                self.latest_img,
+                self.held_img,
+                self.ref_pixel,
+                self.key_to_enter,
+            ]
+        ):
+            return messagebox.showerror(
+                "Error",
+                "You must set the image, coordinates, key\n이미지와 좌표 및 키를 설정하세요.",
+            )
+
+        dur_str, rand_str = self.entry_dur.get(), self.entry_rand.get()
+        dur = int(dur_str) if dur_str else None
+        rand = int(rand_str) if rand_str else None
+
+        if dur and dur < 50:
+            return messagebox.showerror(
+                "Error", "Press Duration must be at least 50 ms."
+            )
+        if dur and rand and rand < 30:
+            return messagebox.showerror(
+                "Error", "Randomization must be at least 30 ms."
+            )
+
+        evt = EventModel(
+            self.event_name,
+            self.latest_pos,
+            self.clicked_pos,
+            self.latest_img,
+            self.held_img,
+            self.ref_pixel,
+            self.key_to_enter,
+            press_duration_ms=dur,
+            randomization_ms=rand,
+            independent_thread=self.independent_thread.get(),
+        )
+        self.save_cb(evt, self.is_edit, self.row_num)
+        self._update_img_lbl(self.lbl_img2, self.held_img)
+        self.close_window()
+
+    def close_window(self, event=None):
+        self.key_check_active = False
+        if self.key_check_thread.is_alive():
+            self.key_check_thread.join(0.5)
+        self.capturer.stop_capture()
+        if self.capturer.capture_thread and self.capturer.capture_thread.is_alive():
+            self.capturer.capture_thread.join(0.1)
+
+        StateUtils.save_main_app_state(
+            event_position=f"{self.win.winfo_x()}/{self.win.winfo_y()}",
+            event_pointer=str(self.capturer.get_current_mouse_position()),
+            clicked_position=str(self.clicked_pos),
+        )
+        self.win.grab_release()
+        self.win.destroy()
+
     def load_latest_position(self):
-        state = StateUtils.load_main_app_state()
-        if state and "event_position" in state:
-            x, y = state["event_position"].split("/")
-            self.event_window.geometry(f"+{x}+{y}")
-            self.event_window.update_idletasks()
-
-        if not self.is_edit and state and "event_pointer" in state:
-            pointer_position = eval(state["event_pointer"])
-            self.screenshot_capturer.set_current_mouse_position(pointer_position)
-
-    def create_coord_entries(
-        self, parent: tk.Frame, labels: list[str]
-    ) -> list[tk.Entry]:
-        entries = []
-        for i, label_text in enumerate(labels):
-            label = tk.Label(parent, text=label_text)
-            row = 0 if i < 2 else 1
-            column = (i % 2) * 2
-            label.grid(row=row, column=column, padx=1, sticky=tk.E)
-
-            entry = tk.Entry(parent, width=4)
-            entry.grid(row=row, column=column + 1, padx=4, sticky=tk.W)
-            entries.append(entry)
-
-        entries[0].bind("<FocusOut>", self.update_position_from_entries)
-        entries[1].bind("<FocusOut>", self.update_position_from_entries)
-
-        for entry in entries:
-            entry.bind("<Up>", lambda event, e=entry: self.increment_entry_value(e))
-            entry.bind("<Down>", lambda event, e=entry: self.decrement_entry_value(e))
-
-        return entries
+        state = StateUtils.load_main_app_state() or {}
+        if pos := state.get("event_position"):
+            self.win.geometry(f"+{pos.split('/')[0]}+{pos.split('/')[1]}")
+        if not self.is_edit and (ptr := state.get("event_pointer")):
+            self.capturer.set_current_mouse_position(eval(ptr))
 
     def update_position_from_entries(self, event=None):
         try:
-            x1 = int(self.coord_entries[0].get())
-            y1 = int(self.coord_entries[1].get())
-            self.screenshot_capturer.set_current_mouse_position((x1, y1))
-        except ValueError:
-            print("Please enter valid numbers for Area X and Area Y coordinates.")
-            pass
-
-    def increment_entry_value(self, entry):
-        try:
-            current_value = int(entry.get())
-            entry.delete(0, tk.END)
-            entry.insert(0, str(current_value + 1))
-            if entry in self.coord_entries[:2]:
-                self.update_position_from_entries()
+            self.capturer.set_current_mouse_position(
+                (int(self.coord_entries[0].get()), int(self.coord_entries[1].get()))
+            )
         except ValueError:
             pass
-        return "break"
 
-    def decrement_entry_value(self, entry):
-        try:
-            current_value = int(entry.get())
-            entry.delete(0, tk.END)
-            entry.insert(0, str(current_value - 1))
-            if entry in self.coord_entries[:2]:
-                self.update_position_from_entries()
-        except ValueError:
-            pass
-        return "break"
-
-    def update_key_to_enter(self, event):
-        self.key_to_enter = self.key_combobox.get()
-
-    def load_stored_event(self, event_function):
-        event: EventModel = event_function()
-        if not event:
+    def load_stored_event(self, func):
+        if not (evt := func()):
             return
-
-        self.event_name = event.event_name
-        self.latest_position = event.latest_position
-        self.clicked_position = event.clicked_position
-        self.latest_screenshot = event.latest_screenshot
-        self.held_screenshot = event.held_screenshot
-        self.key_to_enter = event.key_to_enter
-
-        self.screenshot_capturer.set_mouse_position(event.latest_position)
-
-        self.apply_crosshair_to_placeholder(
-            self.held_screenshot, self.image2_placeholder
+        self.event_name, self.latest_pos, self.clicked_pos = (
+            evt.event_name,
+            evt.latest_position,
+            evt.clicked_position,
+        )
+        self.latest_img, self.held_img, self.key_to_enter = (
+            evt.latest_screenshot,
+            evt.held_screenshot,
+            evt.key_to_enter,
         )
 
-        self.update_coordinate_entries(
-            self.coord_entries[:2], self.latest_position[0], self.latest_position[1]
-        )
-        self.update_coordinate_entries(
-            self.coord_entries[2:], self.clicked_position[0], self.clicked_position[1]
-        )
+        self.capturer.set_mouse_position(self.latest_pos)
+        self._apply_crosshair(self.held_img, self.lbl_img2)
+        self._set_entries(self.coord_entries[:2], *self.latest_pos)
+        self._set_entries(self.coord_entries[2:], *self.clicked_pos)
+        self._update_ref_pixel(self.held_img, self.clicked_pos)
 
-        self.update_ref_pixel_placeholder(self.held_screenshot, self.clicked_position)
-
-        if self.key_to_enter:
-            self.event_window.update_idletasks()
-            if self.key_to_enter in self.key_combobox["values"]:
-                self.key_combobox.set(self.key_to_enter)
-            else:
-                logger.debug(f"Key {self.key_to_enter} not found in combobox values")
-
-        if hasattr(event, "independent_thread"):
-            self.independent_thread.set(event.independent_thread)
-
-        if hasattr(event, "press_duration_ms") and event.press_duration_ms is not None:
-            self.press_duration_entry.insert(0, str(int(event.press_duration_ms)))
-
-        if hasattr(event, "randomization_ms") and event.randomization_ms is not None:
-            self.randomization_entry.insert(0, str(int(event.randomization_ms)))
+        if self.key_to_enter in self.key_combobox["values"]:
+            self.key_combobox.set(self.key_to_enter)
+        self.independent_thread.set(getattr(evt, "independent_thread", False))
+        if d := getattr(evt, "press_duration_ms", None):
+            self.entry_dur.insert(0, str(int(d)))
+        if r := getattr(evt, "randomization_ms", None):
+            self.entry_rand.insert(0, str(int(r)))
 
     @staticmethod
-    def update_coordinate_entries(entries: list[tk.Entry], x, y):
-        for idx, entry in enumerate(entries):
-            entry.delete(0, tk.END)
-            entry.insert(0, str((x, y)[idx]))
+    def _set_entries(entries, x, y):
+        for i, val in enumerate((x, y)):
+            entries[i].delete(0, tk.END)
+            entries[i].insert(0, str(val))
 
     @staticmethod
-    def update_image_placeholder(placeholder: tk.Label, image: Image.Image):
-        photo = ImageTk.PhotoImage(image)
-        placeholder.configure(
-            image=photo,
-            width=image.width,
-            height=image.height,
-        )
-        placeholder.image = photo
+    def _update_img_lbl(lbl, img):
+        photo = ImageTk.PhotoImage(img)
+        lbl.configure(image=photo, width=img.width, height=img.height)
+        lbl.image = photo

@@ -1,34 +1,27 @@
 import json
-import logging
-import ntpath
 import os
+import sys
 import platform
 import subprocess
-import sys
+import threading
 from pathlib import Path
-from threading import Thread
 from typing import Optional, Dict
 
 import pygame
 from loguru import logger
 
-import platform
+# OS-specific imports & Constants
+OS_NAME = platform.system().lower()
+IS_WIN = OS_NAME == "windows"
+IS_MAC = OS_NAME == "darwin"
 
-if platform.system() == "Windows":
-    import win32gui
-    import win32process
-elif platform.system() == "Darwin":
-    import AppKit
-
-
-SYSTEM = platform.system().lower()
-
-if SYSTEM == "windows":
+if IS_WIN:
     import ctypes
     import win32api
     import win32gui
     import win32process
-elif SYSTEM == "darwin":
+    from win32process import GetWindowThreadProcessId, GetModuleFileNameEx
+elif IS_MAC:
     import AppKit
     from Quartz import (
         kCGEventFlagMaskShift,
@@ -41,44 +34,23 @@ elif SYSTEM == "darwin":
 
 class WindowUtils:
     @staticmethod
-    def _get_screen_dimensions(window):
-        return window.winfo_screenwidth(), window.winfo_screenheight()
+    def center_window(win):
+        win.update_idletasks()
+        x = (win.winfo_screenwidth() - win.winfo_width()) // 2
+        y = (win.winfo_screenheight() - win.winfo_height()) // 2
+        win.geometry(f"+{x}+{y}")
 
     @staticmethod
-    def _calculate_window_size(
-        window, screen_width, screen_height, width_percent, height_percent
-    ):
-        window.update_idletasks()
-        return (
-            width_percent * screen_width if width_percent else window.winfo_width(),
-            height_percent * screen_height if height_percent else window.winfo_height(),
-        )
-
-    @staticmethod
-    def center_window(window):
-        window.update_idletasks()
-        screen_width = window.winfo_screenwidth()
-        screen_height = window.winfo_screenheight()
-        window_width = window.winfo_width()
-        window_height = window.winfo_height()
-        x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 2
-        window.geometry(f"+{x}+{y}")
-
-    @staticmethod
-    def set_window_position(window, x_percent=0.5, y_percent=0.5):
-        screen_width, screen_height = WindowUtils._get_screen_dimensions(window)
-        window_width, window_height = WindowUtils._calculate_window_size(
-            window, screen_width, screen_height, None, None
-        )
-        x = int((screen_width - window_width) * x_percent)
-        y = int((screen_height - window_height) * y_percent)
-        window.geometry(f"+{x}+{y}")
-        window.update_idletasks()
+    def set_window_position(win, xp=0.5, yp=0.5):
+        win.update_idletasks()
+        x = int((win.winfo_screenwidth() - win.winfo_width()) * xp)
+        y = int((win.winfo_screenheight() - win.winfo_height()) * yp)
+        win.geometry(f"+{x}+{y}")
+        win.update_idletasks()
 
 
 class KeyUtils:
-    key_codes = {
+    _KEY_MAPS = {
         "darwin": {
             "1": 18,
             "2": 19,
@@ -95,6 +67,12 @@ class KeyUtils:
             "[": 33,
             "]": 30,
             "\\": 42,
+            ";": 41,
+            "'": 39,
+            "`": 50,
+            ",": 43,
+            ".": 47,
+            "/": 44,
             "A": 0,
             "B": 11,
             "C": 8,
@@ -121,12 +99,11 @@ class KeyUtils:
             "X": 7,
             "Y": 16,
             "Z": 6,
-            ",": 43,
-            ".": 47,
-            "/": 44,
-            ";": 41,
-            "'": 39,
-            "`": 50,
+            "Space": 49,
+            "Tab": 48,
+            "Esc": 53,
+            "Enter": 36,
+            "Backspace": 51,
             "F1": 122,
             "F2": 120,
             "F3": 99,
@@ -140,9 +117,9 @@ class KeyUtils:
             "F11": 103,
             "F12": 111,
             "Control": 59,
-            "Space": 49,
             "Command": 55,
             "Option": 58,
+            "Shift": 56,
         },
         "windows": {
             "1": 0x31,
@@ -160,6 +137,11 @@ class KeyUtils:
             "[": 0xDB,
             "]": 0xDD,
             "\\": 0xDC,
+            ";": 0xBA,
+            "'": 0xDE,
+            ",": 0xBC,
+            ".": 0xBE,
+            "/": 0xBF,
             "A": 0x41,
             "B": 0x42,
             "C": 0x43,
@@ -186,11 +168,9 @@ class KeyUtils:
             "X": 0x58,
             "Y": 0x59,
             "Z": 0x5A,
-            ",": 0xBC,
-            ".": 0xBE,
-            "/": 0xBF,
-            ";": 0xBA,
-            "'": 0xDE,
+            "Space": 0x20,
+            "Tab": 0x09,
+            "Esc": 0x1B,
             "F1": 0x70,
             "F2": 0x71,
             "F3": 0x72,
@@ -203,8 +183,6 @@ class KeyUtils:
             "F10": 0x79,
             "F11": 0x7A,
             "F12": 0x7B,
-            "Space": 0x20,
-            "Tab": 0x09,
             "Left": 0x25,
             "Up": 0x26,
             "Right": 0x27,
@@ -216,199 +194,152 @@ class KeyUtils:
             "Pageup": 0x21,
             "Pagedown": 0x22,
             "Insert": 0x2D,
-            "Esc": 0x1B,
-            "VolumeUp": 0xAF,
-            "VolumeDown": 0xAE,
-            "Mute": 0xAD,
             "Shift": 0x10,
             "Alt": 0x12,
             "Ctrl": 0x11,
         },
     }
+    CURRENT_KEYS = _KEY_MAPS.get(OS_NAME, {})
+
+    @classmethod
+    def get_key_list(cls):
+        return cls.CURRENT_KEYS
+
+    @classmethod
+    def get_key_name_list(cls):
+        return list(cls.CURRENT_KEYS.keys())
+
+    @classmethod
+    def get_keycode(cls, char: str):
+        return cls.CURRENT_KEYS.get(char.capitalize())
 
     @staticmethod
-    def get_key_list():
-        return KeyUtils.key_codes[platform.system().lower()]
-
-    @staticmethod
-    def get_key_name_list():
-        return list(KeyUtils.key_codes[platform.system().lower()].keys())
-
-    @staticmethod
-    def get_keycode(character: str):
-        return KeyUtils.get_key_list().get(character.capitalize())
-
-    @staticmethod
-    def mod_key_pressed(key_name: str) -> bool:
-        if SYSTEM == "windows":
-            keycode = KeyUtils.get_keycode(key_name)
-            if not keycode:
-                logger.info(f"Invalid key: {key_name}")
-                return False
-            return ctypes.windll.user32.GetAsyncKeyState(keycode) & 0x8000 != 0
-
-        elif SYSTEM == "darwin":
-            darwin_mod_keys = {
+    def mod_key_pressed(key: str) -> bool:
+        if IS_WIN:
+            code = KeyUtils.get_keycode(key)
+            return (
+                (ctypes.windll.user32.GetAsyncKeyState(code) & 0x8000 != 0)
+                if code
+                else False
+            )
+        elif IS_MAC:
+            mask = {
                 "shift": kCGEventFlagMaskShift,
                 "alt": kCGEventFlagMaskAlternate,
                 "ctrl": kCGEventFlagMaskControl,
-            }
-            try:
-                darwin_mod_key = darwin_mod_keys.get(key_name.lower())
-                event_flags = CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState)
-                return (event_flags & darwin_mod_key) != 0
-            except KeyError:
-                logger.info(f"Invalid key: {key_name}")
-                return False
-
-        else:
-            raise NotImplementedError(f"Key check not implemented for {SYSTEM}")
+            }.get(key.lower())
+            return (
+                (CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState) & mask) != 0
+                if mask
+                else False
+            )
+        return False
 
 
 class StateUtils:
-    state_file_path = Path("./app_state.json")
+    path = Path("./app_state.json")
 
-    @staticmethod
-    def save_main_app_state(**kwargs):
+    @classmethod
+    def save_main_app_state(cls, **kwargs):
         try:
-            state = StateUtils.load_main_app_state() or {}
-            updated = False
-
-            for key, value in kwargs.items():
-                if value:
-                    state[key] = value
-                    updated = True
-
-            if updated:
-                temp_file_path = StateUtils.state_file_path.with_suffix(".tmp")
-                with open(temp_file_path, "w", encoding="utf-8") as f:
-                    json.dump(state, f, ensure_ascii=False)
-                os.replace(temp_file_path, StateUtils.state_file_path)
+            data = cls.load_main_app_state()
+            data.update({k: v for k, v in kwargs.items() if v})
+            tmp = cls.path.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            tmp.replace(cls.path)
         except Exception as e:
-            logging.error(f"Failed to save state file: {e}")
+            logger.error(f"Save state failed: {e}")
 
-    @staticmethod
-    def load_main_app_state() -> Optional[Dict]:
-        if not StateUtils.state_file_path.exists():
+    @classmethod
+    def load_main_app_state(cls) -> Dict:
+        if not cls.path.exists():
             return {}
         try:
-            with open(StateUtils.state_file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            return json.loads(cls.path.read_text(encoding="utf-8"))
         except Exception as e:
-            logging.error(f"Failed to load state file: {e}")
+            logger.error(f"Load state failed: {e}")
             return {}
 
 
 class SoundUtils:
-    _play_sound_method = None
-    _loaded_sounds = {}
-
-    @staticmethod
-    def _play_sound_mac(sound_file):
-        def run_afplay():
-            try:
-                subprocess.run(["afplay", sound_file])
-            except Exception as e:
-                print(f"Failed to play sound on macOS: {e}")
-
-        thread = Thread(target=run_afplay, daemon=True)
-        thread.start()
-
-    @classmethod
-    def _play_sound_default(cls, sound_file):
-        if sound_file not in cls._loaded_sounds:
-            cls._loaded_sounds[sound_file] = pygame.mixer.Sound(sound_file)
-        cls._loaded_sounds[sound_file].play()
+    _sounds = {}
+    _inited = False
 
     @classmethod
     def initialize(cls):
-        if platform.system() == "Darwin":
-            cls._play_sound_method = cls._play_sound_mac
-        else:
+        if not IS_MAC:
             pygame.mixer.init()
-            cls._play_sound_method = cls._play_sound_default
+        cls._inited = True
 
     @classmethod
-    def play_sound(cls, sound_file):
-        if cls._play_sound_method is None:
-            raise RuntimeError(
-                "SoundUtils not initialized. Call SoundUtils.initialize() first."
-            )
-        cls._play_sound_method(sound_file)
+    def play_sound(cls, file):
+        if not cls._inited:
+            raise RuntimeError("SoundUtils not initialized")
+        if IS_MAC:
+            threading.Thread(
+                target=lambda: subprocess.run(
+                    ["afplay", file], stderr=subprocess.DEVNULL
+                ),
+                daemon=True,
+            ).start()
+        else:
+            if file not in cls._sounds:
+                cls._sounds[file] = pygame.mixer.Sound(file)
+            cls._sounds[file].play()
 
 
 class ProcessCollector:
     @staticmethod
     def get():
-        return (
-            ProcessCollector.get_processes_macos()
-            if sys.platform == "darwin"
-            else ProcessCollector.get_processes_windows()
-        )
+        return ProcessCollector._get_mac() if IS_MAC else ProcessCollector._get_win()
 
     @staticmethod
-    def get_processes_macos():
-        workspace = AppKit.NSWorkspace.sharedWorkspace()
-        app_list = workspace.runningApplications()
-
+    def _get_mac():
         return [
             (app.localizedName(), app.processIdentifier(), None)
-            for app in app_list
+            for app in AppKit.NSWorkspace.sharedWorkspace().runningApplications()
             if app.activationPolicy() == 0
         ]
 
     @staticmethod
-    def get_processes_windows():
-        processes = {}
-        window_names = {}
+    def _get_win():
+        procs, wins = {}, {}
 
-        def enum_window_callback(hwnd, lparam):
+        def cb(hwnd, _):
             if win32gui.IsWindowVisible(hwnd):
-                tid, pid = win32process.GetWindowThreadProcessId(hwnd)
-                if pid not in processes:
-                    process_handle = win32api.OpenProcess(0x1000, False, pid)
-                    process_name = win32process.GetModuleFileNameEx(process_handle, 0)
-                    processes[pid] = process_name
-                    window_name = win32gui.GetWindowText(hwnd)
-                    window_names[pid] = [window_name]
-                    win32api.CloseHandle(process_handle)
-                else:
-                    window_name = win32gui.GetWindowText(hwnd)
-                    if window_name not in window_names[pid]:
-                        window_names[pid].append(window_name)
+                _, pid = GetWindowThreadProcessId(hwnd)
+                if pid not in procs:
+                    try:
+                        h = win32api.OpenProcess(0x1000, False, pid)
+                        procs[pid] = os.path.basename(GetModuleFileNameEx(h, 0)).split(
+                            "."
+                        )[0]
+                        wins[pid] = [win32gui.GetWindowText(hwnd)]
+                        win32api.CloseHandle(h)
+                    except Exception:
+                        pass
+                elif (t := win32gui.GetWindowText(hwnd)) not in wins[pid]:
+                    wins[pid].append(t)
             return True
 
-        win32gui.EnumWindows(enum_window_callback, None)
-
-        return [
-            (ntpath.basename(processes[pid]).split(".")[0], pid, window_names[pid])
-            for pid in processes
-        ]
+        win32gui.EnumWindows(cb, None)
+        return [(name, pid, wins[pid]) for pid, name in procs.items()]
 
 
-class ProcessUtils:  # 또는 독립 함수로 만들어도 됨
+class ProcessUtils:
     @staticmethod
     def is_process_active(pid: int | None) -> bool:
-        """지정된 PID를 가진 프로세스가 현재 활성 창인지 확인합니다."""
         if not pid:
             return False
-
-        os_type = platform.system()
         try:
-            if os_type == "Windows":
-                active_window = win32gui.GetForegroundWindow()
-                if not active_window:
+            if IS_WIN:
+                if not (hwnd := win32gui.GetForegroundWindow()):
                     return False
-                _, active_pid = win32process.GetWindowThreadProcessId(active_window)
-                return pid == active_pid
-            elif os_type == "Darwin":
-                active_app = AppKit.NSWorkspace.sharedWorkspace().activeApplication()
-                return (
-                    active_app
-                    and active_app.get("NSApplicationProcessIdentifier") == pid
-                )
-        except Exception as e:
-            # logger가 있다면 로깅 추가
-            print(f"Error checking active process on {os_type}: {e}")
-            return False
+                return pid == GetWindowThreadProcessId(hwnd)[1]
+            elif IS_MAC:
+                app = AppKit.NSWorkspace.sharedWorkspace().activeApplication()
+                return app and app.get("NSApplicationProcessIdentifier") == pid
+        except Exception:
+            pass
         return False

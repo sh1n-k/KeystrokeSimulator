@@ -1,293 +1,219 @@
 import pickle
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk, messagebox
 from typing import Callable
 
 from PIL import Image, ImageTk
 from loguru import logger
 
-from keystroke_models import EventModel, ProfileModel
+from keystroke_models import EventModel
 from keystroke_utils import StateUtils, WindowUtils
 
 
 class KeystrokeSortEvents(tk.Toplevel):
     def __init__(self, master, profile_name: str, save_callback: Callable[[str], None]):
         super().__init__(master)
-        self.master = master
-        self.profiles_dir = "./profiles"
-        self.save_callback = save_callback
-
+        self.master, self.save_cb = master, save_callback
+        self.prof_dir = Path("profiles")
         self.title("Event Organizer")
         self.configure(bg="#2E2E2E")
 
-        self.profile_name = tk.StringVar(value=profile_name)
-        self.profile = self.load_profile(profile_name)
+        # Style Configuration
+        style = ttk.Style(self)
+        style.configure(
+            "Event.TFrame", background="#2E2E2E", relief="solid", borderwidth=1
+        )
+        style.configure("TLabel", background="#2E2E2E", foreground="white")
+        style.configure("TCheckbutton", background="#2E2E2E")
+
+        self.prof_name = tk.StringVar(value=profile_name)
+        self.profile = self._load_profile(profile_name)
         self.events = self.profile.event_list
 
-        self.create_widgets()
+        self._create_ui()
+        self._load_state()
 
-        self.bind("<Escape>", self.close_window)
-        self.protocol("WM_DELETE_WINDOW", self.close_window)
-
+        self.bind("<Escape>", self.close)
+        self.protocol("WM_DELETE_WINDOW", self.close)
         self.focus_force()
-        self.load_window_state()
 
-    def load_window_state(self):
-        try:
-            state = StateUtils.load_main_app_state()
-            if state:
-                geometry = self.build_geometry_string(state)
-                if geometry:
-                    self.geometry(geometry)
-            else:
-                WindowUtils.center_window(self)
-        except Exception as e:
-            logger.error(f"Error loading window state: {e}")
-            WindowUtils.center_window(self)
-
-    @staticmethod
-    def build_geometry_string(state):
-        geometry = ""
-        if "organizer_size" in state:
-            width, height = state["organizer_size"].split("/")
-            geometry = f"{width}x{height}"
-        if "organizer_postition" in state:
-            x, y = state["organizer_postition"].split("/")
-            geometry += f"+{x}+{y}"
-        logger.debug(f"Organizer geometry: {geometry}")
-        return geometry
-
-    def create_widgets(self):
-        self.create_profile_frame()
-        self.create_save_button()
-        self.create_scrollable_event_frame()
-
-    def create_profile_frame(self):
-        profile_frame = ttk.Frame(self)
-        profile_frame.pack(pady=10, padx=10, fill=tk.X)
-
-        ttk.Label(profile_frame, text="Profile Name:").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Entry(profile_frame, textvariable=self.profile_name, state="readonly").pack(
+    def _create_ui(self):
+        # Top Frame (Profile Name)
+        f_top = tk.Frame(self, bg="#2E2E2E")
+        f_top.pack(pady=10, padx=10, fill=tk.X)
+        tk.Label(f_top, text="Profile Name:", bg="#2E2E2E", fg="white").pack(
+            side=tk.LEFT, padx=(0, 5)
+        )
+        ttk.Entry(f_top, textvariable=self.prof_name, state="readonly").pack(
             side=tk.LEFT, expand=True, fill=tk.BOTH
         )
 
-    def create_save_button(self):
-        ttk.Button(self, text="Save", command=self.save_events).pack(pady=5)
+        # Save Button
+        ttk.Button(self, text="Save", command=self.save).pack(pady=5)
 
-    def create_scrollable_event_frame(self):
-        canvas = tk.Canvas(self)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Scrollable Area
+        self.canvas = tk.Canvas(self, bg="#2E2E2E", highlightthickness=0)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        sb = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.configure(yscrollcommand=sb.set)
 
-        self.event_frame = ttk.Frame(canvas)
-        canvas.create_window((0, 0), window=self.event_frame, anchor="nw")
-
-        self.event_frame.bind(
-            "<Configure>", lambda e: self.update_canvas(canvas, self.event_frame)
+        self.f_events = tk.Frame(self.canvas, bg="#2E2E2E")
+        self.win_id = self.canvas.create_window(
+            (0, 0), window=self.f_events, anchor="nw"
         )
 
-        canvas.configure(yscrollcommand=scrollbar.set)
+        # Resize & Scroll Bindings
+        self.f_events.bind("<Configure>", self._on_frame_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self.canvas.bind_all(
+            "<MouseWheel>",
+            lambda e: self.canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"),
+        )
 
-        self.bind_mouse_wheel(canvas)
+        self._refresh_list()
 
-        for idx, event in enumerate(self.events):
-            self.add_event(idx, event)
+    def _on_frame_configure(self, event):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
-    def update_canvas(self, canvas, frame):
-        canvas.configure(scrollregion=canvas.bbox("all"))
-        if frame.winfo_width() > canvas.winfo_width():
-            canvas.config(width=frame.winfo_width())
+    def _on_canvas_configure(self, event):
+        # Canvas 폭에 맞춰 내부 Frame 폭 조절
+        self.canvas.itemconfig(self.win_id, width=event.width)
 
-    def bind_mouse_wheel(self, canvas):
-        def on_mouse_wheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    def _refresh_list(self):
+        for w in self.f_events.winfo_children():
+            w.destroy()
+        for i, evt in enumerate(self.events):
+            self._add_row(i, evt)
 
-        canvas.bind_all("<MouseWheel>", on_mouse_wheel)
+    def _add_row(self, idx, evt):
+        # Row Frame
+        f = ttk.Frame(self.f_events, style="Event.TFrame")
+        f.pack(pady=2, fill=tk.X, padx=5)
 
-        for widget in self.event_frame.winfo_children():
-            widget.bind(
-                "<Enter>", lambda e: canvas.bind_all("<MouseWheel>", on_mouse_wheel)
+        # Widgets
+        widgets = []
+        widgets.append(ttk.Label(f, text=f"{idx + 1}", width=3, anchor="center"))
+
+        var = tk.BooleanVar(value=evt.use_event)
+        var.trace_add("write", lambda *a: setattr(evt, "use_event", var.get()))
+        widgets.append(ttk.Checkbutton(f, variable=var))
+
+        img = (
+            evt.held_screenshot.resize((40, 40))
+            if evt.held_screenshot
+            else Image.new("RGB", (40, 40), "gray")
+        )
+        photo = ImageTk.PhotoImage(img)
+        lbl_img = ttk.Label(f, image=photo)
+        lbl_img.image = photo
+        widgets.append(lbl_img)
+
+        name_var = tk.StringVar(value=evt.event_name or "")
+        name_var.trace_add(
+            "write", lambda *a: setattr(evt, "event_name", name_var.get())
+        )
+        widgets.append(ttk.Entry(f, textvariable=name_var))
+
+        widgets.append(
+            ttk.Label(f, text=evt.key_to_enter or "N/A", width=5, anchor="center")
+        )
+
+        # Pack Widgets & Bind Drag Events (Entry 제외)
+        for w in widgets:
+            is_entry = isinstance(w, ttk.Entry)
+            w.pack(
+                side=tk.LEFT, padx=5, fill=tk.Y if is_entry else None, expand=is_entry
             )
-            widget.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
-    def add_event(self, idx: int, event=None):
-        if event is None:
-            event = EventModel()
-            self.events.append(event)
+            # [수정됨] Entry 위젯은 텍스트 입력을 위해 드래그 바인딩에서 제외
+            if not is_entry:
+                self._bind_drag_events(w, f)
 
-        frame = self.create_event_frame(idx)
-        self.add_event_widgets(frame, idx, event)
-        self.configure_drag_and_drop(frame)
+        self._bind_drag_events(f, f)
 
-    def create_event_frame(self, idx):
-        frame = ttk.Frame(self.event_frame, style="Event.TFrame")
-        frame.pack(pady=5, fill=tk.X, padx=5)
-        frame.configure(borderwidth=2, relief="solid")
-        style = ttk.Style()
-        style.configure("Event.TFrame", background="#2E2E2E", bordercolor="red")
-        return frame
+    def _bind_drag_events(self, widget, parent_frame):
+        widget.bind("<ButtonPress-1>", lambda e: self._drag_start(e, parent_frame))
+        widget.bind("<B1-Motion>", lambda e: self._drag_motion(e, parent_frame))
+        widget.bind("<ButtonRelease-1>", lambda e: self._drag_end(e, parent_frame))
 
-    def add_event_widgets(self, frame, idx, event):
-        self.add_index_label(frame, idx)
-        self.add_use_event_checkbox(frame, event)
-        self.add_screenshot_placeholder(frame, event)
-        self.add_event_name_entry(frame, event)
-        self.add_key_display(frame, event)
+    def _drag_start(self, event, frame):
+        self._drag_data = {
+            "y": event.y_root,
+            "frame": frame,
+            "start_y": frame.winfo_y(),
+        }
+        frame.lift()  # Bring to top
+        frame.configure(cursor="hand2")  # Visual feedback
 
-    def add_index_label(self, frame, idx):
-        index_label = ttk.Label(frame, text=f"{idx + 1}")
-        index_label.pack(side=tk.LEFT, padx=5)
-
-    def add_use_event_checkbox(self, frame, event):
-        use_event_var = tk.BooleanVar(value=event.use_event)
-        use_event_check = ttk.Checkbutton(frame, variable=use_event_var)
-        use_event_check.pack(side=tk.LEFT, padx=5)
-        use_event_var.trace_add(
-            "write", lambda *args: self.update_use_event(event, use_event_var)
-        )
-
-    def add_screenshot_placeholder(self, frame, event):
-        if event.held_screenshot:
-            img = ImageTk.PhotoImage(event.held_screenshot.resize((50, 50)))
-        else:
-            img = ImageTk.PhotoImage(Image.new("RGB", (50, 50), color="gray"))
-        img_label = ttk.Label(frame, image=img)
-        img_label.image = img  # Keep a reference to prevent garbage collection
-        img_label.pack(side=tk.LEFT, padx=5)
-
-    def add_event_name_entry(self, frame, event):
-        event_name_var = tk.StringVar(
-            value=event.event_name if event.event_name else ""
-        )
-        entry = ttk.Entry(frame, textvariable=event_name_var)
-        entry.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
-
-        event_name_var.trace_add(
-            "write", lambda *args: self.update_event_name(event, event_name_var)
-        )
-
-    def add_key_display(self, frame, event):
-        key_entry = ttk.Label(
-            frame,
-            text=event.key_to_enter or "N/A",
-            width=3,
-            anchor="w",
-            state="readonly",
-        )
-        key_entry.pack(side=tk.LEFT, padx=5)
-
-    def update_use_event(self, event: EventModel, use_event_var: tk.BooleanVar):
-        event.use_event = use_event_var.get()
-
-    def configure_drag_and_drop(self, widget):
-        widget.bind("<ButtonPress-1>", self.on_drag_start)
-        widget.bind("<B1-Motion>", self.on_drag_motion)
-        widget.bind("<ButtonRelease-1>", self.on_drag_release)
-
-    def update_event_name(self, event: EventModel, name_var: tk.StringVar):
-        event.event_name = name_var.get()
-
-    def on_drag_start(self, event):
-        widget = self.get_parent_frame(event.widget)
-        widget._drag_start_y = event.y_root - widget.winfo_rooty()
-        widget._drag_start_mouse_y = event.y_root
-
-        self.create_drag_image(widget)
-
-    def get_parent_frame(self, widget):
-        while not isinstance(widget, ttk.Frame):
-            widget = widget.master
-        return widget
-
-    def create_drag_image(self, widget):
-        self.drag_image = tk.Toplevel(self)
-        self.drag_image.overrideredirect(True)
-        self.drag_image.attributes("-alpha", 0.7)
-        self.drag_image.attributes("-topmost", True)
-        clone = ttk.Frame(self.drag_image)
-        clone.pack(fill=tk.BOTH, expand=True)
-        for child in widget.winfo_children():
-            child_clone = ttk.Label(
-                clone,
-                image=child.image if hasattr(child, "image") else None,
-                text=child["text"] if "text" in child.keys() else None,
-            )
-            child_clone.pack(side=tk.LEFT, padx=5)
-
-        x = self.winfo_pointerx() - 100
-        y = self.winfo_pointery()
-
-        self.drag_image.geometry(f"+{x}+{y}")
-
-    def on_drag_motion(self, event):
-        if hasattr(self, "drag_image"):
-            x = self.winfo_pointerx() - 100
-            y = self.winfo_pointery()
-            self.drag_image.geometry(f"+{x}+{y}")
-
-        widget = self.get_parent_frame(event.widget)
-        y = widget.winfo_y() + (event.y_root - widget._drag_start_mouse_y)
-        widget._drag_start_mouse_y = event.y_root
-        widget.place(y=y)
-
-    def on_drag_release(self, event):
-        if hasattr(self, "drag_image"):
-            self.drag_image.destroy()
-            del self.drag_image
-
-        widget = self.get_parent_frame(event.widget)
-        y = widget.winfo_y() + (event.y_root - widget._drag_start_mouse_y)
-        widget.place(y=y)
-
-        self.reorder_events()
-
-    def reorder_events(self):
-        sorted_frames = sorted(
-            self.event_frame.winfo_children(), key=lambda w: w.winfo_y()
-        )
-        self.events = [
-            self.events[int(f.winfo_children()[0]["text"]) - 1] for f in sorted_frames
-        ]
-
-        for widget in self.event_frame.winfo_children():
-            widget.destroy()
-        for idx, event in enumerate(self.events):
-            self.add_event(idx, event)
-
-    def load_profile(self, profile_name: str) -> ProfileModel:
-        try:
-            with open(f"{self.profiles_dir}/{profile_name}.pkl", "rb") as f:
-                return pickle.load(f)
-        except FileNotFoundError:
-            messagebox.showerror("Error", f"File not found: {profile_name}")
-            self.close_window()
-
-    def save_events(self):
-        self.profile.event_list = self.events
-
-        try:
-            with open(f"{self.profiles_dir}/{self.profile_name.get()}.pkl", "wb") as f:
-                pickle.dump(self.profile, f)
-        except Exception as e:
-            logger.error(f"Failed to save events: {type(e)}, {str(e)}")
+    def _drag_motion(self, event, frame):
+        if not hasattr(self, "_drag_data"):
             return
+        dy = event.y_root - self._drag_data["y"]
+        # Move using place (temporarily overriding pack)
+        frame.place(y=self._drag_data["start_y"] + dy, x=5, relwidth=0.95)
 
-        self.save_callback(self.profile_name.get())
-        self.close_window()
+    def _drag_end(self, event, frame):
+        if not hasattr(self, "_drag_data"):
+            return
+        frame.configure(cursor="")
 
-    def close_window(self, event=None):
-        self.save_window_state()
+        # Calculate new position based on Y coordinate
+        rows = sorted(
+            [w for w in self.f_events.winfo_children() if w != frame],
+            key=lambda w: w.winfo_y(),
+        )
+
+        # Find insertion index
+        current_y = frame.winfo_y()
+        insert_idx = len(rows)
+        for i, r in enumerate(rows):
+            if current_y < r.winfo_y() + (r.winfo_height() / 2):
+                insert_idx = i
+                break
+
+        # Reorder events list
+        old_idx = int(frame.winfo_children()[0].cget("text")) - 1
+        moved_event = self.events.pop(old_idx)
+        self.events.insert(insert_idx, moved_event)
+
+        del self._drag_data
+        self._refresh_list()  # Re-render list
+
+    def _load_profile(self, name):
+        try:
+            with open(self.prof_dir / f"{name}.pkl", "rb") as f:
+                return pickle.load(f)
+        except Exception:
+            messagebox.showerror("Error", f"Load failed: {name}")
+            self.close()
+
+    def save(self):
+        self.profile.event_list = self.events
+        try:
+            with open(self.prof_dir / f"{self.prof_name.get()}.pkl", "wb") as f:
+                pickle.dump(self.profile, f)
+            self.save_cb(self.prof_name.get())
+            self.close()
+        except Exception as e:
+            logger.error(f"Save failed: {e}")
+
+    def close(self, event=None):
+        StateUtils.save_main_app_state(
+            org_pos=f"{self.winfo_x()}/{self.winfo_y()}",
+            org_size=f"{self.winfo_width()}/{self.winfo_height()}",
+        )
         self.master.load_settings()
         self.master.setup_event_handlers()
         self.destroy()
 
-    def save_window_state(self):
-        x = self.winfo_x()
-        y = self.winfo_y()
-        height = self.winfo_height()
-        width = self.winfo_width()
-        StateUtils.save_main_app_state(
-            organizer_postition=f"{x}/{y}", organizer_size=f"{width}/{height}"
-        )
+    def _load_state(self):
+        s = StateUtils.load_main_app_state()
+        if s and (p := s.get("org_pos")) and (sz := s.get("org_size")):
+            self.geometry(
+                f"{sz.split('/')[0]}x{sz.split('/')[1]}+{p.split('/')[0]}+{p.split('/')[1]}"
+            )
+        else:
+            WindowUtils.center_window(self)
