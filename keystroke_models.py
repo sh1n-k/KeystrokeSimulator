@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field, fields
+from typing import Dict, Optional, Tuple
 from PIL import Image
 
 
@@ -32,15 +33,27 @@ class EventModel:
     independent_thread: bool | None = False
     use_event: bool = True
 
+    # --- Phase 1 Added Fields ---
+    # 매칭 모드: 'pixel' (기본) 또는 'region'
+    match_mode: str = "pixel"
+    # 지역 크기: (width, height), pixel 모드일 경우 무시됨
+    region_size: Tuple[int, int] | None = None
+    # 키 입력 실행 여부: False일 경우 조건용으로만 사용
+    execute_action: bool = True
+    # 그룹 ID: 비어있으면 독립 이벤트
+    group_id: str | None = None
+    # 그룹 내 우선순위: 높을수록 우선 (또는 로직에 따라 정의)
+    priority: int = 0
+    # 조건 목록: { '다른_이벤트_이름': True/False } (True: 활성 기대, False: 비활성 기대)
+    conditions: Dict[str, bool] = field(default_factory=dict)
+
     def __iter__(self):
-        # fields(self)는 메타데이터이므로 __dict__ 유무와 관계없이 안전하게 동작
         return ((f, getattr(self, f.name)) for f in fields(self))
 
 
 @dataclass
 class ProfileModel:
     name: str | None = None
-    # TypeError 방지: None 대신 빈 리스트를 기본값으로 설정 (field 사용)
     event_list: list[EventModel] = field(default_factory=list)
     modification_keys: dict | None = None
     favorite: bool = False

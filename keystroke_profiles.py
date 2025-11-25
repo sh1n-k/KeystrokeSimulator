@@ -32,26 +32,83 @@ class EventRow(ttk.Frame):
     def __init__(self, master, row_num: int, event: Optional[EventModel], cbs: dict):
         super().__init__(master)
         self.row_num, self.event, self.cbs = row_num, event, cbs
+        self.use_var = tk.BooleanVar(value=event.use_event if event else True)
 
-        widgets = [
-            ttk.Label(self, text=str(row_num + 1), width=2, anchor="center"),
-            ttk.Entry(self),
-        ]
-        if event:
-            widgets[1].insert(0, event.event_name)
-        self.entry = widgets[1]
-
-        btns = [("⚙️", "open"), ("📝", "copy"), ("🗑️", "remove")]
-        widgets.extend(
-            [
-                ttk.Button(self, text=t, command=lambda k=k: self._on_click(k))
-                for t, k in btns
-            ]
+        # 1. Index
+        ttk.Label(self, text=str(row_num + 1), width=2, anchor="center").pack(
+            side=tk.LEFT
         )
 
-        for w in widgets:
-            w.pack(side=tk.LEFT, padx=(5 if w == self.entry else 0))
-            w.bind("<Button-3>", lambda e: self.cbs["menu"](e, self.row_num))
+        # 2. Checkbox
+        ttk.Checkbutton(self, variable=self.use_var, command=self._on_toggle_use).pack(
+            side=tk.LEFT
+        )
+
+        # 3. Independent Thread Indicator (고정 너비, 항상 존재)
+        self.lbl_indep = ttk.Label(self, text="", width=2, anchor="center")
+        self.lbl_indep.pack(side=tk.LEFT)
+
+        # 4. Condition Indicator (고정 너비, 항상 존재)
+        self.lbl_cond = ttk.Label(self, text="", width=6, anchor="center")
+        self.lbl_cond.pack(side=tk.LEFT)
+
+        # 5. Group ID Label
+        self.lbl_grp = ttk.Label(
+            self, text="", width=10, anchor="center", relief="sunken"
+        )
+        self.lbl_grp.pack(side=tk.LEFT, padx=2)
+
+        # 6. Event Name Entry
+        self.entry = ttk.Entry(self)
+        self.entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        if event:
+            self.entry.insert(0, event.event_name or "")
+
+        # 7. Action Buttons
+        for text, key in [("⚙️", "open"), ("📝", "copy"), ("🗑️", "remove")]:
+            btn = ttk.Button(
+                self, text=text, width=3, command=lambda k=key: self._on_click(k)
+            )
+            btn.pack(side=tk.LEFT, padx=1)
+            btn.bind("<Button-3>", lambda e: self.cbs["menu"](e, self.row_num))
+
+        # Context Menu Binding
+        self.entry.bind("<Button-3>", lambda e: self.cbs["menu"](e, self.row_num))
+
+        # Initial Display
+        self.update_display()
+
+    def update_display(self):
+        """이벤트 상태에 따라 UI 갱신"""
+        if not self.event:
+            self.lbl_indep.config(text="")
+            self.lbl_cond.config(text="")
+            self.lbl_grp.config(text="")
+            return
+
+        self.use_var.set(self.event.use_event)
+
+        # Name
+        if self.entry.get() != (self.event.event_name or ""):
+            self.entry.delete(0, tk.END)
+            self.entry.insert(0, self.event.event_name or "")
+
+        # Independent Thread
+        is_indep = getattr(self.event, "independent_thread", False)
+        self.lbl_indep.config(text="⚡" if is_indep else "")
+
+        # Condition Only
+        is_cond = not getattr(self.event, "execute_action", True)
+        self.lbl_cond.config(text="[COND]" if is_cond else "")
+        self.entry.config(foreground="gray" if is_cond else "black")
+
+        # Group
+        grp = self.event.group_id or ""
+        self.lbl_grp.config(text=grp)
+
+    def _on_toggle_use(self):
+        if self.event:
+            self.event.use_event = self.use_var.get()
 
     def _on_click(self, key):
         if key == "open":
@@ -72,20 +129,59 @@ class EventListFrame(ttk.Frame):
         self.rows: List[EventRow] = []
         self.ctx_row = None
 
-        ttk.Button(self, text="Add Event", command=self._add_row).grid(
-            row=1, column=0, pady=5, sticky="we"
+        # --- Control Buttons ---
+        f_ctrl = ttk.Frame(self)
+        f_ctrl.grid(row=1, column=0, columnspan=2, pady=5, sticky="we")
+
+        ttk.Button(f_ctrl, text="Add Event", command=self._add_row).pack(
+            side=tk.LEFT, padx=2, fill=tk.X, expand=True
         )
         ttk.Button(
-            self,
+            f_ctrl,
             text="Import From",
             command=lambda: EventImporter(self.win, self._import),
-        ).grid(row=1, column=1, pady=5, sticky="we")
+        ).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+
+        # Auto Sort Button
+        ttk.Button(f_ctrl, text="Auto Sort", command=self._sort_events).pack(
+            side=tk.LEFT, padx=2, fill=tk.X, expand=True
+        )
 
         self.menu = tk.Menu(self, tearoff=0)
         self.menu.add_command(
-            label="Apply Pixel Info to Similar Areas", command=self._apply_pixel_batch
+            label="Apply Pixel/Region Info to Similar Areas",
+            command=self._apply_pixel_batch,
         )
         self._load_events()
+
+    def _sort_events(self):
+        """
+        이벤트 목록 자동 정렬 로직
+        1. Independent Thread (True -> False)
+        2. Group ID (String, Empty last)
+        3. Priority (Ascending)
+        4. Name (Ascending)
+        """
+        if not self.profile.event_list:
+            return
+
+        def sort_key(e: EventModel):
+            is_indep = 0 if getattr(e, "independent_thread", False) else 1
+            grp = getattr(e, "group_id", "") or ""
+            grp_order = 0 if grp else 1
+            prio = getattr(e, "priority", 0)
+            name = e.event_name or ""
+            return (is_indep, grp_order, grp, prio, name)
+
+        self.save_names()
+        self.profile.event_list.sort(key=sort_key)
+        self.update_events()
+        self.save_cb()
+        messagebox.showinfo(
+            "Sorted",
+            "Events sorted by:\nIndependent -> Group -> Priority -> Name",
+            parent=self.win,
+        )
 
     def _show_menu(self, event, row_num):
         self.ctx_row = row_num
@@ -105,7 +201,7 @@ class EventListFrame(ttk.Frame):
 
         if not messagebox.askyesno(
             "Confirm",
-            f"Apply Pixel Info to all events with Area {src.latest_position}?",
+            f"Apply Info to all events with Area {src.latest_position}?",
             parent=self.win,
         ):
             return
@@ -122,6 +218,8 @@ class EventListFrame(ttk.Frame):
                     evt.ref_pixel_value = evt.held_screenshot.getpixel(
                         src.clicked_position
                     )
+                    evt.match_mode = getattr(src, "match_mode", "pixel")
+                    evt.region_size = getattr(src, "region_size", None)
                     cnt += 1
                 except Exception:
                     print(f"Skipped {evt.event_name}")
@@ -145,11 +243,17 @@ class EventListFrame(ttk.Frame):
             "menu": self._show_menu,
         }
         row = EventRow(self, idx, event, cbs)
-        row.grid(row=idx + 3, column=0, columnspan=2, padx=5, pady=2)
+        row.grid(row=idx + 3, column=0, columnspan=2, padx=5, pady=2, sticky="ew")
         self.rows.append(row)
 
     def _open_editor(self, row, evt):
-        KeystrokeEventEditor(self.win, row, self._on_editor_save, lambda: evt)
+        KeystrokeEventEditor(
+            self.win,
+            row,
+            self._on_editor_save,
+            lambda: evt,
+            existing_events=self.profile.event_list,
+        )
 
     def _on_editor_save(self, evt, is_edit, row=0):
         if is_edit and 0 <= row < len(self.profile.event_list):
@@ -188,16 +292,21 @@ class EventListFrame(ttk.Frame):
 
     def update_events(self):
         curr, new = len(self.rows), len(self.profile.event_list)
+
+        # Update existing rows
         for i in range(min(curr, new)):
             self.rows[i].event = self.profile.event_list[i]
-            self.rows[i].entry.delete(0, tk.END)
-            self.rows[i].entry.insert(0, self.profile.event_list[i].event_name)
+            self.rows[i].update_display()
 
+        # Remove excess rows
         for r in self.rows[new:]:
             r.destroy()
         self.rows = self.rows[:new]
+
+        # Add new rows
         for i in range(curr, new):
             self._add_row(i, self.profile.event_list[i], resize=False)
+
         self.win.update_idletasks()
 
     def save_names(self):
@@ -220,9 +329,9 @@ class KeystrokeProfiles:
 
         self.profile = self._load()
         self.p_frame = ProfileFrame(self.win, prof_name, self.profile.favorite)
-        self.p_frame.pack()
+        self.p_frame.pack(pady=5)
         self.e_frame = EventListFrame(self.win, self.profile, self._save)
-        self.e_frame.pack()
+        self.e_frame.pack(fill="both", expand=True)
 
         f_btn = ttk.Frame(self.win, style="success.TFrame")
         f_btn.pack(side="bottom", anchor="e", pady=10, fill="both")
@@ -236,9 +345,20 @@ class KeystrokeProfiles:
         try:
             with open(self.prof_dir / f"{self.prof_name}.pkl", "rb") as f:
                 p = pickle.load(f)
+                # Backward compatibility defaults
                 for e in p.event_list:
-                    e.press_duration_ms = getattr(e, "press_duration_ms", None)
-                    e.randomization_ms = getattr(e, "randomization_ms", None)
+                    if not hasattr(e, "match_mode"):
+                        e.match_mode = "pixel"
+                    if not hasattr(e, "execute_action"):
+                        e.execute_action = True
+                    if not hasattr(e, "group_id"):
+                        e.group_id = None
+                    if not hasattr(e, "priority"):
+                        e.priority = 0
+                    if not hasattr(e, "conditions"):
+                        e.conditions = {}
+                    if not hasattr(e, "independent_thread"):
+                        e.independent_thread = False
                 p.favorite = getattr(p, "favorite", False)
                 return p
         except Exception:
