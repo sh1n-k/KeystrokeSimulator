@@ -1,4 +1,3 @@
-import base64
 import json
 import pickle
 import platform
@@ -248,27 +247,18 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.load_settings()
         self.load_latest_state()
 
+    # 변경 후
     def load_settings(self):
-        s_file = Path("user_settings.b64")
+        s_file = Path("user_settings.json")
         try:
-            data = (
-                json.loads(base64.b64decode(s_file.read_text()).decode())
-                if s_file.exists()
-                else {}
-            )
+            data = json.loads(s_file.read_text(encoding="utf-8")) if s_file.exists() else {}
             valid_keys = {f.name for f in fields(UserSettings)}
-            self.settings = UserSettings(
-                **{k: v for k, v in data.items() if k in valid_keys}
-            )
+            self.settings = UserSettings(**{k: v for k, v in data.items() if k in valid_keys})
         except Exception:
             self.settings = UserSettings()
 
         # Save clean settings
-        s_file.write_text(
-            base64.b64encode(
-                json.dumps(asdict(self.settings), indent=4).encode()
-            ).decode()
-        )
+        s_file.write_text(json.dumps(asdict(self.settings), indent=2), encoding="utf-8")
 
     def load_latest_state(self):
         state = StateUtils.load_main_app_state() or {}
@@ -371,7 +361,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         key = self.settings.start_stop_key
         if (key == "W_UP" and dy > 0) or (key == "W_DN" and dy < 0):
-            self.toggle_start_stop()
+            self.after(0, self.toggle_start_stop)
         self.latest_scroll_time = curr_time
 
     def toggle_start_stop(self, event=None):

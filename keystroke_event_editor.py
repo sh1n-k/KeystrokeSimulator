@@ -4,9 +4,9 @@ import tkinter as tk
 import tkinter.ttk as ttk
 from threading import Thread
 from tkinter import messagebox
-from typing import Callable, Optional
+from typing import Callable, Optional, List, Dict, Set
 
-from PIL import ImageTk, Image
+from PIL import ImageTk, Image, ImageDraw
 from loguru import logger
 
 from keystroke_capturer import ScreenshotCapturer
@@ -21,6 +21,7 @@ class KeystrokeEventEditor:
         row_num: int,
         save_callback: Optional[Callable[[EventModel, bool, int], None]],
         event_function: Optional[Callable[[], EventModel]],
+        existing_events: Optional[List[EventModel]] = None
     ):
         self.win = tk.Toplevel(profiles_window)
         self.win.title(f"Event Settings - Row {row_num + 1}")
@@ -28,8 +29,14 @@ class KeystrokeEventEditor:
         self.win.grab_set()
         self.win.focus_force()
         self.win.attributes("-topmost", True)
-        self.win.grid_rowconfigure(0, weight=1)
-        self.win.grid_columnconfigure(0, weight=1)
+        
+        self.match_mode_var = tk.StringVar(value="pixel")
+        self.region_w_var = tk.IntVar(value=20)
+        self.region_h_var = tk.IntVar(value=20)
+        self.execute_action_var = tk.BooleanVar(value=True)
+        self.group_id_var = tk.StringVar()
+        self.priority_var = tk.IntVar(value=0)
+        self.independent_thread = tk.BooleanVar(value=False)
 
         self.save_cb = save_callback
         self.capturer = ScreenshotCapturer()
@@ -42,9 +49,11 @@ class KeystrokeEventEditor:
         self.held_img = None
         self.ref_pixel = None
         self.key_to_enter = None
-        self.independent_thread = tk.BooleanVar(value=False)
+        
+        self.existing_events = existing_events or []
+        self.temp_conditions: Dict[str, bool] = {} 
 
-        self.create_ui()
+        self._create_layout()
         self.bind_events()
 
         self.row_num = row_num
@@ -57,11 +66,32 @@ class KeystrokeEventEditor:
         self.key_check_thread.start()
 
         self.load_latest_position()
-        self.key_combobox.focus_set()
+        
+        # Traces
+        self.match_mode_var.trace_add("write", lambda *a: self._redraw_overlay())
+        self.region_w_var.trace_add("write", lambda *a: self._redraw_overlay())
+        self.region_h_var.trace_add("write", lambda *a: self._redraw_overlay())
+        self.independent_thread.trace_add("write", self._on_indep_toggle)
 
-    def create_ui(self):
-        # Image Placeholders
-        f_img = tk.Frame(self.win)
+    def _create_layout(self):
+        self.notebook = ttk.Notebook(self.win)
+        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
+
+        self.tab_basic = ttk.Frame(self.notebook)
+        self.tab_detail = ttk.Frame(self.notebook)
+        self.tab_logic = ttk.Frame(self.notebook)
+
+        self.notebook.add(self.tab_basic, text="Basic (기본)")
+        self.notebook.add(self.tab_detail, text="Detail/Region (상세/지역)")
+        self.notebook.add(self.tab_logic, text="Logic/Group (논리/그룹)")
+
+        self._setup_basic_tab()
+        self._setup_detail_tab()
+        self._setup_logic_tab()
+        self._setup_bottom_buttons()
+
+    def _setup_basic_tab(self):
+        f_img = tk.Frame(self.tab_basic)
         f_img.pack(pady=5)
         self.lbl_img1 = tk.Label(f_img, width=10, height=5, bg="red")
         self.lbl_img1.grid(row=0, column=0, padx=5)
@@ -70,68 +100,124 @@ class KeystrokeEventEditor:
         for seq in ("<Button-1>", "<B1-Motion>"):
             self.lbl_img2.bind(seq, self.get_coordinates_of_held_image)
 
-        # Ref Pixel
-        f_ref = tk.Frame(self.win)
+        f_ref = tk.Frame(self.tab_basic)
         f_ref.pack(pady=5)
         self.lbl_ref = tk.Label(f_ref, width=2, height=1, bg="gray")
         self.lbl_ref.grid(row=0, column=1, padx=5)
 
-        # Coordinates
         self.coord_entries = self.create_coord_entries(
-            tk.Frame(self.win), ["Area X:", "Area Y:", "Pixel X:", "Pixel Y:"]
+            tk.Frame(self.tab_basic), ["Area X:", "Area Y:", "Pixel X:", "Pixel Y:"]
         )
         self.coord_entries[0].master.pack()
 
-        # Key Entry
-        f_key = tk.Frame(self.win)
+        f_key = tk.Frame(self.tab_basic)
         f_key.pack(pady=5)
         tk.Label(f_key, text="Key:", anchor="w").grid(row=0, column=0)
         self.key_combobox = ttk.Combobox(
             f_key, state="readonly", values=KeyUtils.get_key_name_list()
         )
         self.key_combobox.grid(row=0, column=1)
-
-        # Duration
-        f_dur = tk.Frame(self.win)
-        f_dur.pack(pady=5)
-        vcmd = (self.win.register(lambda P: P == "" or P.isdigit()), "%P")
-        self.entry_dur = self._create_labeled_entry(
-            f_dur, "Press Duration (ms):", 0, vcmd
-        )
-        self.entry_rand = self._create_labeled_entry(
-            f_dur, "Randomization (ms):", 1, vcmd
-        )
-
-        # Checkbox & Buttons & Info
-        tk.Checkbutton(
-            self.win, text="Independent Thread", variable=self.independent_thread
+        
+        tk.Label(
+            self.tab_basic,
+            text="ALT: Area selection | CTRL: Grab image\nClick right image to set target.",
+            fg="gray",
         ).pack(pady=5)
 
+    def _setup_detail_tab(self):
+        f_main = ttk.Frame(self.tab_detail)
+        f_main.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        vcmd = (self.win.register(lambda P: P == "" or P.isdigit()), "%P")
+
+        gb_mode = ttk.LabelFrame(f_main, text="Matching Mode")
+        gb_mode.pack(fill="x", pady=5)
+        ttk.Radiobutton(gb_mode, text="Pixel (1px)", variable=self.match_mode_var, value="pixel").pack(side="left", padx=10)
+        ttk.Radiobutton(gb_mode, text="Region (Area)", variable=self.match_mode_var, value="region").pack(side="left", padx=10)
+
+        gb_size = ttk.LabelFrame(f_main, text="Region Size (Only for Region Mode)")
+        gb_size.pack(fill="x", pady=5)
+        
+        ttk.Label(gb_size, text="Width:").pack(side="left", padx=5)
+        ttk.Entry(gb_size, textvariable=self.region_w_var, width=5, validate="key", validatecommand=vcmd).pack(side="left", padx=5)
+        
+        ttk.Label(gb_size, text="Height:").pack(side="left", padx=5)
+        ttk.Entry(gb_size, textvariable=self.region_h_var, width=5, validate="key", validatecommand=vcmd).pack(side="left", padx=5)
+
+        gb_time = ttk.LabelFrame(f_main, text="Timing (Overrides Global)")
+        gb_time.pack(fill="x", pady=5)
+        
+        ttk.Label(gb_time, text="Duration (ms):").grid(row=0, column=0, padx=5, pady=2, sticky="e")
+        self.entry_dur = ttk.Entry(gb_time, width=8, validate="key", validatecommand=vcmd)
+        self.entry_dur.grid(row=0, column=1, padx=5, pady=2)
+        
+        ttk.Label(gb_time, text="Random (ms):").grid(row=1, column=0, padx=5, pady=2, sticky="e")
+        self.entry_rand = ttk.Entry(gb_time, width=8, validate="key", validatecommand=vcmd)
+        self.entry_rand.grid(row=1, column=1, padx=5, pady=2)
+
+        ttk.Checkbutton(f_main, text="Independent Thread (Ignores Group/Condition)", variable=self.independent_thread).pack(pady=10, anchor="w")
+
+    def _setup_logic_tab(self):
+        f_main = ttk.Frame(self.tab_logic)
+        f_main.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        vcmd = (self.win.register(lambda P: P == "" or P.isdigit()), "%P")
+
+        gb_exec = ttk.LabelFrame(f_main, text="Execution Type")
+        gb_exec.pack(fill="x", pady=5)
+        ttk.Checkbutton(gb_exec, text="Execute Key Action (Uncheck for Condition-only)", variable=self.execute_action_var).pack(padx=10, pady=5, anchor="w")
+
+        gb_grp = ttk.LabelFrame(f_main, text="Grouping & Priority")
+        gb_grp.pack(fill="x", pady=5)
+        
+        ttk.Label(gb_grp, text="Group ID:").grid(row=0, column=0, padx=5, pady=5)
+        
+        self.cmb_group = ttk.Combobox(gb_grp, textvariable=self.group_id_var, width=15)
+        self.cmb_group.grid(row=0, column=1, padx=5, pady=5)
+        
+        existing_groups = sorted({
+            e.group_id for e in self.existing_events 
+            if e.group_id and e.group_id.strip()
+        })
+        self.cmb_group['values'] = existing_groups
+        
+        ttk.Label(gb_grp, text="Priority (Lower=High):").grid(row=0, column=2, padx=5, pady=5)
+        ttk.Entry(gb_grp, textvariable=self.priority_var, width=5, validate="key", validatecommand=vcmd).grid(row=0, column=3, padx=5, pady=5)
+
+        gb_cond = ttk.LabelFrame(f_main, text="Conditions (Click: Ignore -> Active -> Inactive)")
+        gb_cond.pack(fill="both", expand=True, pady=5)
+        
+        cols = ("event", "state")
+        self.tree_cond = ttk.Treeview(gb_cond, columns=cols, show="headings", height=5)
+        self.tree_cond.heading("event", text="Event Name")
+        self.tree_cond.heading("state", text="Required State")
+        self.tree_cond.column("event", width=150)
+        self.tree_cond.column("state", width=100)
+        
+        sb = ttk.Scrollbar(gb_cond, orient="vertical", command=self.tree_cond.yview)
+        self.tree_cond.configure(yscrollcommand=sb.set)
+        
+        self.tree_cond.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        
+        self.tree_cond.bind("<Button-1>", self._on_tree_click)
+
+    def _setup_bottom_buttons(self):
         f_btn = tk.Frame(self.win)
-        f_btn.pack(pady=10)
-        tk.Button(f_btn, text="Grab(Ctrl)", command=self.hold_image).grid(
-            row=0, column=0, columnspan=2, padx=5
-        )
-        tk.Button(f_btn, text="OK(↩️)", command=self.save_event).grid(
-            row=1, column=0, padx=5
-        )
-        tk.Button(f_btn, text="Cancel(ESC)", command=self.close_window).grid(
-            row=1, column=1, padx=5
-        )
+        f_btn.pack(pady=10, fill="x")
+        
+        tk.Button(f_btn, text="Grab(Ctrl)", command=self.hold_image).pack(side="left", padx=20)
+        tk.Button(f_btn, text="Cancel(ESC)", command=self.close_window).pack(side="right", padx=20)
+        tk.Button(f_btn, text="OK(Enter)", command=self.save_event, bg="#dddddd").pack(side="right", padx=5)
 
-        tk.Label(
-            self.win,
-            text="ALT: Area selection\nCTRL: Grab current image\n\n1. Click right image to select ref pixel.\n2. Select key.",
-            anchor="center",
-            fg="black",
-            wraplength=250,
-        ).pack(pady=5, fill="both")
-
-    def _create_labeled_entry(self, parent, text, row, vcmd):
-        tk.Label(parent, text=text).grid(row=row, column=0, padx=5)
-        e = tk.Entry(parent, width=10, validate="key", validatecommand=vcmd)
-        e.grid(row=row, column=1, padx=5)
-        return e
+    def _on_indep_toggle(self, *args):
+        # 독립 스레드 활성화 시 그룹 ID 입력 비활성화
+        if self.independent_thread.get():
+            self.cmb_group.set("")
+            self.cmb_group.config(state="disabled")
+            self.group_id_var.set("")
+        else:
+            self.cmb_group.config(state="normal")
 
     def create_coord_entries(self, parent, labels):
         entries = []
@@ -160,11 +246,23 @@ class KeystrokeEventEditor:
         return "break"
 
     def check_key_states(self):
+        """
+        [Fix] Thread Safety:
+        백그라운드 스레드에서 UI 업데이트 호출 시 self.win.after 사용
+        """
         while self.key_check_active:
             if KeyUtils.mod_key_pressed("alt"):
-                self.capturer.set_current_mouse_position(self.win.winfo_pointerxy())
+                cur_pos = self.win.winfo_pointerxy()
+                self.capturer.set_current_mouse_position(cur_pos)
+                
+                valid_pos = self.capturer.get_current_mouse_position()
+                if valid_pos:
+                    # Safe UI update
+                    self.win.after(0, lambda p=valid_pos: self._set_entries(self.coord_entries[:2], *p))
+                
             if KeyUtils.mod_key_pressed("ctrl"):
-                self.hold_image()
+                # Safe UI update
+                self.win.after(0, self.hold_image)
                 time.sleep(0.2)
             time.sleep(0.1)
 
@@ -191,8 +289,10 @@ class KeystrokeEventEditor:
     def update_capture_image(self, pos, img):
         if pos and img:
             self.latest_pos, self.latest_img = pos, img
+            # Image update is heavy, better to use after if coming from mss thread
+            # But mss callback here might be called from capture thread.
             if self.lbl_img1.winfo_exists():
-                self._update_img_lbl(self.lbl_img1, img)
+                self.win.after(0, lambda: self._update_img_lbl(self.lbl_img1, img))
 
     def hold_image(self):
         if self.latest_pos and self.latest_img:
@@ -200,7 +300,7 @@ class KeystrokeEventEditor:
             self.held_img = self.latest_img
             self._update_img_lbl(self.lbl_img2, self.latest_img)
             if self.clicked_pos:
-                self._apply_crosshair(self.held_img, self.lbl_img2)
+                self._draw_overlay(self.held_img, self.lbl_img2)
                 self._update_ref_pixel(self.held_img, self.clicked_pos)
 
     def get_coordinates_of_held_image(self, event):
@@ -217,27 +317,132 @@ class KeystrokeEventEditor:
         self.clicked_pos = (ix, iy)
         self._update_ref_pixel(copy.deepcopy(self.held_img), (ix, iy))
         self._set_entries(self.coord_entries[2:], ix, iy)
-        self._apply_crosshair(self.held_img, self.lbl_img2)
+        self._draw_overlay(self.held_img, self.lbl_img2)
 
-    def _apply_crosshair(self, img, lbl):
+    def _draw_overlay(self, img, lbl):
         if not self.clicked_pos:
             return
+        
         res_img = copy.deepcopy(img)
-        pixels = res_img.load()
+        draw = ImageDraw.Draw(res_img)
         cx, cy = self.clicked_pos
         w, h = res_img.size
 
-        for x in range(w):
-            pixels[x, cy] = tuple(255 - c for c in pixels[x, cy][:3]) + (255,)
-        for y in range(h):
-            pixels[cx, y] = tuple(255 - c for c in pixels[cx, y][:3]) + (255,)
+        if self.match_mode_var.get() == "region":
+            try:
+                rw = self.region_w_var.get() // 2
+                rh = self.region_h_var.get() // 2
+                x1, y1 = max(0, cx - rw), max(0, cy - rh)
+                x2, y2 = min(w, cx + rw), min(h, cy + rh)
+                draw.rectangle([x1, y1, x2, y2], outline="yellow", width=2)
+            except Exception:
+                pass
+        else:
+            pixels = res_img.load()
+            for x in range(w):
+                pixels[x, cy] = tuple(255 - c for c in pixels[x, cy][:3]) + (255,)
+            for y in range(h):
+                pixels[cx, y] = tuple(255 - c for c in pixels[cx, y][:3]) + (255,)
+                
         self._update_img_lbl(lbl, res_img)
+
+    def _redraw_overlay(self):
+        if self.held_img and self.clicked_pos:
+            self._draw_overlay(self.held_img, self.lbl_img2)
 
     def _update_ref_pixel(self, img, coords):
         self.ref_pixel = img.getpixel(coords)
         self._update_img_lbl(
             self.lbl_ref, Image.new("RGBA", (25, 25), color=self.ref_pixel)
         )
+
+    def _populate_condition_tree(self):
+        for item in self.tree_cond.get_children():
+            self.tree_cond.delete(item)
+            
+        for evt in self.existing_events:
+            if self.event_name and evt.event_name == self.event_name:
+                continue
+            
+            # [Fix] 이미 나를 조건으로 참조하고 있는 이벤트는 제외 (1차 방어)
+            if evt.conditions and self.event_name in evt.conditions:
+                continue
+
+            state_val = self.temp_conditions.get(evt.event_name, None)
+            if state_val is True:
+                display = "Active (True)"
+            elif state_val is False:
+                display = "Inactive (False)"
+            else:
+                display = "Ignore"
+                
+            self.tree_cond.insert("", "end", values=(evt.event_name, display))
+
+    def _on_tree_click(self, event):
+        region = self.tree_cond.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+            
+        item_id = self.tree_cond.identify_row(event.y)
+        if not item_id:
+            return
+            
+        vals = self.tree_cond.item(item_id, "values")
+        evt_name, curr_state = vals[0], vals[1]
+        
+        new_state_disp = "Ignore"
+        new_val = None
+        
+        if "Ignore" in curr_state:
+            new_state_disp = "Active (True)"
+            new_val = True
+        elif "Active" in curr_state:
+            new_state_disp = "Inactive (False)"
+            new_val = False
+        else:
+            new_state_disp = "Ignore"
+            new_val = None
+            
+        self.tree_cond.item(item_id, values=(evt_name, new_state_disp))
+        
+        if new_val is None:
+            self.temp_conditions.pop(evt_name, None)
+        else:
+            self.temp_conditions[evt_name] = new_val
+
+    def _validate_cycles(self, new_event_name: str, new_conditions: Dict[str, bool]) -> bool:
+        """
+        조건 순환 참조 검사 (DFS)
+        True: Cycle Detected, False: Safe
+        """
+        # 1. 가상의 그래프 생성 (Existing events + Current editing event)
+        graph = {e.event_name: list(e.conditions.keys()) for e in self.existing_events}
+        # 현재 편집 중인 이벤트 정보 업데이트
+        graph[new_event_name] = list(new_conditions.keys())
+        
+        visited = set()
+        rec_stack = set()
+
+        def dfs(node):
+            visited.add(node)
+            rec_stack.add(node)
+            
+            for neighbor in graph.get(node, []):
+                if neighbor not in visited:
+                    if dfs(neighbor):
+                        return True
+                elif neighbor in rec_stack:
+                    return True # Cycle found
+            
+            rec_stack.remove(node)
+            return False
+
+        # 모든 노드에 대해 검사
+        for node in graph:
+            if node not in visited:
+                if dfs(node):
+                    return True
+        return False
 
     def save_event(self, event=None):
         if not all(
@@ -255,18 +460,42 @@ class KeystrokeEventEditor:
                 "You must set the image, coordinates, key\n이미지와 좌표 및 키를 설정하세요.",
             )
 
-        dur_str, rand_str = self.entry_dur.get(), self.entry_rand.get()
-        dur = int(dur_str) if dur_str else None
-        rand = int(rand_str) if rand_str else None
+        try:
+            dur_str, rand_str = self.entry_dur.get(), self.entry_rand.get()
+            dur = int(dur_str) if dur_str else None
+            rand = int(rand_str) if rand_str else None
+            
+            rw = self.region_w_var.get()
+            rh = self.region_h_var.get()
+            if self.match_mode_var.get() == "region" and (rw <= 0 or rh <= 0):
+                return messagebox.showerror("Error", "Region Width/Height must be > 0")
+                
+            try:
+                prio = self.priority_var.get()
+            except tk.TclError:
+                prio = 0
+                
+        except ValueError:
+            return messagebox.showerror("Error", "Invalid numeric input.")
 
         if dur and dur < 50:
-            return messagebox.showerror(
-                "Error", "Press Duration must be at least 50 ms."
-            )
+            return messagebox.showerror("Error", "Press Duration must be at least 50 ms.")
         if dur and rand and rand < 30:
-            return messagebox.showerror(
-                "Error", "Randomization must be at least 30 ms."
-            )
+            return messagebox.showerror("Error", "Randomization must be at least 30 ms.")
+
+        # [Check] 순환 참조 검사
+        current_name = self.event_name or f"Event_{len(self.existing_events)+1}" # 임시 이름 처리
+        # Note: If self.event_name is empty (new event), user hasn't typed logic yet?
+        # Typically event name is managed in main list, but here we check logic.
+        # Assuming event_name is consistent or using placeholder for graph check.
+        
+        if self._validate_cycles(current_name, self.temp_conditions):
+            return messagebox.showerror("Error", "Circular dependency detected in conditions!\n조건 설정에 순환 참조가 있습니다.")
+
+        # [Check] 독립 스레드일 경우 그룹 제거
+        grp_id = self.group_id_var.get()
+        if self.independent_thread.get():
+            grp_id = None
 
         evt = EventModel(
             self.event_name,
@@ -279,6 +508,12 @@ class KeystrokeEventEditor:
             press_duration_ms=dur,
             randomization_ms=rand,
             independent_thread=self.independent_thread.get(),
+            match_mode=self.match_mode_var.get(),
+            region_size=(rw, rh),
+            execute_action=self.execute_action_var.get(),
+            group_id=grp_id,
+            priority=prio,
+            conditions=copy.deepcopy(self.temp_conditions)
         )
         self.save_cb(evt, self.is_edit, self.row_num)
         self._update_img_lbl(self.lbl_img2, self.held_img)
@@ -317,7 +552,9 @@ class KeystrokeEventEditor:
 
     def load_stored_event(self, func):
         if not (evt := func()):
+            self._populate_condition_tree()
             return
+            
         self.event_name, self.latest_pos, self.clicked_pos = (
             evt.event_name,
             evt.latest_position,
@@ -330,18 +567,38 @@ class KeystrokeEventEditor:
         )
 
         self.capturer.set_mouse_position(self.latest_pos)
-        self._apply_crosshair(self.held_img, self.lbl_img2)
         self._set_entries(self.coord_entries[:2], *self.latest_pos)
         self._set_entries(self.coord_entries[2:], *self.clicked_pos)
         self._update_ref_pixel(self.held_img, self.clicked_pos)
 
         if self.key_to_enter in self.key_combobox["values"]:
             self.key_combobox.set(self.key_to_enter)
-        self.independent_thread.set(getattr(evt, "independent_thread", False))
+        
+        is_indep = getattr(evt, "independent_thread", False)
+        self.independent_thread.set(is_indep)
+        
         if d := getattr(evt, "press_duration_ms", None):
             self.entry_dur.insert(0, str(int(d)))
         if r := getattr(evt, "randomization_ms", None):
             self.entry_rand.insert(0, str(int(r)))
+
+        self.match_mode_var.set(getattr(evt, "match_mode", "pixel"))
+        if r_size := getattr(evt, "region_size", None):
+            self.region_w_var.set(r_size[0])
+            self.region_h_var.set(r_size[1])
+        self.execute_action_var.set(getattr(evt, "execute_action", True))
+        
+        gid = getattr(evt, "group_id", "") or ""
+        self.group_id_var.set(gid)
+        if is_indep: # 독립 스레드면 UI 비활성화 동기화
+            self.cmb_group.config(state="disabled")
+
+        self.priority_var.set(getattr(evt, "priority", 0))
+        
+        self.temp_conditions = copy.deepcopy(getattr(evt, "conditions", {}))
+        self._populate_condition_tree()
+        
+        self._draw_overlay(self.held_img, self.lbl_img2)
 
     @staticmethod
     def _set_entries(entries, x, y):

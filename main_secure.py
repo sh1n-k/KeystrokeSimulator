@@ -243,17 +243,16 @@ class Application:
     def on_auth_success(self):
         self.root.withdraw()
         self.root.destroy()
-        self.check_session_and_schedule()
-        self.main_app = KeystrokeSimulatorApp(
-            secure_callback=self.terminate_application
-        )
+        self.main_app = KeystrokeSimulatorApp(secure_callback=self.terminate_application)
+        # main_app의 after 사용
+        self.main_app.after(5 * 60 * 1000, self.check_session_and_schedule)
         self.main_app.mainloop()
 
     def check_session_and_schedule(self):
         if self.auth_service.validate_session_token(self.auth_ui.user_id):
-            self.root.after(5 * 60 * 1000, self.check_session_and_schedule)
+            if self.main_app and self.main_app.winfo_exists():
+                self.main_app.after(5 * 60 * 1000, self.check_session_and_schedule)
         else:
-            logger.info(f"Invalid session token")
             self.force_close_app()
 
     def terminate_application(self):

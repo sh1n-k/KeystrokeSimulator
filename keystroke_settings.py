@@ -170,10 +170,11 @@ class KeystrokeSettings(tk.Toplevel):
             self.start_stop_combo.set(key)
             self.settings.start_stop_key = key
 
+    # 변경 후
     def _load_settings(self):
         try:
-            with open("user_settings.b64", "r") as f:
-                data = json.loads(base64.b64decode(f.read()).decode("utf-8"))
+            with open("user_settings.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
                 self.settings = UserSettings(**data)
         except Exception as e:
             logger.error(f"Load failed: {e}")
@@ -181,11 +182,8 @@ class KeystrokeSettings(tk.Toplevel):
 
     def save_settings(self):
         try:
-            data = base64.b64encode(
-                json.dumps(asdict(self.settings)).encode("utf-8")
-            ).decode("utf-8")
-            with open("user_settings.b64", "w") as f:
-                f.write(data)
+            with open("user_settings.json", "w", encoding="utf-8") as f:
+                json.dump(asdict(self.settings), f, indent=2)
             logger.debug(f"Saved: {self.settings}")
         except Exception as e:
             logger.error(f"Save failed: {e}")
@@ -256,7 +254,13 @@ class KeystrokeSettings(tk.Toplevel):
 
     @staticmethod
     def _validate_numeric(P):
-        return P == "" or (P.isdigit() and 0 <= int(P) < 1000 and not P.startswith("0"))
+        if P == "":
+            return True
+        if not P.isdigit():
+            return False
+        if len(P) > 1 and P.startswith("0"):  # "01", "007" 등 방지
+            return False
+        return 0 <= int(P) < 1000
 
     @staticmethod
     def _validate_epsilon(P):
