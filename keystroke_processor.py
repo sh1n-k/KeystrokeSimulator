@@ -11,7 +11,6 @@ import numpy as np
 import mss
 from loguru import logger
 
-
 from keystroke_models import EventModel
 from keystroke_utils import KeyUtils, ProcessUtils
 
@@ -102,7 +101,6 @@ class KeystrokeProcessor:
         # Settings (초 단위로 저장)
         s = main_app.settings
         self.delays = (s.delay_between_loop_min / 1000, s.delay_between_loop_max / 1000)
-        self.default_press_times = (
         self.default_press_times = (
             s.key_pressed_time_min / 1000,
             s.key_pressed_time_max / 1000,
@@ -287,8 +285,6 @@ class KeystrokeProcessor:
 
     async def _process_main(self):
         if not self.event_data_list:
-    async def _process_main(self):
-        if not self.event_data_list:
             return
 
         last_proc_check_time = 0
@@ -466,7 +462,6 @@ class KeystrokeProcessor:
 
         key = evt["key"]
         if not key or not (code := self.key_codes.get(key)):
-        if not key or not (code := self.key_codes.get(key)):
             return
 
         with self.key_lock:
@@ -501,7 +496,9 @@ class KeystrokeProcessor:
                 await asyncio.sleep(min(0.02, remaining))
 
             self.sim.release(code)
-            logger.debug(f"Async Key Pressed: {key} Evt: '{evt['name'][:5]:5}' (Duration: {target_duration:.3f}s)")
+            logger.debug(
+                f"Async Key Pressed: {key} Evt: '{evt['name'][:5]:5}' (Duration: {target_duration:.3f}s)"
+            )
 
         finally:
             with self.key_lock:
@@ -545,7 +542,9 @@ class KeystrokeProcessor:
                 time.sleep(min(0.02, remaining))
 
             self.sim.release(code)
-            logger.debug(f"Sync Key Pressed: {key} Evt: '{evt['name'][:5]:5}' (Duration: {target_duration:.3f}s)")
+            logger.debug(
+                f"Sync Key Pressed: {key} Evt: '{evt['name'][:5]:5}' (Duration: {target_duration:.3f}s)"
+            )
         finally:
             with self.key_lock:
                 self.pressed_keys.discard(key)
