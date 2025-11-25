@@ -265,8 +265,15 @@ class EventListFrame(ttk.Frame):
 
         ttk.Button(f_ctrl, text="Add Event", command=self._add_row).pack(
             side=tk.LEFT, padx=2, fill=tk.X, expand=True
+        # --- Control Buttons ---
+        f_ctrl = ttk.Frame(self)
+        f_ctrl.grid(row=1, column=0, columnspan=2, pady=5, sticky="we")
+
+        ttk.Button(f_ctrl, text="Add Event", command=self._add_row).pack(
+            side=tk.LEFT, padx=2, fill=tk.X, expand=True
         )
         ttk.Button(
+            f_ctrl,
             f_ctrl,
             text="Import From",
             command=lambda: EventImporter(self.win, self._import),
@@ -284,6 +291,8 @@ class EventListFrame(ttk.Frame):
 
         self.menu = tk.Menu(self, tearoff=0)
         self.menu.add_command(
+            label="Apply Pixel/Region Info to Similar Areas",
+            command=self._apply_pixel_batch,
             label="Apply Pixel/Region Info to Similar Areas",
             command=self._apply_pixel_batch,
         )
@@ -433,6 +442,7 @@ class EventListFrame(ttk.Frame):
         if not messagebox.askyesno(
             "Confirm",
             f"Apply Info to all events with Area {src.latest_position}?",
+            f"Apply Info to all events with Area {src.latest_position}?",
             parent=self.win,
         ):
             return
@@ -449,6 +459,8 @@ class EventListFrame(ttk.Frame):
                     evt.ref_pixel_value = evt.held_screenshot.getpixel(
                         src.clicked_position
                     )
+                    evt.match_mode = getattr(src, "match_mode", "pixel")
+                    evt.region_size = getattr(src, "region_size", None)
                     evt.match_mode = getattr(src, "match_mode", "pixel")
                     evt.region_size = getattr(src, "region_size", None)
                     cnt += 1
@@ -504,9 +516,17 @@ class EventListFrame(ttk.Frame):
         }
         row = EventRow(self, idx, event, cbs)
         row.grid(row=idx + 3, column=0, columnspan=2, padx=5, pady=2, sticky="ew")
+        row.grid(row=idx + 3, column=0, columnspan=2, padx=5, pady=2, sticky="ew")
         self.rows.append(row)
 
     def _open_editor(self, row, evt):
+        KeystrokeEventEditor(
+            self.win,
+            row,
+            self._on_editor_save,
+            lambda: evt,
+            existing_events=self.profile.event_list,
+        )
         KeystrokeEventEditor(
             self.win,
             row,
@@ -554,15 +574,20 @@ class EventListFrame(ttk.Frame):
         curr, new = len(self.rows), len(self.profile.event_list)
 
         # Update existing rows
+
+        # Update existing rows
         for i in range(min(curr, new)):
             self.rows[i].event = self.profile.event_list[i]
             self.rows[i].row_num = i  # row_num 업데이트
             self.rows[i].update_display()
 
         # Remove excess rows
+        # Remove excess rows
         for r in self.rows[new:]:
             r.destroy()
         self.rows = self.rows[:new]
+
+        # Add new rows
 
         # Add new rows
         for i in range(curr, new):
@@ -604,7 +629,9 @@ class KeystrokeProfiles:
         self.profile = self._load()
         self.p_frame = ProfileFrame(self.win, prof_name, self.profile.favorite)
         self.p_frame.pack(pady=5)
+        self.p_frame.pack(pady=5)
         self.e_frame = EventListFrame(self.win, self.profile, self._save)
+        self.e_frame.pack(fill="both", expand=True)
         self.e_frame.pack(fill="both", expand=True)
 
         f_btn = ttk.Frame(self.win, style="success.TFrame")
@@ -620,7 +647,20 @@ class KeystrokeProfiles:
             with open(self.prof_dir / f"{self.prof_name}.pkl", "rb") as f:
                 p = pickle.load(f)
                 # Backward compatibility defaults
+                # Backward compatibility defaults
                 for e in p.event_list:
+                    if not hasattr(e, "match_mode"):
+                        e.match_mode = "pixel"
+                    if not hasattr(e, "execute_action"):
+                        e.execute_action = True
+                    if not hasattr(e, "group_id"):
+                        e.group_id = None
+                    if not hasattr(e, "priority"):
+                        e.priority = 0
+                    if not hasattr(e, "conditions"):
+                        e.conditions = {}
+                    if not hasattr(e, "independent_thread"):
+                        e.independent_thread = False
                     if not hasattr(e, "match_mode"):
                         e.match_mode = "pixel"
                     if not hasattr(e, "execute_action"):
