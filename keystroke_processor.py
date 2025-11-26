@@ -321,9 +321,43 @@ class KeystrokeProcessor:
                 # [수정] 랜덤 딜레이 적용 시 루프 간 지연
                 await asyncio.sleep(random.uniform(*self.delays))
 
+    def _filter_by_conditions(self, candidates: List[Dict], local_states: Dict) -> List[Dict]:
+        """조건 필터링"""
+        filtered = []
+        for evt in candidates:
+            if not evt["conds"]:
+                filtered.append(evt)
+                continue
+
+            if all(
+                local_states.get(cond_name, self.current_states.get(cond_name, False)) == expected
+                for cond_name, expected in evt["conds"].items()
+            ):
+                filtered.append(evt)
+
+        return filtered
+
+    def _select_by_group_priority(self, events: List[Dict]) -> List[Dict]:
+        """그룹별 우선순위로 이벤트 선택"""
+        groups = {}
+        no_group = []
+
+        for evt in events:
+            if evt["group"]:
+                groups.setdefault(evt["group"], []).append(evt)
+            else:
+                no_group.append(evt)
+
+        # 각 그룹에서 최고 우선순위 이벤트만 선택
+        final_events = [min(grp_evts, key=lambda e: e["priority"]) for grp_evts in groups.values()]
+        final_events.extend(no_group)
+
+        return final_events
+
     async def _evaluate_and_execute_main(self, img: np.ndarray):
-        active_candidates = []
+        # 1. 활성 이벤트 찾기 및 상태 업데이트
         local_states = {}
+        active_candidates = []
 
         for evt in self.event_data_list:
             is_active = self._check_match(img, evt, is_independent=False)
@@ -334,58 +368,43 @@ class KeystrokeProcessor:
         with self.state_lock:
             self.current_states.update(local_states)
 
-        final_events = []
-        filtered_by_cond = []
+        # 2. 조건 필터링
+        filtered_events = self._filter_by_conditions(active_candidates, local_states)
 
-        for evt in active_candidates:
-            passed = True
-            if evt["conds"]:
-                for cond_name, expected in evt["conds"].items():
-                    actual = local_states.get(
-                        cond_name, self.current_states.get(cond_name, False)
-                    )
-                    if actual != expected:
-                        passed = False
-                        break
-            if passed:
-                filtered_by_cond.append(evt)
+        # 3. 그룹 우선순위 적용
+        final_events = self._select_by_group_priority(filtered_events)
 
-        groups = {}
-        no_group = []
-        for evt in filtered_by_cond:
-            if evt["group"]:
-                groups.setdefault(evt["group"], []).append(evt)
-            else:
-                no_group.append(evt)
-
-        for grp_evts in groups.values():
-            grp_evts.sort(key=lambda e: e["priority"])
-            final_events.append(grp_evts[0])
-
-        final_events.extend(no_group)
-
-        tasks = []
-        for evt in final_events:
-            if self.term_event.is_set():
-                break
-            if evt["exec"]:
-                tasks.append(self._press_key_async(evt))
+        # 4. 키 입력 실행
+        tasks = [
+            self._press_key_async(evt)
+            for evt in final_events
+            if evt["exec"] and not self.term_event.is_set()
+        ]
 
         if tasks:
             await asyncio.gather(*tasks)
 
-    def _run_independent_loop(self, evt: Dict):
+    def _build_capture_rect(self, evt: Dict) -> Dict[str, int]:
+        """이벤트에 대한 캡처 영역 생성"""
         cx, cy = evt["center_x"], evt["center_y"]
         if evt["mode"] == "region":
             w, h = evt["region_w"], evt["region_h"]
-            capture_rect = {
-                "top": cy - h // 2,
-                "left": cx - w // 2,
-                "width": w,
-                "height": h,
-            }
-        else:
-            capture_rect = {"top": cy, "left": cx, "width": 1, "height": 1}
+            return {"top": cy - h // 2, "left": cx - w // 2, "width": w, "height": h}
+        return {"top": cy, "left": cx, "width": 1, "height": 1}
+
+    def _check_conditions(self, evt: Dict) -> bool:
+        """이벤트 조건 검사"""
+        if not evt["conds"]:
+            return True
+
+        with self.state_lock:
+            return all(
+                self.current_states.get(cond_name, False) == expected
+                for cond_name, expected in evt["conds"].items()
+            )
+
+    def _run_independent_loop(self, evt: Dict):
+        capture_rect = self._build_capture_rect(evt)
 
         with mss.mss() as sct:
             while not self.term_event.is_set():
@@ -400,38 +419,36 @@ class KeystrokeProcessor:
                     with self.state_lock:
                         self.current_states[evt["name"]] = is_active
 
-                    should_execute = True
-                    if evt["conds"]:
-                        with self.state_lock:
-                            for cond_name, expected in evt["conds"].items():
-                                if (
-                                    self.current_states.get(cond_name, False)
-                                    != expected
-                                ):
-                                    should_execute = False
-                                    break
-
-                    if is_active and should_execute and evt["exec"]:
+                    if is_active and self._check_conditions(evt) and evt["exec"]:
                         self._sync_press_key(evt)
 
                 except Exception as e:
                     logger.error(f"Error in indep thread {evt['name']}: {e}")
 
-                # [수정] 사용자 설정 딜레이 사용
                 time.sleep(random.uniform(*self.delays))
+
+    def _extract_roi(self, img: np.ndarray, evt: Dict, is_independent: bool) -> Optional[np.ndarray]:
+        """이미지에서 관심 영역(ROI) 추출"""
+        if is_independent:
+            return img[:, :, :3]
+
+        w, h = evt["region_w"], evt["region_h"]
+        x, y = evt["rel_x"] - w // 2, evt["rel_y"] - h // 2
+
+        # 경계 검사
+        if x < 0 or y < 0 or x + w > img.shape[1] or y + h > img.shape[0]:
+            return None
+
+        return img[y : y + h, x : x + w, :3]
 
     def _check_match(self, img: np.ndarray, evt: Dict, is_independent: bool) -> bool:
         try:
             if evt["mode"] == "region":
-                if is_independent:
-                    roi = img[:, :, :3]
-                else:
-                    w, h = evt["region_w"], evt["region_h"]
-                    x, y = evt["rel_x"] - w // 2, evt["rel_y"] - h // 2
-                    if x < 0 or y < 0 or x + w > img.shape[1] or y + h > img.shape[0]:
-                        return False
-                    roi = img[y : y + h, x : x + w, :3]
+                roi = self._extract_roi(img, evt, is_independent)
+                if roi is None:
+                    return False
 
+                # 체크포인트 검증 (현재 색상 비교 비활성화됨)
                 for pt in evt.get("check_points", []):
                     px, py = pt["pos"]
                     if py >= roi.shape[0] or px >= roi.shape[1]:
@@ -441,6 +458,7 @@ class KeystrokeProcessor:
                     #     return False
                 return True
             else:
+                # 픽셀 모드
                 if is_independent:
                     pixel = img[0, 0, :3]
                 else:
@@ -452,11 +470,31 @@ class KeystrokeProcessor:
         except Exception:
             return False
 
+    def _calculate_press_duration(self, evt: Dict) -> float:
+        """목표 키 누름 지속 시간 계산 (초 단위)"""
+        duration = evt["dur"] / 1000.0 if evt["dur"] else random.uniform(*self.default_press_times)
+        if evt["rand"]:
+            duration += random.uniform(-evt["rand"], evt["rand"]) / 1000.0
+        return max(0.05, duration)
+
+    async def _wait_until_async(self, end_time: float, check_interval: float = 0.02):
+        """절대 종료 시간까지 비동기 대기"""
+        while time.time() < end_time and not self.term_event.is_set():
+            remaining = end_time - time.time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(check_interval, remaining))
+
+    def _wait_until_sync(self, end_time: float, check_interval: float = 0.02):
+        """절대 종료 시간까지 동기 대기"""
+        while time.time() < end_time and not self.term_event.is_set():
+            remaining = end_time - time.time()
+            if remaining <= 0:
+                break
+            time.sleep(min(check_interval, remaining))
+
     async def _press_key_async(self, evt: Dict):
-        """
-        [수정] 절대 시간(Deadline) 기반 대기 방식으로 변경
-        시스템 렉이나 sleep 오차와 관계없이 정해진 시간만 누르도록 보장
-        """
+        """비동기 키 입력 실행 (메인 루프용)"""
         if self.term_event.is_set():
             return
 
@@ -471,43 +509,18 @@ class KeystrokeProcessor:
 
         try:
             self.sim.press(code)
-
-            # 1. 목표 지속 시간 계산 (초 단위)
-            if evt["dur"]:
-                target_duration = evt["dur"] / 1000.0
-            else:
-                target_duration = random.uniform(*self.default_press_times)
-
-            if evt["rand"]:
-                target_duration += random.uniform(-evt["rand"], evt["rand"]) / 1000.0
-
-            # 최소 안전 시간 (0.05초)
-            target_duration = max(0.05, target_duration)
-
-            # 2. 절대 종료 시간 계산
-            end_time = time.time() + target_duration
-
-            # 3. 종료 시간까지 대기 (Deadline Check)
-            while time.time() < end_time and not self.term_event.is_set():
-                remaining = end_time - time.time()
-                if remaining <= 0:
-                    break
-                # 짧게 자서 반응성 확보 (최대 0.02초)
-                await asyncio.sleep(min(0.02, remaining))
-
+            target_duration = self._calculate_press_duration(evt)
+            await self._wait_until_async(time.time() + target_duration)
             self.sim.release(code)
             logger.debug(
                 f"Async Key Pressed: {key} Evt: '{evt['name'][:5]:5}' (Duration: {target_duration:.3f}s)"
             )
-
         finally:
             with self.key_lock:
                 self.pressed_keys.discard(key)
 
     def _sync_press_key(self, evt: Dict):
-        """
-        [수정] 독립 스레드용 절대 시간 기반 대기
-        """
+        """동기 키 입력 실행 (독립 스레드용)"""
         key = evt["key"]
         if not key or not (code := self.key_codes.get(key)):
             return
@@ -519,28 +532,8 @@ class KeystrokeProcessor:
 
         try:
             self.sim.press(code)
-
-            # 1. 목표 지속 시간 계산 (초 단위)
-            if evt["dur"]:
-                target_duration = evt["dur"] / 1000.0
-            else:
-                target_duration = random.uniform(*self.default_press_times)
-
-            if evt["rand"]:
-                target_duration += random.uniform(-evt["rand"], evt["rand"]) / 1000.0
-
-            target_duration = max(0.05, target_duration)
-
-            # 2. 절대 종료 시간 계산
-            end_time = time.time() + target_duration
-
-            # 3. 종료 시간까지 대기
-            while time.time() < end_time and not self.term_event.is_set():
-                remaining = end_time - time.time()
-                if remaining <= 0:
-                    break
-                time.sleep(min(0.02, remaining))
-
+            target_duration = self._calculate_press_duration(evt)
+            self._wait_until_sync(time.time() + target_duration)
             self.sim.release(code)
             logger.debug(
                 f"Sync Key Pressed: {key} Evt: '{evt['name'][:5]:5}' (Duration: {target_duration:.3f}s)"
