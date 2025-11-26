@@ -255,6 +255,15 @@ class EventRow(ttk.Frame):
 
 
 class EventListFrame(ttk.Frame):
+    # 특수 키 정렬 순서 (클래스 상수)
+    SPECIAL_KEYS_ORDER = {
+        "SPACE": 0, "TAB": 1, "ENTER": 2, "RETURN": 2,
+        "BACKSPACE": 3, "DELETE": 4, "INSERT": 5,
+        "HOME": 6, "END": 7, "PAGEUP": 8, "PAGEDOWN": 9,
+        "UP": 10, "DOWN": 11, "LEFT": 12, "RIGHT": 13,
+        "ESC": 14, "ESCAPE": 14,
+    }
+
     def __init__(self, win, profile: ProfileModel, save_cb: Callable):
         super().__init__(win)
         self.win, self.profile, self.save_cb = win, profile, save_cb
@@ -322,29 +331,9 @@ class EventListFrame(ttk.Frame):
             except ValueError:
                 pass
 
-        # 특수 키 매핑
-        special_keys_order = {
-            "SPACE": 0,
-            "TAB": 1,
-            "ENTER": 2,
-            "RETURN": 2,
-            "BACKSPACE": 3,
-            "DELETE": 4,
-            "INSERT": 5,
-            "HOME": 6,
-            "END": 7,
-            "PAGEUP": 8,
-            "PAGEDOWN": 9,
-            "UP": 10,
-            "DOWN": 11,
-            "LEFT": 12,
-            "RIGHT": 13,
-            "ESC": 14,
-            "ESCAPE": 14,
-        }
-
-        if base_key in special_keys_order:
-            return (3, special_keys_order[base_key], base_key)
+        # 특수 키 매핑 (클래스 상수 사용)
+        if base_key in self.SPECIAL_KEYS_ORDER:
+            return (3, self.SPECIAL_KEYS_ORDER[base_key], base_key)
 
         # 기타 특수문자
         return (4, ord(base_key[0]) if base_key else 999, base_key)
@@ -552,25 +541,8 @@ class EventListFrame(ttk.Frame):
             self._add_row(event=e)
         self.save_cb()
 
-    def update_events(self):
-        curr, new = len(self.rows), len(self.profile.event_list)
-
-        # Update existing rows
-        for i in range(min(curr, new)):
-            self.rows[i].event = self.profile.event_list[i]
-            self.rows[i].row_num = i  # row_num 업데이트
-            self.rows[i].update_display()
-
-        # Remove excess rows
-        for r in self.rows[new:]:
-            r.destroy()
-        self.rows = self.rows[:new]
-
-        # Add new rows
-        for i in range(curr, new):
-            self._add_row(i, self.profile.event_list[i], resize=False)
-
-        # Re-grid all rows (정렬 후 위치 재조정)
+    def _update_row_indices(self):
+        """모든 행의 인덱스 라벨 업데이트"""
         for i, row in enumerate(self.rows):
             row.grid(row=i + 3, column=0, columnspan=2, padx=5, pady=2, sticky="ew")
             # Index 라벨 업데이트
@@ -583,6 +555,26 @@ class EventListFrame(ttk.Frame):
                     except (ValueError, tk.TclError):
                         continue
 
+    def update_events(self):
+        curr, new = len(self.rows), len(self.profile.event_list)
+
+        # Update existing rows
+        for i in range(min(curr, new)):
+            self.rows[i].event = self.profile.event_list[i]
+            self.rows[i].row_num = i
+            self.rows[i].update_display()
+
+        # Remove excess rows
+        for r in self.rows[new:]:
+            r.destroy()
+        self.rows = self.rows[:new]
+
+        # Add new rows
+        for i in range(curr, new):
+            self._add_row(i, self.profile.event_list[i], resize=False)
+
+        # Re-grid all rows and update indices
+        self._update_row_indices()
         self.win.update_idletasks()
 
     def save_names(self):
@@ -678,8 +670,14 @@ class KeystrokeProfiles:
         )
         self.win.destroy()
 
+    def _parse_position(self, pos_str: str) -> tuple[str, str]:
+        """위치 문자열을 x, y 좌표로 파싱"""
+        parts = pos_str.split('/')
+        return parts[0], parts[1]
+
     def _load_pos(self):
         if pos := StateUtils.load_main_app_state().get("prof_pos"):
-            self.win.geometry(f"+{pos.split('/')[0]}+{pos.split('/')[1]}")
+            x, y = self._parse_position(pos)
+            self.win.geometry(f"+{x}+{y}")
         else:
             WindowUtils.center_window(self.win)

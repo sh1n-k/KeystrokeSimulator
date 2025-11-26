@@ -124,11 +124,15 @@ class KeystrokeEventEditor:
             fg="gray",
         ).pack(pady=5)
 
+    def _create_numeric_validator(self):
+        """숫자 입력 검증 함수 생성 (재사용)"""
+        return (self.win.register(lambda P: P == "" or P.isdigit()), "%P")
+
     def _setup_detail_tab(self):
         f_main = ttk.Frame(self.tab_detail)
         f_main.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        vcmd = (self.win.register(lambda P: P == "" or P.isdigit()), "%P")
+
+        vcmd = self._create_numeric_validator()
 
         gb_mode = ttk.LabelFrame(f_main, text="Matching Mode")
         gb_mode.pack(fill="x", pady=5)
@@ -137,31 +141,35 @@ class KeystrokeEventEditor:
 
         gb_size = ttk.LabelFrame(f_main, text="Region Size (Only for Region Mode)")
         gb_size.pack(fill="x", pady=5)
-        
+
         ttk.Label(gb_size, text="Width:").pack(side="left", padx=5)
         ttk.Entry(gb_size, textvariable=self.region_w_var, width=5, validate="key", validatecommand=vcmd).pack(side="left", padx=5)
-        
+
         ttk.Label(gb_size, text="Height:").pack(side="left", padx=5)
         ttk.Entry(gb_size, textvariable=self.region_h_var, width=5, validate="key", validatecommand=vcmd).pack(side="left", padx=5)
 
         gb_time = ttk.LabelFrame(f_main, text="Timing (Overrides Global)")
         gb_time.pack(fill="x", pady=5)
-        
+
         ttk.Label(gb_time, text="Duration (ms):").grid(row=0, column=0, padx=5, pady=2, sticky="e")
         self.entry_dur = ttk.Entry(gb_time, width=8, validate="key", validatecommand=vcmd)
         self.entry_dur.grid(row=0, column=1, padx=5, pady=2)
-        
+
         ttk.Label(gb_time, text="Random (ms):").grid(row=1, column=0, padx=5, pady=2, sticky="e")
         self.entry_rand = ttk.Entry(gb_time, width=8, validate="key", validatecommand=vcmd)
         self.entry_rand.grid(row=1, column=1, padx=5, pady=2)
 
         ttk.Checkbutton(f_main, text="Independent Thread (Ignores Group/Condition)", variable=self.independent_thread).pack(pady=10, anchor="w")
 
+    def _get_existing_groups(self) -> List[str]:
+        """기존 이벤트에서 그룹 ID 목록 추출"""
+        return sorted({e.group_id for e in self.existing_events if e.group_id and e.group_id.strip()})
+
     def _setup_logic_tab(self):
         f_main = ttk.Frame(self.tab_logic)
         f_main.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        vcmd = (self.win.register(lambda P: P == "" or P.isdigit()), "%P")
+
+        vcmd = self._create_numeric_validator()
 
         gb_exec = ttk.LabelFrame(f_main, text="Execution Type")
         gb_exec.pack(fill="x", pady=5)
@@ -169,18 +177,13 @@ class KeystrokeEventEditor:
 
         gb_grp = ttk.LabelFrame(f_main, text="Grouping & Priority")
         gb_grp.pack(fill="x", pady=5)
-        
+
         ttk.Label(gb_grp, text="Group ID:").grid(row=0, column=0, padx=5, pady=5)
-        
+
         self.cmb_group = ttk.Combobox(gb_grp, textvariable=self.group_id_var, width=15)
         self.cmb_group.grid(row=0, column=1, padx=5, pady=5)
-        
-        existing_groups = sorted({
-            e.group_id for e in self.existing_events 
-            if e.group_id and e.group_id.strip()
-        })
-        self.cmb_group['values'] = existing_groups
-        
+        self.cmb_group['values'] = self._get_existing_groups()
+
         ttk.Label(gb_grp, text="Priority (Lower=High):").grid(row=0, column=2, padx=5, pady=5)
         ttk.Entry(gb_grp, textvariable=self.priority_var, width=5, validate="key", validatecommand=vcmd).grid(row=0, column=3, padx=5, pady=5)
 
@@ -287,12 +290,23 @@ class KeystrokeEventEditor:
                 self.key_to_enter = match[0]
 
     def update_capture_image(self, pos, img):
-        if pos and img:
-            self.latest_pos, self.latest_img = pos, img
-            # Image update is heavy, better to use after if coming from mss thread
-            # But mss callback here might be called from capture thread.
-            if self.lbl_img1.winfo_exists():
-                self.win.after(0, lambda: self._update_img_lbl(self.lbl_img1, img))
+        """
+        [Fix] 스레드 안전한 이미지 업데이트
+        - 윈도우가 닫힌 후 호출될 수 있으므로 위젯 존재 여부 확인
+        """
+        if not pos or not img:
+            return
+
+        self.latest_pos, self.latest_img = pos, img
+
+        # 윈도우와 위젯이 모두 존재하는지 확인
+        try:
+            if hasattr(self, 'win') and self.win.winfo_exists() and \
+               hasattr(self, 'lbl_img1') and self.lbl_img1.winfo_exists():
+                self.win.after(0, lambda: self._safe_update_img_lbl(self.lbl_img1, img))
+        except (tk.TclError, AttributeError, RuntimeError):
+            # 윈도우가 이미 파괴된 경우 무시
+            pass
 
     def hold_image(self):
         if self.latest_pos and self.latest_img:
@@ -356,55 +370,54 @@ class KeystrokeEventEditor:
             self.lbl_ref, Image.new("RGBA", (25, 25), color=self.ref_pixel)
         )
 
+    def _get_condition_display(self, state_val: Optional[bool]) -> str:
+        """조건 상태 값을 표시 문자열로 변환"""
+        if state_val is True:
+            return "Active (True)"
+        elif state_val is False:
+            return "Inactive (False)"
+        return "Ignore"
+
     def _populate_condition_tree(self):
         for item in self.tree_cond.get_children():
             self.tree_cond.delete(item)
-            
+
         for evt in self.existing_events:
             if self.event_name and evt.event_name == self.event_name:
                 continue
-            
+
             # [Fix] 이미 나를 조건으로 참조하고 있는 이벤트는 제외 (1차 방어)
             if evt.conditions and self.event_name in evt.conditions:
                 continue
 
             state_val = self.temp_conditions.get(evt.event_name, None)
-            if state_val is True:
-                display = "Active (True)"
-            elif state_val is False:
-                display = "Inactive (False)"
-            else:
-                display = "Ignore"
-                
+            display = self._get_condition_display(state_val)
             self.tree_cond.insert("", "end", values=(evt.event_name, display))
+
+    def _cycle_condition_state(self, current_state: str) -> tuple[str, Optional[bool]]:
+        """조건 상태 순환: Ignore -> Active -> Inactive -> Ignore"""
+        if "Ignore" in current_state:
+            return "Active (True)", True
+        elif "Active" in current_state:
+            return "Inactive (False)", False
+        else:
+            return "Ignore", None
 
     def _on_tree_click(self, event):
         region = self.tree_cond.identify("region", event.x, event.y)
         if region != "cell":
             return
-            
+
         item_id = self.tree_cond.identify_row(event.y)
         if not item_id:
             return
-            
+
         vals = self.tree_cond.item(item_id, "values")
         evt_name, curr_state = vals[0], vals[1]
-        
-        new_state_disp = "Ignore"
-        new_val = None
-        
-        if "Ignore" in curr_state:
-            new_state_disp = "Active (True)"
-            new_val = True
-        elif "Active" in curr_state:
-            new_state_disp = "Inactive (False)"
-            new_val = False
-        else:
-            new_state_disp = "Ignore"
-            new_val = None
-            
+
+        new_state_disp, new_val = self._cycle_condition_state(curr_state)
         self.tree_cond.item(item_id, values=(evt_name, new_state_disp))
-        
+
         if new_val is None:
             self.temp_conditions.pop(evt_name, None)
         else:
@@ -444,44 +457,59 @@ class KeystrokeEventEditor:
                     return True
         return False
 
-    def save_event(self, event=None):
-        if not all(
-            [
-                self.latest_pos,
-                self.clicked_pos,
-                self.latest_img,
-                self.held_img,
-                self.ref_pixel,
-                self.key_to_enter,
-            ]
-        ):
-            return messagebox.showerror(
-                "Error",
-                "You must set the image, coordinates, key\n이미지와 좌표 및 키를 설정하세요.",
-            )
+    def _validate_required_fields(self) -> bool:
+        """필수 필드 검증"""
+        if not all([self.latest_pos, self.clicked_pos, self.latest_img, self.held_img, self.ref_pixel, self.key_to_enter]):
+            messagebox.showerror("Error", "You must set the image, coordinates, key\n이미지와 좌표 및 키를 설정하세요.")
+            return False
+        return True
 
+    def _parse_numeric_inputs(self) -> tuple[Optional[int], Optional[int], int, int, int]:
+        """숫자 입력값 파싱 및 검증"""
         try:
             dur_str, rand_str = self.entry_dur.get(), self.entry_rand.get()
             dur = int(dur_str) if dur_str else None
             rand = int(rand_str) if rand_str else None
-            
+
             rw = self.region_w_var.get()
             rh = self.region_h_var.get()
+
             if self.match_mode_var.get() == "region" and (rw <= 0 or rh <= 0):
-                return messagebox.showerror("Error", "Region Width/Height must be > 0")
-                
+                messagebox.showerror("Error", "Region Width/Height must be > 0")
+                return None, None, 0, 0, 0
+
             try:
                 prio = self.priority_var.get()
             except tk.TclError:
                 prio = 0
-                
-        except ValueError:
-            return messagebox.showerror("Error", "Invalid numeric input.")
 
+            return dur, rand, rw, rh, prio
+        except ValueError:
+            messagebox.showerror("Error", "Invalid numeric input.")
+            return None, None, 0, 0, 0
+
+    def _validate_timing_values(self, dur: Optional[int], rand: Optional[int]) -> bool:
+        """타이밍 값 검증"""
         if dur and dur < 50:
-            return messagebox.showerror("Error", "Press Duration must be at least 50 ms.")
+            messagebox.showerror("Error", "Press Duration must be at least 50 ms.")
+            return False
         if dur and rand and rand < 30:
-            return messagebox.showerror("Error", "Randomization must be at least 30 ms.")
+            messagebox.showerror("Error", "Randomization must be at least 30 ms.")
+            return False
+        return True
+
+    def save_event(self, event=None):
+        if not self._validate_required_fields():
+            return
+
+        parsed = self._parse_numeric_inputs()
+        if parsed == (None, None, 0, 0, 0):
+            return
+
+        dur, rand, rw, rh, prio = parsed
+
+        if not self._validate_timing_values(dur, rand):
+            return
 
         # [Check] 순환 참조 검사
         current_name = self.event_name or f"Event_{len(self.existing_events)+1}" # 임시 이름 처리
@@ -520,6 +548,9 @@ class KeystrokeEventEditor:
         self.close_window()
 
     def close_window(self, event=None):
+        # [Fix] 콜백 비활성화를 위해 capturer 콜백을 None으로 설정
+        self.capturer.screenshot_callback = None
+
         self.key_check_active = False
         if self.key_check_thread.is_alive():
             self.key_check_thread.join(0.5)
@@ -605,6 +636,15 @@ class KeystrokeEventEditor:
         for i, val in enumerate((x, y)):
             entries[i].delete(0, tk.END)
             entries[i].insert(0, str(val))
+
+    def _safe_update_img_lbl(self, lbl, img):
+        """위젯 존재 확인 후 안전하게 이미지 업데이트"""
+        try:
+            if lbl.winfo_exists():
+                self._update_img_lbl(lbl, img)
+        except (tk.TclError, AttributeError):
+            # 위젯이 파괴된 경우 무시
+            pass
 
     @staticmethod
     def _update_img_lbl(lbl, img):
