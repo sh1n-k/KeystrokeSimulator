@@ -448,12 +448,12 @@ class KeystrokeProcessor:
                 if roi is None:
                     return False
 
-                # 체크포인트 검증 (현재 색상 비교 비활성화됨)
+                # 체크포인트 검증
                 for pt in evt.get("check_points", []):
                     px, py = pt["pos"]
                     if py >= roi.shape[0] or px >= roi.shape[1]:
                         continue
-                    # 색상 비교 일시 정지
+                    # 색상 비교
                     if not np.array_equal(roi[py, px], pt["color"]):
                         return False
                 return True
