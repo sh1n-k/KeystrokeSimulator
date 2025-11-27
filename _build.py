@@ -4,7 +4,7 @@ import tempfile
 import PyInstaller.__main__
 from dotenv import load_dotenv, find_dotenv
 
-VERSION = "2.21"
+VERSION = "3.0"
 
 # Load environment variables
 load_dotenv(find_dotenv())

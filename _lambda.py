@@ -25,7 +25,7 @@ ADMIN_KEY = os.environ["ADMIN_KEY"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
-APP_VERSION = "2.21"
+ALLOWED_VERSIONS = ["2.21", "3.0"]
 
 
 # --- 메인 핸들러 ---
@@ -33,13 +33,13 @@ def lambda_handler(event, context):
     method, path = event["routeKey"].split()
     body = json.loads(event.get("body", "{}"))
     ip = event.get("requestContext", {}).get("http", {}).get("sourceIp", "Unknown")
-
+    
     # --- 관리자 기능 라우팅 ---
     if path.startswith("/admin/"):
         if ADMIN_KEY != body.get("adminKey"):
             return response(403, "Unauthorized: Invalid admin key")
 
-        user_id = body.get("userId")  # 관리자 기능은 body에서 userId를 받음
+        user_id = body.get("userId") # 관리자 기능은 body에서 userId를 받음
 
         if method == "POST" and path == "/admin/users/create":
             return create_user(user_id)
@@ -52,7 +52,7 @@ def lambda_handler(event, context):
 
     # --- 기존 클라이언트 앱 기능 라우팅 ---
     app_version = body.get("appVersion")
-    if APP_VERSION != app_version:
+    if app_version not in ALLOWED_VERSIONS:
         return response(400, "Update to the new version.")
 
     user_id = body.get("userId")
@@ -72,9 +72,8 @@ def lambda_handler(event, context):
         if ADMIN_KEY != body.get("adminKey"):
             return response(403, "Unauthorized")
         return clear_logs()
-
+        
     return response(404, "Not Found")
-
 
 # --- 신규 관리자 기능 ---
 def create_user(user_id):
@@ -82,16 +81,15 @@ def create_user(user_id):
         return response(400, "userId is required for creation")
     try:
         users_table.put_item(
-            Item={"userId": user_id, "createdAt": int(time.time())},
-            ConditionExpression="attribute_not_exists(userId)",
+            Item={'userId': user_id, 'createdAt': int(time.time())},
+            ConditionExpression='attribute_not_exists(userId)'
         )
         return response(200, f"User '{user_id}' created successfully.")
     except ClientError as e:
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
             return response(409, f"User '{user_id}' already exists.")
         print(f"Error in create_user: {e}")
         return response(500, "Internal server error during user creation.")
-
 
 def list_users():
     try:
@@ -102,7 +100,7 @@ def list_users():
         while "LastEvaluatedKey" in scan_response:
             scan_response = users_table.scan(
                 ProjectionExpression="userId",
-                ExclusiveStartKey=scan_response["LastEvaluatedKey"],
+                ExclusiveStartKey=scan_response["LastEvaluatedKey"]
             )
             users.extend(scan_response.get("Items", []))
         return response(200, "Users listed successfully", {"users": users})
@@ -110,40 +108,36 @@ def list_users():
         print(f"Error in list_users: {e}")
         return response(500, "Internal server error while listing users.")
 
-
 def delete_user(user_id):
     if not user_id:
         return response(400, "userId is required for deletion")
     try:
-        users_table.delete_item(Key={"userId": user_id})
+        users_table.delete_item(Key={'userId': user_id})
         return response(200, f"User '{user_id}' deleted successfully.")
     except Exception as e:
         print(f"Error in delete_user: {e}")
         return response(500, "Internal server error during user deletion.")
-
 
 def reset_user(user_id):
     if not user_id:
         return response(400, "userId is required for reset")
     try:
         # 1. 세션 테이블에서 해당 사용자의 모든 세션 삭제
-        session_query = sessions_table.query(
-            KeyConditionExpression=Key("userId").eq(user_id)
-        )
+        session_query = sessions_table.query(KeyConditionExpression=Key('userId').eq(user_id))
         with sessions_table.batch_writer() as batch:
             for item in session_query.get("Items", []):
-                batch.delete_item(Key={"userId": item["userId"]})
-
+                batch.delete_item(Key={'userId': item['userId']})
+        
         # 2. 사용자 테이블에서 lastLogin, lastIpAddress 제거(리셋)
         users_table.update_item(
-            Key={"userId": user_id},
+            Key={'userId': user_id},
             UpdateExpression="REMOVE lastLogin, lastIpAddress",
-            ConditionExpression="attribute_exists(userId)",
+            ConditionExpression="attribute_exists(userId)"
         )
         return response(200, f"User '{user_id}' has been reset successfully.")
     except ClientError as e:
         # 사용자가 존재하지 않을 때 발생하는 오류를 잡아서 404로 응답
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
             return response(404, f"User '{user_id}' not found.")
         print(f"Error in reset_user: {e}")
         return response(500, "Internal server error during user reset.")
@@ -201,23 +195,26 @@ def validate_session(user_id, session_token, ip):
         # 일반 속성인 sessionToken은 FilterExpression으로 처리합니다.
         session_response = retry_operation(
             sessions_table.query,
-            KeyConditionExpression=Key("userId").eq(user_id),
-            FilterExpression=Key("sessionToken").eq(session_token),
+            KeyConditionExpression=Key('userId').eq(user_id),
+            FilterExpression=Key('sessionToken').eq(session_token)
         )
-
+        
         if not session_response.get("Items"):
             log_auth_request(user_id, "validate", ip, "invalid")
             send_telegram_message(user_id, ip, "Invalid session")
             return response(401, "Invalid session")
-
+        
         session_item = session_response["Items"][0]
         current_time = int(time.time())
 
         if current_time > session_item["expirationTime"]:
             # 지시사항: 만료된 세션은 업데이트 대신 삭제합니다.
             # 이 때, 테이블 스키마에 맞는 올바른 기본 키를 제공합니다.
-            retry_operation(sessions_table.delete_item, Key={"userId": user_id})
-
+            retry_operation(
+                sessions_table.delete_item,
+                Key={"userId": user_id} 
+            )
+            
             log_auth_request(user_id, "validate", ip, "expired")
             send_telegram_message(user_id, ip, "Session expired")
             return response(401, "Session expired")
@@ -307,7 +304,9 @@ def retry_operation(operation, **kwargs):
             return operation(**kwargs)
         except ClientError as e:
             if e.response["Error"]["Code"] == "ProvisionedThroughputExceededException":
-                sleep_time = (2**retries * BASE_DELAY) + (random.random() * BASE_DELAY)
+                sleep_time = (2**retries * BASE_DELAY) + (
+                    random.random() * BASE_DELAY
+                )
                 time.sleep(sleep_time)
                 retries += 1
             else:
