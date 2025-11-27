@@ -9,7 +9,6 @@ import tkinter as tk
 from dataclasses import fields, asdict
 from pathlib import Path
 from tkinter import ttk, messagebox
-from typing import Callable, List, Dict, Optional
 
 from loguru import logger
 import pynput.keyboard
@@ -30,6 +29,14 @@ from keystroke_utils import (
     KeyUtils,
     ProcessCollector,
 )
+
+
+def safe_call(func, *args, **kwargs):
+    """예외를 무시하고 함수 호출"""
+    try:
+        return func(*args, **kwargs)
+    except Exception:
+        return None
 
 
 class ProcessFrame(tk.Frame):
@@ -70,14 +77,10 @@ class ProfileFrame(tk.Frame):
             self, textvariable=textvariable, state="readonly"
         )
         self.profile_combobox.pack(side=tk.LEFT, padx=5)
-
-        # [수정됨] update_ui에서 참조할 수 있도록 self 변수에 명시적 할당
         self.copy_button = tk.Button(self, text="Copy", command=self.copy_profile)
         self.copy_button.pack(side=tk.LEFT)
-
         self.del_button = tk.Button(self, text="Delete", command=self.delete_profile)
         self.del_button.pack(side=tk.LEFT)
-
         self.load_profiles()
 
     def load_profiles(self):
@@ -109,9 +112,10 @@ class ProfileFrame(tk.Frame):
     def copy_profile(self):
         if not (curr := self.profile_combobox.get()):
             return
-        src = self.profiles_dir / f"{curr}.pkl"
         dst_name = f"{curr} - Copied"
-        shutil.copy(src, self.profiles_dir / f"{dst_name}.pkl")
+        shutil.copy(
+            self.profiles_dir / f"{curr}.pkl", self.profiles_dir / f"{dst_name}.pkl"
+        )
         self.load_profiles()
         self.profile_combobox.set(dst_name)
 
@@ -127,14 +131,14 @@ class ProfileFrame(tk.Frame):
 class ButtonFrame(tk.Frame):
     def __init__(self, master, toggle_cb, events_cb, settings_cb, clear_cb, **kwargs):
         super().__init__(master, **kwargs)
-        buttons = [
+        btns_config = [
             ("Start", toggle_cb),
             ("Quick Events", events_cb),
             ("Settings", settings_cb),
             ("Clear Logs", clear_cb),
         ]
         self.btns = {}
-        for text, cmd in buttons:
+        for text, cmd in btns_config:
             btn = tk.Button(self, text=text, width=10, height=1, command=cmd)
             btn.pack(side=tk.LEFT, padx=5)
             self.btns[text] = btn
@@ -146,13 +150,13 @@ class ButtonFrame(tk.Frame):
 class ProfileButtonFrame(tk.Frame):
     def __init__(self, master, mod_cb, edit_cb, sort_cb, **kwargs):
         super().__init__(master, **kwargs)
-        buttons = [
+        btns_config = [
             ("ModKeys", mod_cb),
             ("Edit Profile", edit_cb),
             ("Sort Profile", sort_cb),
         ]
         self.btns = {}
-        for text, cmd in buttons:
+        for text, cmd in btns_config:
             btn = tk.Button(self, text=text, width=10, height=1, command=cmd)
             btn.pack(side=tk.LEFT, padx=5)
             self.btns[text] = btn
@@ -184,11 +188,11 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.ctrl_check_thread = None
         self.ctrl_check_active = False
 
-        self.create_ui()
-        self.load_settings_and_state()
-        self.setup_event_handlers()
+        self._create_ui()
+        self._load_settings_and_state()
+        self._setup_event_handlers()
 
-    def create_ui(self):
+    def _create_ui(self):
         self.process_frame = ProcessFrame(self, self.selected_process)
         self.profile_frame = ProfileFrame(
             self, self.selected_profile, self.profiles_dir
@@ -217,50 +221,24 @@ class KeystrokeSimulatorApp(tk.Tk):
         style.configure("TEntry", fieldbackground="white")
         WindowUtils.center_window(self)
 
-    def clear_local_logs(self):
-        log_dir = Path("logs")
-        if not messagebox.askokcancel("Confirm", "Delete old log files?"):
-            return
-        if not log_dir.exists():
-            return messagebox.showinfo("Info", "No logs.")
-
-        deleted_size = 0
-        count = 0
-        for p in log_dir.glob("*"):
-            if p.name != "keysym.log" and p.is_file():
-                try:
-                    deleted_size += p.stat().st_size
-                    p.unlink()
-                    count += 1
-                except Exception as e:
-                    logger.warning(f"Del failed {p}: {e}")
-
-        if count:
-            messagebox.showinfo(
-                "Success",
-                f"{count} files cleared.\nSaved: {deleted_size/1048576:.2f} MB",
-            )
-        else:
-            messagebox.showinfo("Info", "No old logs to clear.")
-
-    def load_settings_and_state(self):
-        self.load_settings()
-        self.load_latest_state()
-
-    # 변경 후
-    def load_settings(self):
+    def _load_settings_and_state(self):
+        # Load settings
         s_file = Path("user_settings.json")
+        valid_keys = {f.name for f in fields(UserSettings)}
         try:
-            data = json.loads(s_file.read_text(encoding="utf-8")) if s_file.exists() else {}
-            valid_keys = {f.name for f in fields(UserSettings)}
-            self.settings = UserSettings(**{k: v for k, v in data.items() if k in valid_keys})
+            data = (
+                json.loads(s_file.read_text(encoding="utf-8"))
+                if s_file.exists()
+                else {}
+            )
+            self.settings = UserSettings(
+                **{k: v for k, v in data.items() if k in valid_keys}
+            )
         except Exception:
             self.settings = UserSettings()
-
-        # Save clean settings
         s_file.write_text(json.dumps(asdict(self.settings), indent=2), encoding="utf-8")
 
-    def load_latest_state(self):
+        # Load state
         state = StateUtils.load_main_app_state() or {}
         if proc := state.get("process"):
             match = next(
@@ -276,7 +254,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         if prof := state.get("profile"):
             self.selected_profile.set(prof)
 
-    def setup_event_handlers(self):
+    def _setup_event_handlers(self):
         self.bind("<Escape>", self.on_closing)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.unbind_events()
@@ -284,7 +262,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         if platform.system() == "Darwin" and self.settings.toggle_start_stop_mac:
             self.ctrl_check_active = True
             self.ctrl_check_thread = threading.Thread(
-                target=self.check_for_long_alt_shift, daemon=True
+                target=self._check_for_long_alt_shift, daemon=True
             )
             self.ctrl_check_thread.start()
             return
@@ -297,7 +275,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.keyboard_listener.start()
         elif key.startswith("W_"):
             self.start_stop_mouse_listener = pynput.mouse.Listener(
-                on_scroll=self.on_mouse_scroll
+                on_scroll=self._on_mouse_scroll
             )
             self.start_stop_mouse_listener.start()
         elif key != "DISABLED":
@@ -324,13 +302,11 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.shift_pressed = False
 
     def _on_single_key_press(self, key):
-        if (
-            str(key).replace("Key.", "").replace("'", "").upper()
-            == self.settings.start_stop_key.upper()
-        ):
+        key_str = str(key).replace("Key.", "").replace("'", "").upper()
+        if key_str == self.settings.start_stop_key.upper():
             self.after(0, self.toggle_start_stop)
 
-    def check_for_long_alt_shift(self):
+    def _check_for_long_alt_shift(self):
         last_state, last_time = False, 0
         while self.ctrl_check_active:
             try:
@@ -350,7 +326,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             except Exception:
                 time.sleep(0.1)
 
-    def on_mouse_scroll(self, x, y, dx, dy):
+    def _on_mouse_scroll(self, x, y, dx, dy):
         pid_match = re.search(r"\((\d+)\)", self.selected_process.get())
         if not pid_match or not ProcessUtils.is_process_active(int(pid_match.group(1))):
             return
@@ -364,14 +340,38 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.after(0, self.toggle_start_stop)
         self.latest_scroll_time = curr_time
 
+    def clear_local_logs(self):
+        log_dir = Path("logs")
+        if not messagebox.askokcancel("Confirm", "Delete old log files?"):
+            return
+        if not log_dir.exists():
+            return messagebox.showinfo("Info", "No logs.")
+
+        deleted_size, count = 0, 0
+        for p in log_dir.glob("*"):
+            if p.name != "keysym.log" and p.is_file():
+                try:
+                    deleted_size += p.stat().st_size
+                    p.unlink()
+                    count += 1
+                except Exception as e:
+                    logger.warning(f"Del failed {p}: {e}")
+
+        msg = (
+            f"{count} files cleared.\nSaved: {deleted_size/1048576:.2f} MB"
+            if count
+            else "No old logs to clear."
+        )
+        messagebox.showinfo("Success" if count else "Info", msg)
+
     def toggle_start_stop(self, event=None):
         self.is_running.set(not self.is_running.get())
         if self.is_running.get():
-            self.start_simulation()
+            self._start_simulation()
         else:
-            self.stop_simulation()
+            self._stop_simulation()
 
-    def start_simulation(self):
+    def _start_simulation(self):
         if not (
             self.selected_process.get()
             and "(" in self.selected_process.get()
@@ -400,19 +400,21 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.terminate_event,
         )
         self.keystroke_processor.start()
-        self.save_latest_state()
+        self._save_latest_state()
         self.sound_player.play_start_sound()
-        self.update_ui()
+        self._update_ui()
 
-    def stop_simulation(self):
+    def _stop_simulation(self):
         if self.keystroke_processor:
-            self.keystroke_processor.stop()
+            safe_call(self.keystroke_processor.stop)
             self.keystroke_processor = None
         self.terminate_event.set()
-        self.sound_player.play_stop_sound()
-        self.update_ui()
 
-    def update_ui(self):
+        if safe_call(self.winfo_exists):
+            self.sound_player.play_stop_sound()
+            self._update_ui()
+
+    def _update_ui(self):
         running = self.is_running.get()
         state = "disabled" if running else "normal"
         readonly_state = "disabled" if running else "readonly"
@@ -459,31 +461,47 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.unbind_events()
             self.settings_window = KeystrokeSettings(self)
 
-    def save_latest_state(self):
+    def _save_latest_state(self):
         StateUtils.save_main_app_state(
             process=self.selected_process.get().split(" (")[0],
             profile=self.selected_profile.get(),
         )
 
     def unbind_events(self):
-        self.unbind("<Escape>")
-        if self.keyboard_listener:
-            self.keyboard_listener.stop()
-            self.keyboard_listener = None
-        if self.start_stop_mouse_listener:
-            self.start_stop_mouse_listener.stop()
-            self.start_stop_mouse_listener = None
+        safe_call(self.unbind, "<Escape>")
+
+        for listener in (self.keyboard_listener, self.start_stop_mouse_listener):
+            if listener:
+                safe_call(listener.stop)
+        self.keyboard_listener = None
+        self.start_stop_mouse_listener = None
+
         self.ctrl_check_active = False
-        if self.ctrl_check_thread:
-            self.ctrl_check_thread.join(0.5)
+        if self.ctrl_check_thread and self.ctrl_check_thread.is_alive():
+            safe_call(self.ctrl_check_thread.join, timeout=0.5)
+        self.ctrl_check_thread = None
+
+    # ========== Public Wrappers (for external calls) ==========
+    def load_settings(self):
+        """Public wrapper for KeystrokeSettings to reload settings"""
+        self._load_settings_and_state()
+
+    def setup_event_handlers(self):
+        """Public wrapper for KeystrokeSettings to re-setup event handlers"""
+        self._setup_event_handlers()
 
     def on_closing(self, event=None):
+        if getattr(self, "_is_closing", False):
+            return
+        self._is_closing = True
         logger.info("Shutting down...")
+
         self.terminate_event.set()
-        self.stop_simulation()
-        self.save_latest_state()
-        self.unbind_events()
-        self.destroy()
-        self.quit()
+        safe_call(self._stop_simulation)
+        safe_call(self._save_latest_state)
+        safe_call(self.unbind_events)
+        safe_call(self.destroy)
+        safe_call(self.quit)
+
         if self.secure_callback:
-            self.secure_callback()
+            safe_call(self.secure_callback)
