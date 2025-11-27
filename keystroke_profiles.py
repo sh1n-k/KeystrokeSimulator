@@ -492,6 +492,7 @@ class EventListFrame(ttk.Frame):
             "remove": self._remove_row,
             "menu": self._show_menu,
             "group_select": self._on_group_select,  # NEW
+            "save": lambda: self.save_cb(check_name=False),  # ✅ 추가
         }
         row = EventRow(self, idx, event, cbs)
         row.grid(row=idx + 3, column=0, columnspan=2, padx=5, pady=2, sticky="ew")
@@ -517,8 +518,27 @@ class EventListFrame(ttk.Frame):
         if not evt:
             return messagebox.showinfo("Info", "Only set events can be copied")
         try:
-            new = copy.deepcopy(evt)
-            new.event_name = f"Copy of {evt.event_name}"
+            # ✅ 수동으로 이벤트 복사
+            new = EventModel(
+                event_name=f"Copy of {evt.event_name}",
+                latest_position=evt.latest_position,
+                clicked_position=evt.clicked_position,
+                latest_screenshot=evt.latest_screenshot.copy() if evt.latest_screenshot else None,
+                held_screenshot=evt.held_screenshot.copy() if evt.held_screenshot else None,
+                ref_pixel_value=evt.ref_pixel_value,
+                key_to_enter=evt.key_to_enter,
+                press_duration_ms=getattr(evt, 'press_duration_ms', None),
+                randomization_ms=getattr(evt, 'randomization_ms', None),
+                independent_thread=getattr(evt, 'independent_thread', False),
+                match_mode=getattr(evt, 'match_mode', 'pixel'),
+                region_size=getattr(evt, 'region_size', None),
+                execute_action=getattr(evt, 'execute_action', True),
+                group_id=getattr(evt, 'group_id', None),
+                priority=getattr(evt, 'priority', 0),
+                conditions=copy.deepcopy(getattr(evt, 'conditions', {})),
+            )
+            new.use_event = evt.use_event
+            
             self.profile.event_list.append(new)
             self._add_row(event=new)
             self.save_cb()
@@ -532,6 +552,9 @@ class EventListFrame(ttk.Frame):
         self.rows.remove(row_widget)
         if 0 <= row_num < len(self.profile.event_list):
             self.profile.event_list.pop(row_num)
+        for i, row in enumerate(self.rows):
+            row.row_num = i
+        self._update_row_indices()
         self.save_cb()
         self.win.update_idletasks()
 
@@ -648,6 +671,7 @@ class KeystrokeProfiles:
             self.prof_name = new_name
 
         if reload:
+            self.e_frame.update_events()
             self.e_frame.save_names()
         with open(self.prof_dir / f"{self.prof_name}.pkl", "wb") as f:
             pickle.dump(self.profile, f)

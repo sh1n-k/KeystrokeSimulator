@@ -454,8 +454,8 @@ class KeystrokeProcessor:
                     if py >= roi.shape[0] or px >= roi.shape[1]:
                         continue
                     # 색상 비교 일시 정지
-                    # if not np.array_equal(roi[py, px], pt["color"]):
-                    #     return False
+                    if not np.array_equal(roi[py, px], pt["color"]):
+                        return False
                 return True
             else:
                 # 픽셀 모드

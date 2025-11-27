@@ -52,6 +52,7 @@ class ScreenshotCapturer:
             while self.capturing.is_set():
                 try:
                     position = self.get_current_mouse_position()
+                    callback = self.screenshot_callback
                     if position and self.screenshot_callback:
                         image = sct.grab(
                             {
@@ -64,7 +65,7 @@ class ScreenshotCapturer:
                         pil_image = Image.frombytes(
                             "RGB", image.size, image.bgra, "raw", "BGRX"
                         )
-                        self.screenshot_callback(position, pil_image)
+                        callback(position, pil_image)
                 except tk.TclError as e:
                     logger.error(f"Event windows has been destroyed: {e}")
                     self.capturing.clear()
