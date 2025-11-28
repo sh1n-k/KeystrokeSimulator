@@ -36,6 +36,8 @@ class EventModel:
     # --- Phase 1 Added Fields ---
     # 매칭 모드: 'pixel' (기본) 또는 'region'
     match_mode: str = "pixel"
+    # 매칭 반전: True이면 지정 픽셀/영역이 '다를 때'를 일치로 간주
+    invert_match: bool = False
     # 지역 크기: (width, height), pixel 모드일 경우 무시됨
     region_size: Tuple[int, int] | None = None
     # 키 입력 실행 여부: False일 경우 조건용으로만 사용

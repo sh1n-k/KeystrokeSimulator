@@ -254,7 +254,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         if prof := state.get("profile"):
             self.selected_profile.set(prof)
 
-    def setup_event_handlers(self):
+    def _setup_event_handlers(self):
         self.unbind_events()
         self.bind("<Escape>", self.on_closing)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -416,6 +416,10 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.sound_player.play_stop_sound()
             self._update_ui()
 
+    def update_ui(self):
+        """Backward-compatible wrapper for external/UI callers"""
+        return self._update_ui()
+
     def _update_ui(self):
         running = self.is_running.get()
         state = "disabled" if running else "normal"
@@ -491,6 +495,14 @@ class KeystrokeSimulatorApp(tk.Tk):
     def setup_event_handlers(self):
         """Public wrapper for KeystrokeSettings to re-setup event handlers"""
         self._setup_event_handlers()
+
+    def start_simulation(self):
+        """Backward-compatible wrapper for external callers"""
+        return self._start_simulation()
+
+    def stop_simulation(self):
+        """Backward-compatible wrapper for external callers"""
+        return self._stop_simulation()
 
     def on_closing(self, event=None):
         if getattr(self, "_is_closing", False):

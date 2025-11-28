@@ -33,6 +33,7 @@ class KeystrokeEventEditor:
         self.match_mode_var = tk.StringVar(value="pixel")
         self.region_w_var = tk.IntVar(value=20)
         self.region_h_var = tk.IntVar(value=20)
+        self.invert_match_var = tk.BooleanVar(value=False)
         self.execute_action_var = tk.BooleanVar(value=True)
         self.group_id_var = tk.StringVar()
         self.priority_var = tk.IntVar(value=0)
@@ -147,6 +148,11 @@ class KeystrokeEventEditor:
         ).pack(side="left", padx=10)
         ttk.Radiobutton(
             gb_mode, text="Region (Area)", variable=self.match_mode_var, value="region"
+        ).pack(side="left", padx=10)
+        ttk.Checkbutton(
+            gb_mode,
+            text="Trigger when NOT matching (반전 매칭)",
+            variable=self.invert_match_var,
         ).pack(side="left", padx=10)
 
         gb_size = ttk.LabelFrame(f_main, text="Region Size (Only for Region Mode)")
@@ -647,6 +653,7 @@ class KeystrokeEventEditor:
             randomization_ms=rand,
             independent_thread=self.independent_thread.get(),
             match_mode=self.match_mode_var.get(),
+            invert_match=self.invert_match_var.get(),
             region_size=(rw, rh),
             execute_action=self.execute_action_var.get(),
             group_id=grp_id,
@@ -746,6 +753,7 @@ class KeystrokeEventEditor:
             self.entry_rand.insert(0, str(int(r)))
 
         self.match_mode_var.set(getattr(evt, "match_mode", "pixel"))
+        self.invert_match_var.set(getattr(evt, "invert_match", False))
         if r_size := getattr(evt, "region_size", None):
             self.region_w_var.set(r_size[0])
             self.region_h_var.set(r_size[1])

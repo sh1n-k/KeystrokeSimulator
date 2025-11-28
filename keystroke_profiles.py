@@ -209,7 +209,11 @@ class EventRow(ttk.Frame):
 
         # Key (NEW)
         key = self.event.key_to_enter or ""
-        self.lbl_key.config(text=key if key else "---")
+        invert = getattr(self.event, "invert_match", False)
+        display = key if key else "---"
+        if invert:
+            display = f"≠ {display}"
+        self.lbl_key.config(text=display)
 
     def _on_indep_click(self, event=None):
         if self.event:
@@ -531,6 +535,7 @@ class EventListFrame(ttk.Frame):
                 randomization_ms=getattr(evt, 'randomization_ms', None),
                 independent_thread=getattr(evt, 'independent_thread', False),
                 match_mode=getattr(evt, 'match_mode', 'pixel'),
+                invert_match=getattr(evt, 'invert_match', False),
                 region_size=getattr(evt, 'region_size', None),
                 execute_action=getattr(evt, 'execute_action', True),
                 group_id=getattr(evt, 'group_id', None),
@@ -640,6 +645,8 @@ class KeystrokeProfiles:
                 for e in p.event_list:
                     if not hasattr(e, "match_mode"):
                         e.match_mode = "pixel"
+                    if not hasattr(e, "invert_match"):
+                        e.invert_match = False
                     if not hasattr(e, "execute_action"):
                         e.execute_action = True
                     if not hasattr(e, "group_id"):

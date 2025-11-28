@@ -223,6 +223,7 @@ class KeystrokeProcessor:
             evt_data = {
                 "name": e.event_name or "Unknown",
                 "mode": mode,
+                "invert": getattr(e, "invert_match", False),
                 "key": key,
                 "center_x": center_x,
                 "center_y": center_y,
@@ -469,6 +470,8 @@ class KeystrokeProcessor:
         return img[y : y + h, x : x + w, :3]
 
     def _check_match(self, img: np.ndarray, evt: Dict, is_independent: bool) -> bool:
+        matched = False
+        evaluated = False
         try:
             if evt["mode"] == "region":
                 roi = self._extract_roi(img, evt, is_independent)
@@ -482,8 +485,12 @@ class KeystrokeProcessor:
                         continue
                     # 색상 비교
                     if not np.array_equal(roi[py, px], pt["color"]):
-                        return False
-                return True
+                        matched = False
+                        evaluated = True
+                        break
+                else:
+                    matched = True
+                    evaluated = True
             else:
                 # 픽셀 모드
                 if is_independent:
@@ -493,9 +500,13 @@ class KeystrokeProcessor:
                     if py >= img.shape[0] or px >= img.shape[1]:
                         return False
                     pixel = img[py, px][:3]
-                return np.array_equal(pixel, evt["ref_bgr"])
+                matched = np.array_equal(pixel, evt["ref_bgr"])
+                evaluated = True
         except Exception:
             return False
+        if evt.get("invert") and evaluated:
+            return not matched
+        return matched
 
     def _calculate_press_duration(self, evt: Dict) -> float:
         """목표 키 누름 지속 시간 계산 (초 단위)"""

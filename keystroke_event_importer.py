@@ -111,6 +111,8 @@ class EventImporter:
         for e in event_list:
             if not hasattr(e, "match_mode"):
                 e.match_mode = "pixel"
+            if not hasattr(e, "invert_match"):
+                e.invert_match = False
             if not hasattr(e, "execute_action"):
                 e.execute_action = True
             if not hasattr(e, "group_id"):
@@ -190,6 +192,7 @@ class EventImporter:
             randomization_ms=getattr(evt, "randomization_ms", None),
             independent_thread=getattr(evt, "independent_thread", False),
             match_mode=getattr(evt, "match_mode", "pixel"),
+            invert_match=getattr(evt, "invert_match", False),
             region_size=getattr(evt, "region_size", None),
             execute_action=getattr(evt, "execute_action", True),
             group_id=getattr(evt, "group_id", None),
