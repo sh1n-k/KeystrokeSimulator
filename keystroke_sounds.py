@@ -6,9 +6,14 @@ from typing import Optional
 
 class SoundPlayer:
     def __init__(self):
-        pygame.mixer.init()
-        self.start_sound = self._load_sound(START_SOUND)
-        self.stop_sound = self._load_sound(STOP_SOUND)
+        self.start_sound = None
+        self.stop_sound = None
+        try:
+            pygame.mixer.init()
+            self.start_sound = self._load_sound(START_SOUND)
+            self.stop_sound = self._load_sound(STOP_SOUND)
+        except Exception as e:
+            print(f"Sound init error: {e}")
 
     def _load_sound(self, b64_data: str) -> Optional[pygame.mixer.Sound]:
         """Base64 디코딩 및 Sound 객체 생성 (실패 시 None 반환)"""

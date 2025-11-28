@@ -21,6 +21,30 @@ elif platform.system() == "Darwin":
     from Quartz import CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap
 
 
+def _normalize_key_name(key_codes: Dict[str, int], key_name: Optional[str]) -> Optional[str]:
+    """Return the key name that exists in key_codes (case-insensitive)."""
+    if not key_name:
+        return None
+
+    raw = key_name.strip()
+    if not raw:
+        return None
+
+    if raw in key_codes:
+        return raw
+
+    upper = raw.upper()
+    if upper in key_codes:
+        return upper
+
+    # Fallback: linear search with lower-case comparison to catch mixed case keys like "Space"
+    lower = raw.lower()
+    for k in key_codes:
+        if k.lower() == lower:
+            return k
+    return None
+
+
 class KeySimulator:
     # (기존과 동일)
     def __init__(self, os_type: str):
@@ -66,14 +90,15 @@ class ModificationKeyHandler:
             await asyncio.gather(*tasks)
 
         if active:
-            self.event.set()
+                self.event.set()
         else:
             self.event.clear()
 
         return active
 
     async def _sim_key(self, key_name: str):
-        if code := self.key_codes.get(key_name.upper()):
+        norm_key = _normalize_key_name(self.key_codes, key_name)
+        if norm_key and (code := self.key_codes.get(norm_key)):
             self.sim.press(code)
             await asyncio.sleep(random.uniform(*self.press_time))
             self.sim.release(code)
@@ -176,7 +201,9 @@ class KeystrokeProcessor:
             center_y = e.latest_position[1] + e.clicked_position[1]
             is_indep = getattr(e, "independent_thread", False)
             mode = getattr(e, "match_mode", "pixel")
-            key = e.key_to_enter.upper()
+            key = _normalize_key_name(self.key_codes, e.key_to_enter)
+            if not key:
+                continue
 
             ref_sig = None
             if mode == "pixel":

@@ -277,9 +277,9 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.selected_profile.set(prof)
 
     def setup_event_handlers(self):
+        self.unbind_events()
         self.bind("<Escape>", self.on_closing)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.unbind_events()
 
         if platform.system() == "Darwin" and self.settings.toggle_start_stop_mac:
             self.ctrl_check_active = True
@@ -365,10 +365,12 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.latest_scroll_time = curr_time
 
     def toggle_start_stop(self, event=None):
-        self.is_running.set(not self.is_running.get())
-        if self.is_running.get():
-            self.start_simulation()
+        if not self.is_running.get():
+            if self.start_simulation():
+                self.is_running.set(True)
+                self.update_ui()
         else:
+            self.is_running.set(False)
             self.stop_simulation()
 
     def start_simulation(self):
@@ -377,7 +379,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             and "(" in self.selected_process.get()
             and self.selected_profile.get()
         ):
-            return
+            return False
 
         try:
             with open(
@@ -389,7 +391,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         events = [p for p in profile.event_list if p.key_to_enter and p.use_event]
         if not events:
-            return
+            return False
 
         self.terminate_event.clear()
         self.keystroke_processor = KeystrokeProcessor(
@@ -402,7 +404,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.keystroke_processor.start()
         self.save_latest_state()
         self.sound_player.play_start_sound()
-        self.update_ui()
+        return True
 
     def stop_simulation(self):
         if self.keystroke_processor:
