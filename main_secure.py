@@ -17,7 +17,7 @@ load_dotenv(find_dotenv())
 
 
 class Config:
-    APP_VERSION = "2.21"
+    APP_VERSION = "3.0"
     AUTH_URL = os.getenv("AUTH_URL")
     VALIDATE_URL = os.getenv("VALIDATE_URL")
     MAX_USER_ID_LENGTH = 12
