@@ -190,7 +190,7 @@ class KeystrokeProcessor:
         seen_signatures = set()
 
         for e in raw_events:
-            if not e.use_event or not e.key_to_enter:
+            if not e.use_event:
                 continue
 
             if getattr(e, "match_mode", "pixel") == "pixel":
@@ -201,9 +201,7 @@ class KeystrokeProcessor:
             center_y = e.latest_position[1] + e.clicked_position[1]
             is_indep = getattr(e, "independent_thread", False)
             mode = getattr(e, "match_mode", "pixel")
-            key = _normalize_key_name(self.key_codes, e.key_to_enter)
-            if not key:
-                continue
+            key = _normalize_key_name(self.key_codes, e.key_to_enter) if e.key_to_enter else None
 
             ref_sig = None
             if mode == "pixel":

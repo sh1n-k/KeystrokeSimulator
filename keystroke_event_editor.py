@@ -560,20 +560,24 @@ class KeystrokeEventEditor:
 
     def _validate_required_fields(self) -> bool:
         """필수 필드 검증"""
-        if not all(
-            [
-                self.latest_pos,
-                self.clicked_pos,
-                self.latest_img,
-                self.held_img,
-                self.ref_pixel,
-                self.key_to_enter,
-            ]
-        ):
-            messagebox.showerror(
-                "Error",
-                "You must set the image, coordinates, key\n이미지와 좌표 및 키를 설정하세요.",
+        required = [
+            self.latest_pos,
+            self.clicked_pos,
+            self.latest_img,
+            self.held_img,
+            self.ref_pixel,
+        ]
+        need_key = self.execute_action_var.get()
+        if need_key:
+            required.append(self.key_to_enter)
+
+        if not all(required):
+            msg = (
+                "You must set the image, coordinates, key\n이미지와 좌표 및 키를 설정하세요."
+                if need_key
+                else "You must set the image and coordinates\n이미지와 좌표를 설정하세요."
             )
+            messagebox.showerror("Error", msg)
             return False
         return True
 

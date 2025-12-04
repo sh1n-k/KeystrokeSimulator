@@ -389,7 +389,12 @@ class KeystrokeSimulatorApp(tk.Tk):
         except Exception:
             profile = ProfileModel()
 
-        events = [p for p in profile.event_list if p.key_to_enter and p.use_event]
+        # include condition-only events even if they have no key
+        events = [
+            p
+            for p in profile.event_list
+            if p.use_event and (p.key_to_enter or not getattr(p, "execute_action", True))
+        ]
         if not events:
             return False
 
