@@ -7,7 +7,12 @@ def main():
     log_path = Path("logs")
     log_path.mkdir(exist_ok=True)
     
-    logger.add(log_path / "keysym.log", rotation="1 MB", level="INFO", enqueue=True)
+    log_handler_id = logger.add(
+        log_path / "keysym.log",
+        rotation="1 MB",
+        level="INFO",
+        enqueue=False,
+    )
     Path("profiles").mkdir(exist_ok=True)
     
     from keystroke_simulator_app import KeystrokeSimulatorApp
@@ -30,6 +35,7 @@ def main():
             app.on_closing()
     finally:
         logger.info("Application terminated.")
+        logger.remove(log_handler_id)
 
 if __name__ == "__main__":
     main()
