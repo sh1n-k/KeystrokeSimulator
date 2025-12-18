@@ -14,14 +14,16 @@ from loguru import logger
 from keystroke_models import EventModel
 from keystroke_utils import KeyUtils, ProcessUtils
 
-# OS-specific imports (기존과 동일)
+# OS-specific imports
 if platform.system() == "Windows":
     import win32gui, win32process
 elif platform.system() == "Darwin":
     from Quartz import CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap
 
 
-def _normalize_key_name(key_codes: Dict[str, int], key_name: Optional[str]) -> Optional[str]:
+def _normalize_key_name(
+    key_codes: Dict[str, int], key_name: Optional[str]
+) -> Optional[str]:
     """Return the key name that exists in key_codes (case-insensitive)."""
     if not key_name:
         return None
@@ -46,7 +48,6 @@ def _normalize_key_name(key_codes: Dict[str, int], key_name: Optional[str]) -> O
 
 
 class KeySimulator:
-    # (기존과 동일)
     def __init__(self, os_type: str):
         self.os_type = os_type
         if os_type == "Windows":
@@ -90,7 +91,7 @@ class ModificationKeyHandler:
             await asyncio.gather(*tasks)
 
         if active:
-                self.event.set()
+            self.event.set()
         else:
             self.event.clear()
 
@@ -152,12 +153,6 @@ class KeystrokeProcessor:
         self.main_thread = threading.Thread(target=self._run_loop, daemon=True)
         self.indep_threads: List[threading.Thread] = []
 
-    # ... (start, stop, _init_event_data, _run_loop, _process_main, _evaluate_and_execute_main 메서드는 기존 유지) ...
-    # ... (_check_match 메서드에서 주석 해제한 부분은 이전 답변 적용 유지) ...
-
-    # 생략된 부분들은 이전 코드와 동일하게 유지한다고 가정하고,
-    # 문제가 된 press_key 메서드들만 수정합니다.
-
     def start(self):
         logger.info(f"Processor starting... PID: {self.pid}")
         self.main_thread.start()
@@ -182,8 +177,6 @@ class KeystrokeProcessor:
     def _init_event_data(
         self, raw_events: List[EventModel]
     ) -> Tuple[List[Dict], List[Dict], Optional[Dict]]:
-        # ... (이전 코드와 동일하되, 주석 해제된 Region 매칭 로직 적용 필요) ...
-        # (편의상 중략, 이전 답변의 수정 사항이 적용되어 있어야 함)
         events_data = []
         independent_data = []
         all_coords = []
@@ -201,7 +194,11 @@ class KeystrokeProcessor:
             center_y = e.latest_position[1] + e.clicked_position[1]
             is_indep = getattr(e, "independent_thread", False)
             mode = getattr(e, "match_mode", "pixel")
-            key = _normalize_key_name(self.key_codes, e.key_to_enter) if e.key_to_enter else None
+            key = (
+                _normalize_key_name(self.key_codes, e.key_to_enter)
+                if e.key_to_enter
+                else None
+            )
 
             ref_sig = None
             if mode == "pixel":
@@ -344,10 +341,11 @@ class KeystrokeProcessor:
                     except Exception as e:
                         logger.error(f"Capture failed: {e}")
 
-                # [수정] 랜덤 딜레이 적용 시 루프 간 지연
                 await asyncio.sleep(random.uniform(*self.delays))
 
-    def _filter_by_conditions(self, candidates: List[Dict], local_states: Dict) -> List[Dict]:
+    def _filter_by_conditions(
+        self, candidates: List[Dict], local_states: Dict
+    ) -> List[Dict]:
         """조건 필터링"""
         filtered = []
         for evt in candidates:
@@ -356,7 +354,8 @@ class KeystrokeProcessor:
                 continue
 
             if all(
-                local_states.get(cond_name, self.current_states.get(cond_name, False)) == expected
+                local_states.get(cond_name, self.current_states.get(cond_name, False))
+                == expected
                 for cond_name, expected in evt["conds"].items()
             ):
                 filtered.append(evt)
@@ -375,7 +374,9 @@ class KeystrokeProcessor:
                 no_group.append(evt)
 
         # 각 그룹에서 최고 우선순위 이벤트만 선택
-        final_events = [min(grp_evts, key=lambda e: e["priority"]) for grp_evts in groups.values()]
+        final_events = [
+            min(grp_evts, key=lambda e: e["priority"]) for grp_evts in groups.values()
+        ]
         final_events.extend(no_group)
 
         return final_events
@@ -453,7 +454,9 @@ class KeystrokeProcessor:
 
                 time.sleep(random.uniform(*self.delays))
 
-    def _extract_roi(self, img: np.ndarray, evt: Dict, is_independent: bool) -> Optional[np.ndarray]:
+    def _extract_roi(
+        self, img: np.ndarray, evt: Dict, is_independent: bool
+    ) -> Optional[np.ndarray]:
         """이미지에서 관심 영역(ROI) 추출"""
         if is_independent:
             return img[:, :, :3]
@@ -508,7 +511,11 @@ class KeystrokeProcessor:
 
     def _calculate_press_duration(self, evt: Dict) -> float:
         """목표 키 누름 지속 시간 계산 (초 단위)"""
-        duration = evt["dur"] / 1000.0 if evt["dur"] else random.uniform(*self.default_press_times)
+        duration = (
+            evt["dur"] / 1000.0
+            if evt["dur"]
+            else random.uniform(*self.default_press_times)
+        )
         if evt["rand"]:
             duration += random.uniform(-evt["rand"], evt["rand"]) / 1000.0
         return max(0.05, duration)

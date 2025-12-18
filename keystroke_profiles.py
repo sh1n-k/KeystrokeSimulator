@@ -261,11 +261,23 @@ class EventRow(ttk.Frame):
 class EventListFrame(ttk.Frame):
     # 특수 키 정렬 순서 (클래스 상수)
     SPECIAL_KEYS_ORDER = {
-        "SPACE": 0, "TAB": 1, "ENTER": 2, "RETURN": 2,
-        "BACKSPACE": 3, "DELETE": 4, "INSERT": 5,
-        "HOME": 6, "END": 7, "PAGEUP": 8, "PAGEDOWN": 9,
-        "UP": 10, "DOWN": 11, "LEFT": 12, "RIGHT": 13,
-        "ESC": 14, "ESCAPE": 14,
+        "SPACE": 0,
+        "TAB": 1,
+        "ENTER": 2,
+        "RETURN": 2,
+        "BACKSPACE": 3,
+        "DELETE": 4,
+        "INSERT": 5,
+        "HOME": 6,
+        "END": 7,
+        "PAGEUP": 8,
+        "PAGEDOWN": 9,
+        "UP": 10,
+        "DOWN": 11,
+        "LEFT": 12,
+        "RIGHT": 13,
+        "ESC": 14,
+        "ESCAPE": 14,
     }
 
     def __init__(self, win, profile: ProfileModel, save_cb: Callable):
@@ -496,7 +508,7 @@ class EventListFrame(ttk.Frame):
             "remove": self._remove_row,
             "menu": self._show_menu,
             "group_select": self._on_group_select,  # NEW
-            "save": lambda: self.save_cb(check_name=False),  # ✅ 추가
+            "save": lambda: self.save_cb(check_name=False),  # 추가
         }
         row = EventRow(self, idx, event, cbs)
         row.grid(row=idx + 3, column=0, columnspan=2, padx=5, pady=2, sticky="ew")
@@ -522,28 +534,32 @@ class EventListFrame(ttk.Frame):
         if not evt:
             return messagebox.showinfo("Info", "Only set events can be copied")
         try:
-            # ✅ 수동으로 이벤트 복사
+            # 수동으로 이벤트 복사
             new = EventModel(
                 event_name=f"Copy of {evt.event_name}",
                 latest_position=evt.latest_position,
                 clicked_position=evt.clicked_position,
-                latest_screenshot=evt.latest_screenshot.copy() if evt.latest_screenshot else None,
-                held_screenshot=evt.held_screenshot.copy() if evt.held_screenshot else None,
+                latest_screenshot=(
+                    evt.latest_screenshot.copy() if evt.latest_screenshot else None
+                ),
+                held_screenshot=(
+                    evt.held_screenshot.copy() if evt.held_screenshot else None
+                ),
                 ref_pixel_value=evt.ref_pixel_value,
                 key_to_enter=evt.key_to_enter,
-                press_duration_ms=getattr(evt, 'press_duration_ms', None),
-                randomization_ms=getattr(evt, 'randomization_ms', None),
-                independent_thread=getattr(evt, 'independent_thread', False),
-                match_mode=getattr(evt, 'match_mode', 'pixel'),
-                invert_match=getattr(evt, 'invert_match', False),
-                region_size=getattr(evt, 'region_size', None),
-                execute_action=getattr(evt, 'execute_action', True),
-                group_id=getattr(evt, 'group_id', None),
-                priority=getattr(evt, 'priority', 0),
-                conditions=copy.deepcopy(getattr(evt, 'conditions', {})),
+                press_duration_ms=getattr(evt, "press_duration_ms", None),
+                randomization_ms=getattr(evt, "randomization_ms", None),
+                independent_thread=getattr(evt, "independent_thread", False),
+                match_mode=getattr(evt, "match_mode", "pixel"),
+                invert_match=getattr(evt, "invert_match", False),
+                region_size=getattr(evt, "region_size", None),
+                execute_action=getattr(evt, "execute_action", True),
+                group_id=getattr(evt, "group_id", None),
+                priority=getattr(evt, "priority", 0),
+                conditions=copy.deepcopy(getattr(evt, "conditions", {})),
             )
             new.use_event = evt.use_event
-            
+
             self.profile.event_list.append(new)
             self._add_row(event=new)
             self.save_cb()
@@ -703,7 +719,7 @@ class KeystrokeProfiles:
 
     def _parse_position(self, pos_str: str) -> tuple[str, str]:
         """위치 문자열을 x, y 좌표로 파싱"""
-        parts = pos_str.split('/')
+        parts = pos_str.split("/")
         return parts[0], parts[1]
 
     def _load_pos(self):

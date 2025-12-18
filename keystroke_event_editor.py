@@ -316,7 +316,7 @@ class KeystrokeEventEditor:
 
     def check_key_states(self):
         """
-        [Fix] Thread Safety:
+        Thread Safety:
         백그라운드 스레드에서 UI 업데이트 호출 시 self.win.after 사용
         """
         while self.key_check_active:
@@ -362,7 +362,7 @@ class KeystrokeEventEditor:
 
     def update_capture_image(self, pos, img):
         """
-        [Fix] 스레드 안전한 이미지 업데이트
+        스레드 안전한 이미지 업데이트
         - 윈도우가 닫힌 후 호출될 수 있으므로 위젯 존재 여부 확인
         """
         if not pos or not img:
@@ -410,7 +410,7 @@ class KeystrokeEventEditor:
             return
 
         self.clicked_pos = (ix, iy)
-        self._update_ref_pixel(self.held_img, (ix, iy))  # ✅ deepcopy 제거 (불필요)
+        self._update_ref_pixel(self.held_img, (ix, iy))  # deepcopy 제거 (불필요)
         self._set_entries(self.coord_entries[2:], ix, iy)
         self._draw_overlay(self.held_img, self.lbl_img2)
 
@@ -418,7 +418,7 @@ class KeystrokeEventEditor:
         if not self.clicked_pos:
             return
 
-        res_img = img.copy()  # ✅ copy.deepcopy → copy()
+        res_img = img.copy()  # copy.deepcopy → copy()
         draw = ImageDraw.Draw(res_img)
         cx, cy = self.clicked_pos
         w, h = res_img.size
@@ -433,7 +433,7 @@ class KeystrokeEventEditor:
             except Exception:
                 pass
         else:
-            # ✅ 이미지 모드에 관계없이 안전하게 처리
+            # 이미지 모드에 관계없이 안전하게 처리
             pixels = res_img.load()
             num_channels = len(res_img.getbands())
 
@@ -485,7 +485,7 @@ class KeystrokeEventEditor:
             if self.event_name and evt.event_name == self.event_name:
                 continue
 
-            # [Fix] 이미 나를 조건으로 참조하고 있는 이벤트는 제외 (1차 방어)
+            # 이미 나를 조건으로 참조하고 있는 이벤트는 제외 (1차 방어)
             if evt.conditions and self.event_name in evt.conditions:
                 continue
 
@@ -640,7 +640,7 @@ class KeystrokeEventEditor:
                 "Error", "Circular dependency detected in conditions!"
             )
 
-        # [Check] 독립 스레드일 경우 그룹 제거
+        # 독립 스레드일 경우 그룹 제거
         grp_id = self.group_id_var.get()
         if self.independent_thread.get():
             grp_id = None
@@ -649,8 +649,8 @@ class KeystrokeEventEditor:
             final_name,
             self.latest_pos,
             self.clicked_pos,
-            self.latest_img.copy() if self.latest_img else None,  # ✅ 복사본
-            self.held_img.copy() if self.held_img else None,  # ✅ 복사본
+            self.latest_img.copy() if self.latest_img else None,  # 복사본
+            self.held_img.copy() if self.held_img else None,  # 복사본
             self.ref_pixel,
             self.key_to_enter,
             press_duration_ms=dur,
@@ -669,7 +669,7 @@ class KeystrokeEventEditor:
         self.close_window()
 
     def close_window(self, event=None):
-        # [Fix] 콜백 비활성화를 위해 capturer 콜백을 None으로 설정
+        # 콜백 비활성화를 위해 capturer 콜백을 None으로 설정
         self.capturer.stop_capture()
         self.capturer.screenshot_callback = None
         self.key_check_active = False
@@ -727,7 +727,7 @@ class KeystrokeEventEditor:
         self._set_entries(self.coord_entries[:2], *self.latest_pos)
         self._set_entries(self.coord_entries[2:], *self.clicked_pos)
 
-        # ✅ 원본 ref_pixel 값이 있으면 사용
+        # 원본 ref_pixel 값이 있으면 사용
         if hasattr(evt, "ref_pixel_value") and evt.ref_pixel_value:
             self.ref_pixel = evt.ref_pixel_value
             self._update_img_lbl(
