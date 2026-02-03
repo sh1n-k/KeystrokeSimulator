@@ -393,7 +393,8 @@ class KeystrokeSimulatorApp(tk.Tk):
         events = [
             p
             for p in profile.event_list
-            if p.use_event and (p.key_to_enter or not getattr(p, "execute_action", True))
+            if p.use_event
+            and (p.key_to_enter or not getattr(p, "execute_action", True))
         ]
         if not events:
             return False
@@ -422,7 +423,6 @@ class KeystrokeSimulatorApp(tk.Tk):
             self._update_ui()
 
     def update_ui(self):
-        """Backward-compatible wrapper for external/UI callers"""
         return self._update_ui()
 
     def _update_ui(self):
@@ -492,21 +492,16 @@ class KeystrokeSimulatorApp(tk.Tk):
             safe_call(self.ctrl_check_thread.join, timeout=0.5)
         self.ctrl_check_thread = None
 
-    # ========== Public Wrappers (for external calls) ==========
     def load_settings(self):
-        """Public wrapper for KeystrokeSettings to reload settings"""
         self._load_settings_and_state()
 
     def setup_event_handlers(self):
-        """Public wrapper for KeystrokeSettings to re-setup event handlers"""
         self._setup_event_handlers()
 
     def start_simulation(self):
-        """Backward-compatible wrapper for external callers"""
         return self._start_simulation()
 
     def stop_simulation(self):
-        """Backward-compatible wrapper for external callers"""
         return self._stop_simulation()
 
     def on_closing(self, event=None):

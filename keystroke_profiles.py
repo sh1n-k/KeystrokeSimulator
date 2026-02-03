@@ -5,6 +5,9 @@ from pathlib import Path
 from tkinter import ttk, messagebox, simpledialog
 from typing import Callable, Optional, List
 
+from PIL import Image, ImageTk
+
+from keystroke_event_graph import ensure_profile_graph_image
 from keystroke_event_editor import KeystrokeEventEditor
 from keystroke_event_importer import EventImporter
 from keystroke_models import ProfileModel, EventModel
@@ -280,11 +283,19 @@ class EventListFrame(ttk.Frame):
         "ESCAPE": 14,
     }
 
-    def __init__(self, win, profile: ProfileModel, save_cb: Callable):
+    def __init__(
+        self,
+        win,
+        profile: ProfileModel,
+        save_cb: Callable,
+        name_getter: Optional[Callable[[], str]] = None,
+    ):
         super().__init__(win)
         self.win, self.profile, self.save_cb = win, profile, save_cb
         self.rows: List[EventRow] = []
         self.ctx_row = None
+        self.profile_name_getter = name_getter
+        self.graph_viewer = None
 
         # --- Control Buttons ---
         f_ctrl = ttk.Frame(self)
@@ -309,6 +320,11 @@ class EventListFrame(ttk.Frame):
             side=tk.LEFT, padx=2, fill=tk.X, expand=True
         )
 
+        # Graph Viewer Button (NEW)
+        ttk.Button(f_ctrl, text="View Graph", command=self._open_graph).pack(
+            side=tk.LEFT, padx=2, fill=tk.X, expand=True
+        )
+
         self.menu = tk.Menu(self, tearoff=0)
         self.menu.add_command(
             label="Apply Pixel/Region Info to Similar Areas",
@@ -321,6 +337,13 @@ class EventListFrame(ttk.Frame):
     def _get_existing_groups(self) -> List[str]:
         """프로필 내 모든 고유 그룹 ID 반환"""
         return list(set(e.group_id for e in self.profile.event_list if e.group_id))
+
+    def _get_profile_name(self) -> str:
+        if self.profile_name_getter:
+            return self.profile_name_getter()
+        if getattr(self.profile, "name", None):
+            return self.profile.name
+        return "profile"
 
     def _get_key_sort_order(self, key: str | None) -> tuple:
         """키 정렬 순서 반환: 숫자 → 알파벳 → 펑션키 → 특수문자 → None"""
@@ -408,6 +431,23 @@ class EventListFrame(ttk.Frame):
             info += f"  • {grp}: {group_counts.get(grp, 0)} events\n"
 
         messagebox.showinfo("Group Summary", info, parent=self.win)
+
+    def _open_graph(self):
+        self.save_names()
+        name = self._get_profile_name()
+        if self.graph_viewer and self.graph_viewer.is_open():
+            self.graph_viewer.set_profile_name(name)
+            self.graph_viewer.refresh(force=False)
+            self.graph_viewer.lift()
+            return
+        self.graph_viewer = ProfileGraphViewer(
+            parent=self.win,
+            profile=self.profile,
+            profile_name=name,
+            name_getter=self._get_profile_name,
+            on_close=lambda: setattr(self, "graph_viewer", None),
+        )
+        self.graph_viewer.refresh(force=False)
 
     def _on_group_select(self, row_num: int, event: EventModel):
         """그룹 선택 팝업 열기"""
@@ -642,7 +682,9 @@ class KeystrokeProfiles:
         self.profile = self._load()
         self.p_frame = ProfileFrame(self.win, prof_name, self.profile.favorite)
         self.p_frame.pack(pady=5)
-        self.e_frame = EventListFrame(self.win, self.profile, self._save)
+        self.e_frame = EventListFrame(
+            self.win, self.profile, self._save, name_getter=lambda: self.prof_name
+        )
         self.e_frame.pack(fill="both", expand=True)
 
         f_btn = ttk.Frame(self.win, style="success.TFrame")
@@ -686,6 +728,7 @@ class KeystrokeProfiles:
         if check_name and not new_name:
             raise ValueError("Enter profile name")
         self.profile.favorite = is_fav
+        self.profile.name = new_name
 
         if new_name != self.prof_name:
             if (self.prof_dir / f"{new_name}.pkl").exists():
@@ -728,3 +771,154 @@ class KeystrokeProfiles:
             self.win.geometry(f"+{x}+{y}")
         else:
             WindowUtils.center_window(self.win)
+
+
+class ProfileGraphViewer:
+    def __init__(
+        self,
+        parent: tk.Tk | tk.Toplevel,
+        profile: ProfileModel,
+        profile_name: str,
+        name_getter: Optional[Callable[[], str]] = None,
+        on_close: Optional[Callable[[], None]] = None,
+    ):
+        self.parent = parent
+        self.profile = profile
+        self.profile_name = profile_name
+        self.name_getter = name_getter
+        self.on_close = on_close
+        self.cache_dir = Path("profiles") / "_graphs"
+        self._auto_sized = False
+
+        self.win = tk.Toplevel(parent)
+        self.win.title("Profile Graph")
+        self.win.transient(parent)
+        self.win.geometry("900x600")
+        self.win.protocol("WM_DELETE_WINDOW", self._close)
+        self.win.bind("<Escape>", lambda e: self._close())
+        self.win.focus_force()
+        try:
+            self.parent.grab_release()
+        except tk.TclError:
+            pass
+        try:
+            self.win.grab_set()
+        except tk.TclError:
+            pass
+
+        self.toolbar = ttk.Frame(self.win)
+        self.toolbar.pack(fill="x", padx=6, pady=6)
+
+        ttk.Button(self.toolbar, text="Refresh", command=lambda: self.refresh(True)).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(self.toolbar, text="Close", command=self._close).pack(
+            side=tk.LEFT, padx=2
+        )
+        self.lbl_info = ttk.Label(self.toolbar, text="")
+        self.lbl_info.pack(side=tk.RIGHT, padx=6)
+
+        frame = ttk.Frame(self.win)
+        frame.pack(fill="both", expand=True)
+
+        self.canvas = tk.Canvas(frame, bg="#f8f7f2")
+        self.canvas.pack(side=tk.LEFT, fill="both", expand=True)
+
+        self.scroll_y = ttk.Scrollbar(frame, orient="vertical", command=self.canvas.yview)
+        self.scroll_y.pack(side=tk.RIGHT, fill="y")
+        self.scroll_x = ttk.Scrollbar(
+            self.win, orient="horizontal", command=self.canvas.xview
+        )
+        self.scroll_x.pack(side=tk.BOTTOM, fill="x")
+
+        self.canvas.configure(yscrollcommand=self.scroll_y.set)
+        self.canvas.configure(xscrollcommand=self.scroll_x.set)
+        self.canvas.bind("<Enter>", lambda e: self.canvas.focus_set())
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind("<Button-4>", self._on_mousewheel)
+        self.canvas.bind("<Button-5>", self._on_mousewheel)
+        self.win.bind("<MouseWheel>", self._on_mousewheel)
+        self.win.bind("<Button-4>", self._on_mousewheel)
+        self.win.bind("<Button-5>", self._on_mousewheel)
+
+        self.photo = None
+
+    def is_open(self) -> bool:
+        return self.win.winfo_exists()
+
+    def lift(self):
+        self.win.lift()
+        self.win.focus_force()
+
+    def refresh(self, force: bool = False):
+        if self.name_getter:
+            self.profile_name = self.name_getter()
+        self.profile_name = self.profile_name or "profile"
+        path = ensure_profile_graph_image(
+            self.profile, self.profile_name, self.cache_dir, force=force
+        )
+        try:
+            with Image.open(path) as img:
+                img.load()
+                view_img = img.copy()
+        except Exception as e:
+            messagebox.showerror("Graph Error", str(e), parent=self.win)
+            return
+
+        self.photo = ImageTk.PhotoImage(view_img)
+        self.canvas.delete("all")
+        self.canvas.create_image(0, 0, image=self.photo, anchor="nw")
+        self.canvas.config(scrollregion=(0, 0, view_img.width, view_img.height))
+        self.lbl_info.config(text=f"{path.name}  {view_img.width}x{view_img.height}")
+        self._apply_window_size(view_img.width, view_img.height, force=force)
+
+    def set_profile_name(self, name: str):
+        self.profile_name = name
+
+    def _on_mousewheel(self, event):
+        if event.num == 4:
+            self.canvas.yview_scroll(-1, "units")
+            return
+        if event.num == 5:
+            self.canvas.yview_scroll(1, "units")
+            return
+        if not event.delta:
+            return
+        if abs(event.delta) < 120:
+            step = -1 if event.delta > 0 else 1
+        else:
+            step = int(-event.delta / 120)
+        if step != 0:
+            self.canvas.yview_scroll(step, "units")
+
+    def _apply_window_size(self, img_w: int, img_h: int, force: bool = False):
+        if self._auto_sized and not force:
+            return
+        self.win.update_idletasks()
+        extra_w = self.win.winfo_width() - self.canvas.winfo_width()
+        extra_h = self.win.winfo_height() - self.canvas.winfo_height()
+        screen_w = self.win.winfo_screenwidth()
+        screen_h = self.win.winfo_screenheight()
+
+        target_w = min(img_w + extra_w, int(screen_w * 0.9))
+        target_h = min(img_h + extra_h, int(screen_h * 0.9))
+        target_w = max(480, target_w)
+        target_h = max(320, target_h)
+
+        self.win.geometry(f"{target_w}x{target_h}")
+        WindowUtils.center_window(self.win)
+        self._auto_sized = True
+
+    def _close(self):
+        try:
+            self.win.grab_release()
+        except tk.TclError:
+            pass
+        if self.parent and self.parent.winfo_exists():
+            try:
+                self.parent.grab_set()
+            except tk.TclError:
+                pass
+        if self.on_close:
+            self.on_close()
+        self.win.destroy()
