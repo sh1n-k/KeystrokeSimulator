@@ -67,18 +67,14 @@ class KeystrokeSettings(tk.Toplevel):
             2, "Delay between loop (루프 간 지연)", "delay_between_loop", v_cmd
         )
 
-        # 3. Epsilon Entry
-        self._create_epsilon_entry()
-
-        # 4. Explanation & Warning
-        self._create_explanation()
+        # 3. Warning
         self.warning_label = ttk.Label(
             self, text="", foreground="red", background="white"
         )
-        self.warning_label.grid(row=8, column=0, columnspan=5, pady=5)
+        self.warning_label.grid(row=3, column=0, columnspan=5, pady=5)
         self._update_warning_text()
 
-        # 5. Buttons
+        # 4. Buttons
         self._create_buttons()
 
     def _create_key_section(self):
@@ -118,33 +114,9 @@ class KeystrokeSettings(tk.Toplevel):
 
         self._toggle_combo_state()
 
-    def _create_epsilon_entry(self):
-        ttk.Label(self, text="Cluster epsilon value (클러스터 엡실론 값)").grid(
-            row=3, column=0, padx=10, pady=5, sticky="w"
-        )
-        self.ui_vars["epsilon"] = tk.StringVar(
-            value=str(self.settings.cluster_epsilon_value)
-        )
-        ttk.Entry(
-            self,
-            textvariable=self.ui_vars["epsilon"],
-            validate="key",
-            validatecommand=(self.register(self._validate_epsilon), "%P"),
-        ).grid(row=3, column=1, padx=10, pady=5)
-
-    def _create_explanation(self):
-        frame = ttk.LabelFrame(
-            self, text="클러스터 엡실론 값 설명 (Cluster Epsilon Value Explanation)"
-        )
-        frame.grid(row=5, column=0, columnspan=3, padx=10, pady=10, sticky="ew")
-        text = (
-            "• 화면 감지 영역 그룹화 값 (권장: 8-40)\n• 기본값: 20 (100x100 캡처 기준)"
-        )
-        ttk.Label(frame, text=text, justify="left").pack(padx=10, pady=5, anchor="w")
-
     def _create_buttons(self):
         btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=9, column=0, columnspan=3, pady=10)
+        btn_frame.grid(row=4, column=0, columnspan=3, pady=10)
         for text, cmd in [
             ("Reset", self.on_reset),
             ("OK", self.on_ok),
@@ -225,10 +197,6 @@ class KeystrokeSettings(tk.Toplevel):
                 setattr(self.settings, f"{prefix}_min", mn)
                 setattr(self.settings, f"{prefix}_max", mx)
 
-            eps = int(self.ui_vars["epsilon"].get() or 0)
-            if not (10 <= eps <= 200):
-                return self._warn("Epsilon must be between 10-200.")
-            self.settings.cluster_epsilon_value = eps
         except ValueError:
             return self._warn("Invalid numeric input.")
 
@@ -267,8 +235,3 @@ class KeystrokeSettings(tk.Toplevel):
             P.isdigit() and not (P.startswith("0") and len(P) > 1) and int(P) < 1000
         )
 
-    @staticmethod
-    def _validate_epsilon(P):
-        return P == "" or (
-            P.isdigit() and not (P.startswith("0") and len(P) > 1) and int(P) <= 200
-        )

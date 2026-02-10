@@ -10,7 +10,6 @@ class UserSettings:
     key_pressed_time_max: int = 135
     delay_between_loop_min: int = 100
     delay_between_loop_max: int = 150
-    cluster_epsilon_value: int = 20
     max_key_count: int | None = 10
     toggle_start_stop_mac: bool = True
     use_alt_shift_hotkey: bool = False

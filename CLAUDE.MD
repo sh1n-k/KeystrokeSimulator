@@ -15,7 +15,7 @@ This is a Python desktop automation tool that captures screen regions, watches f
    - Event lifecycle coordination
 
 2. **Event Processing (`keystroke_processor.py`)**
-   - Runtime engine that clusters reference pixels using DBSCAN
+   - Runtime engine that builds a mega_rect bounding box and performs exact pixel/region matching
    - Watches for pixel matches in target process windows
    - Issues key presses via OS-specific APIs
    - Handles timing, randomization, and modifier keys
@@ -45,6 +45,7 @@ This is a Python desktop automation tool that captures screen regions, watches f
 - `keystroke_sounds.py`: Pygame-based audio cues
 - `keystroke_sort_events.py`: Event reordering UI
 - `keystroke_event_importer.py`: Cross-profile event migration
+- `keystroke_event_graph.py`: Component/level-based event dependency graph visualization (PIL-based)
 
 ### Entry Points
 
@@ -57,7 +58,7 @@ This is a Python desktop automation tool that captures screen regions, watches f
 
 - **GUI**: Tkinter
 - **Screen Capture**: mss, numpy
-- **Vision**: DBSCAN clustering (scikit-learn)
+- **Vision**: Exact pixel/region matching (numpy)
 - **Input Automation**: pynput, PyObjC (macOS), pywin32 (Windows)
 - **Data**: Pickle for profiles, JSON for settings
 - **Logging**: loguru
@@ -77,15 +78,17 @@ This is a Python desktop automation tool that captures screen regions, watches f
 ### Data Flow
 1. User captures events (pixels + keys) via Quick Event or Event Editor
 2. Events stored in Profile (Pickle)
-3. Processor loads profile, clusters pixels using DBSCAN
-4. Runtime: watches for matches → triggers keystroke sequences
+3. Processor loads profile, builds mega_rect bounding box covering all event positions
+4. Runtime: captures mega_rect once per loop, checks exact pixel/region matches → triggers keystroke sequences
 
 ## File Locations
 
 - **Profiles**: `profiles/*.pkl`
 - **Settings**: `user_settings.json`, `user_settings*.b64` (encrypted backups)
+- **App State**: `app_state.json`
 - **Logs**: `logs/`
 - **Sounds**: `start.mp3`, `stop.mp3`
+- **Tests**: `tests/`, `run_tests.py`, `run_tests.sh`, `run_tests.bat`
 
 ## Code Style Notes
 
@@ -123,6 +126,8 @@ This is a Python desktop automation tool that captures screen regions, watches f
 ## Development Tips
 
 ### Testing
+- Run tests via `python run_tests.py` (cross-platform), `run_tests.sh` (macOS/Linux), or `run_tests.bat` (Windows)
+- Tests are in `tests/` (e.g., `test_condition_and_core_logic.py`)
 - Use `_local_test_server.py` for auth testing without remote server
 - Test pixel matching with different screen resolutions
 - Verify thread safety when modifying processor logic
@@ -133,14 +138,14 @@ This is a Python desktop automation tool that captures screen regions, watches f
 - Process selection issues: check OS permissions for accessibility/screen recording
 
 ### Performance
-- DBSCAN clustering runs per-event at startup
+- Mega_rect bounding box is computed at startup to minimize capture area
 - Screen capture runs continuously during Quick Event mode
 - Consider performance when adding frequent polling logic
 
 ## Common Issues
 
 1. **Process not found**: Refresh process list or check OS permissions
-2. **Pixel matching fails**: Adjust clustering parameters or recapture events
+2. **Pixel matching fails**: Recapture events or check screen resolution changes
 3. **Keys not working**: Verify target process is focused and accepts input
 4. **Auth failures**: Check `.env` configuration and network connectivity
 
@@ -150,7 +155,7 @@ This is a Python desktop automation tool that captures screen regions, watches f
 - pywin32: Required for Windows, skip on macOS
 - Tkinter: Bundled with Python on macOS/Linux, check Windows installation
 - mss: Cross-platform screenshot library
-- scikit-learn: Required for DBSCAN clustering
+- numpy: Used for pixel array comparison and bounding box computation
 
 ## Build & Distribution
 
@@ -158,9 +163,11 @@ This is a Python desktop automation tool that captures screen regions, watches f
 - `_timestamp.py`: Version/build timestamp utilities
 - `_update_sound.py`: Sound asset update utility
 - `requirements.txt`: All Python dependencies
+- `MANUAL.md`: User-facing documentation
 
 ## Git Workflow
 
 - Main branch: `main`
-- Current worktree: `gallant-newton`
-- Recent commits show ongoing UI/UX improvements and timing logic enhancements
+- Worktrees: `main` (primary), `gallant-newton` (at `~/.claude-worktrees/KeystrokeSimulator/gallant-newton`)
+- Additional branches: `busy-maxwell`
+- Recent work: event graph visualization, inverted match option, key-input validation improvements, UI/UX refinements

@@ -113,17 +113,27 @@ class ProfileFrame(tk.Frame):
         if not (curr := self.profile_combobox.get()):
             return
         dst_name = f"{curr} - Copied"
-        shutil.copy(
-            self.profiles_dir / f"{curr}.pkl", self.profiles_dir / f"{dst_name}.pkl"
-        )
-        self.load_profiles()
-        self.profile_combobox.set(dst_name)
+        dst_path = self.profiles_dir / f"{dst_name}.pkl"
+        if dst_path.exists():
+            messagebox.showwarning(
+                "Warning", f"'{dst_name}' 프로필이 이미 존재합니다.", parent=self
+            )
+            return
+        try:
+            shutil.copy(self.profiles_dir / f"{curr}.pkl", dst_path)
+            self.load_profiles()
+            self.profile_combobox.set(dst_name)
+        except Exception as e:
+            messagebox.showerror("Error", f"복사 실패: {e}", parent=self)
 
     def delete_profile(self):
         curr = self.profile_combobox.get()
-        if not curr or curr == "Quick":
+        if not curr:
             return
-        if messagebox.askokcancel("Warning", f"Delete profile '{curr}'."):
+        if curr == "Quick":
+            messagebox.showinfo("Info", "기본 프로필은 삭제할 수 없습니다.", parent=self)
+            return
+        if messagebox.askokcancel("Warning", f"프로필 '{curr}'을(를) 삭제하시겠습니까?"):
             (self.profiles_dir / f"{curr}.pkl").unlink(missing_ok=True)
             self.load_profiles()
 

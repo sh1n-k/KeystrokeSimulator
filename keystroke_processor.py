@@ -381,27 +381,80 @@ class KeystrokeProcessor:
 
         return final_events
 
+    def _resolve_effective_states(self, local_match_states: Dict[str, bool]) -> Dict[str, bool]:
+        """
+        조건 체인을 포함한 '실제 활성 상태' 계산.
+        - raw match가 False면 비활성
+        - raw match가 True여도 조건 불일치면 비활성
+        - 같은 루프 내 이벤트 조건은 재귀적으로 해석(엄격 체인)
+        """
+        events_by_name = {evt["name"]: evt for evt in self.event_data_list}
+        with self.state_lock:
+            base_states = dict(self.current_states)
+
+        resolved: Dict[str, bool] = {}
+        visiting: Set[str] = set()
+
+        def resolve(name: str) -> bool:
+            if name in resolved:
+                return resolved[name]
+            if name in visiting:
+                # 편집기에서 순환을 막지만, 방어적으로 False 처리
+                return False
+
+            evt = events_by_name.get(name)
+            if not evt:
+                return base_states.get(name, False)
+
+            if not local_match_states.get(name, False):
+                resolved[name] = False
+                return False
+
+            visiting.add(name)
+            for cond_name, expected in evt["conds"].items():
+                if cond_name in events_by_name:
+                    cond_value = resolve(cond_name)
+                else:
+                    cond_value = base_states.get(cond_name, False)
+
+                if cond_value != expected:
+                    visiting.discard(name)
+                    resolved[name] = False
+                    return False
+
+            visiting.discard(name)
+            resolved[name] = True
+            return True
+
+        for evt_name in events_by_name:
+            resolve(evt_name)
+
+        return resolved
+
     async def _evaluate_and_execute_main(self, img: np.ndarray):
-        # 1. 활성 이벤트 찾기 및 상태 업데이트
-        local_states = {}
-        active_candidates = []
+        # 1. raw match 상태 수집
+        local_match_states = {}
 
         for evt in self.event_data_list:
-            is_active = self._check_match(img, evt, is_independent=False)
-            local_states[evt["name"]] = is_active
-            if is_active:
-                active_candidates.append(evt)
+            local_match_states[evt["name"]] = self._check_match(
+                img, evt, is_independent=False
+            )
+
+        # 2. 조건 체인을 반영한 실제 활성 상태 계산
+        local_states = self._resolve_effective_states(local_match_states)
 
         with self.state_lock:
             self.current_states.update(local_states)
 
-        # 2. 조건 필터링
-        filtered_events = self._filter_by_conditions(active_candidates, local_states)
+        # 3. 활성 이벤트 선별
+        active_candidates = [
+            evt for evt in self.event_data_list if local_states.get(evt["name"], False)
+        ]
 
-        # 3. 그룹 우선순위 적용
-        final_events = self._select_by_group_priority(filtered_events)
+        # 4. 그룹 우선순위 적용
+        final_events = self._select_by_group_priority(active_candidates)
 
-        # 4. 키 입력 실행
+        # 5. 키 입력 실행
         tasks = [
             self._press_key_async(evt)
             for evt in final_events
@@ -441,12 +494,13 @@ class KeystrokeProcessor:
 
                 try:
                     img = np.array(sct.grab(capture_rect))
-                    is_active = self._check_match(img, evt, is_independent=True)
+                    is_match = self._check_match(img, evt, is_independent=True)
+                    is_active = is_match and self._check_conditions(evt)
 
                     with self.state_lock:
                         self.current_states[evt["name"]] = is_active
 
-                    if is_active and self._check_conditions(evt) and evt["exec"]:
+                    if is_active and evt["exec"]:
                         self._sync_press_key(evt)
 
                 except Exception as e:

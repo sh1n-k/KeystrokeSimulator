@@ -20,7 +20,7 @@ A Python desktop automation tool that captures small screen regions, watches for
 <h3 id="features">Features</h3>
 
 - Process selection with live process enumeration so keystrokes only target the correct window.
-- Pixel-matching keystroke playback powered by MSS screen grabs, numpy, and DBSCAN clustering for resilient detection.
+- Pixel-matching keystroke playback powered by MSS screen grabs and numpy for exact pixel/region comparison.
 - Profile management (including a dedicated "Quick" profile) to organize sequences, favorite workflows, and copy/delete variants.
 - Quick Event capture tool that records reference pixels directly from the screen (ALT to reposition, CTRL to grab, mouse click to place the crosshair).
 - Fine-grained settings for delays, modifier keys, hotkeys, and loop randomization plus audible start/stop cues.
@@ -40,7 +40,7 @@ The project consists of several Python files, each responsible for different fun
 - `keystroke_event_importer.py`: Utilities to migrate events between profiles.
 - `keystroke_models.py`: Dataclasses describing profiles, events, and persisted settings.
 - `keystroke_modkeys.py`: Configuration window for modifier passthrough and macros.
-- `keystroke_processor.py`: Runtime engine that clusters reference pixels, watches for matches, and issues key presses via OS-specific APIs.
+- `keystroke_processor.py`: Runtime engine that builds a bounding box over all events, performs exact pixel/region matching, and issues key presses via OS-specific APIs.
 - `keystroke_profiles.py`: Filesystem-backed profile manager (Pickle persistence plus favorites, copy/delete).
 - `keystroke_quick_event_editor.py`: Lightweight overlay for capturing events without leaving the main screen (ALT moves the selector, CTRL saves the current capture).
 - `keystroke_settings.py`: Settings dialog plus serialization into `user_settings.json` and base64 backups.
@@ -55,8 +55,8 @@ The project consists of several Python files, each responsible for different fun
 - Create a virtual environment and install dependencies via `python -m pip install -r requirements.txt`.
 - Key third-party packages pulled in by `requirements.txt`:
     - Input/GUI stack: `pynput`, `pygame`, `Pillow`, `screeninfo`.
-    - Vision + automation: `mss`, `numpy`, `scikit-learn`, `Cython` (for wheel builds).
-    - Infra/utilities: `loguru`, `requests`, `python-dotenv`, `joblib`, `threadpoolctl`.
+    - Vision + automation: `mss`, `numpy`, `Cython` (for wheel builds).
+    - Infra/utilities: `loguru`, `requests`, `python-dotenv`.
     - macOS support: `pyobjc` (and dozens of system frameworks). These are already listed in `requirements.txt`; skip them on Windows and install `pywin32` manually if you run outside macOS.
 - `tkinter` ships with CPython on macOS/Linux. On Windows, ensure it is included with your Python installation.
 
@@ -107,7 +107,7 @@ The project consists of several Python files, each responsible for different fun
 
 5. Tune the delays and randomization in **Settings**, including global hotkeys and start/stop triggers.
 
-6. Press **Start**. The processor clusters recorded reference pixels, watches for matches inside the selected process, and sends keystrokes with randomized intervals. Use **Start** again (or configured hotkeys) to stop.
+6. Press **Start**. The processor watches for exact pixel/region matches inside the selected process and sends keystrokes with randomized intervals. Use **Start** again (or configured hotkeys) to stop.
 
 <h3 id="security-features">Security Features</h3>
 
@@ -145,7 +145,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 <h3 id="기능">기능</h3>
 
 - 프로세스 리스트를 실시간으로 불러와 올바른 창에만 입력을 보냄
-- MSS/NumPy/DBSCAN을 활용한 픽셀 매칭 기반 키 입력 실행
+- MSS/NumPy를 활용한 정확한 픽셀/영역 매칭 기반 키 입력 실행
 - 프로필/즐겨찾기/복제/삭제 기능과 자동 생성되는 “Quick” 프로필
 - ALT/CTRL/마우스 조합으로 화면에서 바로 이벤트를 캡처하는 퀵 이벤트 편집기
 - 지연·랜덤화·모디파이어·핫키·사운드 등을 세밀하게 조정하는 설정 창
@@ -165,7 +165,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - `keystroke_event_importer.py`: 다른 프로필에서 이벤트를 가져오는 도구.
 - `keystroke_models.py`: 프로필·이벤트·설정 데이터 클래스.
 - `keystroke_modkeys.py`: 모디파이어 패스스루/매크로 설정 창.
-- `keystroke_processor.py`: 기록된 픽셀을 클러스터링하고 일치 시 키 입력을 발행하는 엔진.
+- `keystroke_processor.py`: 바운딩 박스 기반 정확한 픽셀/영역 매칭으로 키 입력을 발행하는 엔진.
 - `keystroke_profiles.py`: Pickle 기반 프로필 로더/저장/즐겨찾기 관리.
 - `keystroke_quick_event_editor.py`: ALT/CTRL 조작으로 화면에서 바로 이벤트를 캡처하는 오버레이.
 - `keystroke_settings.py`: `user_settings.json` 및 base64 백업으로 설정을 저장하는 창.
@@ -180,8 +180,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - 가상환경 생성 후 `python -m pip install -r requirements.txt` 실행.
 - 주요 외부 패키지:
     - 입력/GUI: `pynput`, `pygame`, `Pillow`, `screeninfo`.
-    - 컴퓨터 비전: `mss`, `numpy`, `scikit-learn`, `Cython`.
-    - 공통 유틸: `loguru`, `requests`, `python-dotenv`, `joblib`, `threadpoolctl`.
+    - 컴퓨터 비전: `mss`, `numpy`, `Cython`.
+    - 공통 유틸: `loguru`, `requests`, `python-dotenv`.
     - macOS 의존성: `pyobjc` 및 각종 프레임워크 (요구사항 파일에 포함). Windows라면 해당 항목을 건너뛰고 `pywin32`를 추가 설치해야 합니다.
 - `tkinter`는 CPython에 기본 포함되어 있으나, Windows에서는 Python 설치 시 Tk 옵션을 포함했는지 확인하세요.
 
@@ -232,7 +232,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 5. **Settings**에서 지연, 랜덤화, 핫키를 조정하고 필요 시 사운드를 enable/disable 합니다.
 
-6. **Start** 버튼 또는 지정한 핫키로 실행/정지합니다. 프로세서는 기록된 참조 픽셀을 클러스터링한 뒤 일치하는 구역에서만 키 입력을 전송합니다.
+6. **Start** 버튼 또는 지정한 핫키로 실행/정지합니다. 프로세서는 정확한 픽셀/영역 매칭을 통해 일치하는 구역에서만 키 입력을 전송합니다.
 
 <h3 id="보안-기능">보안 기능</h3>
 
