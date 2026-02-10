@@ -24,7 +24,7 @@ class KeystrokeEventEditor:
         existing_events: Optional[List[EventModel]] = None,
     ):
         self.win = tk.Toplevel(profiles_window)
-        self.win.title(f"Event Settings - Row {row_num + 1}")
+        self.win.title(f"이벤트 설정 - {row_num + 1}행")
         self.win.transient(profiles_window)
         self.win.grab_set()
         self.win.focus_force()
@@ -54,6 +54,17 @@ class KeystrokeEventEditor:
         self.existing_events = existing_events or []
         self.temp_conditions: Dict[str, bool] = {}
 
+        # UI 위젯 참조 (Phase 1-3)
+        self.lbl_indep_warning = None
+        self.lbl_hidden_notice = None
+        self.lbl_condition_hint = None
+        self.lbl_condition_summary = None
+        self.btn_reset_conditions = None
+        self.lbl_group_hint = None
+        self.entry_region_w = None
+        self.entry_region_h = None
+        self.entry_priority = None
+
         self._create_layout()
         self.bind_events()
 
@@ -70,6 +81,7 @@ class KeystrokeEventEditor:
 
         # Traces
         self.match_mode_var.trace_add("write", lambda *a: self._redraw_overlay())
+        self.match_mode_var.trace_add("write", self._on_match_mode_change)
         self.region_w_var.trace_add("write", lambda *a: self._redraw_overlay())
         self.region_h_var.trace_add("write", lambda *a: self._redraw_overlay())
         self.independent_thread.trace_add("write", self._on_indep_toggle)
@@ -82,9 +94,9 @@ class KeystrokeEventEditor:
         self.tab_detail = ttk.Frame(self.notebook)
         self.tab_logic = ttk.Frame(self.notebook)
 
-        self.notebook.add(self.tab_basic, text="Basic (기본)")
-        self.notebook.add(self.tab_detail, text="Detail/Region (상세/지역)")
-        self.notebook.add(self.tab_logic, text="Logic/Group (논리/그룹)")
+        self.notebook.add(self.tab_basic, text="기본")
+        self.notebook.add(self.tab_detail, text="상세 설정")
+        self.notebook.add(self.tab_logic, text="조건 / 그룹")
 
         self._setup_basic_tab()
         self._setup_detail_tab()
@@ -94,7 +106,7 @@ class KeystrokeEventEditor:
     def _setup_basic_tab(self):
         f_name = tk.Frame(self.tab_basic)
         f_name.pack(pady=5, fill="x", padx=10)
-        tk.Label(f_name, text="Event Name:").pack(side="left")
+        tk.Label(f_name, text="이벤트 이름:").pack(side="left")
         self.entry_name = tk.Entry(f_name)
         self.entry_name.pack(side="left", fill="x", expand=True, padx=5)
 
@@ -119,7 +131,7 @@ class KeystrokeEventEditor:
 
         f_key = tk.Frame(self.tab_basic)
         f_key.pack(pady=5)
-        tk.Label(f_key, text="Key:", anchor="w").grid(row=0, column=0)
+        tk.Label(f_key, text="키:", anchor="w").grid(row=0, column=0)
         self.key_combobox = ttk.Combobox(
             f_key, state="readonly", values=KeyUtils.get_key_name_list()
         )
@@ -127,7 +139,7 @@ class KeystrokeEventEditor:
 
         tk.Label(
             self.tab_basic,
-            text="ALT: Area selection | CTRL: Grab image\nClick right image to set target.",
+            text="ALT: 영역 선택 | CTRL: 이미지 캡처\n오른쪽 이미지를 클릭하여 대상 설정",
             fg="gray",
         ).pack(pady=5)
 
@@ -141,45 +153,47 @@ class KeystrokeEventEditor:
 
         vcmd = self._create_numeric_validator()
 
-        gb_mode = ttk.LabelFrame(f_main, text="Matching Mode")
+        gb_mode = ttk.LabelFrame(f_main, text="매칭 모드")
         gb_mode.pack(fill="x", pady=5)
         ttk.Radiobutton(
-            gb_mode, text="Pixel (1px)", variable=self.match_mode_var, value="pixel"
+            gb_mode, text="픽셀 (1px)", variable=self.match_mode_var, value="pixel"
         ).pack(side="left", padx=10)
         ttk.Radiobutton(
-            gb_mode, text="Region (Area)", variable=self.match_mode_var, value="region"
+            gb_mode, text="영역 (Area)", variable=self.match_mode_var, value="region"
         ).pack(side="left", padx=10)
         ttk.Checkbutton(
             gb_mode,
-            text="Trigger when NOT matching (반전 매칭)",
+            text="반전 매칭 (불일치 시 트리거)",
             variable=self.invert_match_var,
         ).pack(side="left", padx=10)
 
-        gb_size = ttk.LabelFrame(f_main, text="Region Size (Only for Region Mode)")
+        gb_size = ttk.LabelFrame(f_main, text="영역 크기 (영역 모드 전용)")
         gb_size.pack(fill="x", pady=5)
 
-        ttk.Label(gb_size, text="Width:").pack(side="left", padx=5)
-        ttk.Entry(
+        ttk.Label(gb_size, text="너비:").pack(side="left", padx=5)
+        self.entry_region_w = ttk.Entry(
             gb_size,
             textvariable=self.region_w_var,
             width=5,
             validate="key",
             validatecommand=vcmd,
-        ).pack(side="left", padx=5)
+        )
+        self.entry_region_w.pack(side="left", padx=5)
 
-        ttk.Label(gb_size, text="Height:").pack(side="left", padx=5)
-        ttk.Entry(
+        ttk.Label(gb_size, text="높이:").pack(side="left", padx=5)
+        self.entry_region_h = ttk.Entry(
             gb_size,
             textvariable=self.region_h_var,
             width=5,
             validate="key",
             validatecommand=vcmd,
-        ).pack(side="left", padx=5)
+        )
+        self.entry_region_h.pack(side="left", padx=5)
 
-        gb_time = ttk.LabelFrame(f_main, text="Timing (Overrides Global)")
+        gb_time = ttk.LabelFrame(f_main, text="타이밍 (전역 설정 덮어쓰기)")
         gb_time.pack(fill="x", pady=5)
 
-        ttk.Label(gb_time, text="Duration (ms):").grid(
+        ttk.Label(gb_time, text="지속 시간 (ms):").grid(
             row=0, column=0, padx=5, pady=2, sticky="e"
         )
         self.entry_dur = ttk.Entry(
@@ -187,7 +201,7 @@ class KeystrokeEventEditor:
         )
         self.entry_dur.grid(row=0, column=1, padx=5, pady=2)
 
-        ttk.Label(gb_time, text="Random (ms):").grid(
+        ttk.Label(gb_time, text="랜덤 (ms):").grid(
             row=1, column=0, padx=5, pady=2, sticky="e"
         )
         self.entry_rand = ttk.Entry(
@@ -195,11 +209,17 @@ class KeystrokeEventEditor:
         )
         self.entry_rand.grid(row=1, column=1, padx=5, pady=2)
 
-        ttk.Checkbutton(
-            f_main,
-            text="Independent Thread (Ignores Group/Condition)",
-            variable=self.independent_thread,
-        ).pack(pady=10, anchor="w")
+        # 초기 region 필드 상태 설정
+        self._on_match_mode_change()
+
+    def _on_match_mode_change(self, *args):
+        """매칭 모드 변경 시 영역 크기 필드 활성/비활성"""
+        is_region = self.match_mode_var.get() == "region"
+        state = "normal" if is_region else "disabled"
+        if self.entry_region_w:
+            self.entry_region_w.config(state=state)
+        if self.entry_region_h:
+            self.entry_region_h.config(state=state)
 
     def _get_existing_groups(self) -> List[str]:
         """기존 이벤트에서 그룹 ID 목록 추출"""
@@ -217,45 +237,78 @@ class KeystrokeEventEditor:
 
         vcmd = self._create_numeric_validator()
 
-        gb_exec = ttk.LabelFrame(f_main, text="Execution Type")
+        # --- 실행 유형 ---
+        gb_exec = ttk.LabelFrame(f_main, text="실행 유형")
         gb_exec.pack(fill="x", pady=5)
         ttk.Checkbutton(
             gb_exec,
-            text="Execute Key Action (Uncheck for Condition-only)",
+            text="키 입력 실행 (해제 시 조건 감시 전용)",
             variable=self.execute_action_var,
-        ).pack(padx=10, pady=5, anchor="w")
+        ).pack(padx=10, pady=(5, 0), anchor="w")
+        ttk.Label(
+            gb_exec,
+            text="해제하면 키를 누르지 않고, 다른 이벤트의 조건으로만 사용됩니다.",
+            foreground="gray",
+        ).pack(padx=25, anchor="w")
 
-        gb_grp = ttk.LabelFrame(f_main, text="Grouping & Priority")
+        ttk.Checkbutton(
+            gb_exec,
+            text="독립 스레드 (그룹/조건 무시)",
+            variable=self.independent_thread,
+        ).pack(padx=10, pady=(5, 0), anchor="w")
+        self.lbl_indep_warning = ttk.Label(
+            gb_exec,
+            text="⚠ 활성화 시 아래 그룹·조건 설정이 무시됩니다",
+            foreground="#b30000",
+        )
+        # 초기에는 숨김 — _on_indep_toggle에서 동적으로 표시
+
+        # --- 그룹 및 우선순위 ---
+        gb_grp = ttk.LabelFrame(f_main, text="그룹 및 우선순위")
         gb_grp.pack(fill="x", pady=5)
 
-        ttk.Label(gb_grp, text="Group ID:").grid(row=0, column=0, padx=5, pady=5)
+        ttk.Label(gb_grp, text="그룹 ID:").grid(row=0, column=0, padx=5, pady=5)
 
         self.cmb_group = ttk.Combobox(gb_grp, textvariable=self.group_id_var, width=15)
         self.cmb_group.grid(row=0, column=1, padx=5, pady=5)
         self.cmb_group["values"] = self._get_existing_groups()
 
-        ttk.Label(gb_grp, text="Priority (Lower=High):").grid(
+        ttk.Label(gb_grp, text="우선순위 (0이 가장 높음):").grid(
             row=0, column=2, padx=5, pady=5
         )
-        ttk.Entry(
+        self.entry_priority = ttk.Entry(
             gb_grp,
             textvariable=self.priority_var,
             width=5,
             validate="key",
             validatecommand=vcmd,
-        ).grid(row=0, column=3, padx=5, pady=5)
-
-        gb_cond = ttk.LabelFrame(
-            f_main, text="Conditions (Click: Ignore -> Active -> Inactive)"
         )
+        self.entry_priority.grid(row=0, column=3, padx=5, pady=5)
+
+        self.lbl_group_hint = ttk.Label(
+            gb_grp,
+            text="기존 그룹 선택 또는 새 이름 입력",
+            foreground="gray",
+        )
+        self.lbl_group_hint.grid(
+            row=1, column=0, columnspan=4, padx=5, pady=(0, 5), sticky="w"
+        )
+
+        # --- 조건 설정 ---
+        gb_cond = ttk.LabelFrame(f_main, text="조건 설정 (클릭으로 상태 전환)")
         gb_cond.pack(fill="both", expand=True, pady=5)
 
         cols = ("event", "state")
         self.tree_cond = ttk.Treeview(gb_cond, columns=cols, show="headings", height=5)
-        self.tree_cond.heading("event", text="Event Name")
-        self.tree_cond.heading("state", text="Required State")
+        self.tree_cond.heading("event", text="이벤트 이름")
+        self.tree_cond.heading("state", text="필요 상태")
         self.tree_cond.column("event", width=150)
         self.tree_cond.column("state", width=100)
+
+        # 색상 태그
+        self.tree_cond.tag_configure("active", background="#d4edda")
+        self.tree_cond.tag_configure("inactive", background="#f8d7da")
+        self.tree_cond.tag_configure("ignore", background="")
 
         sb = ttk.Scrollbar(gb_cond, orient="vertical", command=self.tree_cond.yview)
         self.tree_cond.configure(yscrollcommand=sb.set)
@@ -265,28 +318,86 @@ class KeystrokeEventEditor:
 
         self.tree_cond.bind("<Button-1>", self._on_tree_click)
 
+        # --- 조건 하단 UI ---
+        f_cond_footer = ttk.Frame(f_main)
+        f_cond_footer.pack(fill="x", pady=(0, 2))
+
+        self.lbl_condition_hint = ttk.Label(
+            f_cond_footer,
+            text="💡 클릭으로 상태 순환: 무시 → 활성 필요 → 비활성 필요",
+            foreground="gray",
+        )
+        self.lbl_condition_hint.pack(side="left", padx=5)
+
+        self.btn_reset_conditions = ttk.Button(
+            f_cond_footer,
+            text="전체 초기화",
+            command=self._reset_all_conditions,
+            width=10,
+        )
+        self.btn_reset_conditions.pack(side="right", padx=5)
+
+        self.lbl_condition_summary = ttk.Label(
+            f_cond_footer, text="", foreground="gray"
+        )
+        self.lbl_condition_summary.pack(side="right", padx=5)
+
+        self.lbl_hidden_notice = ttk.Label(f_main, text="", foreground="#b37400")
+        self.lbl_hidden_notice.pack(fill="x", padx=5)
+
     def _setup_bottom_buttons(self):
         f_btn = tk.Frame(self.win)
         f_btn.pack(pady=10, fill="x")
 
-        tk.Button(f_btn, text="Grab(Ctrl)", command=self.hold_image).pack(
+        tk.Button(f_btn, text="캡처 (Ctrl)", command=self.hold_image).pack(
             side="left", padx=20
         )
-        tk.Button(f_btn, text="Cancel(ESC)", command=self.close_window).pack(
+        tk.Button(f_btn, text="취소 (ESC)", command=self.close_window).pack(
             side="right", padx=20
         )
-        tk.Button(f_btn, text="OK(Enter)", command=self.save_event, bg="#dddddd").pack(
+        tk.Button(f_btn, text="저장 (Enter)", command=self.save_event, bg="#dddddd").pack(
             side="right", padx=5
         )
 
     def _on_indep_toggle(self, *args):
-        # 독립 스레드 활성화 시 그룹 ID 입력 비활성화
+        """독립 스레드 활성화 시 그룹/우선순위/조건 비활성화"""
         if self.independent_thread.get():
             self.cmb_group.set("")
             self.cmb_group.config(state="disabled")
             self.group_id_var.set("")
+            if self.entry_priority:
+                self.entry_priority.config(state="disabled")
+                self.priority_var.set(0)
+            self.tree_cond.config(selectmode="none")
+            self.tree_cond.unbind("<Button-1>")
+            if self.lbl_indep_warning:
+                self.lbl_indep_warning.pack(padx=25, pady=(0, 5), anchor="w")
         else:
             self.cmb_group.config(state="normal")
+            if self.entry_priority:
+                self.entry_priority.config(state="normal")
+            self.tree_cond.config(selectmode="browse")
+            self.tree_cond.bind("<Button-1>", self._on_tree_click)
+            if self.lbl_indep_warning:
+                self.lbl_indep_warning.pack_forget()
+
+    def _reset_all_conditions(self):
+        """모든 조건을 무시 상태로 초기화"""
+        self.temp_conditions.clear()
+        self._populate_condition_tree()
+
+    def _update_condition_summary(self):
+        """조건 수 카운터 갱신"""
+        if not self.lbl_condition_summary:
+            return
+        active = sum(1 for v in self.temp_conditions.values() if v is True)
+        inactive = sum(1 for v in self.temp_conditions.values() if v is False)
+        parts = []
+        if active:
+            parts.append(f"활성: {active}")
+        if inactive:
+            parts.append(f"비활성: {inactive}")
+        self.lbl_condition_summary.config(text=" | ".join(parts) if parts else "")
 
     def create_coord_entries(self, parent, labels):
         entries = []
@@ -472,35 +583,61 @@ class KeystrokeEventEditor:
     def _get_condition_display(self, state_val: Optional[bool]) -> str:
         """조건 상태 값을 표시 문자열로 변환"""
         if state_val is True:
-            return "Active (True)"
+            return "활성 필요 ✓"
         elif state_val is False:
-            return "Inactive (False)"
-        return "Ignore"
+            return "비활성 필요 ✗"
+        return "무시"
+
+    def _get_condition_tag(self, state_val: Optional[bool]) -> str:
+        """조건 상태 값에 대한 Treeview 태그 반환"""
+        if state_val is True:
+            return "active"
+        elif state_val is False:
+            return "inactive"
+        return "ignore"
 
     def _populate_condition_tree(self):
         for item in self.tree_cond.get_children():
             self.tree_cond.delete(item)
 
+        hidden_count = 0
+
         for evt in self.existing_events:
             if self.event_name and evt.event_name == self.event_name:
                 continue
 
-            # 이미 나를 조건으로 참조하고 있는 이벤트는 제외 (1차 방어)
+            # 이미 나를 조건으로 참조하고 있는 이벤트는 제외 (순환 방지)
             if evt.conditions and self.event_name in evt.conditions:
+                hidden_count += 1
                 continue
 
             state_val = self.temp_conditions.get(evt.event_name, None)
             display = self._get_condition_display(state_val)
-            self.tree_cond.insert("", "end", values=(evt.event_name, display))
+            tag = self._get_condition_tag(state_val)
+            self.tree_cond.insert(
+                "", "end", values=(evt.event_name, display), tags=(tag,)
+            )
+
+        # 숨겨진 이벤트 안내
+        if self.lbl_hidden_notice:
+            if hidden_count > 0:
+                self.lbl_hidden_notice.config(
+                    text=f"{hidden_count}개 이벤트가 순환 방지를 위해 숨겨졌습니다"
+                )
+            else:
+                self.lbl_hidden_notice.config(text="")
+
+        # 요약 카운터 갱신
+        self._update_condition_summary()
 
     def _cycle_condition_state(self, current_state: str) -> tuple[str, Optional[bool]]:
-        """조건 상태 순환: Ignore -> Active -> Inactive -> Ignore"""
-        if "Ignore" in current_state:
-            return "Active (True)", True
-        elif "Active" in current_state:
-            return "Inactive (False)", False
+        """조건 상태 순환: 무시 -> 활성 필요 -> 비활성 필요 -> 무시"""
+        if "무시" in current_state:
+            return "활성 필요 ✓", True
+        elif "활성" in current_state and "비활성" not in current_state:
+            return "비활성 필요 ✗", False
         else:
-            return "Ignore", None
+            return "무시", None
 
     def _on_tree_click(self, event):
         region = self.tree_cond.identify("region", event.x, event.y)
@@ -515,19 +652,24 @@ class KeystrokeEventEditor:
         evt_name, curr_state = vals[0], vals[1]
 
         new_state_disp, new_val = self._cycle_condition_state(curr_state)
-        self.tree_cond.item(item_id, values=(evt_name, new_state_disp))
+        tag = self._get_condition_tag(new_val)
+        self.tree_cond.item(
+            item_id, values=(evt_name, new_state_disp), tags=(tag,)
+        )
 
         if new_val is None:
             self.temp_conditions.pop(evt_name, None)
         else:
             self.temp_conditions[evt_name] = new_val
 
+        self._update_condition_summary()
+
     def _validate_cycles(
         self, new_event_name: str, new_conditions: Dict[str, bool]
-    ) -> bool:
+    ) -> Optional[list[str]]:
         """
         조건 순환 참조 검사 (DFS)
-        True: Cycle Detected, False: Safe
+        Returns: 순환 경로 리스트 (발견 시) 또는 None (안전)
         """
         # 1. 가상의 그래프 생성 (Existing events + Current editing event)
         graph = {e.event_name: list(e.conditions.keys()) for e in self.existing_events}
@@ -536,27 +678,33 @@ class KeystrokeEventEditor:
 
         visited = set()
         rec_stack = set()
+        path = []
 
-        def dfs(node):
+        def dfs(node) -> Optional[list[str]]:
             visited.add(node)
             rec_stack.add(node)
+            path.append(node)
 
             for neighbor in graph.get(node, []):
                 if neighbor not in visited:
-                    if dfs(neighbor):
-                        return True
+                    result = dfs(neighbor)
+                    if result is not None:
+                        return result
                 elif neighbor in rec_stack:
-                    return True  # Cycle found
+                    cycle_start = path.index(neighbor)
+                    return path[cycle_start:] + [neighbor]
 
+            path.pop()
             rec_stack.remove(node)
-            return False
+            return None
 
         # 모든 노드에 대해 검사
         for node in graph:
             if node not in visited:
-                if dfs(node):
-                    return True
-        return False
+                result = dfs(node)
+                if result is not None:
+                    return result
+        return None
 
     def _validate_required_fields(self) -> bool:
         """필수 필드 검증"""
@@ -573,11 +721,11 @@ class KeystrokeEventEditor:
 
         if not all(required):
             msg = (
-                "You must set the image, coordinates, key\n이미지와 좌표 및 키를 설정하세요."
+                "이미지, 좌표, 키를 모두 설정해 주세요."
                 if need_key
-                else "You must set the image and coordinates\n이미지와 좌표를 설정하세요."
+                else "이미지와 좌표를 설정해 주세요."
             )
-            messagebox.showerror("Error", msg)
+            messagebox.showerror("오류", msg)
             return False
         return True
 
@@ -594,7 +742,7 @@ class KeystrokeEventEditor:
             rh = self.region_h_var.get()
 
             if self.match_mode_var.get() == "region" and (rw <= 0 or rh <= 0):
-                messagebox.showerror("Error", "Region Width/Height must be > 0")
+                messagebox.showerror("오류", "영역 너비/높이는 0보다 커야 합니다.")
                 return None, None, 0, 0, 0
 
             try:
@@ -604,16 +752,16 @@ class KeystrokeEventEditor:
 
             return dur, rand, rw, rh, prio
         except ValueError:
-            messagebox.showerror("Error", "Invalid numeric input.")
+            messagebox.showerror("오류", "잘못된 숫자 입력입니다.")
             return None, None, 0, 0, 0
 
     def _validate_timing_values(self, dur: Optional[int], rand: Optional[int]) -> bool:
         """타이밍 값 검증"""
         if dur and dur < 50:
-            messagebox.showerror("Error", "Press Duration must be at least 50 ms.")
+            messagebox.showerror("오류", "지속 시간은 최소 50ms여야 합니다.")
             return False
         if dur and rand and rand < 30:
-            messagebox.showerror("Error", "Randomization must be at least 30 ms.")
+            messagebox.showerror("오류", "랜덤은 최소 30ms여야 합니다.")
             return False
         return True
 
@@ -623,7 +771,7 @@ class KeystrokeEventEditor:
 
         final_name = self.entry_name.get().strip()
         if not final_name:
-            messagebox.showerror("Error", "Event Name is required.")
+            messagebox.showerror("오류", "이벤트 이름을 입력해 주세요.")
             return
 
         parsed = self._parse_numeric_inputs()
@@ -635,9 +783,12 @@ class KeystrokeEventEditor:
         if not self._validate_timing_values(dur, rand):
             return
 
-        if self._validate_cycles(final_name, self.temp_conditions):
+        cycle_path = self._validate_cycles(final_name, self.temp_conditions)
+        if cycle_path:
+            path_str = " → ".join(cycle_path)
             return messagebox.showerror(
-                "Error", "Circular dependency detected in conditions!"
+                "오류",
+                f"순환 참조가 감지되었습니다.\n경로: {path_str}\n순환 경로의 조건을 제거해 주세요.",
             )
 
         # 독립 스레드일 경우 그룹 제거
@@ -765,13 +916,24 @@ class KeystrokeEventEditor:
 
         gid = getattr(evt, "group_id", "") or ""
         self.group_id_var.set(gid)
-        if is_indep:  # 독립 스레드면 UI 비활성화 동기화
+
+        # 독립 스레드면 그룹/우선순위/조건 UI 비활성화 동기화
+        if is_indep:
             self.cmb_group.config(state="disabled")
+            if self.entry_priority:
+                self.entry_priority.config(state="disabled")
+            self.tree_cond.config(selectmode="none")
+            self.tree_cond.unbind("<Button-1>")
+            if self.lbl_indep_warning:
+                self.lbl_indep_warning.pack(padx=25, pady=(0, 5), anchor="w")
 
         self.priority_var.set(getattr(evt, "priority", 0))
 
         self.temp_conditions = copy.deepcopy(getattr(evt, "conditions", {}))
         self._populate_condition_tree()
+
+        # 매칭 모드에 따른 영역 크기 필드 상태 동기화
+        self._on_match_mode_change()
 
         self._draw_overlay(self.held_img, self.lbl_img2)
 

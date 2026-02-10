@@ -28,6 +28,32 @@ MARGIN = 32
 TITLE_GAP = 26
 TARGET_WIDTH = 1200
 
+# Legend
+LEGEND_TOP_PAD = 20
+LEGEND_ITEM_H = 22
+LEGEND_SWATCH_W = 30
+LEGEND_COL_GAP = 24
+LEGEND_ROW_GAP = 6
+
+# Group backgrounds
+GROUP_BG_ALPHA = 45
+GROUP_BG_PAD = 12
+GROUP_BG_RADIUS = 14
+GROUP_LABEL_PAD = 4
+
+# Bezier
+BEZIER_SEGMENTS = 32
+
+# Badges
+BADGE_R = 8
+BADGE_OFFSET_X = NODE_W - 6
+BADGE_OFFSET_Y = -4
+
+BADGE_COLOR_THREAD = (100, 80, 180)
+BADGE_COLOR_MISSING = (220, 160, 40)
+BADGE_COLOR_DISABLED = (160, 160, 160)
+BADGE_COLOR_CONDITION = (80, 140, 200)
+
 PALETTE = [
     (244, 206, 201),
     (203, 222, 244),
@@ -95,25 +121,44 @@ def render_profile_graph(profile: ProfileModel, profile_name: str) -> Image.Imag
     nodes, edges = _build_graph(profile)
     positions, width, height = _layout_graph(nodes, edges)
 
-    img = Image.new("RGBA", (width, height), color=BACKGROUND)
-    draw = ImageDraw.Draw(img)
     font = _load_font(14)
     font_small = _load_font(12)
+
+    # Use actual content bottom instead of padded height for legend placement
+    content_bottom = MARGIN + TITLE_GAP
+    if positions:
+        content_bottom = max(y + NODE_H for _, y in positions.values()) + MARGIN
+    content_bottom = max(content_bottom, MARGIN + TITLE_GAP + NODE_H + MARGIN)
+
+    legend_h = _calc_legend_height(nodes, font_small)
+    total_h = max(height, content_bottom + legend_h)
+
+    img = Image.new("RGBA", (width, total_h), color=BACKGROUND)
+
+    # Z1: Group backgrounds (semi-transparent, drawn first)
+    _draw_group_backgrounds(img, nodes, positions, font_small)
+
+    draw = ImageDraw.Draw(img)
 
     title = f"Profile: {profile_name} ({len(profile.event_list)} events)"
     draw.text((MARGIN, MARGIN - 8), title, fill=TEXT_COLOR, font=font)
 
-    # Draw edges first (under nodes)
+    # Z2: Edges (bezier curves)
+    edge_offsets = _compute_edge_offsets(edges, positions)
     for edge in edges:
         if edge.src not in positions or edge.dst not in positions:
             continue
-        _draw_edge(draw, positions[edge.src], positions[edge.dst], edge.state, font_small)
+        offset = edge_offsets.get((edge.src, edge.dst), 0.0)
+        _draw_edge(draw, positions[edge.src], positions[edge.dst], edge.state, font_small, offset)
 
-    # Draw nodes
+    # Z3: Nodes (with badges)
     for node in nodes:
         if node.node_id not in positions:
             continue
         _draw_node(draw, node, positions[node.node_id], font, font_small)
+
+    # Z4: Legend at bottom
+    _draw_legend(draw, img, nodes, content_bottom, width, font, font_small)
 
     return img
 
@@ -127,8 +172,6 @@ def _build_graph(profile: ProfileModel) -> Tuple[List[GraphNode], List[GraphEdge
         raw_name = (evt.event_name or f"Event_{idx + 1}").strip()
         name = raw_name if raw_name else f"Event_{idx + 1}"
         label = name
-        if getattr(evt, "independent_thread", False):
-            label = f"{label} (IND)"
         node_id = f"evt_{idx}"
         node = GraphNode(
             node_id=node_id,
@@ -534,6 +577,73 @@ def _draw_node(
         draw.text((tx, ty), line, fill=text_color, font=font)
         ty += line_height
 
+    _draw_node_badges(draw, node, pos, font_small)
+
+
+def _draw_node_badges(
+    draw: ImageDraw.ImageDraw,
+    node: GraphNode,
+    pos: Tuple[int, int],
+    font_small: ImageFont.ImageFont,
+) -> None:
+    badges: List[Tuple[str, Tuple[int, int, int]]] = []
+    if node.independent_thread:
+        badges.append(("thread", BADGE_COLOR_THREAD))
+    if node.missing:
+        badges.append(("warn", BADGE_COLOR_MISSING))
+    if not node.use_event and not node.missing:
+        badges.append(("off", BADGE_COLOR_DISABLED))
+    if not node.execute_action and not node.missing:
+        badges.append(("eye", BADGE_COLOR_CONDITION))
+
+    if not badges:
+        return
+
+    x, y = pos
+    bx = x + NODE_W - BADGE_R - 2
+    by = y + BADGE_OFFSET_Y
+    for i, (badge_type, color) in enumerate(badges):
+        cx = bx - i * (BADGE_R * 2 + 3)
+        cy = by
+        _draw_badge(draw, cx, cy, BADGE_R, badge_type, color)
+
+
+def _draw_badge(
+    draw: ImageDraw.ImageDraw,
+    cx: int,
+    cy: int,
+    radius: int,
+    badge_type: str,
+    bg_color: Tuple[int, int, int],
+) -> None:
+    draw.ellipse(
+        [cx - radius, cy - radius, cx + radius, cy + radius],
+        fill=bg_color,
+        outline=(255, 255, 255),
+        width=1,
+    )
+    white = (255, 255, 255)
+
+    if badge_type == "thread":
+        draw.line([(cx - 3, cy - 4), (cx - 3, cy + 4)], fill=white, width=2)
+        draw.line([(cx + 3, cy - 4), (cx + 3, cy + 4)], fill=white, width=2)
+    elif badge_type == "warn":
+        draw.line([(cx, cy - 4), (cx, cy + 1)], fill=white, width=2)
+        draw.ellipse([cx - 1, cy + 3, cx + 1, cy + 5], fill=white)
+    elif badge_type == "off":
+        r2 = int(radius * 0.6)
+        draw.line([(cx - r2, cy - r2), (cx + r2, cy + r2)], fill=white, width=2)
+    elif badge_type == "eye":
+        draw.arc(
+            [cx - 5, cy - 4, cx + 5, cy + 4],
+            start=200, end=340, fill=white, width=1,
+        )
+        draw.arc(
+            [cx - 5, cy - 4, cx + 5, cy + 4],
+            start=20, end=160, fill=white, width=1,
+        )
+        draw.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=white)
+
 
 def _draw_edge(
     draw: ImageDraw.ImageDraw,
@@ -541,6 +651,7 @@ def _draw_edge(
     dst_pos: Tuple[int, int],
     state: bool | None,
     font_small: ImageFont.ImageFont,
+    offset: float = 0.0,
 ):
     sx, sy = src_pos
     tx, ty = dst_pos
@@ -562,11 +673,12 @@ def _draw_edge(
         color = EDGE_UNKNOWN
         label = ""
 
-    _draw_arrow(draw, start, end, color)
+    control = _calc_control_point(start, end, offset)
+    mid = _draw_bezier_arrow(draw, start, end, control, color)
 
     if label:
-        mx = (start[0] + end[0]) // 2 + 4
-        my = (start[1] + end[1]) // 2 - 8
+        mx = int(mid[0]) + 4
+        my = int(mid[1]) - 8
         bbox = draw.textbbox((0, 0), label, font=font_small)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
@@ -593,6 +705,119 @@ def _draw_arrow(draw: ImageDraw.ImageDraw, start, end, color):
         end[1] - head_len * math.sin(angle) + head_w * math.cos(angle),
     )
     draw.polygon([end, left, right], fill=color)
+
+
+def _bezier_point(
+    t: float,
+    p0: Tuple[float, float],
+    p1: Tuple[float, float],
+    p2: Tuple[float, float],
+) -> Tuple[float, float]:
+    x = (1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t ** 2 * p2[0]
+    y = (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t ** 2 * p2[1]
+    return (x, y)
+
+
+def _bezier_tangent(
+    t: float,
+    p0: Tuple[float, float],
+    p1: Tuple[float, float],
+    p2: Tuple[float, float],
+) -> Tuple[float, float]:
+    dx = 2 * (1 - t) * (p1[0] - p0[0]) + 2 * t * (p2[0] - p1[0])
+    dy = 2 * (1 - t) * (p1[1] - p0[1]) + 2 * t * (p2[1] - p1[1])
+    return (dx, dy)
+
+
+def _calc_control_point(
+    start: Tuple[int, int],
+    end: Tuple[int, int],
+    offset: float,
+) -> Tuple[float, float]:
+    mx = (start[0] + end[0]) / 2.0
+    my = (start[1] + end[1]) / 2.0
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    length = math.sqrt(dx * dx + dy * dy)
+    if length < 1e-6:
+        return (mx + offset, my)
+    px = -dy / length
+    py = dx / length
+    return (mx + px * offset, my + py * offset)
+
+
+def _compute_edge_offsets(
+    edges: List[GraphEdge],
+    positions: Dict[str, Tuple[int, int]],
+) -> Dict[Tuple[str, str], float]:
+    dst_groups: Dict[str, List[Tuple[str, str]]] = {}
+    for edge in edges:
+        if edge.src not in positions or edge.dst not in positions:
+            continue
+        dst_groups.setdefault(edge.dst, []).append((edge.src, edge.dst))
+
+    offsets: Dict[Tuple[str, str], float] = {}
+    spread = 20.0
+    for dst, pairs in dst_groups.items():
+        n = len(pairs)
+        for i, pair in enumerate(pairs):
+            if n == 1:
+                offsets[pair] = 0.0
+            else:
+                offsets[pair] = (i - (n - 1) / 2.0) * spread
+    return offsets
+
+
+def _draw_bezier_arrow(
+    draw: ImageDraw.ImageDraw,
+    start: Tuple[int, int],
+    end: Tuple[int, int],
+    control: Tuple[float, float],
+    color: Tuple[int, int, int],
+) -> Tuple[float, float]:
+    points = []
+    for i in range(BEZIER_SEGMENTS + 1):
+        t = i / BEZIER_SEGMENTS
+        points.append(_bezier_point(t, start, control, end))
+
+    total_len = 0.0
+    for i in range(1, len(points)):
+        dx = points[i][0] - points[i - 1][0]
+        dy = points[i][1] - points[i - 1][1]
+        total_len += math.sqrt(dx * dx + dy * dy)
+
+    head_len = 10
+    trim_len = max(0, total_len - head_len)
+    trimmed = [points[0]]
+    accum = 0.0
+    for i in range(1, len(points)):
+        dx = points[i][0] - points[i - 1][0]
+        dy = points[i][1] - points[i - 1][1]
+        seg = math.sqrt(dx * dx + dy * dy)
+        if accum + seg >= trim_len:
+            trimmed.append(points[i])
+            break
+        accum += seg
+        trimmed.append(points[i])
+
+    if len(trimmed) >= 2:
+        draw.line([(int(p[0]), int(p[1])) for p in trimmed], fill=color, width=2)
+
+    tangent = _bezier_tangent(1.0, start, control, end)
+    angle = math.atan2(tangent[1], tangent[0])
+    head_w = 6
+    left = (
+        end[0] - head_len * math.cos(angle) + head_w * math.sin(angle),
+        end[1] - head_len * math.sin(angle) - head_w * math.cos(angle),
+    )
+    right = (
+        end[0] - head_len * math.cos(angle) - head_w * math.sin(angle),
+        end[1] - head_len * math.sin(angle) + head_w * math.cos(angle),
+    )
+    draw.polygon([end, left, right], fill=color)
+
+    mid = _bezier_point(0.5, start, control, end)
+    return mid
 
 
 def _draw_dashed_rect(
@@ -636,6 +861,78 @@ def _draw_dashed_line(
             x_end = min(x + dash, min(x1, x2) + length)
             draw.line([(x, y1), (x_end, y1)], fill=color, width=2)
             x += step
+
+
+def _compute_group_bounds(
+    nodes: List[GraphNode],
+    positions: Dict[str, Tuple[int, int]],
+    font_small: ImageFont.ImageFont,
+) -> Dict[str, Tuple[int, int, int, int]]:
+    bounds: Dict[str, List[int]] = {}
+    for node in nodes:
+        if not node.group_id or node.node_id not in positions:
+            continue
+        gid = node.group_id
+        x, y = positions[node.node_id]
+        if gid not in bounds:
+            bounds[gid] = [x, y, x + NODE_W, y + NODE_H]
+        else:
+            b = bounds[gid]
+            b[0] = min(b[0], x)
+            b[1] = min(b[1], y)
+            b[2] = max(b[2], x + NODE_W)
+            b[3] = max(b[3], y + NODE_H)
+
+    label_h = _font_line_height(font_small)
+    result: Dict[str, Tuple[int, int, int, int]] = {}
+    for gid, b in bounds.items():
+        result[gid] = (
+            b[0] - GROUP_BG_PAD,
+            b[1] - GROUP_BG_PAD - label_h - 2,
+            b[2] + GROUP_BG_PAD,
+            b[3] + GROUP_BG_PAD,
+        )
+    return result
+
+
+def _draw_group_backgrounds(
+    img: Image.Image,
+    nodes: List[GraphNode],
+    positions: Dict[str, Tuple[int, int]],
+    font_small: ImageFont.ImageFont,
+) -> None:
+    bounds = _compute_group_bounds(nodes, positions, font_small)
+    if not bounds:
+        return
+
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay, "RGBA")
+
+    for gid, (x1, y1, x2, y2) in bounds.items():
+        color = _group_color(gid)
+        fill = (*color, GROUP_BG_ALPHA)
+        border = (
+            max(0, color[0] - 30),
+            max(0, color[1] - 30),
+            max(0, color[2] - 30),
+            GROUP_BG_ALPHA + 50,
+        )
+        overlay_draw.rounded_rectangle(
+            [x1, y1, x2, y2],
+            radius=GROUP_BG_RADIUS,
+            fill=fill,
+            outline=border,
+            width=1,
+        )
+        overlay_draw.text(
+            (x1 + GROUP_LABEL_PAD, y1 + 2),
+            gid,
+            fill=(*TEXT_COLOR, 200),
+            font=font_small,
+        )
+
+    composited = Image.alpha_composite(img, overlay)
+    img.paste(composited)
 
 
 def _group_color(group_id: str | None) -> Tuple[int, int, int]:
@@ -696,6 +993,129 @@ def _profile_hash(profile: ProfileModel) -> str:
         )
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _calc_legend_height(
+    nodes: List[GraphNode],
+    font_small: ImageFont.ImageFont,
+) -> int:
+    groups = sorted(set(n.group_id for n in nodes if n.group_id))
+    edge_rows = 3
+    node_rows = 4
+    badge_rows = 4
+    group_rows = max(0, len(groups))
+    col_left = edge_rows
+    col_mid = node_rows + badge_rows
+    col_right = group_rows
+    max_rows = max(col_left, col_mid, col_right, 1)
+    return LEGEND_TOP_PAD + 44 + max_rows * (LEGEND_ITEM_H + LEGEND_ROW_GAP) + MARGIN
+
+
+def _draw_legend(
+    draw: ImageDraw.ImageDraw,
+    img: Image.Image,
+    nodes: List[GraphNode],
+    legend_y: int,
+    canvas_width: int,
+    font: ImageFont.ImageFont,
+    font_small: ImageFont.ImageFont,
+) -> None:
+    draw.line(
+        [(MARGIN, legend_y), (canvas_width - MARGIN, legend_y)],
+        fill=(200, 200, 200),
+        width=1,
+    )
+    draw.text((MARGIN, legend_y + 6), "Legend", fill=TEXT_COLOR, font=font)
+
+    col_width = max(200, (canvas_width - 2 * MARGIN) // 3)
+    header_y = legend_y + 26
+    y_start = legend_y + 44
+    item_step = LEGEND_ITEM_H + LEGEND_ROW_GAP
+
+    # Column 1: Edge types
+    col_x = MARGIN
+    draw.text((col_x, header_y), "Edges", fill=TEXT_COLOR_FADE, font=font_small)
+    edge_items = [
+        (EDGE_TRUE, "Active"),
+        (EDGE_FALSE, "Inactive"),
+        (EDGE_UNKNOWN, "Unknown"),
+    ]
+    for i, (color, label) in enumerate(edge_items):
+        ey = y_start + i * item_step + LEGEND_ITEM_H // 2
+        _draw_arrow(draw, (col_x, ey), (col_x + LEGEND_SWATCH_W, ey), color)
+        draw.text(
+            (col_x + LEGEND_SWATCH_W + 8, y_start + i * item_step + 2),
+            label,
+            fill=TEXT_COLOR,
+            font=font_small,
+        )
+
+    # Column 2: Node styles + badges
+    col_x = MARGIN + col_width
+    draw.text((col_x, header_y), "Nodes", fill=TEXT_COLOR_FADE, font=font_small)
+
+    node_style_items = [
+        ("solid", "Normal"),
+        ("dashed", "Condition-only"),
+        ("faded", "Disabled"),
+        ("missing", "Missing ref"),
+    ]
+    for i, (style, label) in enumerate(node_style_items):
+        iy = y_start + i * item_step
+        sx, sy = col_x, iy + 2
+        sw, sh = 26, 16
+        if style == "solid":
+            fill = PALETTE[1]
+            draw.rounded_rectangle(
+                [sx, sy, sx + sw, sy + sh], radius=4, fill=fill, outline=BORDER_COLOR, width=1,
+            )
+        elif style == "dashed":
+            fill = PALETTE[1]
+            draw.rounded_rectangle(
+                [sx, sy, sx + sw, sy + sh], radius=4, fill=fill, outline=BACKGROUND, width=1,
+            )
+            _draw_dashed_rect(draw, (sx, sy, sx + sw, sy + sh), BORDER_COLOR, dash=3, gap=2)
+        elif style == "faded":
+            fill = _fade_color(PALETTE[1], BACKGROUND, 0.35)
+            draw.rounded_rectangle(
+                [sx, sy, sx + sw, sy + sh], radius=4, fill=fill, outline=BORDER_COLOR, width=1,
+            )
+        elif style == "missing":
+            draw.rounded_rectangle(
+                [sx, sy, sx + sw, sy + sh], radius=4, fill=MISSING_FILL, outline=BORDER_COLOR, width=1,
+            )
+        draw.text((col_x + sw + 6, iy + 2), label, fill=TEXT_COLOR, font=font_small)
+
+    badge_items = [
+        ("thread", BADGE_COLOR_THREAD, "Independent thread"),
+        ("warn", BADGE_COLOR_MISSING, "Missing reference"),
+        ("off", BADGE_COLOR_DISABLED, "Disabled event"),
+        ("eye", BADGE_COLOR_CONDITION, "Condition-only"),
+    ]
+    badge_y_start = y_start + len(node_style_items) * item_step
+    for i, (btype, bcolor, blabel) in enumerate(badge_items):
+        iy = badge_y_start + i * item_step
+        bcx = col_x + 7
+        bcy = iy + LEGEND_ITEM_H // 2
+        _draw_badge(draw, bcx, bcy, 7, btype, bcolor)
+        draw.text((col_x + 20, iy + 2), blabel, fill=TEXT_COLOR, font=font_small)
+
+    # Column 3: Group colors
+    groups = sorted(set(n.group_id for n in nodes if n.group_id))
+    if groups:
+        col_x = MARGIN + col_width * 2
+        draw.text((col_x, header_y), "Groups", fill=TEXT_COLOR_FADE, font=font_small)
+        for i, gid in enumerate(groups):
+            iy = y_start + i * item_step
+            gcolor = _group_color(gid)
+            draw.rounded_rectangle(
+                [col_x, iy + 2, col_x + 26, iy + 18],
+                radius=4,
+                fill=gcolor,
+                outline=BORDER_COLOR,
+                width=1,
+            )
+            draw.text((col_x + 32, iy + 2), gid, fill=TEXT_COLOR, font=font_small)
 
 
 def _load_font(size: int) -> ImageFont.ImageFont:

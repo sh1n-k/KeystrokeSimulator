@@ -337,6 +337,7 @@ class EventRow(ttk.Frame):
         super().__init__(master)
         self.row_num, self.event, self.cbs = row_num, event, cbs
         self.use_var = tk.BooleanVar(value=event.use_event if event else True)
+        self._last_saved_name = event.event_name if event else ""
 
         # 1. Index
         ttk.Label(self, text=str(row_num + 1), width=2, anchor="center").pack(
@@ -419,6 +420,7 @@ class EventRow(ttk.Frame):
         if self.entry.get() != (self.event.event_name or ""):
             self.entry.delete(0, tk.END)
             self.entry.insert(0, self.event.event_name or "")
+        self._last_saved_name = self.event.event_name or ""
 
         # Independent Thread
         is_indep = getattr(self.event, "independent_thread", False)
@@ -968,7 +970,18 @@ class EventListFrame(ttk.Frame):
     def save_names(self):
         for i, r in enumerate(self.rows):
             if i < len(self.profile.event_list):
-                self.profile.event_list[i].event_name = r.get_name()
+                old_name = r._last_saved_name
+                new_name = r.get_name()
+                if old_name and new_name and old_name != new_name:
+                    self._update_condition_references(old_name, new_name)
+                self.profile.event_list[i].event_name = new_name
+                r._last_saved_name = new_name
+
+    def _update_condition_references(self, old_name: str, new_name: str):
+        """이벤트 이름 변경 시 조건 참조 업데이트"""
+        for evt in self.profile.event_list:
+            if hasattr(evt, "conditions") and old_name in evt.conditions:
+                evt.conditions[new_name] = evt.conditions.pop(old_name)
 
 
 class KeystrokeProfiles:
