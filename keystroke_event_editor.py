@@ -79,6 +79,10 @@ class KeystrokeEventEditor:
 
         self.load_latest_position()
 
+        # 초기 레이아웃 완료 후 윈도우 크기 고정 (내용 변경 시 크기 변동 방지)
+        self.win.update_idletasks()
+        self.win.geometry(f"{self.win.winfo_width()}x{self.win.winfo_height()}")
+
         # Traces
         self.match_mode_var.trace_add("write", lambda *a: self._redraw_overlay())
         self.match_mode_var.trace_add("write", self._on_match_mode_change)

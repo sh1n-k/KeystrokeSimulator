@@ -25,7 +25,7 @@ NODE_H = 60
 X_GAP = 28
 Y_GAP = 56
 MARGIN = 32
-TITLE_GAP = 26
+TITLE_GAP = 48
 TARGET_WIDTH = 1200
 
 # Legend
@@ -37,7 +37,7 @@ LEGEND_ROW_GAP = 6
 
 # Group backgrounds
 GROUP_BG_ALPHA = 45
-GROUP_BG_PAD = 12
+GROUP_BG_PAD = 28
 GROUP_BG_RADIUS = 14
 GROUP_LABEL_PAD = 4
 
@@ -329,6 +329,7 @@ def _layout_graph(
     if not node_ids:
         return {}, 640, 480
 
+    node_map = {n.node_id: n for n in nodes}
     order_map = _build_order_map(node_ids, edges)
     levels = _assign_levels(node_ids, edges)
     components = _build_components(node_ids, edges)
@@ -341,7 +342,7 @@ def _layout_graph(
         comp_layers = _layers_for_component(comp, levels)
         comp_layers = _optimize_layer_order(comp_layers, edges, order_map, iterations=3)
         comp_layers = _wrap_layers(comp_layers, max_cols)
-        comp_width, comp_height = _calc_component_size(comp_layers)
+        comp_width, comp_height = _calc_component_size(comp_layers, node_map)
         max_comp_width = max(max_comp_width, comp_width)
         layouts.append(
             ComponentLayout(
@@ -355,7 +356,7 @@ def _layout_graph(
     layouts.sort(key=lambda c: (-c.height, -c.width))
 
     max_row_width = max(TARGET_WIDTH, max_comp_width + MARGIN * 2)
-    positions, total_w, total_h = _pack_components(layouts, max_row_width)
+    positions, total_w, total_h = _pack_components(layouts, max_row_width, node_map)
 
     total_w = max(640, total_w + MARGIN)
     total_h = max(480, total_h + MARGIN)
@@ -375,18 +376,42 @@ def _layers_for_component(comp: List[str], levels: Dict[str, int]) -> List[List[
     return [layer for layer in buckets if layer]
 
 
-def _calc_component_size(layers: List[List[str]]) -> Tuple[int, int]:
+def _count_group_breaks(layer: List[str], node_map: Dict[str, GraphNode]) -> int:
+    breaks = 0
+    for i in range(1, len(layer)):
+        g_prev = node_map[layer[i - 1]].group_id if layer[i - 1] in node_map else None
+        g_curr = node_map[layer[i]].group_id if layer[i] in node_map else None
+        if g_prev != g_curr:
+            breaks += 1
+    return breaks
+
+
+def _calc_component_size(
+    layers: List[List[str]],
+    node_map: Dict[str, GraphNode] | None = None,
+) -> Tuple[int, int]:
     if not layers:
         return NODE_W, NODE_H
-    max_nodes_in_row = max(len(layer) for layer in layers)
-    width = max_nodes_in_row * NODE_W + max(0, max_nodes_in_row - 1) * X_GAP
+    if node_map is None:
+        node_map = {}
+    group_gap = GROUP_BG_PAD * 2
+    max_width = 0
+    for layer in layers:
+        n = len(layer)
+        breaks = _count_group_breaks(layer, node_map)
+        row_w = n * NODE_W + max(0, n - 1 - breaks) * X_GAP + breaks * (X_GAP + group_gap)
+        max_width = max(max_width, row_w)
     height = len(layers) * NODE_H + max(0, len(layers) - 1) * Y_GAP
-    return width, height
+    return max_width, height
 
 
 def _pack_components(
-    components: List[ComponentLayout], max_width: int
+    components: List[ComponentLayout],
+    max_width: int,
+    node_map: Dict[str, GraphNode] | None = None,
 ) -> Tuple[Dict[str, Tuple[int, int]], int, int]:
+    if node_map is None:
+        node_map = {}
     positions: Dict[str, Tuple[int, int]] = {}
     x = MARGIN
     y = MARGIN + TITLE_GAP
@@ -399,7 +424,7 @@ def _pack_components(
             y += row_h + Y_GAP
             row_h = 0
 
-        local_positions = _layout_component_positions(comp.layers, comp.width)
+        local_positions = _layout_component_positions(comp.layers, comp.width, node_map)
         for node_id, (lx, ly) in local_positions.items():
             positions[node_id] = (x + lx, y + ly)
 
@@ -413,17 +438,30 @@ def _pack_components(
 
 
 def _layout_component_positions(
-    layers: List[List[str]], comp_width: int
+    layers: List[List[str]],
+    comp_width: int,
+    node_map: Dict[str, GraphNode] | None = None,
 ) -> Dict[str, Tuple[int, int]]:
+    if node_map is None:
+        node_map = {}
+    group_gap = GROUP_BG_PAD * 2
     positions: Dict[str, Tuple[int, int]] = {}
     y = 0
     for layer in layers:
-        row_width = len(layer) * NODE_W + max(0, len(layer) - 1) * X_GAP
+        breaks = _count_group_breaks(layer, node_map)
+        n = len(layer)
+        row_width = n * NODE_W + max(0, n - 1 - breaks) * X_GAP + breaks * (X_GAP + group_gap)
         start_x = max(0, (comp_width - row_width) // 2)
         x = start_x
-        for node_id in layer:
+        for i, node_id in enumerate(layer):
             positions[node_id] = (x, y)
-            x += NODE_W + X_GAP
+            gap = X_GAP
+            if i + 1 < n:
+                g_curr = node_map[node_id].group_id if node_id in node_map else None
+                g_next = node_map[layer[i + 1]].group_id if layer[i + 1] in node_map else None
+                if g_curr != g_next:
+                    gap = X_GAP + group_gap
+            x += NODE_W + gap
         y += NODE_H + Y_GAP
     return positions
 
