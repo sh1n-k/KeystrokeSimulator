@@ -1,5 +1,4 @@
 import copy
-import pickle
 import time
 import tkinter as tk
 from pathlib import Path
@@ -10,7 +9,8 @@ from PIL import Image, ImageTk
 from loguru import logger
 
 from keystroke_capturer import ScreenshotCapturer
-from keystroke_models import EventModel, ProfileModel
+from keystroke_models import EventModel
+from keystroke_profile_storage import ensure_quick_profile, load_profile, save_profile
 from keystroke_utils import StateUtils, WindowUtils, KeyUtils
 
 
@@ -35,10 +35,8 @@ class KeystrokeQuickEventEditor:
 
         self.capturer = ScreenshotCapturer()
         self.capturer.screenshot_callback = self.update_capture
-        self.prof_path = Path("profiles/Quick.pkl")
-        if not self.prof_path.exists():
-            self.prof_path.parent.mkdir(exist_ok=True)
-            self.prof_path.touch()
+        self.prof_dir = Path("profiles")
+        ensure_quick_profile(self.prof_dir)
 
         self._create_ui()
         self._load_pos()
@@ -206,16 +204,15 @@ class KeystrokeQuickEventEditor:
                     str(self.event_idx),
                     self.latest_pos,
                     self.clicked_pos,
-                    self.latest_img,
+                    None,  # latest_screenshot is not persisted
                     self.held_img,
                     self.ref_pixel,
                 )
             )
             self.event_idx += 1
-            p = ProfileModel()
+            p = load_profile(self.prof_dir, "Quick", migrate=True)
             p.event_list = self.events
-            with open(self.prof_path, "wb") as f:
-                pickle.dump(p, f)
+            save_profile(self.prof_dir, p, name="Quick")
 
     def close(self, event=None):
         self.chk_active = False

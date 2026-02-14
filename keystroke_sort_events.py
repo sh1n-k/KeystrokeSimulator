@@ -1,4 +1,3 @@
-import pickle
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, messagebox
@@ -8,6 +7,7 @@ from PIL import Image, ImageTk
 from loguru import logger
 
 from keystroke_models import EventModel
+from keystroke_profile_storage import load_profile, save_profile
 from keystroke_utils import StateUtils, WindowUtils
 
 
@@ -222,8 +222,7 @@ class KeystrokeSortEvents(tk.Toplevel):
 
     def _load_profile(self, name):
         try:
-            with open(self.prof_dir / f"{name}.pkl", "rb") as f:
-                return pickle.load(f)
+            return load_profile(self.prof_dir, name, migrate=True)
         except Exception:
             messagebox.showerror("Error", f"Load failed: {name}")
             self.close()
@@ -231,8 +230,7 @@ class KeystrokeSortEvents(tk.Toplevel):
     def save(self):
         self.profile.event_list = self.events
         try:
-            with open(self.prof_dir / f"{self.prof_name.get()}.pkl", "wb") as f:
-                pickle.dump(self.profile, f)
+            save_profile(self.prof_dir, self.profile, name=self.prof_name.get())
             self.save_cb(self.prof_name.get())
             self.close()
         except Exception as e:

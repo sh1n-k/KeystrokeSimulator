@@ -61,7 +61,7 @@ Capture events → Profile (Pickle, 250ms debounce auto-save) → Processor buil
 1. `keystroke_models.py`: Update `EventModel` dataclass
 2. `keystroke_event_editor.py`: Add UI controls
 3. `keystroke_processor.py`: Add processing logic + event_data conversion
-4. Ensure Pickle compatibility or handle migration
+4. Ensure JSON schema compatibility (`schema_version`) or handle migration (legacy `profiles/*.pkl` import may exist)
 5. Add tests in `tests/`
 
 ### Adding a New Setting
@@ -69,7 +69,7 @@ Capture events → Profile (Pickle, 250ms debounce auto-save) → Processor buil
 2. `keystroke_settings.py`: Add UI controls + JSON serialization
 
 ## File Locations
-- Profiles: `profiles/*.pkl`
+- Profiles: `profiles/*.json` (legacy `profiles/*.pkl` may exist)
 - Settings: `user_settings.json`
 - Logs: `logs/`
 - Auth config: `.env` (`AUTH_URL`, `VALIDATE_URL`)

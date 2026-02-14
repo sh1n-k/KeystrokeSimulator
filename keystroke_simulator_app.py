@@ -1,8 +1,6 @@
 import json
-import pickle
 import platform
 import re
-import shutil
 import threading
 import time
 import tkinter as tk
@@ -16,6 +14,14 @@ import pynput.mouse
 
 from keystroke_models import ProfileModel, EventModel, UserSettings
 from keystroke_modkeys import ModificationKeysWindow
+from keystroke_profile_storage import (
+    copy_profile as copy_profile_storage,
+    delete_profile_files,
+    ensure_quick_profile,
+    list_profile_names,
+    load_profile,
+    load_profile_meta_favorite,
+)
 from keystroke_processor import KeystrokeProcessor
 from keystroke_profiles import KeystrokeProfiles
 from keystroke_quick_event_editor import KeystrokeQuickEventEditor
@@ -85,24 +91,19 @@ class ProfileFrame(tk.Frame):
 
     def load_profiles(self):
         self.profiles_dir.mkdir(exist_ok=True)
-        quick_pkl = self.profiles_dir / "Quick.pkl"
-        if not quick_pkl.exists():
-            with open(quick_pkl, "wb") as f:
-                pickle.dump(ProfileModel(), f)
+        ensure_quick_profile(self.profiles_dir)
 
         favs, non_favs = [], []
-        for p_file in self.profiles_dir.glob("*.pkl"):
-            if p_file.name == "Quick.pkl":
+        for name in list_profile_names(self.profiles_dir):
+            if name == "Quick":
                 continue
             try:
-                with open(p_file, "rb") as f:
-                    data = pickle.load(f)
-                    (favs if getattr(data, "favorite", False) else non_favs).append(
-                        p_file.stem
-                    )
+                (favs if load_profile_meta_favorite(self.profiles_dir, name) else non_favs).append(
+                    name
+                )
             except Exception as e:
-                logger.warning(f"Load failed {p_file}: {e}")
-                non_favs.append(p_file.stem)
+                logger.warning(f"Load failed {name}: {e}")
+                non_favs.append(name)
 
         sorted_profiles = ["Quick"] + sorted(favs) + sorted(non_favs)
         self.profile_combobox["values"] = sorted_profiles
@@ -113,14 +114,15 @@ class ProfileFrame(tk.Frame):
         if not (curr := self.profile_combobox.get()):
             return
         dst_name = f"{curr} - Copied"
-        dst_path = self.profiles_dir / f"{dst_name}.pkl"
-        if dst_path.exists():
+        if (self.profiles_dir / f"{dst_name}.json").exists() or (
+            self.profiles_dir / f"{dst_name}.pkl"
+        ).exists():
             messagebox.showwarning(
                 "Warning", f"'{dst_name}' 프로필이 이미 존재합니다.", parent=self
             )
             return
         try:
-            shutil.copy(self.profiles_dir / f"{curr}.pkl", dst_path)
+            copy_profile_storage(self.profiles_dir, curr, dst_name)
             self.load_profiles()
             self.profile_combobox.set(dst_name)
         except Exception as e:
@@ -134,7 +136,7 @@ class ProfileFrame(tk.Frame):
             messagebox.showinfo("Info", "기본 프로필은 삭제할 수 없습니다.", parent=self)
             return
         if messagebox.askokcancel("Warning", f"프로필 '{curr}'을(를) 삭제하시겠습니까?"):
-            (self.profiles_dir / f"{curr}.pkl").unlink(missing_ok=True)
+            delete_profile_files(self.profiles_dir, curr)
             self.load_profiles()
 
 
@@ -392,10 +394,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             return False
 
         try:
-            with open(
-                Path(self.profiles_dir) / f"{self.selected_profile.get()}.pkl", "rb"
-            ) as f:
-                profile = pickle.load(f)
+            profile = load_profile(Path(self.profiles_dir), self.selected_profile.get(), migrate=True)
         except Exception:
             profile = ProfileModel()
 

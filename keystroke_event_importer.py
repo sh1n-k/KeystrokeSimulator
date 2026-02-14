@@ -1,5 +1,4 @@
 import copy
-import pickle
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
@@ -8,6 +7,7 @@ from typing import Callable, Optional
 from loguru import logger
 
 from keystroke_models import EventModel
+from keystroke_profile_storage import list_profile_names, load_profile
 from keystroke_utils import StateUtils
 
 
@@ -96,11 +96,7 @@ class EventImporter:
 
     def load_profiles(self):
         self.profile_dir.mkdir(exist_ok=True)
-        names = sorted([p.stem for p in self.profile_dir.glob("*.pkl")])
-        if "Quick" in names:
-            names.remove("Quick")
-            names.insert(0, "Quick")
-
+        names = list_profile_names(self.profile_dir)
         self.cb_prof["values"] = names
         if names:
             self.cb_prof.current(0)
@@ -136,10 +132,11 @@ class EventImporter:
         self.canvas.yview_moveto(0)  # 스크롤 초기화
 
         try:
-            with open(self.profile_dir / f"{prof_name}.pkl", "rb") as f:
-                self.current_profile_data = pickle.load(f)
-                if self.current_profile_data and self.current_profile_data.event_list:
-                    self._ensure_event_defaults(self.current_profile_data.event_list)
+            self.current_profile_data = load_profile(
+                self.profile_dir, prof_name, migrate=True
+            )
+            if self.current_profile_data and self.current_profile_data.event_list:
+                self._ensure_event_defaults(self.current_profile_data.event_list)
         except Exception as e:
             logger.error(f"Failed to load profile {prof_name}: {e}")
             self.current_profile_data = None
@@ -182,9 +179,7 @@ class EventImporter:
             event_name=evt.event_name,
             latest_position=evt.latest_position,
             clicked_position=evt.clicked_position,
-            latest_screenshot=(
-                evt.latest_screenshot.copy() if evt.latest_screenshot else None
-            ),
+            latest_screenshot=None,  # not persisted; left preview is always live capture
             held_screenshot=evt.held_screenshot.copy() if evt.held_screenshot else None,
             ref_pixel_value=evt.ref_pixel_value,
             key_to_enter=evt.key_to_enter,

@@ -715,7 +715,6 @@ class KeystrokeEventEditor:
         required = [
             self.latest_pos,
             self.clicked_pos,
-            self.latest_img,
             self.held_img,
             self.ref_pixel,
         ]
@@ -801,13 +800,13 @@ class KeystrokeEventEditor:
             grp_id = None
 
         evt = EventModel(
-            final_name,
-            self.latest_pos,
-            self.clicked_pos,
-            self.latest_img.copy() if self.latest_img else None,  # 복사본
-            self.held_img.copy() if self.held_img else None,  # 복사본
-            self.ref_pixel,
-            self.key_to_enter,
+            event_name=final_name,
+            latest_position=self.latest_pos,
+            clicked_position=self.clicked_pos,
+            latest_screenshot=None,  # removed from persisted format
+            held_screenshot=self.held_img.copy() if self.held_img else None,  # 복사본
+            ref_pixel_value=self.ref_pixel,
+            key_to_enter=self.key_to_enter,
             press_duration_ms=dur,
             randomization_ms=rand,
             independent_thread=self.independent_thread.get(),
@@ -870,7 +869,7 @@ class KeystrokeEventEditor:
             evt.clicked_position,
         )
         self.latest_img, self.held_img, self.key_to_enter = (
-            evt.latest_screenshot,
+            None,  # left preview is always live capture
             evt.held_screenshot,
             evt.key_to_enter,
         )

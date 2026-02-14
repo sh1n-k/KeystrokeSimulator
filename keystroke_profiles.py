@@ -1,5 +1,4 @@
 import copy
-import pickle
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, messagebox, simpledialog
@@ -11,6 +10,7 @@ from keystroke_event_graph import ensure_profile_graph_image
 from keystroke_event_editor import KeystrokeEventEditor
 from keystroke_event_importer import EventImporter
 from keystroke_models import ProfileModel, EventModel
+from keystroke_profile_storage import load_profile, rename_profile_files, save_profile
 from keystroke_utils import WindowUtils, StateUtils
 
 
@@ -102,7 +102,10 @@ class ProfileFrame(ttk.Frame):
         if not name:
             self.lbl_warn.config(text="프로필 이름을 입력하세요")
             return
-        if name != self._original_name and (self._profiles_dir / f"{name}.pkl").exists():
+        if name != self._original_name and (
+            (self._profiles_dir / f"{name}.json").exists()
+            or (self._profiles_dir / f"{name}.pkl").exists()
+        ):
             self.lbl_warn.config(text=f"'{name}' 이미 존재합니다")
             return
         self.lbl_warn.config(text="")
@@ -873,9 +876,7 @@ class EventListFrame(ttk.Frame):
                 event_name=f"Copy of {evt.event_name}",
                 latest_position=evt.latest_position,
                 clicked_position=evt.clicked_position,
-                latest_screenshot=(
-                    evt.latest_screenshot.copy() if evt.latest_screenshot else None
-                ),
+                latest_screenshot=None,  # not persisted; left preview is always live capture
                 held_screenshot=(
                     evt.held_screenshot.copy() if evt.held_screenshot else None
                 ),
@@ -1024,26 +1025,8 @@ class KeystrokeProfiles:
 
     def _load(self):
         try:
-            with open(self.prof_dir / f"{self.prof_name}.pkl", "rb") as f:
-                p = pickle.load(f)
-                # Backward compatibility defaults
-                for e in p.event_list:
-                    if not hasattr(e, "match_mode"):
-                        e.match_mode = "pixel"
-                    if not hasattr(e, "invert_match"):
-                        e.invert_match = False
-                    if not hasattr(e, "execute_action"):
-                        e.execute_action = True
-                    if not hasattr(e, "group_id"):
-                        e.group_id = None
-                    if not hasattr(e, "priority"):
-                        e.priority = 0
-                    if not hasattr(e, "conditions"):
-                        e.conditions = {}
-                    if not hasattr(e, "independent_thread"):
-                        e.independent_thread = False
-                p.favorite = getattr(p, "favorite", False)
-                return p
+            # JSON is primary. If only legacy pickle exists, it is migrated to JSON.
+            return load_profile(self.prof_dir, self.prof_name, migrate=True)
         except Exception:
             return ProfileModel(name=self.prof_name, event_list=[], favorite=False)
 
@@ -1064,17 +1047,22 @@ class KeystrokeProfiles:
         old_name = self.prof_name
         renamed = False
         if new_name != self.prof_name:
-            if (self.prof_dir / f"{new_name}.pkl").exists():
+            if (self.prof_dir / f"{new_name}.json").exists() or (
+                self.prof_dir / f"{new_name}.pkl"
+            ).exists():
                 raise ValueError(f"'{new_name}' exists.")
-            (self.prof_dir / f"{self.prof_name}.pkl").unlink(missing_ok=True)
+
+            if (self.prof_dir / f"{self.prof_name}.json").exists() or (
+                self.prof_dir / f"{self.prof_name}.pkl"
+            ).exists():
+                rename_profile_files(self.prof_dir, self.prof_name, new_name)
             self.prof_name = new_name
             renamed = True
 
         if reload:
             self.e_frame.update_events()
             self.e_frame.save_names()
-        with open(self.prof_dir / f"{self.prof_name}.pkl", "wb") as f:
-            pickle.dump(self.profile, f)
+        save_profile(self.prof_dir, self.profile, name=self.prof_name)
         if reload:
             self.e_frame.update_events()
         if renamed and self.ext_save_cb:

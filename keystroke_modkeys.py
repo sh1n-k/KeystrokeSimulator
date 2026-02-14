@@ -1,11 +1,10 @@
-import pickle
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 from typing import Dict, Any
 
 from loguru import logger
-from keystroke_models import ProfileModel
+from keystroke_profile_storage import load_profile, save_profile
 from keystroke_utils import WindowUtils
 
 
@@ -13,7 +12,7 @@ class ModificationKeysWindow(tk.Toplevel):
     def __init__(self, master, profile_name):
         super().__init__(master)
         self.prof_name = profile_name
-        self.prof_path = Path("profiles") / f"{profile_name}.pkl"
+        self.prof_dir = Path("profiles")
         self.title("Modification Keys")
         self.transient(master)
         self.grab_set()
@@ -58,13 +57,15 @@ class ModificationKeysWindow(tk.Toplevel):
         )
 
     def _load_data(self):
-        if not self.prof_path.exists():
+        if not (
+            (self.prof_dir / f"{self.prof_name}.json").exists()
+            or (self.prof_dir / f"{self.prof_name}.pkl").exists()
+        ):
             logger.warning(f"Profile '{self.prof_name}' missing.")
             return self.destroy()
 
         try:
-            with open(self.prof_path, "rb") as f:
-                p = pickle.load(f)
+            p = load_profile(self.prof_dir, self.prof_name, migrate=True)
 
             # Default initialization if missing
             if not getattr(p, "modification_keys", None):
@@ -72,8 +73,7 @@ class ModificationKeysWindow(tk.Toplevel):
                     l.lower(): {"enabled": True, "value": "Pass", "pass": True}
                     for l in self.labels
                 }
-                with open(self.prof_path, "wb") as f:
-                    pickle.dump(p, f)
+                save_profile(self.prof_dir, p, name=self.prof_name)
 
             for i, lbl in enumerate(self.labels):
                 if d := p.modification_keys.get(lbl.lower()):
@@ -119,11 +119,9 @@ class ModificationKeysWindow(tk.Toplevel):
         }
 
         try:
-            with open(self.prof_path, "rb") as f:
-                p = pickle.load(f)
+            p = load_profile(self.prof_dir, self.prof_name, migrate=True)
             p.modification_keys = data
-            with open(self.prof_path, "wb") as f:
-                pickle.dump(p, f)
+            save_profile(self.prof_dir, p, name=self.prof_name)
             logger.info(f"Saved keys for '{self.prof_name}'")
             self.destroy()
         except Exception as e:

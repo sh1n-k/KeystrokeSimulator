@@ -7,7 +7,7 @@ KeystrokeSimulator is a Python/Tkinter desktop automation app that watches scree
 Primary goals for agents:
 - Keep `main.py` / `keystroke_simulator_app.py` runnable.
 - Keep the event processing pipeline in `keystroke_processor.py` correct (conditions, groups, inversion, threading).
-- Maintain backward compatibility for saved profiles (`profiles/*.pkl`).
+- Maintain backward compatibility for saved profiles (`profiles/*.json` primary; legacy `profiles/*.pkl` may exist and should migrate cleanly).
 
 ## Setup commands
 
@@ -95,14 +95,16 @@ Tests:
 - `tests/`: `unittest` suite (`test_*.py`).
 
 Local state (gitignored; avoid relying on these being versioned):
-- `profiles/`: saved profiles (`*.pkl`).
+- `profiles/`: saved profiles (`*.json` primary; legacy `*.pkl` may exist).
 - `logs/`: log files.
 - `*.json`, `*.b64`: user/state artifacts (see `.gitignore`).
 
 ## Conventions
 
-Pickle compatibility:
-- Profiles are persisted via Pickle; changes to `EventModel`/`ProfileModel` should keep defaults/backward compatibility to avoid breaking existing `profiles/*.pkl`.
+Profile persistence:
+- Profiles are persisted as JSON (`profiles/*.json`) with `schema_version` and Base64-encoded PNG images for `held_screenshot` (see `keystroke_profile_storage.py`).
+- `latest_screenshot` is not persisted; the left preview in the editor is always live capture.
+- Legacy Pickle profiles (`profiles/*.pkl`) may exist; loaders should be able to read them and (when loading for real use) migrate to JSON without breaking old data.
 
 Threading/UI:
 - Tkinter UI must remain on the main thread.
