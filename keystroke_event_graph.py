@@ -30,10 +30,11 @@ TARGET_WIDTH = 1200
 
 # Legend
 LEGEND_TOP_PAD = 20
-LEGEND_ITEM_H = 22
+LEGEND_ITEM_H = 26
 LEGEND_SWATCH_W = 30
 LEGEND_COL_GAP = 24
 LEGEND_ROW_GAP = 6
+LEGEND_FONT_SIZE = 14
 
 # Group backgrounds
 GROUP_BG_ALPHA = 45
@@ -124,6 +125,7 @@ def render_profile_graph(profile: ProfileModel, profile_name: str) -> Image.Imag
 
     font = _load_font(14)
     font_small = _load_font(12)
+    font_legend = _load_font(LEGEND_FONT_SIZE)
 
     # Use actual content bottom instead of padded height for legend placement
     content_bottom = MARGIN + TITLE_GAP
@@ -131,7 +133,7 @@ def render_profile_graph(profile: ProfileModel, profile_name: str) -> Image.Imag
         content_bottom = max(y + NODE_H for _, y in positions.values()) + MARGIN
     content_bottom = max(content_bottom, MARGIN + TITLE_GAP + NODE_H + MARGIN)
 
-    legend_h = _calc_legend_height(nodes, font_small)
+    legend_h = _calc_legend_height(nodes)
     total_h = max(height, content_bottom + legend_h)
 
     img = Image.new("RGBA", (width, total_h), color=BACKGROUND)
@@ -159,7 +161,7 @@ def render_profile_graph(profile: ProfileModel, profile_name: str) -> Image.Imag
         _draw_node(draw, node, positions[node.node_id], font, font_small)
 
     # Z4: Legend at bottom
-    _draw_legend(draw, img, nodes, content_bottom, width, font, font_small)
+    _draw_legend(draw, img, nodes, content_bottom, width, font, font_legend)
 
     return img
 
@@ -1054,7 +1056,6 @@ def _profile_hash(profile: ProfileModel) -> str:
 
 def _calc_legend_height(
     nodes: List[GraphNode],
-    font_small: ImageFont.ImageFont,
 ) -> int:
     groups = sorted(set(n.group_id for n in nodes if n.group_id))
     edge_rows = 3
@@ -1075,7 +1076,7 @@ def _draw_legend(
     legend_y: int,
     canvas_width: int,
     font: ImageFont.ImageFont,
-    font_small: ImageFont.ImageFont,
+    font_legend: ImageFont.ImageFont,
 ) -> None:
     draw.line(
         [(MARGIN, legend_y), (canvas_width - MARGIN, legend_y)],
@@ -1091,11 +1092,11 @@ def _draw_legend(
 
     # Column 1: Edge types
     col_x = MARGIN
-    draw.text((col_x, header_y), "Edges", fill=TEXT_COLOR_FADE, font=font_small)
+    draw.text((col_x, header_y), "Edges", fill=TEXT_COLOR_FADE, font=font_legend)
     edge_items = [
-        (EDGE_TRUE, "Active"),
-        (EDGE_FALSE, "Inactive"),
-        (EDGE_UNKNOWN, "Unknown"),
+        (EDGE_TRUE, "Active (활성)"),
+        (EDGE_FALSE, "Inactive (비활성)"),
+        (EDGE_UNKNOWN, "Unknown (알 수 없음)"),
     ]
     for i, (color, label) in enumerate(edge_items):
         ey = y_start + i * item_step + LEGEND_ITEM_H // 2
@@ -1104,18 +1105,18 @@ def _draw_legend(
             (col_x + LEGEND_SWATCH_W + 8, y_start + i * item_step + 2),
             label,
             fill=TEXT_COLOR,
-            font=font_small,
+            font=font_legend,
         )
 
     # Column 2: Node styles + badges
     col_x = MARGIN + col_width
-    draw.text((col_x, header_y), "Nodes", fill=TEXT_COLOR_FADE, font=font_small)
+    draw.text((col_x, header_y), "Nodes", fill=TEXT_COLOR_FADE, font=font_legend)
 
     node_style_items = [
-        ("solid", "Normal"),
-        ("dashed", "Condition-only"),
-        ("faded", "Disabled"),
-        ("missing", "Missing ref"),
+        ("solid", "Normal (일반)"),
+        ("dashed", "Condition-only (조건 전용)"),
+        ("faded", "Disabled (사용 안 함)"),
+        ("missing", "Missing ref (참조 누락)"),
     ]
     for i, (style, label) in enumerate(node_style_items):
         iy = y_start + i * item_step
@@ -1141,13 +1142,13 @@ def _draw_legend(
             draw.rounded_rectangle(
                 [sx, sy, sx + sw, sy + sh], radius=4, fill=MISSING_FILL, outline=BORDER_COLOR, width=1,
             )
-        draw.text((col_x + sw + 6, iy + 2), label, fill=TEXT_COLOR, font=font_small)
+        draw.text((col_x + sw + 6, iy + 2), label, fill=TEXT_COLOR, font=font_legend)
 
     badge_items = [
-        ("thread", BADGE_COLOR_THREAD, "Independent thread"),
-        ("warn", BADGE_COLOR_MISSING, "Missing reference"),
-        ("off", BADGE_COLOR_DISABLED, "Disabled event"),
-        ("eye", BADGE_COLOR_CONDITION, "Condition-only"),
+        ("thread", BADGE_COLOR_THREAD, "Independent thread (독립 스레드)"),
+        ("warn", BADGE_COLOR_MISSING, "Missing reference (참조 누락)"),
+        ("off", BADGE_COLOR_DISABLED, "Disabled event (비활성 이벤트)"),
+        ("eye", BADGE_COLOR_CONDITION, "Condition-only (조건 전용)"),
     ]
     badge_y_start = y_start + len(node_style_items) * item_step
     for i, (btype, bcolor, blabel) in enumerate(badge_items):
@@ -1155,13 +1156,13 @@ def _draw_legend(
         bcx = col_x + 7
         bcy = iy + LEGEND_ITEM_H // 2
         _draw_badge(draw, bcx, bcy, 7, btype, bcolor)
-        draw.text((col_x + 20, iy + 2), blabel, fill=TEXT_COLOR, font=font_small)
+        draw.text((col_x + 20, iy + 2), blabel, fill=TEXT_COLOR, font=font_legend)
 
     # Column 3: Group colors
     groups = sorted(set(n.group_id for n in nodes if n.group_id))
     if groups:
         col_x = MARGIN + col_width * 2
-        draw.text((col_x, header_y), "Groups", fill=TEXT_COLOR_FADE, font=font_small)
+        draw.text((col_x, header_y), "Groups", fill=TEXT_COLOR_FADE, font=font_legend)
         for i, gid in enumerate(groups):
             iy = y_start + i * item_step
             gcolor = _group_color(gid)
@@ -1172,7 +1173,7 @@ def _draw_legend(
                 outline=BORDER_COLOR,
                 width=1,
             )
-            draw.text((col_x + 32, iy + 2), gid, fill=TEXT_COLOR, font=font_small)
+            draw.text((col_x + 32, iy + 2), gid, fill=TEXT_COLOR, font=font_legend)
 
 
 def _load_font(size: int) -> ImageFont.ImageFont:
