@@ -25,7 +25,7 @@ NODE_H = 60
 X_GAP = 28
 Y_GAP = 56
 MARGIN = 32
-TITLE_GAP = 48
+TITLE_GAP = 68
 TARGET_WIDTH = 1200
 
 # Legend
@@ -119,6 +119,7 @@ def ensure_profile_graph_image(
 
 def render_profile_graph(profile: ProfileModel, profile_name: str) -> Image.Image:
     nodes, edges = _build_graph(profile)
+    _infer_condition_groups(nodes, edges)
     positions, width, height = _layout_graph(nodes, edges)
 
     font = _load_font(14)
@@ -161,6 +162,24 @@ def render_profile_graph(profile: ProfileModel, profile_name: str) -> Image.Imag
     _draw_legend(draw, img, nodes, content_bottom, width, font, font_small)
 
     return img
+
+
+def _infer_condition_groups(nodes: List[GraphNode], edges: List[GraphEdge]) -> None:
+    """Infer group_id for ungrouped condition-only nodes from their edge targets."""
+    node_map = {n.node_id: n for n in nodes}
+    for node in nodes:
+        if node.group_id or node.execute_action:
+            continue
+        target_groups: set[str] = set()
+        has_targets = False
+        for edge in edges:
+            if edge.src == node.node_id:
+                has_targets = True
+                dst = node_map.get(edge.dst)
+                if dst and dst.group_id:
+                    target_groups.add(dst.group_id)
+        if has_targets and len(target_groups) == 1:
+            node.group_id = target_groups.pop()
 
 
 def _build_graph(profile: ProfileModel) -> Tuple[List[GraphNode], List[GraphEdge]]:
