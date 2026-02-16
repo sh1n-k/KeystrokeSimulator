@@ -4,6 +4,7 @@ import re
 import threading
 import time
 import tkinter as tk
+from tkinter import font as tkfont
 from dataclasses import fields, asdict
 from pathlib import Path
 from tkinter import ttk, messagebox
@@ -28,6 +29,7 @@ from keystroke_quick_event_editor import KeystrokeQuickEventEditor
 from keystroke_settings import KeystrokeSettings
 from keystroke_sort_events import KeystrokeSortEvents
 from keystroke_sounds import SoundPlayer
+from profile_display import QUICK_PROFILE_NAME, build_profile_display_values
 from keystroke_utils import (
     ProcessUtils,
     StateUtils,
@@ -78,24 +80,68 @@ class ProfileFrame(tk.Frame):
     def __init__(self, master, textvariable, profiles_dir, *args, **kwargs):
         super().__init__(master, *args, **kwargs)
         self.profiles_dir = Path(profiles_dir)
+        self.selected_profile_var = textvariable
+        self.profile_display_var = tk.StringVar()
+        self.profile_names = []
+        self.name_to_index = {}
+        self.favorite_names = set()
+
+        self._normal_font = tkfont.nametofont("TkTextFont").copy()
+        self._bold_font = tkfont.nametofont("TkTextFont").copy()
+        self._bold_font.configure(weight="bold")
+
         tk.Label(self, text="Profiles:").pack(side=tk.LEFT, padx=5)
         self.profile_combobox = ttk.Combobox(
-            self, textvariable=textvariable, state="readonly"
+            self, textvariable=self.profile_display_var, state="readonly"
         )
         self.profile_combobox.pack(side=tk.LEFT, padx=5)
+        self.profile_combobox.bind(
+            "<<ComboboxSelected>>",
+            self._on_profile_selected,
+        )
         self.copy_button = tk.Button(self, text="Copy", command=self.copy_profile)
         self.copy_button.pack(side=tk.LEFT)
         self.del_button = tk.Button(self, text="Delete", command=self.delete_profile)
         self.del_button.pack(side=tk.LEFT)
         self.load_profiles()
 
-    def load_profiles(self):
+    def _apply_selected_profile_font(self, profile_name: str):
+        font = (
+            self._bold_font
+            if profile_name in self.favorite_names and profile_name != QUICK_PROFILE_NAME
+            else self._normal_font
+        )
+        self.profile_combobox.configure(font=font)
+
+    def _on_profile_selected(self, _event=None):
+        idx = self.profile_combobox.current()
+        if not (0 <= idx < len(self.profile_names)):
+            return
+        profile_name = self.profile_names[idx]
+        self.selected_profile_var.set(profile_name)
+        self._apply_selected_profile_font(profile_name)
+
+    def set_selected_profile(self, profile_name: str) -> bool:
+        idx = self.name_to_index.get(profile_name)
+        if idx is None:
+            return False
+        self.profile_combobox.current(idx)
+        self._on_profile_selected()
+        return True
+
+    def get_selected_profile_name(self) -> str:
+        idx = self.profile_combobox.current()
+        if 0 <= idx < len(self.profile_names):
+            return self.profile_names[idx]
+        return self.selected_profile_var.get()
+
+    def load_profiles(self, select_name: str | None = None):
         self.profiles_dir.mkdir(exist_ok=True)
         ensure_quick_profile(self.profiles_dir)
 
         favs, non_favs = [], []
         for name in list_profile_names(self.profiles_dir):
-            if name == "Quick":
+            if name == QUICK_PROFILE_NAME:
                 continue
             try:
                 (favs if load_profile_meta_favorite(self.profiles_dir, name) else non_favs).append(
@@ -105,13 +151,30 @@ class ProfileFrame(tk.Frame):
                 logger.warning(f"Load failed {name}: {e}")
                 non_favs.append(name)
 
-        sorted_profiles = ["Quick"] + sorted(favs) + sorted(non_favs)
-        self.profile_combobox["values"] = sorted_profiles
-        if sorted_profiles:
+        self.favorite_names = set(favs)
+        sorted_profiles = [QUICK_PROFILE_NAME] + sorted(favs) + sorted(non_favs)
+        self.profile_names = sorted_profiles
+        self.name_to_index = {name: idx for idx, name in enumerate(sorted_profiles)}
+
+        self.profile_combobox["values"] = build_profile_display_values(
+            sorted_profiles,
+            self.favorite_names,
+            quick_profile_name=QUICK_PROFILE_NAME,
+        )
+
+        if not sorted_profiles:
+            self.selected_profile_var.set("")
+            self.profile_display_var.set("")
+            self._apply_selected_profile_font("")
+            return
+
+        target_name = select_name or self.selected_profile_var.get() or QUICK_PROFILE_NAME
+        if not self.set_selected_profile(target_name):
             self.profile_combobox.current(0)
+            self._on_profile_selected()
 
     def copy_profile(self):
-        if not (curr := self.profile_combobox.get()):
+        if not (curr := self.get_selected_profile_name()):
             return
         dst_name = f"{curr} - Copied"
         if (self.profiles_dir / f"{dst_name}.json").exists() or (
@@ -123,16 +186,15 @@ class ProfileFrame(tk.Frame):
             return
         try:
             copy_profile_storage(self.profiles_dir, curr, dst_name)
-            self.load_profiles()
-            self.profile_combobox.set(dst_name)
+            self.load_profiles(select_name=dst_name)
         except Exception as e:
             messagebox.showerror("Error", f"복사 실패: {e}", parent=self)
 
     def delete_profile(self):
-        curr = self.profile_combobox.get()
+        curr = self.get_selected_profile_name()
         if not curr:
             return
-        if curr == "Quick":
+        if curr == QUICK_PROFILE_NAME:
             messagebox.showinfo("Info", "기본 프로필은 삭제할 수 없습니다.", parent=self)
             return
         if messagebox.askokcancel("Warning", f"프로필 '{curr}'을(를) 삭제하시겠습니까?"):
@@ -264,7 +326,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             if match:
                 self.selected_process.set(match)
         if prof := state.get("profile"):
-            self.selected_profile.set(prof)
+            self.profile_frame.set_selected_profile(prof)
 
     def _setup_event_handlers(self):
         self.unbind_events()
@@ -461,12 +523,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             KeystrokeProfiles(self, self.selected_profile.get(), self.reload_profiles)
 
     def reload_profiles(self, new_name):
-        self.profile_frame.load_profiles()
-        vals = self.profile_frame.profile_combobox["values"]
-        if new_name in vals:
-            self.profile_frame.profile_combobox.set(new_name)
-        elif vals:
-            self.profile_frame.profile_combobox.current(0)
+        self.profile_frame.load_profiles(select_name=new_name)
 
     def sort_profile_events(self):
         self.unbind_events()
