@@ -27,7 +27,8 @@ keystroke_quick_event_editor.py # Batch quick event creation
 keystroke_event_importer.py     # Import events between profiles
 keystroke_event_graph.py        # Condition chain graph visualization (Pillow)
 keystroke_capturer.py           # Screen capture thread (mss + screeninfo)
-keystroke_profiles.py           # Profile manager (Pickle load/save, auto-save)
+keystroke_profile_storage.py    # Profile JSON serialization/deserialization (legacy pkl import)
+keystroke_profiles.py           # Profile manager (JSON load/save, auto-save)
 keystroke_settings.py           # Settings dialog (JSON serialization)
 keystroke_sort_events.py        # Drag-and-drop event reordering
 keystroke_modkeys.py            # Modification keys (Alt/Ctrl/Shift) config window
@@ -53,7 +54,7 @@ tests/                          # unittest test suite (7 test files)
 - **Inverted Matching**: `invert_match=True` triggers on mismatch.
 
 ### Data Flow
-Capture events → Profile (Pickle, 250ms debounce auto-save) → Processor builds mega_rect → Runtime loop: capture → match → conditions → group priority → keystrokes
+Capture events → Profile (JSON, 250ms debounce auto-save) → Processor builds mega_rect → Runtime loop: capture → match → conditions → group priority → keystrokes
 
 ## Common Tasks
 
@@ -88,7 +89,7 @@ Python 3.13, Tkinter (Korean UI), mss + numpy (capture/vision), pynput + PyObjC/
 - Feature branches: `busy-maxwell`, `gallant-newton`
 
 ## Known Constraints
-- Profiles use Pickle: adding/removing `EventModel` fields requires backward-compatible defaults
+- Profiles use JSON (`keystroke_profile_storage.py`): legacy `.pkl` files auto-converted on load. `PROFILE_SCHEMA_VERSION` tracks schema changes.
 - macOS: requires Accessibility + Screen Recording permissions
 - `_lambda.py` is AWS Lambda server-side code, not part of the client app
 
