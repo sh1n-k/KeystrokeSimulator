@@ -1,4 +1,5 @@
 import copy
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, messagebox, simpledialog
@@ -354,20 +355,20 @@ class EventRow(ttk.Frame):
 
         # 3. Independent Thread Indicator
         self.lbl_indep = ttk.Label(
-            self, text="", width=4, anchor="center", cursor="hand2"
+            self, text="", width=8, anchor="center", cursor="hand2"
         )
         self.lbl_indep.bind("<Button-1>", self._on_indep_click)
         self.lbl_indep.pack(side=tk.LEFT)
         self._tip_indep = ToolTip(self.lbl_indep)
 
         # 4. Condition Indicator
-        self.lbl_cond = ttk.Label(self, text="", width=6, anchor="center")
+        self.lbl_cond = ttk.Label(self, text="", width=10, anchor="center")
         self.lbl_cond.pack(side=tk.LEFT)
         self._tip_cond = ToolTip(self.lbl_cond)
 
         # 5. Group ID Label (클릭 가능)
         self.lbl_grp = ttk.Label(
-            self, text="", width=12, anchor="center", relief="sunken", cursor="hand2"
+            self, text="", width=14, anchor="center", relief="sunken", cursor="hand2"
         )
         self.lbl_grp.pack(side=tk.LEFT, padx=2)
         self.lbl_grp.bind("<Button-1>", self._on_group_click)
@@ -375,7 +376,7 @@ class EventRow(ttk.Frame):
 
         # 6. Key Display Label (NEW)
         self.lbl_key = ttk.Label(
-            self, text="", width=8, anchor="center", relief="groove"
+            self, text="", width=10, anchor="center", relief="groove"
         )
         self.lbl_key.pack(side=tk.LEFT, padx=2)
         self.lbl_key.bind(
@@ -427,38 +428,44 @@ class EventRow(ttk.Frame):
 
         # Independent Thread
         is_indep = getattr(self.event, "independent_thread", False)
-        self.lbl_indep.config(text="IND" if is_indep else "")
+        self.lbl_indep.config(text="독립 실행" if is_indep else "")
         self._tip_indep.update_text(
-            "독립 실행 (다른 이벤트와 병렬 처리)\n클릭하여 해제" if is_indep
-            else "클릭하여 독립 실행으로 전환"
+            "현재 독립 실행 상태입니다. 클릭하면 일반 실행으로 바뀝니다." if is_indep
+            else "클릭하면 독립 실행으로 전환됩니다."
         )
 
         # Condition Only
         is_cond = not getattr(self.event, "execute_action", True)
-        self.lbl_cond.config(text="[COND]" if is_cond else "")
+        self.lbl_cond.config(text="조건 전용" if is_cond else "")
         self.entry.config(foreground="gray" if is_cond else "black")
-        self._tip_cond.update_text("조건만 평가 (키 입력 없음)" if is_cond else "")
+        self._tip_cond.update_text(
+            "조건만 확인하고 키 입력은 하지 않습니다." if is_cond
+            else "조건이 맞으면 키를 눌러 실행됩니다."
+        )
 
         # Group
         grp = self.event.group_id or ""
-        self.lbl_grp.config(text=grp if grp else "---")
+        self.lbl_grp.config(text=grp if grp else "그룹 없음")
         self._tip_grp.update_text(
-            f"그룹: {grp}\n클릭하여 변경" if grp else "클릭하여 그룹 지정"
+            f"현재 그룹: {grp}. 클릭하면 변경할 수 있습니다." if grp
+            else "현재 그룹이 없습니다. 클릭해서 그룹을 지정하세요."
         )
 
         # Key (NEW)
         key = self.event.key_to_enter or ""
         invert = getattr(self.event, "invert_match", False)
-        display = key if key else "---"
+        display = key if key else "키 없음"
         if invert:
-            display = f"≠ {display}"
+            display = f"반전:{display}"
         self.lbl_key.config(text=display)
         if invert:
-            self._tip_key.update_text("반전 매칭: 조건 불일치 시 실행\n클릭하여 편집기 열기")
+            self._tip_key.update_text(
+                "반전 매칭이 켜져 있습니다. 기준과 불일치할 때 실행됩니다."
+            )
         elif key:
-            self._tip_key.update_text(f"{key}\n클릭하여 편집기 열기")
+            self._tip_key.update_text(f"입력 키: {key}. 클릭하면 편집기를 엽니다.")
         else:
-            self._tip_key.update_text("클릭하여 편집기 열기")
+            self._tip_key.update_text("입력 키가 없습니다. 클릭하면 편집기를 엽니다.")
 
     def _on_indep_click(self, event=None):
         if self.event:
@@ -548,6 +555,7 @@ class EventListFrame(ttk.Frame):
         self.profile_name_getter = name_getter
         self.status_cb = status_cb
         self.graph_viewer = None
+        self.empty_state_frame: Optional[ttk.LabelFrame] = None
 
         # --- Control Buttons ---
         f_ctrl = ttk.Frame(self)
@@ -666,7 +674,7 @@ class EventListFrame(ttk.Frame):
         if not self._get_existing_groups():
             messagebox.showinfo(
                 "Groups",
-                "No groups defined yet.\nClick on '---' in any event row to assign a group.",
+                "아직 그룹이 없습니다.\n이벤트 행의 '그룹 없음' 칸을 클릭해 그룹을 지정하세요.",
                 parent=self.win,
             )
             return
@@ -801,12 +809,12 @@ class EventListFrame(ttk.Frame):
         _hdr = [
             ("#",          2,  "center", {},                              "이벤트 순서"),
             ("Use",        3,  "center", {},                              "체크 해제 시 이벤트를 건너뜁니다"),
-            ("Ind",        4,  "center", {},                              "독립 실행 (클릭하여 전환)"),
-            ("Type",       6,  "center", {},                              "조건 전용 여부"),
-            ("Group",     12,  "center", {"padx": 2},                     "이벤트 그룹 (클릭하여 변경)"),
-            ("Key",        8,  "center", {"padx": 2},                     "입력할 키 (클릭하여 편집)"),
-            ("Event Name", 0,  "w",      {"padx": 5, "fill": tk.X, "expand": True}, "이벤트 이름"),
-            ("Actions",   22,  "center", {},                              "편집 / 복사 / 삭제"),
+            ("독립 실행",  8,  "center", {},                              "독립 실행 상태"),
+            ("실행 유형", 10,  "center", {},                              "조건 전용 또는 키 입력 실행"),
+            ("그룹",      14,  "center", {"padx": 2},                     "이벤트 그룹 (클릭하여 변경)"),
+            ("입력 키",   10,  "center", {"padx": 2},                     "입력할 키 (클릭하여 편집)"),
+            ("이벤트 이름", 0, "w",      {"padx": 5, "fill": tk.X, "expand": True}, "이벤트 이름"),
+            ("동작",      22,  "center", {},                              "편집 / 복사 / 삭제"),
         ]
         for text, width, anchor, pack_kw, tip in _hdr:
             kw = {"text": text, "anchor": anchor}
@@ -825,6 +833,39 @@ class EventListFrame(ttk.Frame):
         for i, evt in enumerate(self.profile.event_list):
             self._add_row(i, evt, resize=False)
         self._update_delete_buttons()
+        self._sync_empty_state()
+
+    def _sync_empty_state(self):
+        has_events = bool(self.profile.event_list)
+        if has_events:
+            if self.empty_state_frame and self.empty_state_frame.winfo_exists():
+                self.empty_state_frame.grid_remove()
+            return
+
+        if not self.empty_state_frame or not self.empty_state_frame.winfo_exists():
+            self.empty_state_frame = ttk.LabelFrame(self, text="처음 시작 가이드")
+            self.empty_state_frame.grid(
+                row=3, column=0, columnspan=2, padx=8, pady=(8, 4), sticky="ew"
+            )
+            ttk.Label(
+                self.empty_state_frame,
+                text="1) 'Add Event (Open Editor)' 버튼으로 첫 이벤트를 추가하세요.",
+            ).pack(anchor="w", padx=10, pady=(8, 2))
+            ttk.Label(
+                self.empty_state_frame,
+                text="2) 이벤트 편집기에서 캡처와 입력 키를 설정하세요.",
+            ).pack(anchor="w", padx=10, pady=2)
+            ttk.Label(
+                self.empty_state_frame,
+                text="3) 상단 저장 상태가 'Saved HH:MM:SS'로 바뀌면 완료입니다.",
+            ).pack(anchor="w", padx=10, pady=2)
+            ttk.Button(
+                self.empty_state_frame,
+                text="첫 이벤트 추가",
+                command=self._add_event,
+            ).pack(anchor="e", padx=10, pady=(6, 8))
+        else:
+            self.empty_state_frame.grid()
 
     def _add_event(self):
         row_idx = len(self.profile.event_list)
@@ -837,6 +878,8 @@ class EventListFrame(ttk.Frame):
         )
 
     def _add_row(self, row_num=None, event=None, resize=True):
+        if self.empty_state_frame and self.empty_state_frame.winfo_exists():
+            self.empty_state_frame.grid_remove()
         idx = len(self.rows) if row_num is None else row_num
         cbs = {
             "open": self._open_editor,
@@ -915,6 +958,7 @@ class EventListFrame(ttk.Frame):
             row.row_num = i
         self._update_row_indices()
         self._update_delete_buttons()
+        self._sync_empty_state()
         self.save_cb()
         self.win.update_idletasks()
 
@@ -922,6 +966,7 @@ class EventListFrame(ttk.Frame):
         self.profile.event_list.extend(evts)
         for e in evts:
             self._add_row(event=e)
+        self._sync_empty_state()
         self.save_cb()
 
     def _update_row_indices(self):
@@ -966,6 +1011,7 @@ class EventListFrame(ttk.Frame):
         # Re-grid all rows and update indices
         self._update_row_indices()
         self._update_delete_buttons()
+        self._sync_empty_state()
         self.win.update_idletasks()
 
     def save_names(self):
@@ -1006,6 +1052,22 @@ class KeystrokeProfiles:
             profiles_dir=self.prof_dir,
         )
         self.p_frame.pack(pady=5)
+
+        f_status = ttk.Frame(self.win)
+        f_status.pack(fill="x", padx=8, pady=(0, 4))
+        ttk.Label(f_status, text="저장 상태:").pack(side=tk.LEFT)
+        self.lbl_save_badge = tk.Label(
+            f_status,
+            text="",
+            relief="groove",
+            borderwidth=1,
+            padx=8,
+            pady=2,
+        )
+        self.lbl_save_badge.pack(side=tk.LEFT, padx=5)
+        self.lbl_status = ttk.Label(f_status, text="", foreground="gray")
+        self.lbl_status.pack(side=tk.LEFT, padx=8)
+
         self.e_frame = EventListFrame(
             self.win, self.profile, self._on_changed,
             name_getter=lambda: self.prof_name,
@@ -1015,13 +1077,12 @@ class KeystrokeProfiles:
 
         f_btn = ttk.Frame(self.win, style="success.TFrame")
         f_btn.pack(side="bottom", anchor="e", pady=10, fill="both")
-        self.lbl_status = ttk.Label(f_btn, text="Auto-save enabled", foreground="gray")
-        self.lbl_status.pack(side=tk.LEFT, padx=5)
         ttk.Button(f_btn, text="Close", command=self._close).pack(
             side=tk.LEFT, anchor="center", padx=5
         )
 
         self._load_pos()
+        self._set_save_status("saved")
 
     def _load(self):
         try:
@@ -1072,8 +1133,41 @@ class KeystrokeProfiles:
     def _show_temp_status(self, text: str, duration_ms: int = 2000):
         self.lbl_status.config(text=text, foreground="#006600")
         self.win.after(duration_ms, lambda: self.lbl_status.config(
-            text="Auto-save enabled", foreground="gray"
+            text="", foreground="gray"
         ))
+
+    def _set_save_status(self, status: str, detail: str = ""):
+        if status == "saving":
+            self.lbl_save_badge.config(
+                text="Saving...",
+                bg="#fff4cc",
+                fg="#7a5b00",
+            )
+            if not detail:
+                self.lbl_status.config(text="", foreground="gray")
+            return
+        if status == "saved":
+            saved_at = time.strftime("%H:%M:%S")
+            self.lbl_save_badge.config(
+                text=f"Saved {saved_at}",
+                bg="#e6f4ea",
+                fg="#1e5f3a",
+            )
+            self.lbl_status.config(
+                text=detail if detail else "",
+                foreground="gray",
+            )
+            return
+        if status == "error":
+            self.lbl_save_badge.config(
+                text="Save failed",
+                bg="#fdecea",
+                fg="#9f1f1f",
+            )
+            self.lbl_status.config(
+                text=detail if detail else "",
+                foreground="#b30000",
+            )
 
     def _set_dirty(self, dirty: bool):
         self._dirty = dirty
@@ -1086,10 +1180,10 @@ class KeystrokeProfiles:
             self.e_frame.save_names()
             self._save(check_name=check_name, reload=False)
             self._set_dirty(False)
-            self.lbl_status.config(text="Auto-saved", foreground="gray")
+            self._set_save_status("saved")
         except Exception as e:
             self._set_dirty(True)
-            self.lbl_status.config(text=f"Auto-save failed: {e}", foreground="#b30000")
+            self._set_save_status("error", str(e))
 
     def _schedule_autosave(self, delay_ms=250, check_name=False):
         if self._autosave_after_id:
@@ -1101,7 +1195,7 @@ class KeystrokeProfiles:
 
     def _on_changed(self, check_name=False, reload=False):
         self._set_dirty(True)
-        self.lbl_status.config(text="Saving...", foreground="gray")
+        self._set_save_status("saving")
         self._schedule_autosave(check_name=check_name)
 
     def _flush_autosave(self, check_name=True):
@@ -1112,11 +1206,11 @@ class KeystrokeProfiles:
             self.e_frame.save_names()
             self._save(check_name=check_name, reload=False)
             self._set_dirty(False)
-            self.lbl_status.config(text="Auto-saved", foreground="gray")
+            self._set_save_status("saved")
             return True
         except Exception as e:
             self._set_dirty(True)
-            self.lbl_status.config(text=f"Auto-save failed: {e}", foreground="#b30000")
+            self._set_save_status("error", str(e))
             messagebox.showerror("Error", str(e), parent=self.win)
             return False
 
