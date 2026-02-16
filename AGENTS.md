@@ -89,10 +89,12 @@ Core modules:
 - `keystroke_simulator_app.py`: main Tkinter app and UI flow.
 - `keystroke_processor.py`: capture -> match -> conditions -> group priority -> keystrokes pipeline.
 - `keystroke_models.py`: dataclasses (events/profiles/settings).
+- `profile_display.py`: profile dropdown display-label helpers (favorite prefix, Quick exception).
 - `keystroke_capturer.py`: screen capture thread (mss + screeninfo).
 
 Tests:
 - `tests/`: `unittest` suite (`test_*.py`).
+- `tests/test_profile_display.py`: favorite profile display-label rules.
 
 Local state (gitignored; avoid relying on these being versioned):
 - `profiles/`: saved profiles (`*.json` primary; legacy `*.pkl` may exist).
@@ -105,6 +107,11 @@ Profile persistence:
 - Profiles are persisted as JSON (`profiles/*.json`) with `schema_version` and Base64-encoded PNG images for `held_screenshot` (see `keystroke_profile_storage.py`).
 - `latest_screenshot` is not persisted; the left preview in the editor is always live capture.
 - Legacy Pickle profiles (`profiles/*.pkl`) may exist; loaders should be able to read them and (when loading for real use) migrate to JSON without breaking old data.
+- New/fallback profiles should get default `modification_keys` with `alt`/`ctrl`/`shift` enabled and `Pass` mode.
+
+Profile dropdown/UI naming:
+- Favorite profiles in the main dropdown may use decorated display labels (for example `⭐ <name>`), while `Quick` remains undecorated and pinned first.
+- Always keep internal operations (`load_profile`, copy/delete, state save/load) on canonical profile names, not decorated display labels.
 
 Threading/UI:
 - Tkinter UI must remain on the main thread.

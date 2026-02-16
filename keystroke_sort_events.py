@@ -30,6 +30,8 @@ class KeystrokeSortEvents(tk.Toplevel):
         self.prof_name = tk.StringVar(value=profile_name)
         self.profile = self._load_profile(profile_name)
         self.events = self.profile.event_list
+        self._preview_win = None
+        self._preview_photo = None
 
         self._create_ui()
         self._load_state()
@@ -132,6 +134,7 @@ class KeystrokeSortEvents(tk.Toplevel):
         photo = ImageTk.PhotoImage(img)
         lbl_img = ttk.Label(f, image=photo)
         lbl_img.image = photo
+        self._bind_image_preview(lbl_img, evt)
         widgets.append(lbl_img)
 
         # 4. Group Info
@@ -165,12 +168,13 @@ class KeystrokeSortEvents(tk.Toplevel):
         # Pack & Bind
         for w in widgets:
             is_interactive = isinstance(w, (ttk.Entry, ttk.Checkbutton))
+            is_image_widget = w is lbl_img
             
             w.pack(
                 side=tk.LEFT, padx=5, fill=tk.Y if isinstance(w, ttk.Entry) else None, expand=isinstance(w, ttk.Entry)
             )
 
-            if not is_interactive:
+            if not is_interactive and not is_image_widget:
                 self._bind_drag_events(w, f)
 
         self._bind_drag_events(f, f)
@@ -180,6 +184,48 @@ class KeystrokeSortEvents(tk.Toplevel):
         widget.bind("<ButtonPress-1>", lambda e: self._drag_start(e, parent_frame))
         widget.bind("<B1-Motion>", lambda e: self._drag_motion(e, parent_frame))
         widget.bind("<ButtonRelease-1>", lambda e: self._drag_end(e, parent_frame))
+
+    def _bind_image_preview(self, widget, evt):
+        widget.bind("<ButtonPress-1>", lambda e: self._open_image_preview(evt, e))
+
+    def _open_image_preview(self, evt, click_event=None):
+        if not evt.held_screenshot:
+            return
+
+        self._close_image_preview()
+
+        preview = tk.Toplevel(self)
+        preview.title("Event Image Preview")
+        preview.transient(self)
+        preview.protocol("WM_DELETE_WINDOW", self._close_image_preview)
+        preview.bind("<Escape>", self._close_image_preview)
+
+        img = evt.held_screenshot
+        self._preview_photo = ImageTk.PhotoImage(img)
+        lbl = ttk.Label(preview, image=self._preview_photo)
+        lbl.image = self._preview_photo
+        lbl.pack()
+
+        x = click_event.x_root if click_event else self.winfo_rootx()
+        y = click_event.y_root if click_event else self.winfo_rooty()
+        offset_x, offset_y = 12, 12
+        x += offset_x
+        y += offset_y
+        max_x = max(0, self.winfo_screenwidth() - img.width)
+        max_y = max(0, self.winfo_screenheight() - img.height)
+        x = min(max(0, x), max_x)
+        y = min(max(0, y), max_y)
+
+        preview.geometry(f"{img.width}x{img.height}+{x}+{y}")
+        preview.focus_force()
+
+        self._preview_win = preview
+
+    def _close_image_preview(self, event=None):
+        if self._preview_win and self._preview_win.winfo_exists():
+            self._preview_win.destroy()
+        self._preview_win = None
+        self._preview_photo = None
 
     def _drag_start(self, event, frame):
         self._drag_data = {
@@ -237,6 +283,7 @@ class KeystrokeSortEvents(tk.Toplevel):
             logger.error(f"Save failed: {e}")
 
     def close(self, event=None):
+        self._close_image_preview()
         StateUtils.save_main_app_state(
             org_pos=f"{self.winfo_x()}/{self.winfo_y()}",
             org_size=f"{self.winfo_width()}/{self.winfo_height()}",
