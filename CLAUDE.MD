@@ -29,6 +29,7 @@ keystroke_event_graph.py        # Condition chain graph visualization (Pillow)
 keystroke_capturer.py           # Screen capture thread (mss + screeninfo)
 keystroke_profile_storage.py    # Profile JSON serialization/deserialization (legacy pkl import)
 keystroke_profiles.py           # Profile manager (JSON load/save, auto-save)
+profile_display.py              # Profile combobox display formatting (favorite star prefix)
 keystroke_settings.py           # Settings dialog (JSON serialization)
 keystroke_sort_events.py        # Drag-and-drop event reordering
 keystroke_modkeys.py            # Modification keys (Alt/Ctrl/Shift) config window
@@ -37,7 +38,7 @@ keystroke_utils.py              # Shared utilities: KeyUtils, ProcessUtils, Stat
 _build.py                       # PyInstaller build script
 _lambda.py                      # AWS Lambda auth backend (server-side only)
 _local_test_server.py           # Local auth test server
-tests/                          # unittest test suite (7 test files)
+tests/                          # unittest test suite (9 test files)
 ```
 
 ### 5-Stage Processor Pipeline (`keystroke_processor.py`)
@@ -81,12 +82,10 @@ Python 3.13, Tkinter (Korean UI), mss + numpy (capture/vision), pynput + PyObjC/
 ## Testing
 - Framework: `unittest`
 - Run: `python run_tests.py` (auto-discovers `tests/test_*.py`)
-- Test areas: condition chains, check_match, event data conversion, invert conditions, event graph algorithms, ROI extraction, resolve effective states
+- Test areas: condition chains, check_match, event data conversion, invert conditions, event graph algorithms, ROI extraction, resolve effective states, profile display, profile JSON storage
 
 ## Git Workflow
 - Main branch: `main`
-- Worktrees: `main` (primary), `gallant-newton`
-- Feature branches: `busy-maxwell`, `gallant-newton`
 
 ## Known Constraints
 - Profiles use JSON (`keystroke_profile_storage.py`): legacy `.pkl` files auto-converted on load. `PROFILE_SCHEMA_VERSION` tracks schema changes.
