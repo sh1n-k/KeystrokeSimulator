@@ -144,6 +144,15 @@ def profile_from_dict(d: Dict[str, Any]) -> ProfileModel:
 
 def _ensure_profile_defaults(p: ProfileModel) -> None:
     p.favorite = bool(getattr(p, "favorite", False))
+
+    # Ensure modification_keys default: all keys enabled with Pass mode
+    if not getattr(p, "modification_keys", None):
+        p.modification_keys = {
+            "alt": {"enabled": True, "value": "Pass", "pass": True},
+            "ctrl": {"enabled": True, "value": "Pass", "pass": True},
+            "shift": {"enabled": True, "value": "Pass", "pass": True},
+        }
+
     if getattr(p, "event_list", None) is None:
         p.event_list = []
 
@@ -230,7 +239,9 @@ def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> Profile
             save_profile(profiles_dir, p, name=name)
         return p
 
-    return ProfileModel(name=name, event_list=[], favorite=False)
+    p = ProfileModel(name=name, event_list=[], favorite=False)
+    _ensure_profile_defaults(p)
+    return p
 
 
 def save_profile(
