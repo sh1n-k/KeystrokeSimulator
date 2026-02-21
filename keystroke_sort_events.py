@@ -17,15 +17,10 @@ class KeystrokeSortEvents(tk.Toplevel):
         self.master, self.save_cb = master, save_callback
         self.prof_dir = Path("profiles")
         self.title("Event Organizer")
-        self.configure(bg="#2E2E2E")
 
         style = ttk.Style(self)
-        style.configure(
-            "Event.TFrame", background="#2E2E2E", relief="solid", borderwidth=1
-        )
-        style.configure("TLabel", background="#2E2E2E", foreground="white")
-        style.configure("TCheckbutton", background="#2E2E2E")
-        style.configure("Group.TLabel", background="#3E3E3E", foreground="#AAAAAA", relief="groove")
+        style.configure("Event.TFrame", relief="solid", borderwidth=1)
+        style.configure("Group.TLabel", background="#E0E0E0", foreground="#666666", relief="groove")
 
         self.prof_name = tk.StringVar(value=profile_name)
         self.profile = self._load_profile(profile_name)
@@ -42,9 +37,9 @@ class KeystrokeSortEvents(tk.Toplevel):
 
     def _create_ui(self):
         # 1. Top Frame (Profile Name)
-        f_top = tk.Frame(self, bg="#2E2E2E")
+        f_top = tk.Frame(self)
         f_top.pack(pady=10, padx=10, fill=tk.X)
-        tk.Label(f_top, text="Profile Name:", bg="#2E2E2E", fg="white").pack(
+        tk.Label(f_top, text="Profile Name:").pack(
             side=tk.LEFT, padx=(0, 5)
         )
         ttk.Entry(f_top, textvariable=self.prof_name, state="readonly").pack(
@@ -58,14 +53,14 @@ class KeystrokeSortEvents(tk.Toplevel):
         self._create_header()
 
         # 4. Scrollable Area
-        self.canvas = tk.Canvas(self, bg="#2E2E2E", highlightthickness=0)
+        self.canvas = tk.Canvas(self, highlightthickness=0)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         sb = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         self.canvas.configure(yscrollcommand=sb.set)
 
-        self.f_events = tk.Frame(self.canvas, bg="#2E2E2E")
+        self.f_events = tk.Frame(self.canvas)
         self.win_id = self.canvas.create_window(
             (0, 0), window=self.f_events, anchor="nw"
         )
@@ -81,23 +76,23 @@ class KeystrokeSortEvents(tk.Toplevel):
 
     def _create_header(self):
         """컬럼 타이틀 헤더 생성"""
-        f_h = tk.Frame(self, bg="#2E2E2E")
+        f_h = tk.Frame(self)
         # padx=(5, 20): 왼쪽은 행과 맞추고, 오른쪽은 스크롤바 너비만큼 여백을 줌
         f_h.pack(fill=tk.X, padx=(5, 20), pady=(10, 0))
 
         # _add_row의 위젯 구성과 너비를 맞춰서 라벨 배치
         # 1. No
-        tk.Label(f_h, text="No", width=3, bg="#2E2E2E", fg="gray").pack(side=tk.LEFT, padx=5)
+        tk.Label(f_h, text="No", width=3, fg="gray").pack(side=tk.LEFT, padx=5)
         # 2. Use (Checkbox)
-        tk.Label(f_h, text="Use", width=3, bg="#2E2E2E", fg="gray").pack(side=tk.LEFT, padx=5)
+        tk.Label(f_h, text="Use", width=3, fg="gray").pack(side=tk.LEFT, padx=5)
         # 3. Img
-        tk.Label(f_h, text="Img", width=6, bg="#2E2E2E", fg="gray").pack(side=tk.LEFT, padx=5)
+        tk.Label(f_h, text="Img", width=6, fg="gray").pack(side=tk.LEFT, padx=5)
         # 4. Group
-        tk.Label(f_h, text="Group (Prio)", width=12, bg="#2E2E2E", fg="gray").pack(side=tk.LEFT, padx=5)
+        tk.Label(f_h, text="Group (Prio)", width=12, fg="gray").pack(side=tk.LEFT, padx=5)
         # 5. Name (Expandable)
-        tk.Label(f_h, text="Event Name", bg="#2E2E2E", fg="gray", anchor="w").pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        tk.Label(f_h, text="Event Name", fg="gray", anchor="w").pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         # 6. Key/Type
-        tk.Label(f_h, text="Key", width=6, bg="#2E2E2E", fg="gray").pack(side=tk.LEFT, padx=5)
+        tk.Label(f_h, text="Key", width=6, fg="gray").pack(side=tk.LEFT, padx=5)
 
     def _on_frame_configure(self, event):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -155,14 +150,12 @@ class KeystrokeSortEvents(tk.Toplevel):
         # 6. Key or Type
         if getattr(evt, "execute_action", True):
             key_text = evt.key_to_enter or "N/A"
-            fg_color = "white"
         else:
             key_text = "Cond"
-            fg_color = "#888888"
-            
+
         lbl_key = ttk.Label(f, text=key_text, width=6, anchor="center")
-        if fg_color != "white":
-            lbl_key.configure(foreground=fg_color)
+        if not getattr(evt, "execute_action", True):
+            lbl_key.configure(foreground="#888888")
         widgets.append(lbl_key)
 
         # Pack & Bind
@@ -284,6 +277,7 @@ class KeystrokeSortEvents(tk.Toplevel):
 
     def close(self, event=None):
         self._close_image_preview()
+        self.unbind_all("<MouseWheel>")
         StateUtils.save_main_app_state(
             org_pos=f"{self.winfo_x()}/{self.winfo_y()}",
             org_size=f"{self.winfo_width()}/{self.winfo_height()}",
