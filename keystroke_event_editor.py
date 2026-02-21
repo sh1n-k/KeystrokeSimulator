@@ -143,16 +143,18 @@ class KeystrokeEventEditor:
 
         f_cap = ttk.LabelFrame(self.tab_basic, text="캡처 크기")
         f_cap.pack(pady=5, padx=10, fill="x")
-        ttk.Label(f_cap, text="너비:").pack(side="left", padx=5)
+        f_cap_row = tk.Frame(f_cap)
+        f_cap_row.pack(pady=3)
+        ttk.Label(f_cap_row, text="너비:").pack(side="left", padx=5)
         self.entry_capture_w = ttk.Spinbox(
-            f_cap, textvariable=self.capture_w_var, from_=50, to=1000, width=5
+            f_cap_row, textvariable=self.capture_w_var, from_=50, to=1000, width=5
         )
         self.entry_capture_w.pack(side="left", padx=5)
         for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
             self.entry_capture_w.bind(seq, self._on_capture_size_change)
-        ttk.Label(f_cap, text="높이:").pack(side="left", padx=5)
+        ttk.Label(f_cap_row, text="높이:").pack(side="left", padx=5)
         self.entry_capture_h = ttk.Spinbox(
-            f_cap, textvariable=self.capture_h_var, from_=50, to=1000, width=5
+            f_cap_row, textvariable=self.capture_h_var, from_=50, to=1000, width=5
         )
         self.entry_capture_h.pack(side="left", padx=5)
         for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
