@@ -249,17 +249,17 @@ class KeystrokeProcessor:
 
                     rh, rw = evt_data["ref_img"].shape[:2]
                     if rh > 0 and rw > 0:
-                        pts = [
-                            (0, 0),
-                            (rw - 1, 0),
-                            (0, rh - 1),
-                            (rw - 1, rh - 1),
-                            (rw // 2, rh // 2),
-                        ]
+                        n = max(5, min(25, (rw * rh) // 100))
+                        cols = max(2, int(n ** 0.5))
+                        rows = max(2, (n + cols - 1) // cols)
+                        pts = list(dict.fromkeys(
+                            (int((rw - 1) * c / (cols - 1)), int((rh - 1) * r / (rows - 1)))
+                            for r in range(rows)
+                            for c in range(cols)
+                        ))
                         evt_data["check_points"] = [
                             {"pos": (px, py), "color": evt_data["ref_img"][py, px]}
                             for px, py in pts
-                            if 0 <= px < rw and 0 <= py < rh
                         ]
             else:
                 ref_rgb = e.ref_pixel_value[:3]
