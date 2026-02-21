@@ -23,7 +23,7 @@ keystroke_simulator_app.py      # Main Tkinter app (process/profile selection, s
 keystroke_processor.py          # Core 5-stage pipeline (capture → match → conditions → group → keystrokes)
 keystroke_models.py             # Dataclasses: EventModel, ProfileModel, UserSettings
 keystroke_event_editor.py       # Full event editor dialog (Korean UI)
-keystroke_quick_event_editor.py # Batch quick event creation
+keystroke_quick_event_editor.py # Quick event creation (always pixel mode, capture size adjustable)
 keystroke_event_importer.py     # Import events between profiles
 keystroke_event_graph.py        # Condition chain graph visualization (Pillow)
 keystroke_capturer.py           # Screen capture thread (mss + screeninfo)
@@ -38,7 +38,7 @@ keystroke_utils.py              # Shared utilities: KeyUtils, ProcessUtils, Stat
 _build.py                       # PyInstaller build script
 _lambda.py                      # AWS Lambda auth backend (server-side only)
 _local_test_server.py           # Local auth test server
-tests/                          # unittest test suite (9 test files)
+tests/                          # unittest test suite (10 test files)
 ```
 
 ### 5-Stage Processor Pipeline (`keystroke_processor.py`)
@@ -53,6 +53,8 @@ tests/                          # unittest test suite (9 test files)
 - **Condition Chains**: Recursive DFS with cycle detection. "Strict chain" within same loop iteration. Distinguishes raw match state vs effective activation state. Condition-only events (`execute_action=False`) participate in chains without triggering keys.
 - **Group Priority**: Same `group_id` = mutually exclusive. Lower `priority` value wins. Independent thread events bypass group logic.
 - **Inverted Matching**: `invert_match=True` triggers on mismatch.
+- **Region Mode Matching**: At init, `held_screenshot` + `clicked_position` + `region_size` → extract reference image → sample N dynamic grid checkpoints (5–25, proportional to ROI area: `n = max(5, min(25, area // 100))`), laid out as a uniform cols×rows grid (corners always included, duplicates removed). At runtime, extract ROI from mega_rect capture centered at `(rel_x, rel_y)` with `region_w × region_h`, then compare each checkpoint color with `np.array_equal`. All checkpoints must match. `ref_pixel_value` is unused in region mode.
+- **Capture Size vs Region Size**: `ScreenshotCapturer.box_w/box_h` (UI "캡처 크기", basic tab) = live preview capture area. `EventModel.region_size` (UI "영역 크기", detail tab) = matching ROI size used by processor. These are independent; if capture area < region_size the ROI extraction returns `None` → no match.
 
 ### Data Flow
 Capture events → Profile (JSON, 250ms debounce auto-save) → Processor builds mega_rect → Runtime loop: capture → match → conditions → group priority → keystrokes
@@ -82,7 +84,7 @@ Python 3.13, Tkinter (Korean UI), mss + numpy (capture/vision), pynput + PyObjC/
 ## Testing
 - Framework: `unittest`
 - Run: `python run_tests.py` (auto-discovers `tests/test_*.py`)
-- Test areas: condition chains, check_match, event data conversion, invert conditions, event graph algorithms, ROI extraction, resolve effective states, profile display, profile JSON storage
+- Test areas: condition chains, check_match, event data conversion, invert conditions, event graph algorithms, ROI extraction, resolve effective states, profile display, profile JSON storage, capture size (`set_capture_size`)
 
 ## Git Workflow
 - Main branch: `main`
