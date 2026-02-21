@@ -31,8 +31,10 @@ class KeystrokeEventEditor:
         self.win.attributes("-topmost", True)
 
         self.match_mode_var = tk.StringVar(value="pixel")
-        self.region_w_var = tk.IntVar(value=20)
-        self.region_h_var = tk.IntVar(value=20)
+        self.capture_w_var = tk.IntVar(value=100)
+        self.capture_h_var = tk.IntVar(value=100)
+        self.region_w_var = tk.IntVar(value=100)
+        self.region_h_var = tk.IntVar(value=100)
         self.invert_match_var = tk.BooleanVar(value=False)
         self.execute_action_var = tk.BooleanVar(value=True)
         self.group_id_var = tk.StringVar()
@@ -61,6 +63,8 @@ class KeystrokeEventEditor:
         self.lbl_condition_summary = None
         self.btn_reset_conditions = None
         self.lbl_group_hint = None
+        self.entry_capture_w = None
+        self.entry_capture_h = None
         self.entry_region_w = None
         self.entry_region_h = None
         self.entry_priority = None
@@ -78,10 +82,6 @@ class KeystrokeEventEditor:
         self.key_check_thread.start()
 
         self.load_latest_position()
-
-        # 초기 레이아웃 완료 후 윈도우 크기 고정 (내용 변경 시 크기 변동 방지)
-        self.win.update_idletasks()
-        self.win.geometry(f"{self.win.winfo_width()}x{self.win.winfo_height()}")
 
         # Traces
         self.match_mode_var.trace_add("write", lambda *a: self._redraw_overlay())
@@ -141,6 +141,25 @@ class KeystrokeEventEditor:
         )
         self.key_combobox.grid(row=0, column=1)
 
+        f_cap = ttk.LabelFrame(self.tab_basic, text="캡처 크기")
+        f_cap.pack(pady=5, padx=10, fill="x")
+        f_cap_row = tk.Frame(f_cap)
+        f_cap_row.pack(pady=3)
+        ttk.Label(f_cap_row, text="너비:").pack(side="left", padx=5)
+        self.entry_capture_w = ttk.Spinbox(
+            f_cap_row, textvariable=self.capture_w_var, from_=50, to=1000, width=5
+        )
+        self.entry_capture_w.pack(side="left", padx=5)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
+            self.entry_capture_w.bind(seq, self._on_capture_size_change)
+        ttk.Label(f_cap_row, text="높이:").pack(side="left", padx=5)
+        self.entry_capture_h = ttk.Spinbox(
+            f_cap_row, textvariable=self.capture_h_var, from_=50, to=1000, width=5
+        )
+        self.entry_capture_h.pack(side="left", padx=5)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
+            self.entry_capture_h.bind(seq, self._on_capture_size_change)
+
         tk.Label(
             self.tab_basic,
             text="ALT: 영역 선택 | CTRL: 이미지 캡처\n오른쪽 이미지를 클릭하여 대상 설정",
@@ -175,24 +194,28 @@ class KeystrokeEventEditor:
         gb_size.pack(fill="x", pady=5)
 
         ttk.Label(gb_size, text="너비:").pack(side="left", padx=5)
-        self.entry_region_w = ttk.Entry(
+        self.entry_region_w = ttk.Spinbox(
             gb_size,
             textvariable=self.region_w_var,
+            from_=50,
+            to=1000,
             width=5,
-            validate="key",
-            validatecommand=vcmd,
         )
         self.entry_region_w.pack(side="left", padx=5)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>"):
+            self.entry_region_w.bind(seq, self._on_region_size_change)
 
         ttk.Label(gb_size, text="높이:").pack(side="left", padx=5)
-        self.entry_region_h = ttk.Entry(
+        self.entry_region_h = ttk.Spinbox(
             gb_size,
             textvariable=self.region_h_var,
+            from_=50,
+            to=1000,
             width=5,
-            validate="key",
-            validatecommand=vcmd,
         )
         self.entry_region_h.pack(side="left", padx=5)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>"):
+            self.entry_region_h.bind(seq, self._on_region_size_change)
 
         gb_time = ttk.LabelFrame(f_main, text="타이밍 (전역 설정 덮어쓰기)")
         gb_time.pack(fill="x", pady=5)
@@ -224,6 +247,28 @@ class KeystrokeEventEditor:
             self.entry_region_w.config(state=state)
         if self.entry_region_h:
             self.entry_region_h.config(state=state)
+
+    def _on_capture_size_change(self, *args):
+        """캡처 크기 변경 시 capturer 동기화"""
+        try:
+            w = max(50, min(1000, self.capture_w_var.get()))
+            h = max(50, min(1000, self.capture_h_var.get()))
+            self.capturer.set_capture_size(w, h)
+        except (ValueError, tk.TclError):
+            pass
+
+    def _on_region_size_change(self, *args):
+        """영역 크기 변경 시 오버레이 갱신"""
+        try:
+            w = max(50, min(1000, self.region_w_var.get()))
+            h = max(50, min(1000, self.region_h_var.get()))
+            if self.region_w_var.get() != w:
+                self.region_w_var.set(w)
+            if self.region_h_var.get() != h:
+                self.region_h_var.set(h)
+            self._draw_overlay(self.held_img, self.lbl_img2)
+        except (ValueError, tk.TclError):
+            pass
 
     def _get_existing_groups(self) -> List[str]:
         """기존 이벤트에서 그룹 ID 목록 추출"""
@@ -493,7 +538,8 @@ class KeystrokeEventEditor:
                 and hasattr(self, "lbl_img1")
                 and self.lbl_img1.winfo_exists()
             ):
-                self.win.after(0, lambda: self._safe_update_img_lbl(self.lbl_img1, img))
+                scaled = self._scale_for_display(img)
+                self.win.after(0, lambda s=scaled: self._safe_update_img_lbl(self.lbl_img1, s))
         except (tk.TclError, AttributeError, RuntimeError):
             # 윈도우가 이미 파괴된 경우 무시
             pass
@@ -502,7 +548,7 @@ class KeystrokeEventEditor:
         if self.latest_pos and self.latest_img:
             self._set_entries(self.coord_entries[:2], *self.latest_pos)
             self.held_img = self.latest_img.copy()
-            self._update_img_lbl(self.lbl_img2, self.latest_img)
+            self._update_img_lbl(self.lbl_img2, self._scale_for_display(self.latest_img))
             if self.clicked_pos:
                 self._draw_overlay(self.held_img, self.lbl_img2)
                 self._update_ref_pixel(self.held_img, self.clicked_pos)
@@ -570,11 +616,22 @@ class KeystrokeEventEditor:
                     else inverted + (orig[3] if num_channels == 4 else 255,)
                 )
 
-        self._update_img_lbl(lbl, res_img)
+        self._update_img_lbl(lbl, self._scale_for_display(res_img))
 
     def _redraw_overlay(self):
         if self.held_img and self.clicked_pos:
             self._draw_overlay(self.held_img, self.lbl_img2)
+
+    @staticmethod
+    def _scale_for_display(img: Image.Image) -> Image.Image:
+        """표시용 이미지 스케일 다운 (원본 크기 유지: MAX_DISPLAY=400px 기준)"""
+        MAX_DISPLAY = 400
+        scale = min(MAX_DISPLAY / img.width, MAX_DISPLAY / img.height, 1.0)
+        if scale < 1.0:
+            return img.resize(
+                (int(img.width * scale), int(img.height * scale)), Image.LANCZOS
+            )
+        return img
 
     def _update_ref_pixel(self, img, coords):
         self.ref_pixel = img.getpixel(coords)

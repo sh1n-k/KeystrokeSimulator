@@ -1,6 +1,7 @@
 import copy
-import time
 import tkinter as tk
+import tkinter.ttk as ttk
+import time
 from pathlib import Path
 from threading import Thread
 from typing import List, Tuple
@@ -32,6 +33,12 @@ class KeystrokeQuickEventEditor:
         self.latest_img = None
         self.held_img = None
         self.ref_pixel = None
+
+        self.capture_w_var = tk.IntVar(value=100)
+        self.capture_h_var = tk.IntVar(value=100)
+
+        self.spn_capture_w = None
+        self.spn_capture_h = None
 
         self.capturer = ScreenshotCapturer()
         self.capturer.screenshot_callback = self.update_capture
@@ -67,6 +74,24 @@ class KeystrokeQuickEventEditor:
         )
         self.entries[0].master.pack()
 
+        # Capture Size
+        f_size = tk.Frame(self.win)
+        f_size.pack(pady=3)
+        tk.Label(f_size, text="캡처 너비:").pack(side=tk.LEFT, padx=5)
+        self.spn_capture_w = ttk.Spinbox(
+            f_size, textvariable=self.capture_w_var, from_=50, to=1000, width=5,
+        )
+        self.spn_capture_w.pack(side=tk.LEFT)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
+            self.spn_capture_w.bind(seq, self._on_capture_size_change)
+        tk.Label(f_size, text="높이:").pack(side=tk.LEFT, padx=5)
+        self.spn_capture_h = ttk.Spinbox(
+            f_size, textvariable=self.capture_h_var, from_=50, to=1000, width=5,
+        )
+        self.spn_capture_h.pack(side=tk.LEFT)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
+            self.spn_capture_h.bind(seq, self._on_capture_size_change)
+
         # Buttons
         f_btn = tk.Frame(self.win)
         f_btn.pack(pady=5)
@@ -85,6 +110,15 @@ class KeystrokeQuickEventEditor:
             fg="black",
             wraplength=200,
         ).pack(pady=5, fill="both")
+
+    def _on_capture_size_change(self, *args):
+        """캡처 크기 변경 시 capturer 동기화"""
+        try:
+            w = max(50, min(1000, self.capture_w_var.get()))
+            h = max(50, min(1000, self.capture_h_var.get()))
+            self.capturer.set_capture_size(w, h)
+        except (ValueError, tk.TclError):
+            pass
 
     def _mk_lbl(self, p, bg, r, c):
         l = tk.Label(p, width=10, height=5, bg=bg)
@@ -130,32 +164,40 @@ class KeystrokeQuickEventEditor:
             if KeyUtils.mod_key_pressed("alt"):
                 self.capturer.set_current_mouse_position(self.win.winfo_pointerxy())
             if KeyUtils.mod_key_pressed("ctrl"):
-                self.hold_image()
+                self.win.after(0, self.hold_image)
                 time.sleep(0.2)
             time.sleep(0.1)
 
     def update_capture(self, pos, img):
         if pos and img:
             self.latest_pos, self.latest_img = pos, img
-            if self.lbl_img1.winfo_exists():
-                self._upd_img(self.lbl_img1, img)
+            try:
+                if self.lbl_img1.winfo_exists():
+                    scaled = self._scale_for_display(img)
+                    self.win.after(0, lambda s=scaled: self._upd_img(self.lbl_img1, s))
+            except (tk.TclError, AttributeError):
+                pass
 
     def hold_image(self):
         if self.latest_pos and self.latest_img:
             self._set_entries(self.entries[:2], *self.latest_pos)
-            self.held_img = self.latest_img
-            self._upd_img(self.lbl_img2, self.latest_img)
+            self.held_img = self.latest_img.copy()
+            self._upd_img(self.lbl_img2, self._scale_for_display(self.latest_img))
             if self.clicked_pos:
-                self._apply_crosshair(self.held_img, self.lbl_img2)
+                self._apply_overlay(self.held_img, self.lbl_img2)
                 self.save_event()
 
     def _on_click_held(self, event):
         if not self.held_img:
             return
-        w_r, h_r = (
-            self.held_img.width / self.lbl_img2.winfo_width(),
-            self.held_img.height / self.lbl_img2.winfo_height(),
-        )
+
+        display_w = self.lbl_img2.winfo_width()
+        display_h = self.lbl_img2.winfo_height()
+        if display_w <= 1 or display_h <= 1:
+            return
+
+        w_r = self.held_img.width / display_w
+        h_r = self.held_img.height / display_h
         ix, iy = int(event.x * w_r), int(event.y * h_r)
 
         if 0 <= ix < self.held_img.width and 0 <= iy < self.held_img.height:
@@ -163,18 +205,34 @@ class KeystrokeQuickEventEditor:
             self.ref_pixel = self.held_img.getpixel((ix, iy))
             self._upd_img(self.lbl_ref, Image.new("RGBA", (25, 25), self.ref_pixel))
             self._set_entries(self.entries[2:], ix, iy)
-            self._apply_crosshair(self.held_img, self.lbl_img2)
+            self._apply_overlay(self.held_img, self.lbl_img2)
 
-    def _apply_crosshair(self, img, lbl):
+    def _apply_overlay(self, img, lbl):
+        """십자선 오버레이"""
+        if not self.clicked_pos:
+            return
+        cx, cy = self.clicked_pos
+
         res = copy.deepcopy(img)
         px = res.load()
-        cx, cy = self.clicked_pos
         w, h = res.size
         for x in range(w):
             px[x, cy] = tuple(255 - c for c in px[x, cy][:3]) + (255,)
         for y in range(h):
             px[cx, y] = tuple(255 - c for c in px[cx, y][:3]) + (255,)
-        self._upd_img(lbl, res)
+
+        self._upd_img(lbl, self._scale_for_display(res))
+
+    @staticmethod
+    def _scale_for_display(img: Image.Image) -> Image.Image:
+        """표시용 이미지 스케일 다운 (MAX_DISPLAY=400px 기준, 비율 유지)"""
+        MAX_DISPLAY = 400
+        scale = min(MAX_DISPLAY / img.width, MAX_DISPLAY / img.height, 1.0)
+        if scale < 1.0:
+            return img.resize(
+                (int(img.width * scale), int(img.height * scale)), Image.LANCZOS
+            )
+        return img
 
     def _upd_img(self, lbl, img):
         try:
@@ -207,6 +265,8 @@ class KeystrokeQuickEventEditor:
                     None,  # latest_screenshot is not persisted
                     self.held_img,
                     self.ref_pixel,
+                    match_mode="pixel",
+                    region_size=None,
                 )
             )
             self.event_idx += 1
