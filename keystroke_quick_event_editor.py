@@ -94,15 +94,17 @@ class KeystrokeQuickEventEditor:
         tk.Label(f_size, text="너비:").pack(side=tk.LEFT, padx=5)
         self.spn_region_w = ttk.Spinbox(
             f_size, textvariable=self.region_w_var, from_=50, to=1000, width=5,
-            state="disabled",
         )
         self.spn_region_w.pack(side=tk.LEFT)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>"):
+            self.spn_region_w.bind(seq, self._on_capture_size_change)
         tk.Label(f_size, text="높이:").pack(side=tk.LEFT, padx=5)
         self.spn_region_h = ttk.Spinbox(
             f_size, textvariable=self.region_h_var, from_=50, to=1000, width=5,
-            state="disabled",
         )
         self.spn_region_h.pack(side=tk.LEFT)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>"):
+            self.spn_region_h.bind(seq, self._on_capture_size_change)
 
         # Buttons
         f_btn = tk.Frame(self.win)
@@ -124,22 +126,22 @@ class KeystrokeQuickEventEditor:
         ).pack(pady=5, fill="both")
 
     def _on_match_mode_change(self):
-        """매칭 모드 변경 시 region 크기 Spinbox 활성/비활성 및 캡처 크기 동기화"""
-        is_region = self.match_mode_var.get() == "region"
-        state = "normal" if is_region else "disabled"
-        if self.spn_region_w:
-            self.spn_region_w.config(state=state)
-        if self.spn_region_h:
-            self.spn_region_h.config(state=state)
-        if is_region:
-            try:
-                w = max(50, min(1000, self.region_w_var.get()))
-                h = max(50, min(1000, self.region_h_var.get()))
-                self.capturer.set_capture_size(w, h)
-            except (ValueError, tk.TclError):
-                pass
-        else:
-            self.capturer.set_capture_size(100, 100)
+        """매칭 모드 변경 시 캡처 크기 동기화"""
+        try:
+            w = max(50, min(1000, self.region_w_var.get()))
+            h = max(50, min(1000, self.region_h_var.get()))
+            self.capturer.set_capture_size(w, h)
+        except (ValueError, tk.TclError):
+            pass
+
+    def _on_capture_size_change(self, *args):
+        """캡처 크기 변경 시 capturer 동기화"""
+        try:
+            w = max(50, min(1000, self.region_w_var.get()))
+            h = max(50, min(1000, self.region_h_var.get()))
+            self.capturer.set_capture_size(w, h)
+        except (ValueError, tk.TclError):
+            pass
 
     def _mk_lbl(self, p, bg, r, c):
         l = tk.Label(p, width=10, height=5, bg=bg)

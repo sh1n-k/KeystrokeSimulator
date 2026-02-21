@@ -79,10 +79,6 @@ class KeystrokeEventEditor:
 
         self.load_latest_position()
 
-        # 초기 레이아웃 완료 후 윈도우 크기 고정 (내용 변경 시 크기 변동 방지)
-        self.win.update_idletasks()
-        self.win.geometry(f"{self.win.winfo_width()}x{self.win.winfo_height()}")
-
         # Traces
         self.match_mode_var.trace_add("write", lambda *a: self._redraw_overlay())
         self.match_mode_var.trace_add("write", self._on_match_mode_change)
@@ -171,7 +167,7 @@ class KeystrokeEventEditor:
             variable=self.invert_match_var,
         ).pack(side="left", padx=10)
 
-        gb_size = ttk.LabelFrame(f_main, text="영역 크기 (영역 모드 전용)")
+        gb_size = ttk.LabelFrame(f_main, text="캡처 크기")
         gb_size.pack(fill="x", pady=5)
 
         ttk.Label(gb_size, text="너비:").pack(side="left", padx=5)
@@ -221,25 +217,16 @@ class KeystrokeEventEditor:
         self._on_match_mode_change()
 
     def _on_match_mode_change(self, *args):
-        """매칭 모드 변경 시 영역 크기 필드 활성/비활성 및 캡처 크기 동기화"""
-        is_region = self.match_mode_var.get() == "region"
-        state = "normal" if is_region else "disabled"
-        if self.entry_region_w:
-            self.entry_region_w.config(state=state)
-        if self.entry_region_h:
-            self.entry_region_h.config(state=state)
-        if is_region:
-            try:
-                w = max(50, min(1000, self.region_w_var.get()))
-                h = max(50, min(1000, self.region_h_var.get()))
-                self.capturer.set_capture_size(w, h)
-            except (ValueError, tk.TclError):
-                pass
-        else:
-            self.capturer.set_capture_size(100, 100)
+        """매칭 모드 변경 시 캡처 크기 동기화"""
+        try:
+            w = max(50, min(1000, self.region_w_var.get()))
+            h = max(50, min(1000, self.region_h_var.get()))
+            self.capturer.set_capture_size(w, h)
+        except (ValueError, tk.TclError):
+            pass
 
     def _on_region_size_change(self, *args):
-        """영역 크기 변경 시 캡처 크기 동기화"""
+        """캡처 크기 변경 시 캡처 크기 동기화"""
         try:
             w = max(50, min(1000, self.region_w_var.get()))
             h = max(50, min(1000, self.region_h_var.get()))
@@ -247,8 +234,7 @@ class KeystrokeEventEditor:
                 self.region_w_var.set(w)
             if self.region_h_var.get() != h:
                 self.region_h_var.set(h)
-            if self.match_mode_var.get() == "region":
-                self.capturer.set_capture_size(w, h)
+            self.capturer.set_capture_size(w, h)
             self._draw_overlay(self.held_img, self.lbl_img2)
         except (ValueError, tk.TclError):
             pass
@@ -955,8 +941,7 @@ class KeystrokeEventEditor:
         if r_size := getattr(evt, "region_size", None):
             self.region_w_var.set(r_size[0])
             self.region_h_var.set(r_size[1])
-            if self.match_mode_var.get() == "region":
-                self.capturer.set_capture_size(r_size[0], r_size[1])
+            self.capturer.set_capture_size(r_size[0], r_size[1])
         self.execute_action_var.set(getattr(evt, "execute_action", True))
 
         gid = getattr(evt, "group_id", "") or ""
