@@ -28,8 +28,7 @@ class ScreenshotCapturer:
         return self.current_position
 
     def set_capture_size(self, w: int, h: int):
-        self.box_w = max(1, w)
-        self.box_h = max(1, h)
+        self.box_w, self.box_h = max(1, w), max(1, h)
 
     def set_current_mouse_position(self, position):
         mouse_x, mouse_y = position
@@ -59,12 +58,13 @@ class ScreenshotCapturer:
                     position = self.get_current_mouse_position()
                     callback = self.screenshot_callback
                     if position and self.screenshot_callback:
+                        box_w, box_h = self.box_w, self.box_h
                         image = sct.grab(
                             {
                                 "top": position[1],
                                 "left": position[0],
-                                "width": self.box_w,
-                                "height": self.box_h,
+                                "width": box_w,
+                                "height": box_h,
                             }
                         )
                         pil_image = Image.frombytes(

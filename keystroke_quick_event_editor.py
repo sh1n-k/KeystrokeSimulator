@@ -185,15 +185,19 @@ class KeystrokeQuickEventEditor:
             if KeyUtils.mod_key_pressed("alt"):
                 self.capturer.set_current_mouse_position(self.win.winfo_pointerxy())
             if KeyUtils.mod_key_pressed("ctrl"):
-                self.hold_image()
+                self.win.after(0, self.hold_image)
                 time.sleep(0.2)
             time.sleep(0.1)
 
     def update_capture(self, pos, img):
         if pos and img:
             self.latest_pos, self.latest_img = pos, img
-            if self.lbl_img1.winfo_exists():
-                self._upd_img(self.lbl_img1, self._scale_for_display(img))
+            try:
+                if self.lbl_img1.winfo_exists():
+                    scaled = self._scale_for_display(img)
+                    self.win.after(0, lambda s=scaled: self._upd_img(self.lbl_img1, s))
+            except (tk.TclError, AttributeError):
+                pass
 
     def hold_image(self):
         if self.latest_pos and self.latest_img:

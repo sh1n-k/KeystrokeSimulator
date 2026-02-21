@@ -243,8 +243,10 @@ class KeystrokeEventEditor:
         try:
             w = max(50, min(1000, self.region_w_var.get()))
             h = max(50, min(1000, self.region_h_var.get()))
-            self.region_w_var.set(w)
-            self.region_h_var.set(h)
+            if self.region_w_var.get() != w:
+                self.region_w_var.set(w)
+            if self.region_h_var.get() != h:
+                self.region_h_var.set(h)
             if self.match_mode_var.get() == "region":
                 self.capturer.set_capture_size(w, h)
             self._draw_overlay(self.held_img, self.lbl_img2)
