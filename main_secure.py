@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import threading
 import tkinter as tk
 from datetime import datetime, timezone
 from tkinter import ttk
@@ -243,27 +244,33 @@ class Application:
     def on_auth_success(self):
         self.root.withdraw()
         self.root.destroy()
-        self.main_app = KeystrokeSimulatorApp(secure_callback=self.terminate_application)
-        # main_app의 after 사용
+        self.main_app = KeystrokeSimulatorApp()
         self.main_app.after(5 * 60 * 1000, self.check_session_and_schedule)
         self.main_app.mainloop()
+        logger.info("Application terminated")
 
     def check_session_and_schedule(self):
-        if self.auth_service.validate_session_token(self.auth_ui.user_id):
-            if self.main_app and self.main_app.winfo_exists():
-                self.main_app.after(5 * 60 * 1000, self.check_session_and_schedule)
+        threading.Thread(target=self._validate_session_worker, daemon=True).start()
+
+    def _validate_session_worker(self):
+        is_valid = self.auth_service.validate_session_token(self.auth_ui.user_id)
+        if self.main_app:
+            try:
+                self.main_app.after(0, self._on_session_checked, is_valid)
+            except Exception:
+                pass  # main_app이 닫히는 중
+
+    def _on_session_checked(self, is_valid: bool):
+        if not (self.main_app and self.main_app.winfo_exists()):
+            return
+        if is_valid:
+            self.main_app.after(5 * 60 * 1000, self.check_session_and_schedule)
         else:
             self.force_close_app()
-
-    def terminate_application(self):
-        self.root.quit()
-        logger.info("Application terminated")
 
     def force_close_app(self):
         if self.main_app:
             self.main_app.on_closing()
-        else:
-            self.terminate_application()
 
     def run(self):
         self.root.mainloop()
