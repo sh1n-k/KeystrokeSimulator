@@ -117,6 +117,10 @@ Threading/UI:
 - Tkinter UI must remain on the main thread.
 - The processor and some events may run in separate threads; be careful with shared state and UI updates.
 
+Processor/auth behavior that should not regress:
+- Main-loop activation logic should stay centered on `_resolve_effective_states` (strict condition-chain resolution); avoid reintroducing unused condition-filter helpers.
+- In `main_secure.py`, keep lockout countdown single-sourced: `lock_inputs()` should only disable inputs, and `show_error_and_reactivate()` should start `start_countdown(...)` exactly once.
+
 ## Safety / security boundaries
 
 - Do not commit directly to the default branch (`main`/`master`); use feature branches.
