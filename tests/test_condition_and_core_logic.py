@@ -18,24 +18,6 @@ def _make_processor_stub() -> KeystrokeProcessor:
 
 
 class TestConditionFiltering(unittest.TestCase):
-    def test_filter_by_conditions_multi_and(self):
-        proc = _make_processor_stub()
-        candidates = [{"name": "Skill", "conds": {"A": True, "B": False}}]
-
-        passed = proc._filter_by_conditions(candidates, {"A": True, "B": False})
-        failed = proc._filter_by_conditions(candidates, {"A": True, "B": True})
-
-        self.assertEqual([evt["name"] for evt in passed], ["Skill"])
-        self.assertEqual(failed, [])
-
-    def test_filter_by_conditions_fallbacks_to_current_state(self):
-        proc = _make_processor_stub()
-        proc.current_states = {"A": True}
-        candidates = [{"name": "Skill", "conds": {"A": True}}]
-
-        passed = proc._filter_by_conditions(candidates, local_states={})
-        self.assertEqual([evt["name"] for evt in passed], ["Skill"])
-
     def test_select_by_group_priority_and_non_group(self):
         proc = _make_processor_stub()
         events = [

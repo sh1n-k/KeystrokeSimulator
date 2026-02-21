@@ -362,6 +362,15 @@ class TestAuthUIErrorHandling(unittest.TestCase):
         mock_lock.assert_called_once()
         self.assertEqual(ui.failed_attempts, Config.MAX_FAILED_ATTEMPTS)
 
+    def test_third_failure_starts_countdown_once(self):
+        ui = _make_auth_ui()
+        ui.failed_attempts = Config.MAX_FAILED_ATTEMPTS - 1
+        with patch.object(ui, "start_countdown") as mock_cd:
+            ui.show_error_and_reactivate("fail")
+        mock_cd.assert_called_once_with(
+            Config.LOCKOUT_TIME, final_message="fail"
+        )
+
     def test_lockout_passes_message_to_countdown(self):
         ui = _make_auth_ui()
         ui.failed_attempts = Config.MAX_FAILED_ATTEMPTS - 1
@@ -374,8 +383,7 @@ class TestAuthUIErrorHandling(unittest.TestCase):
 
     def test_lock_inputs_disables_entry_and_button(self):
         ui = _make_auth_ui()
-        with patch.object(ui, "start_countdown"):
-            ui.lock_inputs()
+        ui.lock_inputs()
         ui.id_entry.config.assert_called_with(state="disabled")
         ui.ok_button.config.assert_called_with(state="disabled")
 

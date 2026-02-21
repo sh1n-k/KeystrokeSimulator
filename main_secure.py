@@ -166,7 +166,6 @@ class AuthUI:
     def lock_inputs(self):
         self.id_entry.config(state="disabled")
         self.ok_button.config(state="disabled")
-        self.start_countdown(Config.LOCKOUT_TIME)
 
     def unlock_inputs(self):
         self.id_entry.config(state="normal")

@@ -345,25 +345,6 @@ class KeystrokeProcessor:
 
                 await asyncio.sleep(random.uniform(*self.delays))
 
-    def _filter_by_conditions(
-        self, candidates: List[Dict], local_states: Dict
-    ) -> List[Dict]:
-        """조건 필터링"""
-        filtered = []
-        for evt in candidates:
-            if not evt["conds"]:
-                filtered.append(evt)
-                continue
-
-            if all(
-                local_states.get(cond_name, self.current_states.get(cond_name, False))
-                == expected
-                for cond_name, expected in evt["conds"].items()
-            ):
-                filtered.append(evt)
-
-        return filtered
-
     def _select_by_group_priority(self, events: List[Dict]) -> List[Dict]:
         """그룹별 우선순위로 이벤트 선택"""
         groups = {}
