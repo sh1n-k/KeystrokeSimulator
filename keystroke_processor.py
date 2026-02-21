@@ -144,6 +144,7 @@ class KeystrokeProcessor:
 
         self.pressed_keys: Set[str] = set()
         self.current_states: Dict[str, bool] = {}
+        self._roi_warn_logged: Set[str] = set()
 
         self.event_data_list, self.independent_events, self.mega_rect = (
             self._init_event_data(events)
@@ -249,6 +250,7 @@ class KeystrokeProcessor:
 
                     rh, rw = evt_data["ref_img"].shape[:2]
                     if rh > 0 and rw > 0:
+                        # Target count (actual may be less after dedup for very small ROIs)
                         n = max(5, min(25, (rw * rh) // 100))
                         cols = max(2, int(n ** 0.5))
                         rows = max(2, (n + cols - 1) // cols)
@@ -520,6 +522,16 @@ class KeystrokeProcessor:
 
         # 경계 검사
         if x < 0 or y < 0 or x + w > img.shape[1] or y + h > img.shape[0]:
+            name = evt.get("name", "?")
+            if not hasattr(self, "_roi_warn_logged"):
+                self._roi_warn_logged = set()
+            if name not in self._roi_warn_logged:
+                self._roi_warn_logged.add(name)
+                logger.warning(
+                    f"Event '{name}': ROI extraction failed — "
+                    f"region_size({w}×{h}) exceeds capture area "
+                    f"({img.shape[1]}×{img.shape[0]}). Matching will always return False."
+                )
             return None
 
         return img[y : y + h, x : x + w, :3]
