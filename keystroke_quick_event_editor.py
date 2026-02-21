@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import Thread
 from typing import List, Tuple
 
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageTk
 from loguru import logger
 
 from keystroke_capturer import ScreenshotCapturer
@@ -34,12 +34,11 @@ class KeystrokeQuickEventEditor:
         self.held_img = None
         self.ref_pixel = None
 
-        self.match_mode_var = tk.StringVar(value="pixel")
-        self.region_w_var = tk.IntVar(value=100)
-        self.region_h_var = tk.IntVar(value=100)
+        self.capture_w_var = tk.IntVar(value=100)
+        self.capture_h_var = tk.IntVar(value=100)
 
-        self.spn_region_w = None
-        self.spn_region_h = None
+        self.spn_capture_w = None
+        self.spn_capture_h = None
 
         self.capturer = ScreenshotCapturer()
         self.capturer.screenshot_callback = self.update_capture
@@ -75,36 +74,23 @@ class KeystrokeQuickEventEditor:
         )
         self.entries[0].master.pack()
 
-        # Match Mode
-        f_mode = tk.Frame(self.win)
-        f_mode.pack(pady=3)
-        tk.Label(f_mode, text="모드:").pack(side=tk.LEFT, padx=5)
-        tk.Radiobutton(
-            f_mode, text="Pixel", variable=self.match_mode_var, value="pixel",
-            command=self._on_match_mode_change,
-        ).pack(side=tk.LEFT)
-        tk.Radiobutton(
-            f_mode, text="Region", variable=self.match_mode_var, value="region",
-            command=self._on_match_mode_change,
-        ).pack(side=tk.LEFT)
-
-        # Region Size
+        # Capture Size
         f_size = tk.Frame(self.win)
         f_size.pack(pady=3)
-        tk.Label(f_size, text="너비:").pack(side=tk.LEFT, padx=5)
-        self.spn_region_w = ttk.Spinbox(
-            f_size, textvariable=self.region_w_var, from_=50, to=1000, width=5,
+        tk.Label(f_size, text="캡처 너비:").pack(side=tk.LEFT, padx=5)
+        self.spn_capture_w = ttk.Spinbox(
+            f_size, textvariable=self.capture_w_var, from_=50, to=1000, width=5,
         )
-        self.spn_region_w.pack(side=tk.LEFT)
-        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>"):
-            self.spn_region_w.bind(seq, self._on_capture_size_change)
+        self.spn_capture_w.pack(side=tk.LEFT)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
+            self.spn_capture_w.bind(seq, self._on_capture_size_change)
         tk.Label(f_size, text="높이:").pack(side=tk.LEFT, padx=5)
-        self.spn_region_h = ttk.Spinbox(
-            f_size, textvariable=self.region_h_var, from_=50, to=1000, width=5,
+        self.spn_capture_h = ttk.Spinbox(
+            f_size, textvariable=self.capture_h_var, from_=50, to=1000, width=5,
         )
-        self.spn_region_h.pack(side=tk.LEFT)
-        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>"):
-            self.spn_region_h.bind(seq, self._on_capture_size_change)
+        self.spn_capture_h.pack(side=tk.LEFT)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
+            self.spn_capture_h.bind(seq, self._on_capture_size_change)
 
         # Buttons
         f_btn = tk.Frame(self.win)
@@ -125,20 +111,11 @@ class KeystrokeQuickEventEditor:
             wraplength=200,
         ).pack(pady=5, fill="both")
 
-    def _on_match_mode_change(self):
-        """매칭 모드 변경 시 캡처 크기 동기화"""
-        try:
-            w = max(50, min(1000, self.region_w_var.get()))
-            h = max(50, min(1000, self.region_h_var.get()))
-            self.capturer.set_capture_size(w, h)
-        except (ValueError, tk.TclError):
-            pass
-
     def _on_capture_size_change(self, *args):
         """캡처 크기 변경 시 capturer 동기화"""
         try:
-            w = max(50, min(1000, self.region_w_var.get()))
-            h = max(50, min(1000, self.region_h_var.get()))
+            w = max(50, min(1000, self.capture_w_var.get()))
+            h = max(50, min(1000, self.capture_h_var.get()))
             self.capturer.set_capture_size(w, h)
         except (ValueError, tk.TclError):
             pass
@@ -231,30 +208,18 @@ class KeystrokeQuickEventEditor:
             self._apply_overlay(self.held_img, self.lbl_img2)
 
     def _apply_overlay(self, img, lbl):
-        """pixel 모드: 십자선, region 모드: 직사각형 오버레이"""
+        """십자선 오버레이"""
         if not self.clicked_pos:
             return
         cx, cy = self.clicked_pos
 
-        if self.match_mode_var.get() == "region":
-            res = img.copy()
-            draw = ImageDraw.Draw(res)
-            try:
-                rw = max(50, min(1000, self.region_w_var.get())) // 2
-                rh = max(50, min(1000, self.region_h_var.get())) // 2
-            except (ValueError, tk.TclError):
-                rw, rh = 50, 50
-            x1, y1 = max(0, cx - rw), max(0, cy - rh)
-            x2, y2 = min(img.width, cx + rw), min(img.height, cy + rh)
-            draw.rectangle([x1, y1, x2, y2], outline="yellow", width=2)
-        else:
-            res = copy.deepcopy(img)
-            px = res.load()
-            w, h = res.size
-            for x in range(w):
-                px[x, cy] = tuple(255 - c for c in px[x, cy][:3]) + (255,)
-            for y in range(h):
-                px[cx, y] = tuple(255 - c for c in px[cx, y][:3]) + (255,)
+        res = copy.deepcopy(img)
+        px = res.load()
+        w, h = res.size
+        for x in range(w):
+            px[x, cy] = tuple(255 - c for c in px[x, cy][:3]) + (255,)
+        for y in range(h):
+            px[cx, y] = tuple(255 - c for c in px[cx, y][:3]) + (255,)
 
         self._upd_img(lbl, self._scale_for_display(res))
 
@@ -292,17 +257,6 @@ class KeystrokeQuickEventEditor:
                 self.ref_pixel,
             ]
         ):
-            mode = self.match_mode_var.get()
-            region_size = None
-            if mode == "region":
-                try:
-                    region_size = (
-                        max(50, min(1000, self.region_w_var.get())),
-                        max(50, min(1000, self.region_h_var.get())),
-                    )
-                except (ValueError, tk.TclError):
-                    region_size = (100, 100)
-
             self.events.append(
                 EventModel(
                     str(self.event_idx),
@@ -311,8 +265,8 @@ class KeystrokeQuickEventEditor:
                     None,  # latest_screenshot is not persisted
                     self.held_img,
                     self.ref_pixel,
-                    match_mode=mode,
-                    region_size=region_size,
+                    match_mode="pixel",
+                    region_size=None,
                 )
             )
             self.event_idx += 1

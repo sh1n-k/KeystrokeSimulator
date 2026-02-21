@@ -31,6 +31,8 @@ class KeystrokeEventEditor:
         self.win.attributes("-topmost", True)
 
         self.match_mode_var = tk.StringVar(value="pixel")
+        self.capture_w_var = tk.IntVar(value=100)
+        self.capture_h_var = tk.IntVar(value=100)
         self.region_w_var = tk.IntVar(value=100)
         self.region_h_var = tk.IntVar(value=100)
         self.invert_match_var = tk.BooleanVar(value=False)
@@ -61,6 +63,8 @@ class KeystrokeEventEditor:
         self.lbl_condition_summary = None
         self.btn_reset_conditions = None
         self.lbl_group_hint = None
+        self.entry_capture_w = None
+        self.entry_capture_h = None
         self.entry_region_w = None
         self.entry_region_h = None
         self.entry_priority = None
@@ -137,6 +141,23 @@ class KeystrokeEventEditor:
         )
         self.key_combobox.grid(row=0, column=1)
 
+        f_cap = ttk.LabelFrame(self.tab_basic, text="캡처 크기")
+        f_cap.pack(pady=5, padx=10, fill="x")
+        ttk.Label(f_cap, text="너비:").pack(side="left", padx=5)
+        self.entry_capture_w = ttk.Spinbox(
+            f_cap, textvariable=self.capture_w_var, from_=50, to=1000, width=5
+        )
+        self.entry_capture_w.pack(side="left", padx=5)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
+            self.entry_capture_w.bind(seq, self._on_capture_size_change)
+        ttk.Label(f_cap, text="높이:").pack(side="left", padx=5)
+        self.entry_capture_h = ttk.Spinbox(
+            f_cap, textvariable=self.capture_h_var, from_=50, to=1000, width=5
+        )
+        self.entry_capture_h.pack(side="left", padx=5)
+        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
+            self.entry_capture_h.bind(seq, self._on_capture_size_change)
+
         tk.Label(
             self.tab_basic,
             text="ALT: 영역 선택 | CTRL: 이미지 캡처\n오른쪽 이미지를 클릭하여 대상 설정",
@@ -167,7 +188,7 @@ class KeystrokeEventEditor:
             variable=self.invert_match_var,
         ).pack(side="left", padx=10)
 
-        gb_size = ttk.LabelFrame(f_main, text="캡처 크기")
+        gb_size = ttk.LabelFrame(f_main, text="영역 크기 (영역 모드 전용)")
         gb_size.pack(fill="x", pady=5)
 
         ttk.Label(gb_size, text="너비:").pack(side="left", padx=5)
@@ -217,16 +238,25 @@ class KeystrokeEventEditor:
         self._on_match_mode_change()
 
     def _on_match_mode_change(self, *args):
-        """매칭 모드 변경 시 캡처 크기 동기화"""
+        """매칭 모드 변경 시 영역 크기 필드 활성/비활성"""
+        is_region = self.match_mode_var.get() == "region"
+        state = "normal" if is_region else "disabled"
+        if self.entry_region_w:
+            self.entry_region_w.config(state=state)
+        if self.entry_region_h:
+            self.entry_region_h.config(state=state)
+
+    def _on_capture_size_change(self, *args):
+        """캡처 크기 변경 시 capturer 동기화"""
         try:
-            w = max(50, min(1000, self.region_w_var.get()))
-            h = max(50, min(1000, self.region_h_var.get()))
+            w = max(50, min(1000, self.capture_w_var.get()))
+            h = max(50, min(1000, self.capture_h_var.get()))
             self.capturer.set_capture_size(w, h)
         except (ValueError, tk.TclError):
             pass
 
     def _on_region_size_change(self, *args):
-        """캡처 크기 변경 시 캡처 크기 동기화"""
+        """영역 크기 변경 시 오버레이 갱신"""
         try:
             w = max(50, min(1000, self.region_w_var.get()))
             h = max(50, min(1000, self.region_h_var.get()))
@@ -234,7 +264,6 @@ class KeystrokeEventEditor:
                 self.region_w_var.set(w)
             if self.region_h_var.get() != h:
                 self.region_h_var.set(h)
-            self.capturer.set_capture_size(w, h)
             self._draw_overlay(self.held_img, self.lbl_img2)
         except (ValueError, tk.TclError):
             pass
@@ -941,7 +970,6 @@ class KeystrokeEventEditor:
         if r_size := getattr(evt, "region_size", None):
             self.region_w_var.set(r_size[0])
             self.region_h_var.set(r_size[1])
-            self.capturer.set_capture_size(r_size[0], r_size[1])
         self.execute_action_var.set(getattr(evt, "execute_action", True))
 
         gid = getattr(evt, "group_id", "") or ""
