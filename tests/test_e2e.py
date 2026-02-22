@@ -46,22 +46,38 @@ class TestKeystrokeSimulatorE2E(unittest.TestCase):
         self.patcher_sound = patch("keystroke_simulator_app.SoundPlayer")
         self.patcher_sound.start()
 
+        # Prevent OS-level global listeners (pynput) from being created in GUI E2E.
+        self.patcher_handlers = patch.object(
+            KeystrokeSimulatorApp,
+            "_setup_event_handlers",
+            autospec=True,
+            return_value=None,
+        )
+        self.patcher_handlers.start()
+
+        self.app = None
         # Initialize the app and point it to test profiles dir
         with patch.object(KeystrokeSimulatorApp, "_load_settings_and_state", autospec=True) as mock_load:
             # We must assign self.settings manually since we patch out the method that normally does it
             def side_effect(app_instance):
                 app_instance.settings = MagicMock()
                 app_instance.settings.toggle_start_stop_mac = False
-                app_instance.settings.start_stop_key = "F12"
+                app_instance.settings.start_stop_key = "DISABLED"
             
             mock_load.side_effect = side_effect
-            
-            self.app = KeystrokeSimulatorApp(secure_callback=MagicMock())
-            self.app.profiles_dir = str(self.test_profiles_dir)
+            try:
+                self.app = KeystrokeSimulatorApp(secure_callback=MagicMock())
+                self.app.profiles_dir = str(self.test_profiles_dir)
+                self.app.update_idletasks()
+            except tk.TclError as exc:
+                self.skipTest(f"GUI environment unavailable: {exc}")
 
     def tearDown(self):
-        self.app.stop_simulation()
-        self.app.destroy()
+        if self.app is not None:
+            self.app.stop_simulation()
+            if self.app.winfo_exists():
+                self.app.update_idletasks()
+                self.app.destroy()
         patch.stopall()
 
     @patch("tkinter.messagebox.askokcancel")
@@ -152,6 +168,104 @@ class TestKeystrokeSimulatorE2E(unittest.TestCase):
         self.assertFalse(self.app.is_running.get())
         self.assertEqual(self.app.button_frame.start_stop_button["text"], txt("Start", "시작"))
         mock_proc_stop.assert_called_once()
+
+    @patch("keystroke_simulator_app.load_profile")
+    @patch("keystroke_processor.KeystrokeProcessor.start")
+    @patch("keystroke_processor.KeystrokeProcessor.stop")
+    def test_scenario_d_running_state_locks_management_buttons(
+        self, mock_proc_stop, mock_proc_start, mock_load_profile
+    ):
+        """
+        Scenario D: [Running State Lock Policy]
+        1. Start simulator with valid profile
+        2. Verify management buttons are disabled while running
+        3. Stop simulator and verify buttons are restored
+        """
+        self.app.selected_profile.set(QUICK_PROFILE_NAME)
+        self.app.selected_process.set("Dummy Process (1234)")
+        dummy_event = EventModel(event_name="Dummy", use_event=True, key_to_enter="A")
+        mock_load_profile.return_value = ProfileModel(
+            name=QUICK_PROFILE_NAME, event_list=[dummy_event]
+        )
+
+        self.app.toggle_start_stop()
+        self.assertTrue(self.app.is_running.get())
+        self.assertEqual(self.app.button_frame.quick_events_button["state"], "disabled")
+        self.assertEqual(self.app.button_frame.settings_button["state"], "disabled")
+        self.assertEqual(self.app.button_frame.clear_logs_button["state"], "disabled")
+        self.assertEqual(self.app.profile_button_frame.modkeys_button["state"], "disabled")
+        self.assertEqual(self.app.profile_button_frame.settings_button["state"], "disabled")
+        self.assertEqual(self.app.profile_button_frame.sort_button["state"], "disabled")
+        mock_proc_start.assert_called_once()
+
+        self.app.toggle_start_stop()
+        self.assertFalse(self.app.is_running.get())
+        self.assertEqual(self.app.button_frame.quick_events_button["state"], "normal")
+        self.assertEqual(self.app.button_frame.settings_button["state"], "normal")
+        self.assertEqual(self.app.button_frame.clear_logs_button["state"], "normal")
+        self.assertEqual(self.app.profile_button_frame.modkeys_button["state"], "normal")
+        self.assertEqual(self.app.profile_button_frame.settings_button["state"], "normal")
+        self.assertEqual(self.app.profile_button_frame.sort_button["state"], "normal")
+        mock_proc_stop.assert_called_once()
+
+    @patch("keystroke_simulator_app.load_profile")
+    @patch("keystroke_processor.KeystrokeProcessor.start")
+    def test_scenario_e_invalid_start_conditions_are_rejected(
+        self, mock_proc_start, mock_load_profile
+    ):
+        """
+        Scenario E: [Invalid Start Conditions]
+        1. Missing process/profile should not start simulation
+        2. Profile with no valid executable events should not start simulation
+        """
+        # Missing process/profile
+        self.app.selected_profile.set("")
+        self.app.selected_process.set("")
+        self.app.toggle_start_stop()
+        self.assertFalse(self.app.is_running.get())
+        mock_proc_start.assert_not_called()
+
+        # Invalid events: execute_action=True and key_to_enter=None -> filtered out
+        self.app.selected_profile.set(QUICK_PROFILE_NAME)
+        self.app.selected_process.set("Dummy Process (1234)")
+        mock_load_profile.return_value = ProfileModel(
+            name=QUICK_PROFILE_NAME,
+            event_list=[
+                EventModel(
+                    event_name="Invalid",
+                    use_event=True,
+                    key_to_enter=None,
+                    execute_action=True,
+                )
+            ],
+        )
+        self.app.toggle_start_stop()
+        self.assertFalse(self.app.is_running.get())
+        mock_proc_start.assert_not_called()
+
+    @patch("keystroke_simulator_app.delete_profile_files")
+    @patch("tkinter.messagebox.showinfo")
+    def test_scenario_f_quick_profile_deletion_is_blocked(
+        self, mock_showinfo, mock_delete_files
+    ):
+        """
+        Scenario F: [Quick Profile Protection]
+        1. Select Quick profile
+        2. Attempt delete
+        3. Verify delete is blocked and Quick remains selected
+        """
+        self.assertTrue(self.app.profile_frame.set_selected_profile(QUICK_PROFILE_NAME))
+        self.assertEqual(
+            self.app.profile_frame.get_selected_profile_name(), QUICK_PROFILE_NAME
+        )
+
+        self.app.profile_frame.delete_profile()
+
+        mock_showinfo.assert_called_once()
+        mock_delete_files.assert_not_called()
+        self.assertEqual(
+            self.app.profile_frame.get_selected_profile_name(), QUICK_PROFILE_NAME
+        )
 
 if __name__ == "__main__":
     unittest.main()

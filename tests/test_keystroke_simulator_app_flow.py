@@ -154,6 +154,97 @@ class TestToggleAndStopSimulation(unittest.TestCase):
         app._update_ui.assert_not_called()
 
 
+class TestMainUiState(unittest.TestCase):
+    def _make_ui_stub(self, running: bool) -> KeystrokeSimulatorApp:
+        app = _make_app_stub()
+        app.is_running = FakeVar(running)
+
+        app.process_frame = MagicMock()
+        app.process_frame.process_combobox = MagicMock()
+        app.process_frame.refresh_button = MagicMock()
+
+        app.profile_frame = MagicMock()
+        app.profile_frame.profile_combobox = MagicMock()
+        app.profile_frame.copy_button = MagicMock()
+        app.profile_frame.del_button = MagicMock()
+
+        app.button_frame = MagicMock()
+        app.button_frame.start_stop_button = MagicMock()
+        app.button_frame.quick_events_button = MagicMock()
+        app.button_frame.settings_button = MagicMock()
+        app.button_frame.clear_logs_button = MagicMock()
+
+        app.profile_button_frame = MagicMock()
+        app.profile_button_frame.modkeys_button = MagicMock()
+        app.profile_button_frame.settings_button = MagicMock()
+        app.profile_button_frame.sort_button = MagicMock()
+        return app
+
+    def test_update_ui_disables_quick_events_and_modkeys_when_running(self):
+        app = self._make_ui_stub(running=True)
+
+        KeystrokeSimulatorApp._update_ui(app)
+
+        app.button_frame.quick_events_button.config.assert_called_once_with(
+            state="disabled"
+        )
+        app.profile_button_frame.modkeys_button.config.assert_called_once_with(
+            state="disabled"
+        )
+
+    def test_update_ui_enables_quick_events_and_modkeys_when_stopped(self):
+        app = self._make_ui_stub(running=False)
+
+        KeystrokeSimulatorApp._update_ui(app)
+
+        app.button_frame.quick_events_button.config.assert_called_once_with(
+            state="normal"
+        )
+        app.profile_button_frame.modkeys_button.config.assert_called_once_with(
+            state="normal"
+        )
+
+
+class TestRuntimeEditGuards(unittest.TestCase):
+    @patch("keystroke_simulator_app.KeystrokeQuickEventEditor")
+    def test_open_quick_events_noop_when_running(self, mock_editor):
+        app = _make_app_stub()
+        app.is_running = FakeVar(True)
+
+        KeystrokeSimulatorApp.open_quick_events(app)
+
+        mock_editor.assert_not_called()
+
+    @patch("keystroke_simulator_app.KeystrokeQuickEventEditor")
+    def test_open_quick_events_opens_when_stopped(self, mock_editor):
+        app = _make_app_stub()
+        app.is_running = FakeVar(False)
+
+        KeystrokeSimulatorApp.open_quick_events(app)
+
+        mock_editor.assert_called_once_with(app)
+
+    @patch("keystroke_simulator_app.ModificationKeysWindow")
+    def test_open_modkeys_noop_when_running(self, mock_modkeys):
+        app = _make_app_stub()
+        app.is_running = FakeVar(True)
+        app.selected_profile = FakeVar("Quick")
+
+        KeystrokeSimulatorApp.open_modkeys(app)
+
+        mock_modkeys.assert_not_called()
+
+    @patch("keystroke_simulator_app.ModificationKeysWindow")
+    def test_open_modkeys_opens_when_stopped(self, mock_modkeys):
+        app = _make_app_stub()
+        app.is_running = FakeVar(False)
+        app.selected_profile = FakeVar("Quick")
+
+        KeystrokeSimulatorApp.open_modkeys(app)
+
+        mock_modkeys.assert_called_once_with(app, "Quick")
+
+
 class TestSaveLatestState(unittest.TestCase):
     @patch("keystroke_simulator_app.StateUtils.save_main_app_state")
     def test_save_latest_state_strips_pid_suffix(self, mock_save_state):

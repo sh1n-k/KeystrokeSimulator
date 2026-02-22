@@ -257,6 +257,7 @@ class ButtonFrame(tk.Frame):
             btn.pack(side=tk.LEFT, padx=5)
             self.btns[key] = btn
         self.start_stop_button = self.btns["start"]
+        self.quick_events_button = self.btns["quick_events"]
         self.settings_button = self.btns["settings"]
         self.clear_logs_button = self.btns["clear_logs"]
 
@@ -293,6 +294,7 @@ class ProfileButtonFrame(tk.Frame):
             btn.pack(side=tk.LEFT, padx=5)
             self.btns[key] = btn
         self.settings_button = self.btns["edit_profile"]
+        self.modkeys_button = self.btns["modkeys"]
         self.sort_button = self.btns["sort_profile"]
 
     def refresh_texts(self):
@@ -606,13 +608,17 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.button_frame.start_stop_button.config(
             text=txt("Stop", "중지") if running else txt("Start", "시작")
         )
+        self.button_frame.quick_events_button.config(state=state)
         self.button_frame.settings_button.config(state=state)
         self.button_frame.clear_logs_button.config(state=state)
 
+        self.profile_button_frame.modkeys_button.config(state=state)
         self.profile_button_frame.settings_button.config(state=state)
         self.profile_button_frame.sort_button.config(state=state)
 
     def open_modkeys(self):
+        if self.is_running.get():
+            return
         if self.selected_profile.get():
             ModificationKeysWindow(self, self.selected_profile.get())
 
@@ -629,6 +635,8 @@ class KeystrokeSimulatorApp(tk.Tk):
             KeystrokeSortEvents(self, self.selected_profile.get(), self.reload_profiles)
 
     def open_quick_events(self):
+        if self.is_running.get():
+            return
         KeystrokeQuickEventEditor(self)
 
     def open_settings(self):

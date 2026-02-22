@@ -114,8 +114,8 @@ class KeystrokeSettings(tk.Toplevel):
             ttk.Checkbutton(
                 key_frame,
                 text=txt(
-                    "Enable Start/Stop Key (Alt+Shift)",
-                    "시작/중지 키 사용 (Alt+Shift)",
+                    "Enable Start/Stop Key (Option+Shift)",
+                    "시작/중지 키 사용 (Option+Shift)",
                 ),
                 variable=self.ui_vars["enable_key"],
                 command=self._toggle_combo_state,
@@ -268,7 +268,7 @@ class KeystrokeSettings(tk.Toplevel):
         msg = (
             txt("Start/Stop: A-Z, 0-9, special keys only.", "시작/중지: A-Z, 0-9, 특수키만 허용됩니다.")
             if self.is_windows
-            else txt("macOS: Start/Stop is Alt+Shift.", "macOS: 시작/중지는 Alt+Shift입니다.")
+            else txt("macOS: Start/Stop is Option+Shift.", "macOS: 시작/중지는 Option+Shift입니다.")
         )
         self.warning_label.config(text=msg)
 
