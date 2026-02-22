@@ -2,18 +2,14 @@ import unittest
 
 import numpy as np
 
-from keystroke_processor import KeystrokeProcessor
-
-
-def _make_processor_stub() -> KeystrokeProcessor:
-    return KeystrokeProcessor.__new__(KeystrokeProcessor)
+from helpers import make_processor_stub
 
 
 class TestCheckMatchPixelMode(unittest.TestCase):
     """_check_match: 픽셀 모드 테스트"""
 
     def setUp(self):
-        self.proc = _make_processor_stub()
+        self.proc = make_processor_stub()
 
     def test_pixel_exact_match(self):
         """픽셀이 ref_bgr과 정확히 일치하면 True"""
@@ -107,7 +103,7 @@ class TestCheckMatchRegionMode(unittest.TestCase):
     """_check_match: 영역 모드 테스트"""
 
     def setUp(self):
-        self.proc = _make_processor_stub()
+        self.proc = make_processor_stub()
 
     def test_region_all_checkpoints_match(self):
         """모든 체크포인트 색상이 일치하면 True"""

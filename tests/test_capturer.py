@@ -84,5 +84,35 @@ class TestSetCaptureSize(unittest.TestCase):
         self.assertEqual(capturer.box_h, 150)
 
 
+class TestCapturerAttributes(unittest.TestCase):
+    """ScreenshotCapturer: 속성 초기화 및 접근"""
+
+    def _make_capturer(self, screen_w=1920, screen_h=1080):
+        monitor = MagicMock()
+        monitor.width = screen_w
+        monitor.height = screen_h
+        with patch("keystroke_capturer.screeninfo.get_monitors", return_value=[monitor]):
+            return ScreenshotCapturer()
+
+    def test_screenshot_callback_settable(self):
+        """screenshot_callback 설정 가능"""
+        capturer = self._make_capturer()
+        cb = lambda pos, img: None
+        capturer.screenshot_callback = cb
+        self.assertIs(capturer.screenshot_callback, cb)
+
+    def test_current_position_initial(self):
+        """current_position 초기값은 (0, 0)"""
+        capturer = self._make_capturer()
+        self.assertEqual(capturer.current_position, (0, 0))
+
+    def test_get_current_mouse_position_type(self):
+        """get_current_mouse_position() 반환 타입"""
+        capturer = self._make_capturer()
+        pos = capturer.get_current_mouse_position()
+        self.assertIsInstance(pos, tuple)
+        self.assertEqual(len(pos), 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
