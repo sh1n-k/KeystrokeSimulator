@@ -30,6 +30,18 @@ class TestProfileDisplay(unittest.TestCase):
             [QUICK_PROFILE_NAME, "⭐ A", "B", "C"],
         )
 
+    def test_build_profile_display_values_respects_custom_quick_name(self):
+        names = ["Fast", "A"]
+        favorites = {"Fast", "A"}
+        self.assertEqual(
+            build_profile_display_values(
+                names,
+                favorites,
+                quick_profile_name="Fast",
+            ),
+            ["Fast", "⭐ A"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

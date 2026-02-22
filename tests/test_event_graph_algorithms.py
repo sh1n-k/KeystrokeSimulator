@@ -1,6 +1,10 @@
 import unittest
+from unittest.mock import patch
+
+import keystroke_event_graph as graph_module
 
 from keystroke_event_graph import (
+    PALETTE,
     GraphEdge,
     GraphNode,
     _assign_levels,
@@ -430,13 +434,13 @@ class TestGroupColor(unittest.TestCase):
         """동일 group_id → 동일 색상"""
         self.assertEqual(_group_color("G1"), _group_color("G1"))
 
-    def test_different_groups_may_differ(self):
-        """다른 group_id → 색상이 다를 수 있음"""
+    def test_group_color_is_in_palette(self):
+        """group_id가 있으면 팔레트 내 색상이 반환됨"""
         c1 = _group_color("Group_A")
         c2 = _group_color("Group_B")
-        # 해시 충돌 가능하므로 다름을 보장하진 않지만, 일반적으로 다름
-        self.assertEqual(len(c1), 3)
-        self.assertEqual(len(c2), 3)
+        self.assertIn(c1, PALETTE)
+        self.assertIn(c2, PALETTE)
+        self.assertNotEqual(c1, _group_color(None))
 
 
 class TestBezierMath(unittest.TestCase):
@@ -550,11 +554,34 @@ class TestUtilityFunctions(unittest.TestCase):
         lines = _wrap_label("", width=20, max_lines=2)
         self.assertEqual(lines, [""])
 
-    def test_calc_max_cols_in_range(self):
-        """max_cols 결과가 3~8 범위"""
-        cols = _calc_max_cols()
-        self.assertGreaterEqual(cols, 3)
-        self.assertLessEqual(cols, 8)
+    def test_calc_max_cols_lower_clamped_to_3(self):
+        """폭이 작아도 최소 3열"""
+        with patch.object(graph_module, "TARGET_WIDTH", 320):
+            self.assertEqual(_calc_max_cols(), 3)
+
+    def test_calc_max_cols_uses_formula(self):
+        """중간 폭에서는 계산식과 일치"""
+        with patch.object(graph_module, "TARGET_WIDTH", 1200):
+            usable = max(
+                320,
+                graph_module.TARGET_WIDTH - graph_module.MARGIN * 2,
+            )
+            expected = max(
+                3,
+                min(
+                    8,
+                    int(
+                        (usable + graph_module.X_GAP)
+                        // (graph_module.NODE_W + graph_module.X_GAP)
+                    ),
+                ),
+            )
+            self.assertEqual(_calc_max_cols(), expected)
+
+    def test_calc_max_cols_upper_clamped_to_8(self):
+        """폭이 매우 커도 최대 8열"""
+        with patch.object(graph_module, "TARGET_WIDTH", 10000):
+            self.assertEqual(_calc_max_cols(), 8)
 
 
 if __name__ == "__main__":
