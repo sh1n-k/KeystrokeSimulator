@@ -3,18 +3,14 @@ from unittest.mock import patch
 
 import numpy as np
 
-from keystroke_processor import KeystrokeProcessor
-
-
-def _make_processor_stub() -> KeystrokeProcessor:
-    return KeystrokeProcessor.__new__(KeystrokeProcessor)
+from helpers import make_processor_stub
 
 
 class TestExtractROI(unittest.TestCase):
     """_extract_roi: 이미지에서 관심 영역 추출"""
 
     def setUp(self):
-        self.proc = _make_processor_stub()
+        self.proc = make_processor_stub()
 
     def test_normal_extraction(self):
         """정상 좌표에서 ROI가 올바르게 추출됨"""
@@ -101,7 +97,7 @@ class TestBuildCaptureRect(unittest.TestCase):
     """_build_capture_rect: 독립 이벤트 캡처 영역 생성"""
 
     def setUp(self):
-        self.proc = _make_processor_stub()
+        self.proc = make_processor_stub()
 
     def test_pixel_mode_single_pixel_rect(self):
         """픽셀 모드: 1x1 캡처 영역"""
@@ -161,7 +157,7 @@ class TestCheckMatchRegionROIIntegration(unittest.TestCase):
     """_check_match + _extract_roi 통합: 영역 매칭 시 ROI 추출 후 체크포인트 검증"""
 
     def setUp(self):
-        self.proc = _make_processor_stub()
+        self.proc = make_processor_stub()
 
     def test_region_match_with_roi_extraction(self):
         """영역 매칭: ROI 추출 → 체크포인트 검증 전체 경로"""
@@ -208,7 +204,7 @@ class TestExtractROIWarning(unittest.TestCase):
     """_extract_roi: 경계 초과 시 경고 로깅 검증"""
 
     def setUp(self):
-        self.proc = _make_processor_stub()
+        self.proc = make_processor_stub()
 
     def _out_of_bounds_evt(self, name="TestEvt"):
         return {"name": name, "region_w": 50, "region_h": 50, "rel_x": 5, "rel_y": 5}

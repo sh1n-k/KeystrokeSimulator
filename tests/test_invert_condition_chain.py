@@ -1,16 +1,6 @@
-import threading
 import unittest
 
-from keystroke_processor import KeystrokeProcessor
-
-
-def _make_processor_stub() -> KeystrokeProcessor:
-    proc = KeystrokeProcessor.__new__(KeystrokeProcessor)
-    proc.state_lock = threading.Lock()
-    proc.current_states = {}
-    proc.term_event = threading.Event()
-    proc.default_press_times = (0.1, 0.1)
-    return proc
+from helpers import make_processor_stub
 
 
 class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
@@ -21,7 +11,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
         Parent(invert): 픽셀 불일치 → invert 적용 후 True
         Child(conds={Parent: True}): 조건 충족 → 실행
         """
-        proc = _make_processor_stub()
+        proc = make_processor_stub()
         proc.event_data_list = [
             {
                 "name": "Parent",
@@ -65,7 +55,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
         Parent(invert): 픽셀 일치 → invert 적용 후 False
         Child(conds={Parent: True}): 조건 불충족 → 차단
         """
-        proc = _make_processor_stub()
+        proc = make_processor_stub()
         proc.event_data_list = [
             {
                 "name": "Parent",
@@ -108,7 +98,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
         Parent(invert): True
         Child(invert, conds={Parent: True}): 조건 충족 + 매치 True → 실행
         """
-        proc = _make_processor_stub()
+        proc = make_processor_stub()
         proc.event_data_list = [
             {
                 "name": "Parent",
@@ -151,7 +141,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
         Parent(invert): False (invert 적용 후)
         Child(conds={Parent: False}): Parent가 False이므로 조건 충족 → 실행
         """
-        proc = _make_processor_stub()
+        proc = make_processor_stub()
         proc.event_data_list = [
             {
                 "name": "Parent",
@@ -197,7 +187,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
         G1_HIGH(priority=0): True
         → priority 0인 G1_HIGH만 실행
         """
-        proc = _make_processor_stub()
+        proc = make_processor_stub()
         proc.event_data_list = [
             {
                 "name": "G1_LOW",
@@ -240,7 +230,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
         C(invert, conds={B: True}): True
         → 3단계 체인에서 invert가 혼합되어도 정상 실행
         """
-        proc = _make_processor_stub()
+        proc = make_processor_stub()
         proc.event_data_list = [
             {
                 "name": "A",
@@ -293,7 +283,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
         B(invert, conds={A: True}): False (invert 후)
         C(conds={B: True}): raw True지만 B가 False라 차단
         """
-        proc = _make_processor_stub()
+        proc = make_processor_stub()
         proc.event_data_list = [
             {
                 "name": "A",
