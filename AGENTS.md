@@ -67,6 +67,11 @@ If you need to force a specific interpreter:
 python3 run_tests.py --python .venv/bin/python
 ```
 
+Run GUI-including tests (when display/Tk environment is available):
+```bash
+RUN_GUI_TESTS=1 python3 run_tests.py --python .venv/bin/python -q
+```
+
 ## Build commands
 
 Build uses PyInstaller (not pinned in `requirements.txt`):
@@ -120,6 +125,13 @@ Threading/UI:
 Processor/auth behavior that should not regress:
 - Main-loop activation logic should stay centered on `_resolve_effective_states` (strict condition-chain resolution); avoid reintroducing unused condition-filter helpers.
 - In `main_secure.py`, keep lockout countdown single-sourced: `lock_inputs()` should only disable inputs, and `show_error_and_reactivate()` should start `start_countdown(...)` exactly once.
+
+Localization (EN/KO):
+- UI text should use `i18n.py` helpers (`txt`, `set_language`, `normalize_language`) instead of hard-coded single-language strings.
+- Default language is English (`en`). Korean (`ko`) is supported.
+- `UserSettings.language` is persisted in `user_settings.json` and loaded by app/settings/auth UI flows.
+- For button text that can clip in different languages, use `dual_text_width(...)` instead of fixed widths where practical.
+- New/updated tests that assert UI strings should explicitly set language (`set_language("en")` or `set_language("ko")`) before assertions.
 
 ## Safety / security boundaries
 
