@@ -1,7 +1,7 @@
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, messagebox
-from typing import Callable
+from typing import Callable, Optional
 
 from PIL import Image, ImageTk
 from loguru import logger
@@ -10,20 +10,50 @@ from keystroke_models import EventModel
 from keystroke_profile_storage import load_profile, save_profile
 from keystroke_utils import StateUtils, WindowUtils
 
+SW_PAD_XS = 2
+SW_PAD_SM = 4
+SW_PAD_MD = 8
+SW_PAD_LG = 12
+SW_ROW_IMAGE_SIZE = 40
+
+SW_BG_BASE = "#f3f2ee"
+SW_BG_PANEL = "#f7f6f2"
+SW_BG_ROW = "#efeee9"
+SW_BG_CHIP = "#e8e6de"
+SW_BG_THUMBNAIL = "#d9d6cd"
+SW_BG_ROW_ACTIVE = "#e7e5dc"
+
+SW_FG_PRIMARY = "#2f2f2a"
+SW_FG_MUTED = "#6f6d64"
+SW_FG_WARN = "#8a6f2d"
+SW_BORDER_SOFT = "#d6d3c9"
+
 
 class KeystrokeSortEvents(tk.Toplevel):
+    HEADER_COLUMNS = [
+        ("#", 3, "center", False),
+        ("사용", 3, "center", False),
+        ("이미지", 6, "center", False),
+        ("그룹(우선순위)", 14, "center", False),
+        ("이벤트 이름", 0, "w", True),
+        ("입력 키", 8, "center", False),
+    ]
+
     def __init__(self, master, profile_name: str, save_callback: Callable[[str], None]):
         super().__init__(master)
         self.master, self.save_cb = master, save_callback
         self.prof_dir = Path("profiles")
-        self.title("Event Organizer")
+        self.title("이벤트 정렬")
+        self.configure(bg=SW_BG_BASE)
 
         style = ttk.Style(self)
-        style.configure("Event.TFrame", relief="solid", borderwidth=1)
-        style.configure("Group.TLabel", background="#E0E0E0", foreground="#666666", relief="groove")
+        style.configure("SortReadonly.TEntry", fieldbackground="#fbfaf7")
 
         self.prof_name = tk.StringVar(value=profile_name)
-        self.profile = self._load_profile(profile_name)
+        self.profile: Optional[object] = self._load_profile(profile_name)
+        if not self.profile:
+            self.after(0, self.destroy)
+            return
         self.events = self.profile.event_list
         self._preview_win = None
         self._preview_photo = None
@@ -36,31 +66,53 @@ class KeystrokeSortEvents(tk.Toplevel):
         self.focus_force()
 
     def _create_ui(self):
-        # 1. Top Frame (Profile Name)
-        f_top = tk.Frame(self)
-        f_top.pack(pady=10, padx=10, fill=tk.X)
-        tk.Label(f_top, text="Profile Name:").pack(
-            side=tk.LEFT, padx=(0, 5)
+        # 1. Top Toolbar
+        f_top = tk.Frame(
+            self,
+            bg=SW_BG_PANEL,
+            highlightbackground=SW_BORDER_SOFT,
+            highlightthickness=1,
+            bd=0,
         )
-        ttk.Entry(f_top, textvariable=self.prof_name, state="readonly").pack(
-            side=tk.LEFT, expand=True, fill=tk.BOTH
-        )
-
-        # 2. Save Button
-        ttk.Button(self, text="Save", command=self.save).pack(pady=5)
+        f_top.pack(pady=(SW_PAD_MD, SW_PAD_SM), padx=SW_PAD_MD, fill=tk.X)
+        tk.Label(
+            f_top,
+            text="프로필:",
+            bg=SW_BG_PANEL,
+            fg=SW_FG_MUTED,
+        ).pack(side=tk.LEFT, padx=(SW_PAD_MD, SW_PAD_SM), pady=SW_PAD_SM)
+        ttk.Entry(
+            f_top,
+            textvariable=self.prof_name,
+            state="readonly",
+            style="SortReadonly.TEntry",
+        ).pack(side=tk.LEFT, expand=True, fill=tk.BOTH, padx=(0, SW_PAD_MD), pady=SW_PAD_SM)
+        ttk.Button(
+            f_top,
+            text="저장 후 닫기",
+            command=self.save,
+        ).pack(side=tk.RIGHT, padx=(0, SW_PAD_MD), pady=SW_PAD_SM)
 
         # 3. [New] Column Headers
         self._create_header()
 
         # 4. Scrollable Area
-        self.canvas = tk.Canvas(self, highlightthickness=0)
+        body = tk.Frame(self, bg=SW_BG_BASE)
+        body.pack(fill=tk.BOTH, expand=True, padx=SW_PAD_MD, pady=(0, SW_PAD_MD))
+
+        self.canvas = tk.Canvas(
+            body,
+            bg=SW_BG_BASE,
+            highlightthickness=0,
+            bd=0,
+        )
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        sb = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        sb = ttk.Scrollbar(body, orient="vertical", command=self.canvas.yview)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         self.canvas.configure(yscrollcommand=sb.set)
 
-        self.f_events = tk.Frame(self.canvas)
+        self.f_events = tk.Frame(self.canvas, bg=SW_BG_BASE)
         self.win_id = self.canvas.create_window(
             (0, 0), window=self.f_events, anchor="nw"
         )
@@ -76,23 +128,31 @@ class KeystrokeSortEvents(tk.Toplevel):
 
     def _create_header(self):
         """컬럼 타이틀 헤더 생성"""
-        f_h = tk.Frame(self)
-        # padx=(5, 20): 왼쪽은 행과 맞추고, 오른쪽은 스크롤바 너비만큼 여백을 줌
-        f_h.pack(fill=tk.X, padx=(5, 20), pady=(10, 0))
+        f_h = tk.Frame(
+            self,
+            bg=SW_BG_PANEL,
+            highlightbackground=SW_BORDER_SOFT,
+            highlightthickness=1,
+            bd=0,
+        )
+        f_h.pack(fill=tk.X, padx=SW_PAD_MD, pady=(SW_PAD_SM, SW_PAD_SM))
 
-        # _add_row의 위젯 구성과 너비를 맞춰서 라벨 배치
-        # 1. No
-        tk.Label(f_h, text="No", width=3, fg="gray").pack(side=tk.LEFT, padx=5)
-        # 2. Use (Checkbox)
-        tk.Label(f_h, text="Use", width=3, fg="gray").pack(side=tk.LEFT, padx=5)
-        # 3. Img
-        tk.Label(f_h, text="Img", width=6, fg="gray").pack(side=tk.LEFT, padx=5)
-        # 4. Group
-        tk.Label(f_h, text="Group (Prio)", width=12, fg="gray").pack(side=tk.LEFT, padx=5)
-        # 5. Name (Expandable)
-        tk.Label(f_h, text="Event Name", fg="gray", anchor="w").pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        # 6. Key/Type
-        tk.Label(f_h, text="Key", width=6, fg="gray").pack(side=tk.LEFT, padx=5)
+        for text, width, anchor, expand in self.HEADER_COLUMNS:
+            kw = {
+                "text": text,
+                "bg": SW_BG_PANEL,
+                "fg": SW_FG_MUTED,
+                "anchor": anchor,
+            }
+            if width:
+                kw["width"] = width
+            tk.Label(f_h, **kw).pack(
+                side=tk.LEFT,
+                padx=SW_PAD_SM,
+                pady=SW_PAD_SM,
+                fill=tk.X if expand else None,
+                expand=expand,
+            )
 
     def _on_frame_configure(self, event):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -106,14 +166,44 @@ class KeystrokeSortEvents(tk.Toplevel):
         for i, evt in enumerate(self.events):
             self._add_row(i, evt)
 
+    @staticmethod
+    def _format_group_text(evt: EventModel) -> str:
+        if evt.group_id:
+            return f"{evt.group_id} ({evt.priority})"
+        return "그룹 없음"
+
+    @staticmethod
+    def _format_key_text(evt: EventModel) -> tuple[str, str]:
+        if not getattr(evt, "execute_action", True):
+            return "조건", SW_FG_MUTED
+        key = (evt.key_to_enter or "").strip()
+        if key:
+            return key, SW_FG_PRIMARY
+        return "키 없음", SW_FG_WARN
+
     def _add_row(self, idx, evt):
-        f = ttk.Frame(self.f_events, style="Event.TFrame")
-        f.pack(pady=2, fill=tk.X, padx=5)
+        f = tk.Frame(
+            self.f_events,
+            bg=SW_BG_ROW,
+            highlightbackground=SW_BORDER_SOFT,
+            highlightthickness=1,
+            bd=0,
+        )
+        f.pack(pady=(0, SW_PAD_XS), fill=tk.X)
 
         widgets = []
-        
+
         # 1. Index
-        widgets.append(ttk.Label(f, text=f"{idx + 1}", width=3, anchor="center"))
+        widgets.append(
+            tk.Label(
+                f,
+                text=f"{idx + 1}",
+                width=3,
+                anchor="center",
+                bg=SW_BG_ROW,
+                fg=SW_FG_PRIMARY,
+            )
+        )
 
         # 2. Use Checkbox
         var = tk.BooleanVar(value=evt.use_event)
@@ -122,22 +212,29 @@ class KeystrokeSortEvents(tk.Toplevel):
 
         # 3. Image
         img = (
-            evt.held_screenshot.resize((40, 40))
+            evt.held_screenshot.resize((SW_ROW_IMAGE_SIZE, SW_ROW_IMAGE_SIZE))
             if evt.held_screenshot
-            else Image.new("RGB", (40, 40), "gray")
+            else Image.new("RGB", (SW_ROW_IMAGE_SIZE, SW_ROW_IMAGE_SIZE), SW_BG_THUMBNAIL)
         )
         photo = ImageTk.PhotoImage(img)
-        lbl_img = ttk.Label(f, image=photo)
+        lbl_img = tk.Label(f, image=photo, bg=SW_BG_ROW)
         lbl_img.image = photo
         self._bind_image_preview(lbl_img, evt)
         widgets.append(lbl_img)
 
         # 4. Group Info
-        grp_text = ""
-        if evt.group_id:
-            grp_text = f"{evt.group_id} ({evt.priority})"
-        
-        lbl_grp = ttk.Label(f, text=grp_text, width=12, anchor="center", style="Group.TLabel")
+        grp_text = self._format_group_text(evt)
+        grp_fg = SW_FG_PRIMARY if evt.group_id else SW_FG_MUTED
+        lbl_grp = tk.Label(
+            f,
+            text=grp_text,
+            width=14,
+            anchor="center",
+            bg=SW_BG_CHIP,
+            fg=grp_fg,
+            relief="groove",
+            bd=1,
+        )
         widgets.append(lbl_grp)
 
         # 5. Event Name
@@ -148,23 +245,28 @@ class KeystrokeSortEvents(tk.Toplevel):
         widgets.append(ttk.Entry(f, textvariable=name_var))
 
         # 6. Key or Type
-        if getattr(evt, "execute_action", True):
-            key_text = evt.key_to_enter or "N/A"
-        else:
-            key_text = "Cond"
-
-        lbl_key = ttk.Label(f, text=key_text, width=6, anchor="center")
-        if not getattr(evt, "execute_action", True):
-            lbl_key.configure(foreground="#888888")
+        key_text, key_fg = self._format_key_text(evt)
+        lbl_key = tk.Label(
+            f,
+            text=key_text,
+            width=8,
+            anchor="center",
+            bg=SW_BG_ROW,
+            fg=key_fg,
+        )
         widgets.append(lbl_key)
 
         # Pack & Bind
         for w in widgets:
             is_interactive = isinstance(w, (ttk.Entry, ttk.Checkbutton))
             is_image_widget = w is lbl_img
-            
+
             w.pack(
-                side=tk.LEFT, padx=5, fill=tk.Y if isinstance(w, ttk.Entry) else None, expand=isinstance(w, ttk.Entry)
+                side=tk.LEFT,
+                padx=SW_PAD_SM,
+                pady=SW_PAD_SM,
+                fill=tk.Y if isinstance(w, ttk.Entry) else None,
+                expand=isinstance(w, ttk.Entry),
             )
 
             if not is_interactive and not is_image_widget:
@@ -227,18 +329,18 @@ class KeystrokeSortEvents(tk.Toplevel):
             "start_y": frame.winfo_y(),
         }
         frame.lift()
-        frame.configure(cursor="hand2")
+        frame.configure(cursor="hand2", bg=SW_BG_ROW_ACTIVE)
 
     def _drag_motion(self, event, frame):
         if not hasattr(self, "_drag_data"):
             return
         dy = event.y_root - self._drag_data["y"]
-        frame.place(y=self._drag_data["start_y"] + dy, x=5, relwidth=0.95)
+        frame.place(y=self._drag_data["start_y"] + dy, x=0, relwidth=1.0)
 
     def _drag_end(self, event, frame):
         if not hasattr(self, "_drag_data"):
             return
-        frame.configure(cursor="")
+        frame.configure(cursor="", bg=SW_BG_ROW)
 
         rows = sorted(
             [w for w in self.f_events.winfo_children() if w != frame],
@@ -263,7 +365,11 @@ class KeystrokeSortEvents(tk.Toplevel):
         try:
             return load_profile(self.prof_dir, name, migrate=True)
         except Exception:
-            messagebox.showerror("Error", f"Load failed: {name}")
+            messagebox.showerror(
+                "오류",
+                f"프로필을 불러오지 못했습니다: {name}",
+                parent=self,
+            )
             self.close()
 
     def save(self):
@@ -274,6 +380,11 @@ class KeystrokeSortEvents(tk.Toplevel):
             self.close()
         except Exception as e:
             logger.error(f"Save failed: {e}")
+            messagebox.showerror(
+                "저장 실패",
+                f"프로필 저장 중 오류가 발생했습니다:\n{e}",
+                parent=self,
+            )
 
     def close(self, event=None):
         self._close_image_preview()
