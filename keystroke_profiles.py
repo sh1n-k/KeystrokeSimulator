@@ -7,6 +7,7 @@ from typing import Callable, Optional, List
 
 from PIL import Image, ImageTk
 
+from i18n import txt, dual_text_width
 from keystroke_event_graph import ensure_profile_graph_image
 from keystroke_event_editor import KeystrokeEventEditor
 from keystroke_event_importer import EventImporter
@@ -94,11 +95,11 @@ class ProfileFrame(ttk.Frame):
         self._profiles_dir = profiles_dir or Path("profiles")
         self.fav_var = tk.BooleanVar(value=fav)
 
-        ttk.Label(self, text="Profile Name: ").pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
+        ttk.Label(self, text=txt("Profile Name:", "프로필 이름:")).pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
         self.entry = ttk.Entry(self, width=24)
         self.entry.pack(side=tk.LEFT, padx=(0, UI_PAD_MD))
         self.entry.insert(0, name)
-        ttk.Checkbutton(self, text="Favorite", variable=self.fav_var).pack(
+        ttk.Checkbutton(self, text=txt("Favorite", "즐겨찾기"), variable=self.fav_var).pack(
             side=tk.LEFT, padx=(0, UI_PAD_MD)
         )
         self.lbl_warn = ttk.Label(self, text="", foreground="#b30000")
@@ -114,13 +115,13 @@ class ProfileFrame(ttk.Frame):
     def _validate(self):
         name = self.entry.get().strip()
         if not name:
-            self.lbl_warn.config(text="프로필 이름을 입력하세요")
+            self.lbl_warn.config(text=txt("Enter profile name", "프로필 이름을 입력하세요"))
             return
         if name != self._original_name and (
             (self._profiles_dir / f"{name}.json").exists()
             or (self._profiles_dir / f"{name}.pkl").exists()
         ):
-            self.lbl_warn.config(text=f"'{name}' 이미 존재합니다")
+            self.lbl_warn.config(text=txt(f"'{name}' already exists", f"'{name}' 이미 존재합니다"))
             return
         self.lbl_warn.config(text="")
 
@@ -139,15 +140,19 @@ class GroupSelector(tk.Toplevel):
         super().__init__(master)
         self.callback = callback
         self.result = None
+        self.none_label = txt("(None)", "(없음)")
         self.existing_groups = {g.lower(): g for g in existing_groups}
 
-        self.title("Select Group")
+        self.title(txt("Select Group", "그룹 선택"))
         self.transient(master)
         self.grab_set()
         self.resizable(False, False)
 
         # 현재 그룹 표시
-        ttk.Label(self, text=f"Current: {current_group or '(None)'}").pack(pady=5)
+        ttk.Label(
+            self,
+            text=f"{txt('Current:', '현재:')} {current_group or self.none_label}",
+        ).pack(pady=5)
 
         # 그룹 목록
         frame = ttk.Frame(self)
@@ -161,7 +166,7 @@ class GroupSelector(tk.Toplevel):
         self.listbox.config(yscrollcommand=scrollbar.set)
 
         # 목록 채우기: (None) + 기존 그룹들
-        self.listbox.insert(tk.END, "(None)")
+        self.listbox.insert(tk.END, self.none_label)
         for grp in sorted(existing_groups):
             self.listbox.insert(tk.END, grp)
 
@@ -179,13 +184,13 @@ class GroupSelector(tk.Toplevel):
         btn_frame = ttk.Frame(self)
         btn_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        ttk.Button(btn_frame, text="Select", command=self._on_select).pack(
+        ttk.Button(btn_frame, text=txt("Select", "선택"), command=self._on_select).pack(
             side=tk.LEFT, padx=2
         )
-        ttk.Button(btn_frame, text="New Group", command=self._on_new).pack(
+        ttk.Button(btn_frame, text=txt("New Group", "새 그룹"), command=self._on_new).pack(
             side=tk.LEFT, padx=2
         )
-        ttk.Button(btn_frame, text="Cancel", command=self.destroy).pack(
+        ttk.Button(btn_frame, text=txt("Cancel", "취소"), command=self.destroy).pack(
             side=tk.RIGHT, padx=2
         )
 
@@ -203,28 +208,39 @@ class GroupSelector(tk.Toplevel):
         if not sel:
             return
         value = self.listbox.get(sel[0])
-        self.result = None if value == "(None)" else value
+        self.result = None if value == self.none_label else value
         self.callback(self.result)
         self.destroy()
 
     def _on_new(self):
         new_name = simpledialog.askstring(
-            "New Group", "Enter new group name:", parent=self
+            txt("New Group", "새 그룹"),
+            txt("Enter new group name:", "새 그룹 이름을 입력하세요:"),
+            parent=self,
         )
         if not new_name:
             return
         new_name = new_name.strip()
         if not new_name:
             return messagebox.showwarning(
-                "Invalid Group", "Group name cannot be empty.", parent=self
+                txt("Invalid Group", "유효하지 않은 그룹"),
+                txt("Group name cannot be empty.", "그룹 이름은 비워둘 수 없습니다."),
+                parent=self,
             )
-        if new_name == "(None)":
+        if new_name in {"(None)", self.none_label}:
             return messagebox.showwarning(
-                "Invalid Group", "'(None)' is reserved.", parent=self
+                txt("Invalid Group", "유효하지 않은 그룹"),
+                txt(
+                    f"'{self.none_label}' is reserved.",
+                    f"'{self.none_label}'은 예약어입니다.",
+                ),
+                parent=self,
             )
         if new_name.lower() in self.existing_groups:
             return messagebox.showwarning(
-                "Duplicate Group", f"'{new_name}' already exists.", parent=self
+                txt("Duplicate Group", "중복 그룹"),
+                txt(f"'{new_name}' already exists.", f"'{new_name}' 이미 존재합니다."),
+                parent=self,
             )
         self.result = new_name
         self.callback(self.result)
@@ -245,13 +261,17 @@ class GroupManagerDialog(tk.Toplevel):
         self.clear_cb = clear_cb
         self._name_map: list[str] = []
 
-        self.title("Manage Groups")
+        self.title(txt("Manage Groups", "그룹 관리"))
         self.transient(master)
         self.grab_set()
         self.resizable(False, False)
 
         ttk.Label(
-            self, text="Select a group to rename or clear from events."
+            self,
+            text=txt(
+                "Select a group to rename or clear from events.",
+                "이벤트에서 이름 변경 또는 해제할 그룹을 선택하세요.",
+            ),
         ).pack(anchor="w", padx=10, pady=(10, 5))
 
         body = ttk.Frame(self)
@@ -266,13 +286,13 @@ class GroupManagerDialog(tk.Toplevel):
 
         btns = ttk.Frame(self)
         btns.pack(fill=tk.X, padx=10, pady=(4, 10))
-        ttk.Button(btns, text="Rename", command=self._rename_group).pack(
+        ttk.Button(btns, text=txt("Rename", "이름 변경"), command=self._rename_group).pack(
             side=tk.LEFT, padx=2
         )
-        ttk.Button(btns, text="Clear Group", command=self._clear_group).pack(
+        ttk.Button(btns, text=txt("Clear Group", "그룹 해제"), command=self._clear_group).pack(
             side=tk.LEFT, padx=2
         )
-        ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(btns, text=txt("Close", "닫기"), command=self.destroy).pack(side=tk.RIGHT, padx=2)
 
         self.listbox.bind("<Double-Button-1>", lambda e: self._rename_group())
         self.bind("<Escape>", lambda e: self.destroy())
@@ -288,10 +308,13 @@ class GroupManagerDialog(tk.Toplevel):
         self.listbox.delete(0, tk.END)
         self._name_map = sorted(data.keys())
         for name in self._name_map:
-            self.listbox.insert(tk.END, f"{name} ({data[name]} events)")
+            self.listbox.insert(
+                tk.END,
+                txt(f"{name} ({data[name]} events)", f"{name} ({data[name]}개 이벤트)"),
+            )
 
         if not self._name_map:
-            self.listbox.insert(tk.END, "(No groups)")
+            self.listbox.insert(tk.END, txt("(No groups)", "(그룹 없음)"))
             self.listbox.config(state=tk.DISABLED)
             return
 
@@ -318,8 +341,8 @@ class GroupManagerDialog(tk.Toplevel):
         if not group:
             return
         new_name = simpledialog.askstring(
-            "Rename Group",
-            "Enter new group name:",
+            txt("Rename Group", "그룹 이름 변경"),
+            txt("Enter new group name:", "새 그룹 이름을 입력하세요:"),
             initialvalue=group,
             parent=self,
         )
@@ -327,7 +350,7 @@ class GroupManagerDialog(tk.Toplevel):
             return
         ok, msg = self.rename_cb(group, new_name)
         if not ok:
-            return messagebox.showwarning("Rename Failed", msg, parent=self)
+            return messagebox.showwarning(txt("Rename Failed", "이름 변경 실패"), msg, parent=self)
         self._reload_groups(selected_name=new_name.strip())
 
     def _clear_group(self):
@@ -335,16 +358,19 @@ class GroupManagerDialog(tk.Toplevel):
         if not group:
             return
         if not messagebox.askyesno(
-            "Clear Group",
-            f"Clear group '{group}' from all events?",
+            txt("Clear Group", "그룹 해제"),
+            txt(
+                f"Clear group '{group}' from all events?",
+                f"모든 이벤트에서 그룹 '{group}'을(를) 해제할까요?",
+            ),
             parent=self,
         ):
             return
         changed = self.clear_cb(group)
         self._reload_groups()
         messagebox.showinfo(
-            "Group Cleared",
-            f"'{group}' removed from {changed} event(s).",
+            txt("Group Cleared", "그룹 해제 완료"),
+            txt(f"'{group}' removed from {changed} event(s).", f"'{group}'이(가) {changed}개 이벤트에서 제거되었습니다."),
             parent=self,
         )
 
@@ -405,13 +431,16 @@ class EventRow(ttk.Frame):
 
         # 8. Action Buttons
         self.btn_delete = None
-        for text, key, width in [
-            ("Edit", "open", 7),
-            ("Copy", "copy", 7),
-            ("🗑 Delete", "remove", 9),
+        for en, ko, key, min_width in [
+            ("Edit", "편집", "open", 7),
+            ("Copy", "복사", "copy", 7),
+            ("🗑 Delete", "🗑 삭제", "remove", 9),
         ]:
             btn = ttk.Button(
-                self, text=text, width=width, command=lambda k=key: self._on_click(k)
+                self,
+                text=txt(en, ko),
+                width=dual_text_width(en, ko, padding=2, min_width=min_width),
+                command=lambda k=key: self._on_click(k),
             )
             btn.pack(side=tk.LEFT, padx=UI_PAD_XS)
             btn.bind("<Button-3>", lambda e: self.cbs["menu"](e, self.row_num))
@@ -445,44 +474,72 @@ class EventRow(ttk.Frame):
 
         # Independent Thread
         is_indep = getattr(self.event, "independent_thread", False)
-        self.lbl_indep.config(text="🧵 독립" if is_indep else "")
+        self.lbl_indep.config(text=txt("🧵 Indep", "🧵 독립") if is_indep else "")
         self._tip_indep.update_text(
-            "현재 독립 실행 상태입니다. 클릭하면 일반 실행으로 바뀝니다." if is_indep
-            else "클릭하면 독립 실행으로 전환됩니다."
+            txt(
+                "This event runs independently. Click to switch to normal mode.",
+                "현재 독립 실행 상태입니다. 클릭하면 일반 실행으로 바뀝니다.",
+            )
+            if is_indep
+            else txt(
+                "Click to switch this event to independent mode.",
+                "클릭하면 독립 실행으로 전환됩니다.",
+            )
         )
 
         # Condition Only
         is_cond = not getattr(self.event, "execute_action", True)
-        self.lbl_cond.config(text="🔎 조건" if is_cond else "")
+        self.lbl_cond.config(text=txt("🔎 Cond", "🔎 조건") if is_cond else "")
         self.entry.config(foreground="gray" if is_cond else "black")
         self._tip_cond.update_text(
-            "조건만 확인하고 키 입력은 하지 않습니다." if is_cond
-            else "조건이 맞으면 키를 눌러 실행됩니다."
+            txt(
+                "Condition-only mode checks conditions without pressing keys.",
+                "조건만 확인하고 키 입력은 하지 않습니다.",
+            )
+            if is_cond
+            else txt(
+                "When conditions match, the key input is executed.",
+                "조건이 맞으면 키를 눌러 실행됩니다.",
+            )
         )
 
         # Group
         grp = self.event.group_id or ""
-        self.lbl_grp.config(text=grp if grp else "그룹 없음")
+        self.lbl_grp.config(text=grp if grp else txt("No Group", "그룹 없음"))
         self._tip_grp.update_text(
-            f"현재 그룹: {grp}. 클릭하면 변경할 수 있습니다." if grp
-            else "현재 그룹이 없습니다. 클릭해서 그룹을 지정하세요."
+            txt(
+                f"Current group: {grp}. Click to change it.",
+                f"현재 그룹: {grp}. 클릭하면 변경할 수 있습니다.",
+            )
+            if grp
+            else txt(
+                "No group assigned. Click to set a group.",
+                "현재 그룹이 없습니다. 클릭해서 그룹을 지정하세요.",
+            )
         )
 
         # Key (NEW)
         key = self.event.key_to_enter or ""
         invert = getattr(self.event, "invert_match", False)
-        display = key if key else "⌨️ 없음"
+        display = key if key else txt("⌨️ None", "⌨️ 없음")
         if invert:
             display = f"🔁 {display}"
         self.lbl_key.config(text=display)
         if invert:
             self._tip_key.update_text(
-                "반전 매칭이 켜져 있습니다. 기준과 불일치할 때 실행됩니다."
+                txt(
+                    "Invert match is enabled. It runs when the target does not match.",
+                    "반전 매칭이 켜져 있습니다. 기준과 불일치할 때 실행됩니다.",
+                )
             )
         elif key:
-            self._tip_key.update_text(f"입력 키: {key}. 클릭하면 편집기를 엽니다.")
+            self._tip_key.update_text(
+                txt(f"Input key: {key}. Click to open the editor.", f"입력 키: {key}. 클릭하면 편집기를 엽니다.")
+            )
         else:
-            self._tip_key.update_text("입력 키가 없습니다. 클릭하면 편집기를 엽니다.")
+            self._tip_key.update_text(
+                txt("No input key. Click to open the editor.", "입력 키가 없습니다. 클릭하면 편집기를 엽니다.")
+            )
 
     def _on_indep_click(self, event=None):
         if self.event:
@@ -509,8 +566,11 @@ class EventRow(ttk.Frame):
         if self.event:
             if getattr(self.event, "independent_thread", False):
                 messagebox.showinfo(
-                    "Info",
-                    "Independent thread events cannot be grouped.",
+                    txt("Info", "안내"),
+                    txt(
+                        "Independent thread events cannot be grouped.",
+                        "독립 실행 이벤트는 그룹으로 묶을 수 없습니다.",
+                    ),
                     parent=self.master,
                 )
                 return
@@ -573,7 +633,7 @@ class EventListFrame(ttk.Frame):
         self.status_cb = status_cb
         self.graph_viewer = None
         self.empty_state_frame: Optional[ttk.LabelFrame] = None
-        self.add_event_label = "➕ Add Event"
+        self.add_event_label = txt("➕ Add Event", "➕ 이벤트 추가")
 
         # --- Control Buttons ---
         f_ctrl = ttk.Frame(self)
@@ -591,50 +651,53 @@ class EventListFrame(ttk.Frame):
             f_primary,
             text=self.add_event_label,
             command=self._add_event,
-            width=18,
+            width=dual_text_width("➕ Add Event", "➕ 이벤트 추가", padding=2, min_width=18),
         )
         self.btn_add_event.pack(side=tk.LEFT, padx=(0, UI_PAD_SM), fill=tk.X, expand=True)
-        ToolTip(self.btn_add_event, "새 이벤트를 추가하고 편집기를 엽니다.")
+        ToolTip(self.btn_add_event, txt("Add a new event and open its editor.", "새 이벤트를 추가하고 편집기를 엽니다."))
 
         self.btn_import = ttk.Button(
             f_primary,
-            text="📥 Import",
+            text=txt("📥 Import", "📥 가져오기"),
             command=lambda: EventImporter(self.win, self._import),
-            width=13,
+            width=dual_text_width("📥 Import", "📥 가져오기", padding=2, min_width=13),
         )
         self.btn_import.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
-        ToolTip(self.btn_import, "다른 이벤트 설정을 현재 프로필로 가져옵니다.")
+        ToolTip(self.btn_import, txt("Import event settings into this profile.", "다른 이벤트 설정을 현재 프로필로 가져옵니다."))
 
         self.btn_sort = ttk.Button(
             f_secondary,
-            text="↕ Auto Sort",
+            text=txt("↕ Auto Sort", "↕ 자동 정렬"),
             command=self._sort_events,
-            width=12,
+            width=dual_text_width("↕ Auto Sort", "↕ 자동 정렬", padding=2, min_width=12),
         )
         self.btn_sort.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
-        ToolTip(self.btn_sort, "우선순위 규칙에 맞게 이벤트를 자동 정렬합니다.")
+        ToolTip(self.btn_sort, txt("Sort events automatically by priority rules.", "우선순위 규칙에 맞게 이벤트를 자동 정렬합니다."))
 
         self.btn_manage_groups = ttk.Button(
             f_secondary,
-            text="🧩 Manage Groups",
+            text=txt("🧩 Manage Groups", "🧩 그룹 관리"),
             command=self._manage_groups,
-            width=16,
+            width=dual_text_width("🧩 Manage Groups", "🧩 그룹 관리", padding=2, min_width=16),
         )
         self.btn_manage_groups.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
-        ToolTip(self.btn_manage_groups, "그룹 이름 변경 또는 그룹 해제를 관리합니다.")
+        ToolTip(self.btn_manage_groups, txt("Rename groups or clear groups from events.", "그룹 이름 변경 또는 그룹 해제를 관리합니다."))
 
         self.btn_graph = ttk.Button(
             f_secondary,
-            text="🗺 View Graph",
+            text=txt("🗺 View Graph", "🗺 그래프 보기"),
             command=self._open_graph,
-            width=13,
+            width=dual_text_width("🗺 View Graph", "🗺 그래프 보기", padding=2, min_width=13),
         )
         self.btn_graph.pack(side=tk.LEFT)
-        ToolTip(self.btn_graph, "현재 이벤트 흐름을 그래프로 확인합니다.")
+        ToolTip(self.btn_graph, txt("Open a graph view of the current event flow.", "현재 이벤트 흐름을 그래프로 확인합니다."))
 
         self.menu = tk.Menu(self, tearoff=0)
         self.menu.add_command(
-            label="Apply Pixel/Region Info to Similar Areas",
+            label=txt(
+                "Apply Pixel/Region Info to Similar Areas",
+                "유사 영역에 픽셀/영역 정보 적용",
+            ),
             command=self._apply_pixel_batch,
         )
 
@@ -710,9 +773,11 @@ class EventListFrame(ttk.Frame):
         self.update_events()
         self.save_cb()
         messagebox.showinfo(
-            "자동 정렬 완료",
-            "이벤트를 다음 순서로 정렬했습니다:\n"
-            "독립 실행 → 그룹 → 우선순위 → 입력 키(0-9→A-Z→F1-F12→특수키) → 이름",
+            txt("Auto Sort Complete", "자동 정렬 완료"),
+            txt(
+                "Events were sorted by:\nIndependent → Group → Priority → Input Key (0-9→A-Z→F1-F12→Special) → Name",
+                "이벤트를 다음 순서로 정렬했습니다:\n독립 실행 → 그룹 → 우선순위 → 입력 키(0-9→A-Z→F1-F12→특수키) → 이름",
+            ),
             parent=self.win,
         )
 
@@ -720,8 +785,11 @@ class EventListFrame(ttk.Frame):
         """그룹 관리 다이얼로그"""
         if not self._get_existing_groups():
             messagebox.showinfo(
-                "Groups",
-                "아직 그룹이 없습니다.\n이벤트 행의 '그룹 없음' 칸을 클릭해 그룹을 지정하세요.",
+                txt("Groups", "그룹"),
+                txt(
+                    "No groups yet.\nClick the 'No Group' cell in an event row to assign one.",
+                    "아직 그룹이 없습니다.\n이벤트 행의 '그룹 없음' 칸을 클릭해 그룹을 지정하세요.",
+                ),
                 parent=self.win,
             )
             return
@@ -741,14 +809,15 @@ class EventListFrame(ttk.Frame):
 
     def _rename_group(self, old_name: str, new_name: str) -> tuple[bool, str]:
         target = new_name.strip()
+        none_labels = {"(None)", txt("(None)", "(없음)")}
         if not target:
-            return False, "Group name cannot be empty."
-        if target == "(None)":
-            return False, "'(None)' is reserved."
+            return False, txt("Group name cannot be empty.", "그룹 이름은 비워둘 수 없습니다.")
+        if target in none_labels:
+            return False, txt(f"'{target}' is reserved.", f"'{target}'은 예약어입니다.")
         if target.lower() != old_name.lower() and target.lower() in {
             g.lower() for g in self._get_existing_groups()
         }:
-            return False, f"'{target}' already exists."
+            return False, txt(f"'{target}' already exists.", f"'{target}' 이미 존재합니다.")
 
         changed = 0
         for e in self.profile.event_list:
@@ -813,12 +882,17 @@ class EventListFrame(ttk.Frame):
         src = self.profile.event_list[self.ctx_row]
         if not (src.latest_position and src.clicked_position):
             return messagebox.showwarning(
-                "Warning", "Invalid source event.", parent=self.win
+                txt("Warning", "경고"),
+                txt("Invalid source event.", "유효하지 않은 원본 이벤트입니다."),
+                parent=self.win,
             )
 
         if not messagebox.askyesno(
-            "Confirm",
-            f"Apply Info to all events with Area {src.latest_position}?",
+            txt("Confirm", "확인"),
+            txt(
+                f"Apply info to all events with area {src.latest_position}?",
+                f"영역 {src.latest_position}를 가진 모든 이벤트에 정보를 적용할까요?",
+            ),
             parent=self.win,
         ):
             return
@@ -843,9 +917,17 @@ class EventListFrame(ttk.Frame):
 
         if cnt:
             self.save_cb()
-            messagebox.showinfo("Success", f"{cnt} events updated.", parent=self.win)
+            messagebox.showinfo(
+                txt("Success", "완료"),
+                txt(f"{cnt} events updated.", f"{cnt}개 이벤트를 업데이트했습니다."),
+                parent=self.win,
+            )
         else:
-            messagebox.showinfo("Info", "No matching events found.", parent=self.win)
+            messagebox.showinfo(
+                txt("Info", "안내"),
+                txt("No matching events found.", "일치하는 이벤트가 없습니다."),
+                parent=self.win,
+            )
 
     def _create_header(self):
         """컬럼 헤더 생성"""
@@ -857,14 +939,14 @@ class EventListFrame(ttk.Frame):
 
         # 각 컬럼 레이블 (EventRow와 동일한 너비)
         _hdr = [
-            ("#",          2,  "center", {},                              "이벤트 순서"),
-            ("Use",        3,  "center", {},                              "체크 해제 시 이벤트를 건너뜁니다"),
-            ("독립 실행",  8,  "center", {},                              "독립 실행 상태"),
-            ("실행 유형", 10,  "center", {},                              "조건 전용 또는 키 입력 실행"),
-            ("그룹",      14,  "center", {"padx": 2},                     "이벤트 그룹 (클릭하여 변경)"),
-            ("입력 키",   10,  "center", {"padx": 2},                     "입력할 키 (클릭하여 편집)"),
-            ("이벤트 이름", 0, "w",      {"padx": 5, "fill": tk.X, "expand": True}, "이벤트 이름"),
-            ("동작",      22,  "center", {},                              "편집 / 복사 / 삭제"),
+            ("#", 2, "center", {}, txt("Event index", "이벤트 순서")),
+            (txt("Use", "사용"), 3, "center", {}, txt("Uncheck to skip this event.", "체크 해제 시 이벤트를 건너뜁니다")),
+            (txt("Independent", "독립 실행"), 8, "center", {}, txt("Independent execution state.", "독립 실행 상태")),
+            (txt("Type", "실행 유형"), 10, "center", {}, txt("Condition-only or key-input execution.", "조건 전용 또는 키 입력 실행")),
+            (txt("Group", "그룹"), 14, "center", {"padx": 2}, txt("Event group (click to change).", "이벤트 그룹 (클릭하여 변경)")),
+            (txt("Input Key", "입력 키"), 10, "center", {"padx": 2}, txt("Key to input (click to edit).", "입력할 키 (클릭하여 편집)")),
+            (txt("Event Name", "이벤트 이름"), 0, "w", {"padx": 5, "fill": tk.X, "expand": True}, txt("Event name.", "이벤트 이름")),
+            (txt("Actions", "동작"), 22, "center", {}, txt("Edit / Copy / Delete", "편집 / 복사 / 삭제")),
         ]
         for text, width, anchor, pack_kw, tip in _hdr:
             kw = {"text": text, "anchor": anchor}
@@ -893,25 +975,25 @@ class EventListFrame(ttk.Frame):
             return
 
         if not self.empty_state_frame or not self.empty_state_frame.winfo_exists():
-            self.empty_state_frame = ttk.LabelFrame(self, text="처음 시작 가이드")
+            self.empty_state_frame = ttk.LabelFrame(self, text=txt("Getting Started", "처음 시작 가이드"))
             self.empty_state_frame.grid(
                 row=3, column=0, columnspan=2, padx=UI_PAD_MD, pady=(UI_PAD_MD, UI_PAD_SM), sticky="ew"
             )
             ttk.Label(
                 self.empty_state_frame,
-                text="1) ➕ Add Event 버튼으로 첫 이벤트를 추가하세요.",
+                text=txt("1) Add your first event with the ➕ Add Event button.", "1) ➕ Add Event 버튼으로 첫 이벤트를 추가하세요."),
             ).pack(anchor="w", padx=10, pady=(8, 2))
             ttk.Label(
                 self.empty_state_frame,
-                text="2) 🖼 이벤트 편집기에서 캡처와 입력 키를 설정하세요.",
+                text=txt("2) Configure capture and input key in the event editor.", "2) 🖼 이벤트 편집기에서 캡처와 입력 키를 설정하세요."),
             ).pack(anchor="w", padx=10, pady=2)
             ttk.Label(
                 self.empty_state_frame,
-                text="3) ✅ 상단 저장 상태가 'Saved HH:MM:SS'로 바뀌면 완료입니다.",
+                text=txt("3) Done when the top save status changes to 'Saved HH:MM:SS'.", "3) ✅ 상단 저장 상태가 'Saved HH:MM:SS'로 바뀌면 완료입니다."),
             ).pack(anchor="w", padx=10, pady=2)
             ttk.Button(
                 self.empty_state_frame,
-                text="➕ 첫 이벤트 추가",
+                text=txt("➕ Add First Event", "➕ 첫 이벤트 추가"),
                 command=self._add_event,
             ).pack(anchor="e", padx=10, pady=(6, 8))
         else:
@@ -965,11 +1047,14 @@ class EventListFrame(ttk.Frame):
 
     def _copy_row(self, evt):
         if not evt:
-            return messagebox.showinfo("Info", "Only set events can be copied")
+            return messagebox.showinfo(
+                txt("Info", "안내"),
+                txt("Only configured events can be copied.", "설정된 이벤트만 복사할 수 있습니다."),
+            )
         try:
             # 수동으로 이벤트 복사
             new = EventModel(
-                event_name=f"Copy of {evt.event_name}",
+                event_name=f"{txt('Copy of', '복사본')} {evt.event_name}",
                 latest_position=evt.latest_position,
                 clicked_position=evt.clicked_position,
                 latest_screenshot=None,  # not persisted; left preview is always live capture
@@ -996,9 +1081,12 @@ class EventListFrame(ttk.Frame):
             self.save_cb()
             self._update_delete_buttons()
             if self.status_cb:
-                self.status_cb("이벤트 복사됨")
+                self.status_cb(txt("Event copied", "이벤트 복사됨"))
         except Exception as e:
-            messagebox.showerror("Error", f"Copy failed: {e}")
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt(f"Copy failed: {e}", f"복사 실패: {e}"),
+            )
 
     def _remove_row(self, row_widget, row_num):
         if len(self.profile.event_list) < 2:
@@ -1095,7 +1183,7 @@ class KeystrokeProfiles:
         self._autosave_after_id = None
 
         self.win = tk.Toplevel(main_win)
-        self.win.title(f"Profile Manager - {self.prof_name}")
+        self.win.title(f"{txt('Profile Manager', '프로필 관리자')} - {self.prof_name}")
         self.win.transient(main_win)
         self.win.grab_set()
         self.win.bind("<Escape>", self._close)
@@ -1111,7 +1199,7 @@ class KeystrokeProfiles:
 
         f_status = ttk.Frame(self.win)
         f_status.pack(fill="x", padx=UI_PAD_MD, pady=(0, UI_PAD_SM))
-        ttk.Label(f_status, text="저장 상태:").pack(side=tk.LEFT)
+        ttk.Label(f_status, text=txt("Save status:", "저장 상태:")).pack(side=tk.LEFT)
         self.lbl_save_badge = tk.Label(
             f_status,
             text="",
@@ -1142,7 +1230,7 @@ class KeystrokeProfiles:
 
         f_btn = ttk.Frame(self.win, style="success.TFrame")
         f_btn.pack(side="bottom", fill="x", padx=UI_PAD_MD, pady=(UI_PAD_SM, UI_PAD_MD))
-        ttk.Button(f_btn, text="Close", command=self._close).pack(
+        ttk.Button(f_btn, text=txt("Close", "닫기"), command=self._close).pack(
             side=tk.RIGHT, anchor="center"
         )
 
@@ -1170,12 +1258,12 @@ class KeystrokeProfiles:
 
     def _save(self, check_name=True, reload=True):
         if not self.profile.event_list:
-            raise ValueError("At least one event must be set")
+            raise ValueError(txt("At least one event must be set", "최소 1개 이상의 이벤트가 필요합니다"))
         new_name, is_fav = self.p_frame.get_data()
         new_name = (new_name or "").strip()
 
         if check_name and not new_name:
-            raise ValueError("Enter profile name")
+            raise ValueError(txt("Enter profile name", "프로필 이름을 입력하세요"))
         if not new_name:
             # Auto-save 중 임시 공백 입력은 기존 파일명을 유지한다.
             new_name = self.prof_name
@@ -1188,7 +1276,7 @@ class KeystrokeProfiles:
             if (self.prof_dir / f"{new_name}.json").exists() or (
                 self.prof_dir / f"{new_name}.pkl"
             ).exists():
-                raise ValueError(f"'{new_name}' exists.")
+                raise ValueError(txt(f"'{new_name}' already exists.", f"'{new_name}' 이미 존재합니다."))
 
             if (self.prof_dir / f"{self.prof_name}.json").exists() or (
                 self.prof_dir / f"{self.prof_name}.pkl"
@@ -1228,24 +1316,24 @@ class KeystrokeProfiles:
         warning_count = condition_only_count + missing_key_count
 
         self.lbl_events_badge.config(
-            text=f"⚙️ Events {event_count}",
+            text=txt(f"⚙️ Events {event_count}", f"⚙️ 이벤트 {event_count}"),
             bg=BADGE_BG_INFO,
             fg=BADGE_FG_INFO,
         )
         self.lbl_groups_badge.config(
-            text=f"🧩 Groups {group_count}",
+            text=txt(f"🧩 Groups {group_count}", f"🧩 그룹 {group_count}"),
             bg="#f2f7ec",
             fg="#2f6f3e",
         )
         if warning_count:
             self.lbl_attention_badge.config(
-                text=f"⚠ Attention {warning_count}",
+                text=txt(f"⚠ Attention {warning_count}", f"⚠ 주의 {warning_count}"),
                 bg=BADGE_BG_WARN,
                 fg=BADGE_FG_WARN,
             )
             return
         self.lbl_attention_badge.config(
-            text="✅ Attention 0",
+            text=txt("✅ Attention 0", "✅ 주의 0"),
             bg=BADGE_BG_OK,
             fg=BADGE_FG_OK,
         )
@@ -1254,7 +1342,7 @@ class KeystrokeProfiles:
         self._refresh_profile_overview()
         if status == "saving":
             self.lbl_save_badge.config(
-                text="💾 Saving...",
+                text=txt("💾 Saving...", "💾 저장 중..."),
                 bg=BADGE_BG_WARN,
                 fg=BADGE_FG_WARN,
             )
@@ -1264,7 +1352,7 @@ class KeystrokeProfiles:
         if status == "saved":
             saved_at = time.strftime("%H:%M:%S")
             self.lbl_save_badge.config(
-                text=f"✅ Saved {saved_at}",
+                text=txt(f"✅ Saved {saved_at}", f"✅ 저장됨 {saved_at}"),
                 bg=BADGE_BG_OK,
                 fg=BADGE_FG_OK,
             )
@@ -1275,7 +1363,7 @@ class KeystrokeProfiles:
             return
         if status == "error":
             self.lbl_save_badge.config(
-                text="⚠ Save failed",
+                text=txt("⚠ Save failed", "⚠ 저장 실패"),
                 bg=BADGE_BG_ERR,
                 fg=BADGE_FG_ERR,
             )
@@ -1287,7 +1375,7 @@ class KeystrokeProfiles:
     def _set_dirty(self, dirty: bool):
         self._dirty = dirty
         star = "* " if dirty else ""
-        self.win.title(f"{star}Profile Manager - {self.prof_name}")
+        self.win.title(f"{star}{txt('Profile Manager', '프로필 관리자')} - {self.prof_name}")
 
     def _run_autosave(self, check_name=False):
         self._autosave_after_id = None
@@ -1326,7 +1414,7 @@ class KeystrokeProfiles:
         except Exception as e:
             self._set_dirty(True)
             self._set_save_status("error", str(e))
-            messagebox.showerror("Error", str(e), parent=self.win)
+            messagebox.showerror(txt("Error", "오류"), str(e), parent=self.win)
             return False
 
     def _close(self, event=None):
@@ -1370,7 +1458,7 @@ class ProfileGraphViewer:
         self._auto_sized = False
 
         self.win = tk.Toplevel(parent)
-        self.win.title("Profile Graph")
+        self.win.title(txt("Profile Graph", "프로필 그래프"))
         self.win.transient(parent)
         self.win.geometry("900x600")
         self.win.protocol("WM_DELETE_WINDOW", self._close)
@@ -1388,10 +1476,10 @@ class ProfileGraphViewer:
         self.toolbar = ttk.Frame(self.win)
         self.toolbar.pack(fill="x", padx=6, pady=6)
 
-        ttk.Button(self.toolbar, text="Refresh", command=lambda: self.refresh(True)).pack(
+        ttk.Button(self.toolbar, text=txt("Refresh", "새로고침"), command=lambda: self.refresh(True)).pack(
             side=tk.LEFT, padx=2
         )
-        ttk.Button(self.toolbar, text="Close", command=self._close).pack(
+        ttk.Button(self.toolbar, text=txt("Close", "닫기"), command=self._close).pack(
             side=tk.LEFT, padx=2
         )
         self.lbl_info = ttk.Label(self.toolbar, text="")
@@ -1441,7 +1529,7 @@ class ProfileGraphViewer:
                 img.load()
                 view_img = img.copy()
         except Exception as e:
-            messagebox.showerror("Graph Error", str(e), parent=self.win)
+            messagebox.showerror(txt("Graph Error", "그래프 오류"), str(e), parent=self.win)
             return
 
         self.photo = ImageTk.PhotoImage(view_img)

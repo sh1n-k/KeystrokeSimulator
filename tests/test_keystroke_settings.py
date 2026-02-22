@@ -24,7 +24,11 @@ class TestKeystrokeSettings(unittest.TestCase):
     @patch("keystroke_settings.Path.read_text")
     def test_load_settings_success(self, mock_read_text, mock_exists):
         mock_exists.return_value = True
-        fake_data = {"key_pressed_time_min": 100, "delay_between_loop_max": 300}
+        fake_data = {
+            "key_pressed_time_min": 100,
+            "delay_between_loop_max": 300,
+            "language": "ko",
+        }
         mock_read_text.return_value = json.dumps(fake_data)
 
         # Mock geometry/center_window to avoid screen size issues in headless
@@ -33,8 +37,21 @@ class TestKeystrokeSettings(unittest.TestCase):
 
         self.assertEqual(settings_win.settings.key_pressed_time_min, 100)
         self.assertEqual(settings_win.settings.delay_between_loop_max, 300)
+        self.assertEqual(settings_win.settings.language, "ko")
         # Default value for others
         self.assertEqual(settings_win.settings.key_pressed_time_max, 135)
+        settings_win.destroy()
+
+    @patch("keystroke_settings.Path.exists")
+    @patch("keystroke_settings.Path.read_text")
+    def test_load_settings_fallback_on_invalid_language(self, mock_read_text, mock_exists):
+        mock_exists.return_value = True
+        mock_read_text.return_value = json.dumps({"language": "jp"})
+
+        with patch("keystroke_settings.WindowUtils.center_window"):
+            settings_win = KeystrokeSettings(self.root)
+
+        self.assertEqual(settings_win.settings.language, "en")
         settings_win.destroy()
 
     @patch("keystroke_settings.Path.exists")
@@ -55,11 +72,13 @@ class TestKeystrokeSettings(unittest.TestCase):
             settings_win = KeystrokeSettings(self.root)
 
         settings_win.settings.key_pressed_time_min = 123
+        settings_win.settings.language = "ko"
         settings_win._save_settings()
 
         mock_write_text.assert_called_once()
         saved_data = json.loads(mock_write_text.call_args[0][0])
         self.assertEqual(saved_data["key_pressed_time_min"], 123)
+        self.assertEqual(saved_data["language"], "ko")
         settings_win.destroy()
 
 class TestValidateNumeric(unittest.TestCase):

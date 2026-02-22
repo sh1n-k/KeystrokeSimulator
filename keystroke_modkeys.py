@@ -4,6 +4,7 @@ from tkinter import ttk
 from typing import Dict, Any
 
 from loguru import logger
+from i18n import dual_text_width, txt
 from keystroke_profile_storage import load_profile, save_profile
 from keystroke_utils import WindowUtils
 
@@ -13,7 +14,7 @@ class ModificationKeysWindow(tk.Toplevel):
         super().__init__(master)
         self.prof_name = profile_name
         self.prof_dir = Path("profiles")
-        self.title("Modification Keys")
+        self.title(txt("Modification Keys", "수정 키 설정"))
         self.transient(master)
         self.grab_set()
 
@@ -43,7 +44,7 @@ class ModificationKeysWindow(tk.Toplevel):
             cmb.grid(row=i, column=3, padx=5)
             cmb.bind("<KeyPress>", lambda e, v=cmb_var, idx=i: self._on_key(e, v, idx))
 
-            ttk.Label(self, text="Pass").grid(row=i, column=4, padx=5)
+            ttk.Label(self, text=txt("Pass", "패스")).grid(row=i, column=4, padx=5)
 
             pas = tk.BooleanVar(value=False)
             ttk.Checkbutton(
@@ -52,7 +53,12 @@ class ModificationKeysWindow(tk.Toplevel):
 
             self.rows.append((chk, cmb_var, tk.StringVar(value="PressKey"), pas, cmb))
 
-        ttk.Button(self, text="Save(Enter)", command=self.save).grid(
+        ttk.Button(
+            self,
+            text=txt("Save (Enter)", "저장 (Enter)"),
+            width=dual_text_width("Save (Enter)", "저장 (Enter)", padding=2, min_width=12),
+            command=self.save,
+        ).grid(
             row=len(self.labels), column=0, columnspan=6, pady=10
         )
 

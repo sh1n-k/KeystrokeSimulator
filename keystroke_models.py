@@ -5,6 +5,7 @@ from PIL import Image
 
 @dataclass
 class UserSettings:
+    language: str = "en"
     start_stop_key: str = "`"
     key_pressed_time_min: int = 95
     key_pressed_time_max: int = 135

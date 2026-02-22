@@ -14,6 +14,7 @@ _RUN_GUI_TESTS = os.environ.get("RUN_GUI_TESTS", "0") == "1"
 from keystroke_simulator_app import KeystrokeSimulatorApp
 from keystroke_models import ProfileModel, EventModel
 from profile_display import QUICK_PROFILE_NAME
+from i18n import txt
 
 # Suppress loguru output during tests to prevent clutter
 from loguru import logger
@@ -141,7 +142,7 @@ class TestKeystrokeSimulatorE2E(unittest.TestCase):
         
         # Verify processor started
         self.assertTrue(self.app.is_running.get())
-        self.assertEqual(self.app.button_frame.start_stop_button["text"], "Stop")
+        self.assertEqual(self.app.button_frame.start_stop_button["text"], txt("Stop", "중지"))
         mock_proc_start.assert_called_once()
 
         # Simulate clicking Stop
@@ -149,7 +150,7 @@ class TestKeystrokeSimulatorE2E(unittest.TestCase):
         
         # Verify processor stopped
         self.assertFalse(self.app.is_running.get())
-        self.assertEqual(self.app.button_frame.start_stop_button["text"], "Start")
+        self.assertEqual(self.app.button_frame.start_stop_button["text"], txt("Start", "시작"))
         mock_proc_stop.assert_called_once()
 
 if __name__ == "__main__":

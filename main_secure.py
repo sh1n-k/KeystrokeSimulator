@@ -2,19 +2,31 @@ import os
 import re
 import shutil
 import threading
+import json
 import tkinter as tk
 from datetime import datetime, timezone
+from pathlib import Path
 from tkinter import ttk
 from typing import Dict, Optional
 
 import requests
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
+from i18n import dual_text_width, normalize_language, set_language, txt
 
 from keystroke_simulator_app import KeystrokeSimulatorApp
 from keystroke_utils import WindowUtils
 
 load_dotenv(find_dotenv())
+
+
+def _load_ui_language():
+    s_file = Path("user_settings.json")
+    try:
+        data = json.loads(s_file.read_text(encoding="utf-8")) if s_file.exists() else {}
+    except Exception:
+        data = {}
+    set_language(normalize_language(data.get("language")))
 
 
 class Config:
@@ -49,14 +61,20 @@ class AuthService:
             # 서버 응답이 있는 경우 message 필드 추출
             try:
                 error_data = e.response.json()
-                error_message = error_data.get("message", "Authentication failed")
+                error_message = error_data.get(
+                    "message", txt("Authentication failed", "인증에 실패했습니다")
+                )
             except:
-                error_message = f"Server error: {e.response.status_code}"
+                error_message = txt(
+                    "Server error: {code}",
+                    "서버 오류: {code}",
+                    code=e.response.status_code,
+                )
             raise Exception(error_message)
         except requests.RequestException as e:
             logger.error(f"Authentication network error for user {user_id}: {str(e)}")
             # 네트워크 오류
-            raise Exception("Network connection failed")
+            raise Exception(txt("Network connection failed", "네트워크 연결에 실패했습니다"))
 
     def validate_session_token(self, user_id: str) -> bool:
         if not self.session_token:
@@ -84,6 +102,7 @@ class AuthService:
 
 class AuthUI:
     def __init__(self, master: tk.Tk, auth_service: AuthService, on_success_callback):
+        _load_ui_language()
         self.master = master
         self.auth_service = auth_service
         self.on_success_callback = on_success_callback
@@ -92,26 +111,35 @@ class AuthUI:
         self.user_id = None
 
     def setup_ui(self):
-        self.master.title("Authentication")
+        self.master.title(txt("Authentication", "인증"))
         self.create_widgets()
         self.setup_bindings()
         WindowUtils.center_window(self.master)
 
     def create_widgets(self):
-        self.id_label = ttk.Label(self.master, text="User ID:")
+        self.id_label = ttk.Label(self.master, text=txt("User ID:", "사용자 ID:"))
         self.id_entry = ttk.Entry(self.master)
         self.error_label = tk.Label(
             self.master,
-            text="Enter your User ID and click 'OK' or press Enter.",
+            text=txt(
+                "Enter your User ID and click 'OK' or press Enter.",
+                "사용자 ID를 입력한 뒤 '확인'을 누르거나 Enter를 입력하세요.",
+            ),
             fg="black",
             wraplength=300,
         )
         button_frame = ttk.Frame(self.master)
         self.ok_button = ttk.Button(
-            button_frame, text="OK", command=self.validate_and_auth
+            button_frame,
+            text=txt("OK", "확인"),
+            width=dual_text_width("OK", "확인", padding=2, min_width=6),
+            command=self.validate_and_auth,
         )
         self.quit_button = ttk.Button(
-            button_frame, text="Quit", command=self.master.quit
+            button_frame,
+            text=txt("Quit", "종료"),
+            width=dual_text_width("Quit", "종료", padding=2, min_width=6),
+            command=self.master.quit,
         )
 
         self.id_label.grid(row=0, column=0, padx=5, pady=5, sticky="e")
@@ -138,7 +166,11 @@ class AuthUI:
     def validate_user_id(self, new_value: str) -> bool:
         if len(new_value) > Config.MAX_USER_ID_LENGTH:
             self.show_error(
-                f"User ID must be\n{Config.MAX_USER_ID_LENGTH} characters or less"
+                txt(
+                    "User ID must be\n{max_len} characters or less",
+                    "사용자 ID는\n{max_len}자 이하여야 합니다.",
+                    max_len=Config.MAX_USER_ID_LENGTH,
+                )
             )
             return False
         self.clear_error()
@@ -150,7 +182,12 @@ class AuthUI:
             self.user_id,
         ):
             self.show_error(
-                f"User ID must be\n{Config.MIN_USER_ID_LENGTH}-{Config.MAX_USER_ID_LENGTH} alphanumeric characters"
+                txt(
+                    "User ID must be\n{min_len}-{max_len} alphanumeric characters",
+                    "사용자 ID는\n{min_len}-{max_len}자의 영문/숫자여야 합니다.",
+                    min_len=Config.MIN_USER_ID_LENGTH,
+                    max_len=Config.MAX_USER_ID_LENGTH,
+                )
             )
             return False
         self.clear_error()
@@ -176,7 +213,12 @@ class AuthUI:
     def start_countdown(self, remaining_time: int, final_message: str = ""):
         if remaining_time > 0:
             self.show_error(
-                f"{final_message}\n\nToo many failed attempts.\nTry again in {remaining_time} seconds."
+                txt(
+                    "{final_message}\n\nToo many failed attempts.\nTry again in {remaining_time} seconds.",
+                    "{final_message}\n\n실패 횟수가 너무 많습니다.\n{remaining_time}초 후 다시 시도하세요.",
+                    final_message=final_message,
+                    remaining_time=remaining_time,
+                )
             )
             self.master.after(
                 1000, self.start_countdown, remaining_time - 1, final_message
@@ -203,9 +245,11 @@ class AuthUI:
                 self.on_success_callback()
             else:
                 logger.error("No session token received in authentication response")
-                raise Exception("No session token received")
+                raise Exception(txt("No session token received", "세션 토큰을 받지 못했습니다"))
         except Exception as e:
-            self.show_error_and_reactivate(f"Authentication failed: {str(e)}")
+            self.show_error_and_reactivate(
+                txt("Authentication failed: {error}", "인증 실패: {error}", error=str(e))
+            )
 
     def show_error_and_reactivate(self, message: str):
         self.failed_attempts += 1

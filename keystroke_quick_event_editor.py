@@ -9,6 +9,7 @@ from typing import List, Tuple
 from PIL import Image, ImageTk
 from loguru import logger
 
+from i18n import dual_text_width, txt
 from keystroke_capturer import ScreenshotCapturer
 from keystroke_models import EventModel
 from keystroke_profile_storage import ensure_quick_profile, load_profile, save_profile
@@ -18,7 +19,7 @@ from keystroke_utils import StateUtils, WindowUtils, KeyUtils
 class KeystrokeQuickEventEditor:
     def __init__(self, settings_window: tk.Tk | tk.Toplevel):
         self.win = tk.Toplevel(settings_window)
-        self.win.title("Quick Event Settings")
+        self.win.title(txt("Quick Event Settings", "빠른 이벤트 설정"))
         self.win.transient(settings_window)
         self.win.grab_set()
         self.win.focus_force()
@@ -77,14 +78,14 @@ class KeystrokeQuickEventEditor:
         # Capture Size
         f_size = tk.Frame(self.win)
         f_size.pack(pady=3)
-        tk.Label(f_size, text="캡처 너비:").pack(side=tk.LEFT, padx=5)
+        tk.Label(f_size, text=txt("Capture Width:", "캡처 너비:")).pack(side=tk.LEFT, padx=5)
         self.spn_capture_w = ttk.Spinbox(
             f_size, textvariable=self.capture_w_var, from_=50, to=1000, width=5,
         )
         self.spn_capture_w.pack(side=tk.LEFT)
         for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
             self.spn_capture_w.bind(seq, self._on_capture_size_change)
-        tk.Label(f_size, text="높이:").pack(side=tk.LEFT, padx=5)
+        tk.Label(f_size, text=txt("Height:", "높이:")).pack(side=tk.LEFT, padx=5)
         self.spn_capture_h = ttk.Spinbox(
             f_size, textvariable=self.capture_h_var, from_=50, to=1000, width=5,
         )
@@ -95,20 +96,33 @@ class KeystrokeQuickEventEditor:
         # Buttons
         f_btn = tk.Frame(self.win)
         f_btn.pack(pady=5)
-        tk.Button(f_btn, text="Grab(Ctrl)", command=self.hold_image).pack(
+        tk.Button(
+            f_btn,
+            text=txt("Grab (Ctrl)", "캡처 (Ctrl)"),
+            width=dual_text_width("Grab (Ctrl)", "캡처 (Ctrl)", padding=2, min_width=11),
+            command=self.hold_image,
+        ).pack(
             side=tk.LEFT, padx=5
         )
-        tk.Button(f_btn, text="Close(ESC)", command=self.close).pack(
+        tk.Button(
+            f_btn,
+            text=txt("Close (ESC)", "닫기 (ESC)"),
+            width=dual_text_width("Close (ESC)", "닫기 (ESC)", padding=2, min_width=11),
+            command=self.close,
+        ).pack(
             side=tk.LEFT, padx=5
         )
 
         # Info
         tk.Label(
             self.win,
-            text="ALT: Area selection\nCTRL: Grab current image\nLeft-click to set Crossline & CTRL to save.\n\nALT: 영역 선택\nCTRL: 이미지 가져오기\n클릭으로 교차선 설정 후 CTRL로 저장.",
+            text=txt(
+                "ALT: Area selection\nCTRL: Grab current image\nLeft-click to set crossline, then press CTRL to save.",
+                "ALT: 영역 선택\nCTRL: 현재 이미지 캡처\n클릭으로 교차선을 맞춘 뒤 CTRL로 저장합니다.",
+            ),
             anchor="center",
             fg="black",
-            wraplength=200,
+            wraplength=320,
         ).pack(pady=5, fill="both")
 
     def _on_capture_size_change(self, *args):

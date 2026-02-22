@@ -6,6 +6,7 @@ from pathlib import Path
 from tkinter import ttk, messagebox
 
 from loguru import logger
+from i18n import LANGUAGE_LABELS, normalize_language, set_language, txt, dual_text_width
 from keystroke_models import UserSettings
 from keystroke_utils import WindowUtils
 
@@ -15,11 +16,12 @@ class KeystrokeSettings(tk.Toplevel):
 
     def __init__(self, master=None):
         super().__init__(master)
-        self.title("Settings")
         self.is_windows = platform.system() == "Windows"
         self.ui_vars: dict[str, tk.Variable] = {}
+        self.language_code_by_label = {v: k for k, v in LANGUAGE_LABELS.items()}
 
         self._load_settings()
+        self.title(txt("Settings", "설정"))
         self._setup_window()
         self._create_widgets()
 
@@ -44,6 +46,8 @@ class KeystrokeSettings(tk.Toplevel):
         except Exception as e:
             logger.error(f"Load failed: {e}")
             self.settings = UserSettings()
+        self.settings.language = normalize_language(getattr(self.settings, "language", None))
+        set_language(self.settings.language)
 
     def _save_settings(self):
         try:
@@ -57,35 +61,38 @@ class KeystrokeSettings(tk.Toplevel):
     def _create_widgets(self):
         # 1. Start/Stop Key Section
         self._create_key_section()
+        self._create_language_section()
 
         # 2. Numeric Entries
         v_cmd = (self.register(self._validate_numeric), "%P")
         self._add_range_row(
-            1, "Key pressed time (키 누름 시간)", "key_pressed_time", v_cmd
+            2, txt("Key pressed time", "키 누름 시간"), "key_pressed_time", v_cmd
         )
         self._add_range_row(
-            2, "Delay between loop (루프 간 지연)", "delay_between_loop", v_cmd
+            3, txt("Delay between loop", "루프 간 지연"), "delay_between_loop", v_cmd
         )
 
         # 3. Warning
         self.warning_label = ttk.Label(
             self, text="", foreground="red", background="white"
         )
-        self.warning_label.grid(row=3, column=0, columnspan=5, pady=5)
+        self.warning_label.grid(row=4, column=0, columnspan=5, pady=5, sticky="w")
+        self.warning_label.configure(wraplength=420)
         self._update_warning_text()
 
         # 4. Buttons
         self._create_buttons()
 
     def _create_key_section(self):
-        ttk.Label(self, text="Start/Stop Key (시작/중지 키):").grid(
+        ttk.Label(self, text=txt("Start/Stop Key:", "시작/중지 키:")).grid(
             row=0, column=0, padx=10, pady=5, sticky="w"
         )
         key_frame = ttk.Frame(self)
         key_frame.grid(row=0, column=1, columnspan=3, padx=10, pady=5, sticky="w")
 
+        self._press_key_label = txt("Press Key", "키 입력")
         self.start_stop_combo = ttk.Combobox(
-            key_frame, values=["Press Key"], state="readonly"
+            key_frame, values=[self._press_key_label], state="readonly", width=14
         )
         self.start_stop_combo.bind("<Key>", self._on_key_press)
 
@@ -96,7 +103,7 @@ class KeystrokeSettings(tk.Toplevel):
             )
             ttk.Checkbutton(
                 key_frame,
-                text="Use Alt+Shift",
+                text=txt("Use Alt+Shift", "Alt+Shift 사용"),
                 variable=self.ui_vars["use_alt_shift"],
                 command=self._toggle_combo_state,
             ).pack(side="left")
@@ -106,7 +113,10 @@ class KeystrokeSettings(tk.Toplevel):
             )
             ttk.Checkbutton(
                 key_frame,
-                text="Enable Start/Stop Key (Alt+Shift)",
+                text=txt(
+                    "Enable Start/Stop Key (Alt+Shift)",
+                    "시작/중지 키 사용 (Alt+Shift)",
+                ),
                 variable=self.ui_vars["enable_key"],
                 command=self._toggle_combo_state,
             ).pack(side="left", padx=(0, 10))
@@ -114,18 +124,37 @@ class KeystrokeSettings(tk.Toplevel):
 
         self._toggle_combo_state()
 
+    def _create_language_section(self):
+        ttk.Label(self, text=txt("Language:", "언어:")).grid(
+            row=1, column=0, padx=10, pady=5, sticky="w"
+        )
+        self.language_combo = ttk.Combobox(self, state="readonly")
+        labels = [LANGUAGE_LABELS[code] for code in ("en", "ko")]
+        self.language_combo["values"] = labels
+        selected_label = LANGUAGE_LABELS.get(
+            normalize_language(self.settings.language), LANGUAGE_LABELS["en"]
+        )
+        self.language_combo.set(selected_label)
+        self.language_combo.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+
     def _create_buttons(self):
         btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=4, column=0, columnspan=3, pady=10)
-        for text, cmd in [
-            ("Reset", self.on_reset),
-            ("OK", self.on_ok),
-            ("Cancel", self.on_close),
-        ]:
-            ttk.Button(btn_frame, text=text, command=cmd).pack(side="left", padx=5)
+        btn_frame.grid(row=5, column=0, columnspan=3, pady=10)
+        button_defs = [
+            (txt("Reset", "초기화"), self.on_reset, ("Reset", "초기화")),
+            (txt("OK", "확인"), self.on_ok, ("OK", "확인")),
+            (txt("Cancel", "취소"), self.on_close, ("Cancel", "취소")),
+        ]
+        for text, cmd, width_pair in button_defs:
+            ttk.Button(
+                btn_frame,
+                text=text,
+                width=dual_text_width(*width_pair, padding=3, min_width=7),
+                command=cmd,
+            ).pack(side="left", padx=5)
 
     def _add_range_row(self, row: int, label: str, setting_prefix: str, v_cmd):
-        ttk.Label(self, text=f"{label} (min, max):").grid(
+        ttk.Label(self, text=f"{label} ({txt('min, max', '최소, 최대')}):").grid(
             row=row, column=0, padx=10, pady=5, sticky="w"
         )
         for col, suffix in enumerate(["min", "max"], start=1):
@@ -152,7 +181,7 @@ class KeystrokeSettings(tk.Toplevel):
             )
 
         current_key = self.settings.start_stop_key
-        if current_key not in ("DISABLED", "Press Key", ""):
+        if current_key not in ("DISABLED", self._press_key_label, ""):
             self.start_stop_combo.set(current_key)
         else:
             self.start_stop_combo.current(0)
@@ -170,20 +199,30 @@ class KeystrokeSettings(tk.Toplevel):
             self.settings.start_stop_key = key
 
     def on_ok(self):
+        selected_language = self.language_code_by_label.get(
+            self.language_combo.get(), "en"
+        )
+        self.settings.language = normalize_language(selected_language)
+        set_language(self.settings.language)
+
         # 1. Key Validation
-        invalid_keys = ("Press Key", "", "DISABLED")
+        invalid_keys = (self._press_key_label, "", "DISABLED")
         if self.is_windows:
             self.settings.use_alt_shift_hotkey = self.ui_vars["use_alt_shift"].get()
             if (
                 not self.settings.use_alt_shift_hotkey
                 and self.settings.start_stop_key in invalid_keys
             ):
-                return self._warn("Please select a Start/Stop key.")
+                return self._warn(
+                    txt("Please select a Start/Stop key.", "시작/중지 키를 선택하세요.")
+                )
         elif (
             self.ui_vars["enable_key"].get()
             and self.settings.start_stop_key in invalid_keys
         ):
-            return self._warn("Please select a Start/Stop key.")
+            return self._warn(
+                txt("Please select a Start/Stop key.", "시작/중지 키를 선택하세요.")
+            )
 
         # 2. Numeric Validation & Update
         try:
@@ -191,20 +230,24 @@ class KeystrokeSettings(tk.Toplevel):
                 mn = int(self.ui_vars[f"{prefix}_min"].get() or 0)
                 mx = int(self.ui_vars[f"{prefix}_max"].get() or 0)
                 if mn >= mx:
-                    return self._warn("Min must be less than Max.")
+                    return self._warn(txt("Min must be less than Max.", "최소값은 최대값보다 작아야 합니다."))
                 if not (50 <= mn and mx <= 500):
-                    return self._warn("Values must be between 50 and 500.")
+                    return self._warn(txt("Values must be between 50 and 500.", "값은 50~500 범위여야 합니다."))
                 setattr(self.settings, f"{prefix}_min", mn)
                 setattr(self.settings, f"{prefix}_max", mx)
 
         except ValueError:
-            return self._warn("Invalid numeric input.")
+            return self._warn(txt("Invalid numeric input.", "숫자 입력이 올바르지 않습니다."))
 
         self._save_settings()
         self.on_close()
 
     def on_reset(self):
-        if messagebox.askokcancel("Warning", "Reset settings?"):
+        if messagebox.askokcancel(
+            txt("Warning", "경고"),
+            txt("Reset settings?", "설정을 초기화하시겠습니까?"),
+            parent=self,
+        ):
             self.settings = UserSettings()
             self.destroy()
             KeystrokeSettings(self.master)
@@ -223,9 +266,9 @@ class KeystrokeSettings(tk.Toplevel):
 
     def _update_warning_text(self):
         msg = (
-            "Start/Stop: A-Z, 0-9, special keys only."
+            txt("Start/Stop: A-Z, 0-9, special keys only.", "시작/중지: A-Z, 0-9, 특수키만 허용됩니다.")
             if self.is_windows
-            else "macOS: Start/Stop is Alt+Shift."
+            else txt("macOS: Start/Stop is Alt+Shift.", "macOS: 시작/중지는 Alt+Shift입니다.")
         )
         self.warning_label.config(text=msg)
 
@@ -234,4 +277,3 @@ class KeystrokeSettings(tk.Toplevel):
         return P == "" or (
             P.isdigit() and not (P.startswith("0") and len(P) > 1) and int(P) < 1000
         )
-

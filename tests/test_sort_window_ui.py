@@ -9,6 +9,7 @@ from keystroke_sort_events import (
     SW_FG_PRIMARY,
     SW_FG_WARN,
 )
+from i18n import set_language
 
 
 class FakeVar:
@@ -20,6 +21,9 @@ class FakeVar:
 
 
 class TestSortWindowFormatting(unittest.TestCase):
+    def setUp(self):
+        set_language("en")
+
     def test_format_group_text(self):
         evt_with_group = EventModel(group_id="G1", priority=2)
         evt_without_group = EventModel(group_id=None, priority=0)
@@ -27,7 +31,7 @@ class TestSortWindowFormatting(unittest.TestCase):
         self.assertEqual(KeystrokeSortEvents._format_group_text(evt_with_group), "G1 (2)")
         self.assertEqual(
             KeystrokeSortEvents._format_group_text(evt_without_group),
-            "그룹 없음",
+            "No Group",
         )
 
     def test_format_key_text(self):
@@ -41,16 +45,19 @@ class TestSortWindowFormatting(unittest.TestCase):
         )
         self.assertEqual(
             KeystrokeSortEvents._format_key_text(evt_missing),
-            ("키 없음", SW_FG_WARN),
+            ("No Key", SW_FG_WARN),
         )
         self.assertEqual(
             KeystrokeSortEvents._format_key_text(evt_cond),
-            ("조건", SW_FG_MUTED),
+            ("Condition", SW_FG_MUTED),
         )
 
 
 class TestSortWindowMessages(unittest.TestCase):
-    def test_load_profile_error_message_is_korean(self):
+    def setUp(self):
+        set_language("en")
+
+    def test_load_profile_error_message_uses_default_language(self):
         stub = KeystrokeSortEvents.__new__(KeystrokeSortEvents)
         stub.prof_dir = Path("profiles")
         stub.close = lambda *args, **kwargs: None
@@ -62,11 +69,11 @@ class TestSortWindowMessages(unittest.TestCase):
         self.assertIsNone(result)
         mock_error.assert_called_once()
         args, kwargs = mock_error.call_args
-        self.assertEqual(args[0], "오류")
-        self.assertIn("프로필을 불러오지 못했습니다", args[1])
+        self.assertEqual(args[0], "Error")
+        self.assertIn("Failed to load profile", args[1])
         self.assertIs(kwargs["parent"], stub)
 
-    def test_save_error_message_is_korean(self):
+    def test_save_error_message_uses_default_language(self):
         stub = KeystrokeSortEvents.__new__(KeystrokeSortEvents)
         stub.profile = ProfileModel(name="Quick", event_list=[])
         stub.events = []
@@ -82,8 +89,8 @@ class TestSortWindowMessages(unittest.TestCase):
         mock_log.assert_called_once()
         mock_error.assert_called_once()
         args, kwargs = mock_error.call_args
-        self.assertEqual(args[0], "저장 실패")
-        self.assertIn("프로필 저장 중 오류가 발생했습니다", args[1])
+        self.assertEqual(args[0], "Save Failed")
+        self.assertIn("An error occurred while saving profile", args[1])
         self.assertIs(kwargs["parent"], stub)
 
 

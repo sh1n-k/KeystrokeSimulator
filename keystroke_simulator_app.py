@@ -12,6 +12,7 @@ from tkinter import ttk, messagebox
 from loguru import logger
 import pynput.keyboard
 import pynput.mouse
+from i18n import dual_text_width, normalize_language, set_language, txt
 
 from keystroke_models import ProfileModel, EventModel, UserSettings
 from keystroke_modkeys import ModificationKeysWindow
@@ -50,16 +51,23 @@ def safe_call(func, *args, **kwargs):
 class ProcessFrame(tk.Frame):
     def __init__(self, master, textvariable, *args, **kwargs):
         super().__init__(master, *args, **kwargs)
-        tk.Label(self, text="Process:").pack(side=tk.LEFT, padx=5)
+        self.lbl_process = tk.Label(self)
+        self.lbl_process.pack(side=tk.LEFT, padx=5)
         self.process_combobox = ttk.Combobox(
             self, textvariable=textvariable, state="readonly"
         )
         self.process_combobox.pack(side=tk.LEFT, padx=5)
-        self.refresh_button = tk.Button(
-            self, text="Refresh", command=self.refresh_processes
-        )
+        self.refresh_button = tk.Button(self, command=self.refresh_processes)
         self.refresh_button.pack(side=tk.LEFT)
+        self.refresh_texts()
         self.refresh_processes()
+
+    def refresh_texts(self):
+        self.lbl_process.config(text=txt("Process:", "프로세스:"))
+        self.refresh_button.config(
+            text=txt("Refresh", "새로고침"),
+            width=dual_text_width("Refresh", "새로고침", padding=2, min_width=8),
+        )
 
     def refresh_processes(self):
         curr_val = self.process_combobox.get()
@@ -90,7 +98,8 @@ class ProfileFrame(tk.Frame):
         self._bold_font = tkfont.nametofont("TkTextFont").copy()
         self._bold_font.configure(weight="bold")
 
-        tk.Label(self, text="Profiles:").pack(side=tk.LEFT, padx=5)
+        self.lbl_profiles = tk.Label(self)
+        self.lbl_profiles.pack(side=tk.LEFT, padx=5)
         self.profile_combobox = ttk.Combobox(
             self, textvariable=self.profile_display_var, state="readonly"
         )
@@ -99,10 +108,11 @@ class ProfileFrame(tk.Frame):
             "<<ComboboxSelected>>",
             self._on_profile_selected,
         )
-        self.copy_button = tk.Button(self, text="📄 Copy", command=self.copy_profile)
+        self.copy_button = tk.Button(self, command=self.copy_profile)
         self.copy_button.pack(side=tk.LEFT)
-        self.del_button = tk.Button(self, text="🗑 Delete", command=self.delete_profile)
+        self.del_button = tk.Button(self, command=self.delete_profile)
         self.del_button.pack(side=tk.LEFT)
+        self.refresh_texts()
         self.load_profiles()
 
     def _apply_selected_profile_font(self, profile_name: str):
@@ -173,6 +183,17 @@ class ProfileFrame(tk.Frame):
             self.profile_combobox.current(0)
             self._on_profile_selected()
 
+    def refresh_texts(self):
+        self.lbl_profiles.config(text=txt("Profiles:", "프로필:"))
+        self.copy_button.config(
+            text=txt("Copy", "복사"),
+            width=dual_text_width("Copy", "복사", padding=2, min_width=9),
+        )
+        self.del_button.config(
+            text=txt("Delete", "삭제"),
+            width=dual_text_width("Delete", "삭제", padding=2, min_width=9),
+        )
+
     def copy_profile(self):
         if not (curr := self.get_selected_profile_name()):
             return
@@ -181,23 +202,36 @@ class ProfileFrame(tk.Frame):
             self.profiles_dir / f"{dst_name}.pkl"
         ).exists():
             messagebox.showwarning(
-                "Warning", f"'{dst_name}' 프로필이 이미 존재합니다.", parent=self
+                txt("Warning", "경고"),
+                txt("Profile '{name}' already exists.", "'{name}' 프로필이 이미 존재합니다.", name=dst_name),
+                parent=self,
             )
             return
         try:
             copy_profile_storage(self.profiles_dir, curr, dst_name)
             self.load_profiles(select_name=dst_name)
         except Exception as e:
-            messagebox.showerror("Error", f"복사 실패: {e}", parent=self)
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt("Copy failed: {error}", "복사 실패: {error}", error=e),
+                parent=self,
+            )
 
     def delete_profile(self):
         curr = self.get_selected_profile_name()
         if not curr:
             return
         if curr == QUICK_PROFILE_NAME:
-            messagebox.showinfo("Info", "기본 프로필은 삭제할 수 없습니다.", parent=self)
+            messagebox.showinfo(
+                txt("Info", "안내"),
+                txt("The default profile cannot be deleted.", "기본 프로필은 삭제할 수 없습니다."),
+                parent=self,
+            )
             return
-        if messagebox.askokcancel("Warning", f"프로필 '{curr}'을(를) 삭제하시겠습니까?"):
+        if messagebox.askokcancel(
+            txt("Warning", "경고"),
+            txt("Delete profile '{name}'?", "프로필 '{name}'을(를) 삭제하시겠습니까?", name=curr),
+        ):
             delete_profile_files(self.profiles_dir, curr)
             self.load_profiles()
 
@@ -206,36 +240,71 @@ class ButtonFrame(tk.Frame):
     def __init__(self, master, toggle_cb, events_cb, settings_cb, clear_cb, **kwargs):
         super().__init__(master, **kwargs)
         btns_config = [
-            ("Start", toggle_cb),
-            ("Quick Events", events_cb),
-            ("Settings", settings_cb),
-            ("Clear Logs", clear_cb),
+            ("start", ("Start", "시작"), toggle_cb),
+            ("quick_events", ("Quick Events", "빠른 이벤트"), events_cb),
+            ("settings", ("Settings", "설정"), settings_cb),
+            ("clear_logs", ("Clear Logs", "로그 삭제"), clear_cb),
         ]
         self.btns = {}
-        for text, cmd in btns_config:
-            btn = tk.Button(self, text=text, width=10, height=1, command=cmd)
+        for key, label_pair, cmd in btns_config:
+            btn = tk.Button(
+                self,
+                text=txt(*label_pair),
+                width=dual_text_width(*label_pair, padding=2, min_width=9),
+                height=1,
+                command=cmd,
+            )
             btn.pack(side=tk.LEFT, padx=5)
-            self.btns[text] = btn
-        self.start_stop_button = self.btns["Start"]
-        self.settings_button = self.btns["Settings"]
-        self.clear_logs_button = self.btns["Clear Logs"]
+            self.btns[key] = btn
+        self.start_stop_button = self.btns["start"]
+        self.settings_button = self.btns["settings"]
+        self.clear_logs_button = self.btns["clear_logs"]
+
+    def refresh_texts(self):
+        for key, label_pair in {
+            "start": ("Start", "시작"),
+            "quick_events": ("Quick Events", "빠른 이벤트"),
+            "settings": ("Settings", "설정"),
+            "clear_logs": ("Clear Logs", "로그 삭제"),
+        }.items():
+            self.btns[key].config(
+                text=txt(*label_pair),
+                width=dual_text_width(*label_pair, padding=2, min_width=9),
+            )
 
 
 class ProfileButtonFrame(tk.Frame):
     def __init__(self, master, mod_cb, edit_cb, sort_cb, **kwargs):
         super().__init__(master, **kwargs)
         btns_config = [
-            ("ModKeys", mod_cb),
-            ("Edit Profile", edit_cb),
-            ("Sort Profile", sort_cb),
+            ("modkeys", ("ModKeys", "수정키"), mod_cb),
+            ("edit_profile", ("Edit Profile", "프로필 편집"), edit_cb),
+            ("sort_profile", ("Sort Profile", "프로필 정렬"), sort_cb),
         ]
         self.btns = {}
-        for text, cmd in btns_config:
-            btn = tk.Button(self, text=text, width=10, height=1, command=cmd)
+        for key, label_pair, cmd in btns_config:
+            btn = tk.Button(
+                self,
+                text=txt(*label_pair),
+                width=dual_text_width(*label_pair, padding=2, min_width=9),
+                height=1,
+                command=cmd,
+            )
             btn.pack(side=tk.LEFT, padx=5)
-            self.btns[text] = btn
-        self.settings_button = self.btns["Edit Profile"]
-        self.sort_button = self.btns["Sort Profile"]
+            self.btns[key] = btn
+        self.settings_button = self.btns["edit_profile"]
+        self.sort_button = self.btns["sort_profile"]
+
+    def refresh_texts(self):
+        for key, label_pair in {
+            "modkeys": ("ModKeys", "수정키"),
+            "edit_profile": ("Edit Profile", "프로필 편집"),
+            "sort_profile": ("Sort Profile", "프로필 정렬"),
+        }.items():
+            self.btns[key].config(
+                text=txt(*label_pair),
+                width=dual_text_width(*label_pair, padding=2, min_width=9),
+            )
 
 
 class KeystrokeSimulatorApp(tk.Tk):
@@ -293,6 +362,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         style = ttk.Style(self)
         style.theme_use("default")
         style.configure("TEntry", fieldbackground="white")
+        self._refresh_ui_texts()
         WindowUtils.center_window(self)
 
     def _load_settings_and_state(self):
@@ -310,7 +380,10 @@ class KeystrokeSimulatorApp(tk.Tk):
             )
         except Exception:
             self.settings = UserSettings()
+        self.settings.language = normalize_language(getattr(self.settings, "language", None))
+        set_language(self.settings.language)
         s_file.write_text(json.dumps(asdict(self.settings), indent=2), encoding="utf-8")
+        self._refresh_ui_texts()
 
         # Load state
         state = StateUtils.load_main_app_state() or {}
@@ -327,6 +400,16 @@ class KeystrokeSimulatorApp(tk.Tk):
                 self.selected_process.set(match)
         if prof := state.get("profile"):
             self.profile_frame.set_selected_profile(prof)
+
+    def _refresh_ui_texts(self):
+        if hasattr(self, "process_frame"):
+            self.process_frame.refresh_texts()
+        if hasattr(self, "profile_frame"):
+            self.profile_frame.refresh_texts()
+        if hasattr(self, "button_frame"):
+            self.button_frame.refresh_texts()
+        if hasattr(self, "profile_button_frame"):
+            self.profile_button_frame.refresh_texts()
 
     def _setup_event_handlers(self):
         self.unbind_events()
@@ -416,10 +499,15 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def clear_local_logs(self):
         log_dir = Path("logs")
-        if not messagebox.askokcancel("Confirm", "Delete old log files?"):
+        if not messagebox.askokcancel(
+            txt("Confirm", "확인"),
+            txt("Delete old log files?", "오래된 로그 파일을 삭제하시겠습니까?"),
+        ):
             return
         if not log_dir.exists():
-            return messagebox.showinfo("Info", "No logs.")
+            return messagebox.showinfo(
+                txt("Info", "안내"), txt("No logs.", "로그가 없습니다.")
+            )
 
         deleted_size, count = 0, 0
         for p in log_dir.glob("*"):
@@ -432,11 +520,19 @@ class KeystrokeSimulatorApp(tk.Tk):
                     logger.warning(f"Del failed {p}: {e}")
 
         msg = (
-            f"{count} files cleared.\nSaved: {deleted_size/1048576:.2f} MB"
+            txt(
+                "{count} files cleared.\nSaved: {size:.2f} MB",
+                "{count}개 파일을 정리했습니다.\n확보 용량: {size:.2f} MB",
+                count=count,
+                size=deleted_size / 1048576,
+            )
             if count
-            else "No old logs to clear."
+            else txt("No old logs to clear.", "정리할 오래된 로그가 없습니다.")
         )
-        messagebox.showinfo("Success" if count else "Info", msg)
+        messagebox.showinfo(
+            txt("Success", "완료") if count else txt("Info", "안내"),
+            msg,
+        )
 
     def toggle_start_stop(self, event=None):
         if not self.is_running.get():
@@ -507,7 +603,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_frame.copy_button.config(state=state)
         self.profile_frame.del_button.config(state=state)
 
-        self.button_frame.start_stop_button.config(text="Stop" if running else "Start")
+        self.button_frame.start_stop_button.config(
+            text=txt("Stop", "중지") if running else txt("Start", "시작")
+        )
         self.button_frame.settings_button.config(state=state)
         self.button_frame.clear_logs_button.config(state=state)
 

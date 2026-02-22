@@ -5,6 +5,7 @@ from typing import Callable, Optional
 
 from PIL import Image, ImageTk
 from loguru import logger
+from i18n import dual_text_width, txt
 
 from keystroke_models import EventModel
 from keystroke_profile_storage import load_profile, save_profile
@@ -31,19 +32,19 @@ SW_BORDER_SOFT = "#d6d3c9"
 
 class KeystrokeSortEvents(tk.Toplevel):
     HEADER_COLUMNS = [
-        ("#", 3, "center", False),
-        ("사용", 3, "center", False),
-        ("이미지", 6, "center", False),
-        ("그룹(우선순위)", 14, "center", False),
-        ("이벤트 이름", 0, "w", True),
-        ("입력 키", 8, "center", False),
+        ("#", 3, "center", False, "#"),
+        ("Enabled", 5, "center", False, "사용"),
+        ("Image", 6, "center", False, "이미지"),
+        ("Group (Priority)", 16, "center", False, "그룹(우선순위)"),
+        ("Event Name", 0, "w", True, "이벤트 이름"),
+        ("Input Key", 10, "center", False, "입력 키"),
     ]
 
     def __init__(self, master, profile_name: str, save_callback: Callable[[str], None]):
         super().__init__(master)
         self.master, self.save_cb = master, save_callback
         self.prof_dir = Path("profiles")
-        self.title("이벤트 정렬")
+        self.title(txt("Sort Events", "이벤트 정렬"))
         self.configure(bg=SW_BG_BASE)
 
         style = ttk.Style(self)
@@ -77,7 +78,7 @@ class KeystrokeSortEvents(tk.Toplevel):
         f_top.pack(pady=(SW_PAD_MD, SW_PAD_SM), padx=SW_PAD_MD, fill=tk.X)
         tk.Label(
             f_top,
-            text="프로필:",
+            text=txt("Profile:", "프로필:"),
             bg=SW_BG_PANEL,
             fg=SW_FG_MUTED,
         ).pack(side=tk.LEFT, padx=(SW_PAD_MD, SW_PAD_SM), pady=SW_PAD_SM)
@@ -89,7 +90,8 @@ class KeystrokeSortEvents(tk.Toplevel):
         ).pack(side=tk.LEFT, expand=True, fill=tk.BOTH, padx=(0, SW_PAD_MD), pady=SW_PAD_SM)
         ttk.Button(
             f_top,
-            text="저장 후 닫기",
+            text=txt("Save and Close", "저장 후 닫기"),
+            width=dual_text_width("Save and Close", "저장 후 닫기", padding=2, min_width=14),
             command=self.save,
         ).pack(side=tk.RIGHT, padx=(0, SW_PAD_MD), pady=SW_PAD_SM)
 
@@ -137,9 +139,9 @@ class KeystrokeSortEvents(tk.Toplevel):
         )
         f_h.pack(fill=tk.X, padx=SW_PAD_MD, pady=(SW_PAD_SM, SW_PAD_SM))
 
-        for text, width, anchor, expand in self.HEADER_COLUMNS:
+        for en_text, width, anchor, expand, ko_text in self.HEADER_COLUMNS:
             kw = {
-                "text": text,
+                "text": txt(en_text, ko_text),
                 "bg": SW_BG_PANEL,
                 "fg": SW_FG_MUTED,
                 "anchor": anchor,
@@ -170,16 +172,16 @@ class KeystrokeSortEvents(tk.Toplevel):
     def _format_group_text(evt: EventModel) -> str:
         if evt.group_id:
             return f"{evt.group_id} ({evt.priority})"
-        return "그룹 없음"
+        return txt("No Group", "그룹 없음")
 
     @staticmethod
     def _format_key_text(evt: EventModel) -> tuple[str, str]:
         if not getattr(evt, "execute_action", True):
-            return "조건", SW_FG_MUTED
+            return txt("Condition", "조건"), SW_FG_MUTED
         key = (evt.key_to_enter or "").strip()
         if key:
             return key, SW_FG_PRIMARY
-        return "키 없음", SW_FG_WARN
+        return txt("No Key", "키 없음"), SW_FG_WARN
 
     def _add_row(self, idx, evt):
         f = tk.Frame(
@@ -228,7 +230,7 @@ class KeystrokeSortEvents(tk.Toplevel):
         lbl_grp = tk.Label(
             f,
             text=grp_text,
-            width=14,
+            width=16,
             anchor="center",
             bg=SW_BG_CHIP,
             fg=grp_fg,
@@ -249,7 +251,7 @@ class KeystrokeSortEvents(tk.Toplevel):
         lbl_key = tk.Label(
             f,
             text=key_text,
-            width=8,
+            width=10,
             anchor="center",
             bg=SW_BG_ROW,
             fg=key_fg,
@@ -366,8 +368,8 @@ class KeystrokeSortEvents(tk.Toplevel):
             return load_profile(self.prof_dir, name, migrate=True)
         except Exception:
             messagebox.showerror(
-                "오류",
-                f"프로필을 불러오지 못했습니다: {name}",
+                txt("Error", "오류"),
+                txt("Failed to load profile: {name}", "프로필을 불러오지 못했습니다: {name}", name=name),
                 parent=self,
             )
             self.close()
@@ -381,8 +383,12 @@ class KeystrokeSortEvents(tk.Toplevel):
         except Exception as e:
             logger.error(f"Save failed: {e}")
             messagebox.showerror(
-                "저장 실패",
-                f"프로필 저장 중 오류가 발생했습니다:\n{e}",
+                txt("Save Failed", "저장 실패"),
+                txt(
+                    "An error occurred while saving profile:\n{error}",
+                    "프로필 저장 중 오류가 발생했습니다:\n{error}",
+                    error=e,
+                ),
                 parent=self,
             )
 

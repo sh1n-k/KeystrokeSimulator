@@ -5,6 +5,7 @@ from tkinter import ttk
 from typing import Callable, Optional
 
 from loguru import logger
+from i18n import dual_text_width, txt
 
 from keystroke_models import EventModel
 from keystroke_profile_storage import list_profile_names, load_profile
@@ -18,7 +19,7 @@ class EventImporter:
         confirm_callback: Optional[Callable[[list[EventModel]], None]] = None,
     ):
         self.win = tk.Toplevel(profiles_window)
-        self.win.title("Import events")
+        self.win.title(txt("Import Events", "이벤트 가져오기"))
         self.win.transient(profiles_window)  # 부모창 위에 뜨도록 설정
         self.win.focus_force()
         self.win.attributes("-topmost", True)
@@ -40,13 +41,15 @@ class EventImporter:
         # 1. 프로필 선택 영역
         f_prof = ttk.Frame(self.win)
         f_prof.pack(pady=10, fill="x", padx=10)
-        ttk.Label(f_prof, text="Source Profile:").pack(side="left", padx=5)
+        ttk.Label(f_prof, text=txt("Source Profile:", "원본 프로필:")).pack(side="left", padx=5)
         self.cb_prof = ttk.Combobox(f_prof, state="readonly")
         self.cb_prof.bind("<<ComboboxSelected>>", self.load_events)
         self.cb_prof.pack(side="left", padx=5, fill="x", expand=True)
 
         # 2. 이벤트 목록 영역 (스크롤바 추가)
-        container = ttk.LabelFrame(self.win, text="Select Events to Import")
+        container = ttk.LabelFrame(
+            self.win, text=txt("Select Events to Import", "가져올 이벤트 선택")
+        )
         container.pack(pady=5, padx=10, fill="both", expand=True)
 
         self.canvas = tk.Canvas(container, highlightthickness=0)
@@ -75,9 +78,24 @@ class EventImporter:
         # 3. 하단 버튼 영역
         f_btn = ttk.Frame(self.win)
         f_btn.pack(side="bottom", pady=10, fill="x", padx=10)
-        ttk.Button(f_btn, text="OK", command=self.on_ok).pack(side="left", padx=5)
-        ttk.Button(f_btn, text="Cancel", command=self.close).pack(side="left", padx=5)
-        ttk.Button(f_btn, text="Select/Deselect All", command=self.toggle_all).pack(
+        ttk.Button(
+            f_btn,
+            text=txt("OK", "확인"),
+            width=dual_text_width("OK", "확인", padding=2, min_width=6),
+            command=self.on_ok,
+        ).pack(side="left", padx=5)
+        ttk.Button(
+            f_btn,
+            text=txt("Cancel", "취소"),
+            width=dual_text_width("Cancel", "취소", padding=2, min_width=7),
+            command=self.close,
+        ).pack(side="left", padx=5)
+        ttk.Button(
+            f_btn,
+            text=txt("Select/Deselect All", "전체 선택/해제"),
+            width=dual_text_width("Select/Deselect All", "전체 선택/해제", padding=2, min_width=14),
+            command=self.toggle_all,
+        ).pack(
             side="right", padx=5
         )
 

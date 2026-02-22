@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from keystroke_models import EventModel, ProfileModel
 from keystroke_profiles import EventListFrame, EventRow, KeystrokeProfiles
+from i18n import set_language
 
 
 class FakeWidget:
@@ -53,6 +54,7 @@ class TestGetKeySortOrder(unittest.TestCase):
     """EventListFrame._get_key_sort_order: 키 정렬 순서"""
 
     def setUp(self):
+        set_language("en")
         self.stub = _make_event_list_frame_stub()
 
     def test_digit(self):
@@ -141,6 +143,7 @@ class TestSortEventsLogic(unittest.TestCase):
     """이벤트 정렬 로직 검증"""
 
     def _make_sortable_stub(self, events):
+        set_language("en")
         stub = _make_event_list_frame_stub()
         stub.profile = ProfileModel(event_list=events)
         return stub
@@ -206,7 +209,7 @@ class TestSortEventsLogic(unittest.TestCase):
         sorted_events = sorted(events, key=lambda e: self._sort_key(stub, e))
         self.assertEqual(sorted_events[0].event_name, "Apple")
 
-    def test_sort_events_uses_korean_dialog_message(self):
+    def test_sort_events_uses_default_language_dialog_message(self):
         events = [
             EventModel(event_name="B", key_to_enter="B"),
             EventModel(event_name="A", key_to_enter="A"),
@@ -222,13 +225,14 @@ class TestSortEventsLogic(unittest.TestCase):
 
         mock_show.assert_called_once()
         args, kwargs = mock_show.call_args
-        self.assertEqual(args[0], "자동 정렬 완료")
-        self.assertIn("이벤트를 다음 순서로 정렬했습니다", args[1])
+        self.assertEqual(args[0], "Auto Sort Complete")
+        self.assertIn("Events were sorted by:", args[1])
         self.assertEqual(kwargs["parent"], stub.win)
 
 
 class TestEventRowBadges(unittest.TestCase):
     def _make_row(self, event: EventModel):
+        set_language("en")
         row = EventRow.__new__(EventRow)
         row.event = event
         row.use_var = FakeVar()
@@ -256,8 +260,8 @@ class TestEventRowBadges(unittest.TestCase):
 
         row.update_display()
 
-        self.assertEqual(row.lbl_indep.cget("text"), "🧵 독립")
-        self.assertEqual(row.lbl_cond.cget("text"), "🔎 조건")
+        self.assertEqual(row.lbl_indep.cget("text"), "🧵 Indep")
+        self.assertEqual(row.lbl_cond.cget("text"), "🔎 Cond")
         self.assertEqual(row.lbl_grp.cget("text"), "G1")
         self.assertEqual(row.lbl_key.cget("text"), "A")
         self.assertEqual(row.entry.cget("foreground"), "gray")
@@ -273,12 +277,13 @@ class TestEventRowBadges(unittest.TestCase):
 
         row.update_display()
 
-        self.assertEqual(row.lbl_key.cget("text"), "🔁 ⌨️ 없음")
-        self.assertIn("반전 매칭", row._tip_key.text)
+        self.assertEqual(row.lbl_key.cget("text"), "🔁 ⌨️ None")
+        self.assertIn("Invert match", row._tip_key.text)
 
 
 class TestProfileOverviewBadges(unittest.TestCase):
     def _make_profile_stub(self, events):
+        set_language("en")
         stub = KeystrokeProfiles.__new__(KeystrokeProfiles)
         stub.profile = ProfileModel(name="Test", event_list=events)
         stub.lbl_events_badge = FakeWidget()
