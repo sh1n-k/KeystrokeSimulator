@@ -99,9 +99,9 @@ class ProfileFrame(tk.Frame):
             "<<ComboboxSelected>>",
             self._on_profile_selected,
         )
-        self.copy_button = tk.Button(self, text="Copy", command=self.copy_profile)
+        self.copy_button = tk.Button(self, text="📄 Copy", command=self.copy_profile)
         self.copy_button.pack(side=tk.LEFT)
-        self.del_button = tk.Button(self, text="Delete", command=self.delete_profile)
+        self.del_button = tk.Button(self, text="🗑 Delete", command=self.delete_profile)
         self.del_button.pack(side=tk.LEFT)
         self.load_profiles()
 

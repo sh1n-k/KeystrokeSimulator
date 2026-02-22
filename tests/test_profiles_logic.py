@@ -1,9 +1,46 @@
 import unittest
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from keystroke_models import EventModel, ProfileModel
-from keystroke_profiles import EventListFrame
+from keystroke_profiles import EventListFrame, EventRow, KeystrokeProfiles
+
+
+class FakeWidget:
+    def __init__(self, **kwargs):
+        self._state = dict(kwargs)
+
+    def config(self, **kwargs):
+        self._state.update(kwargs)
+
+    def cget(self, key):
+        return self._state.get(key)
+
+
+class FakeEntry(FakeWidget):
+    def get(self):
+        return self._state.get("text", "")
+
+    def delete(self, _start, _end):
+        self._state["text"] = ""
+
+    def insert(self, _index, text):
+        self._state["text"] = text
+
+
+class FakeVar:
+    def __init__(self):
+        self.value = None
+
+    def set(self, value):
+        self.value = value
+
+
+class FakeToolTip:
+    def __init__(self):
+        self.text = ""
+
+    def update_text(self, text):
+        self.text = text
 
 
 def _make_event_list_frame_stub():
@@ -168,6 +205,112 @@ class TestSortEventsLogic(unittest.TestCase):
         stub = self._make_sortable_stub(events)
         sorted_events = sorted(events, key=lambda e: self._sort_key(stub, e))
         self.assertEqual(sorted_events[0].event_name, "Apple")
+
+    def test_sort_events_uses_korean_dialog_message(self):
+        events = [
+            EventModel(event_name="B", key_to_enter="B"),
+            EventModel(event_name="A", key_to_enter="A"),
+        ]
+        stub = self._make_sortable_stub(events)
+        stub.win = object()
+        stub.save_names = lambda: None
+        stub.update_events = lambda: None
+        stub.save_cb = lambda *args, **kwargs: None
+
+        with patch("keystroke_profiles.messagebox.showinfo") as mock_show:
+            stub._sort_events()
+
+        mock_show.assert_called_once()
+        args, kwargs = mock_show.call_args
+        self.assertEqual(args[0], "자동 정렬 완료")
+        self.assertIn("이벤트를 다음 순서로 정렬했습니다", args[1])
+        self.assertEqual(kwargs["parent"], stub.win)
+
+
+class TestEventRowBadges(unittest.TestCase):
+    def _make_row(self, event: EventModel):
+        row = EventRow.__new__(EventRow)
+        row.event = event
+        row.use_var = FakeVar()
+        row.entry = FakeEntry(text="")
+        row.lbl_indep = FakeWidget(text="")
+        row.lbl_cond = FakeWidget(text="")
+        row.lbl_grp = FakeWidget(text="")
+        row.lbl_key = FakeWidget(text="")
+        row._tip_indep = FakeToolTip()
+        row._tip_cond = FakeToolTip()
+        row._tip_grp = FakeToolTip()
+        row._tip_key = FakeToolTip()
+        row._last_saved_name = ""
+        return row
+
+    def test_row_displays_independent_and_condition_badges(self):
+        evt = EventModel(
+            event_name="Evt",
+            independent_thread=True,
+            execute_action=False,
+            group_id="G1",
+            key_to_enter="A",
+        )
+        row = self._make_row(evt)
+
+        row.update_display()
+
+        self.assertEqual(row.lbl_indep.cget("text"), "🧵 독립")
+        self.assertEqual(row.lbl_cond.cget("text"), "🔎 조건")
+        self.assertEqual(row.lbl_grp.cget("text"), "G1")
+        self.assertEqual(row.lbl_key.cget("text"), "A")
+        self.assertEqual(row.entry.cget("foreground"), "gray")
+
+    def test_row_displays_invert_and_missing_key_badges(self):
+        evt = EventModel(
+            event_name="Evt",
+            execute_action=True,
+            invert_match=True,
+            key_to_enter=None,
+        )
+        row = self._make_row(evt)
+
+        row.update_display()
+
+        self.assertEqual(row.lbl_key.cget("text"), "🔁 ⌨️ 없음")
+        self.assertIn("반전 매칭", row._tip_key.text)
+
+
+class TestProfileOverviewBadges(unittest.TestCase):
+    def _make_profile_stub(self, events):
+        stub = KeystrokeProfiles.__new__(KeystrokeProfiles)
+        stub.profile = ProfileModel(name="Test", event_list=events)
+        stub.lbl_events_badge = FakeWidget()
+        stub.lbl_groups_badge = FakeWidget()
+        stub.lbl_attention_badge = FakeWidget()
+        stub.lbl_save_badge = FakeWidget()
+        stub.lbl_status = FakeWidget()
+        return stub
+
+    def test_refresh_profile_overview_updates_counts(self):
+        events = [
+            EventModel(event_name="A", group_id="G1", execute_action=False),
+            EventModel(event_name="B", group_id="G2", execute_action=True, key_to_enter=None),
+            EventModel(event_name="C", execute_action=True, key_to_enter="X"),
+        ]
+        stub = self._make_profile_stub(events)
+
+        stub._refresh_profile_overview()
+
+        self.assertEqual(stub.lbl_events_badge.cget("text"), "⚙️ Events 3")
+        self.assertEqual(stub.lbl_groups_badge.cget("text"), "🧩 Groups 2")
+        self.assertEqual(stub.lbl_attention_badge.cget("text"), "⚠ Attention 2")
+
+    def test_save_status_badge_prefixes(self):
+        stub = self._make_profile_stub([EventModel(event_name="A", key_to_enter="X")])
+
+        stub._set_save_status("saving")
+        self.assertEqual(stub.lbl_save_badge.cget("text"), "💾 Saving...")
+
+        stub._set_save_status("error", "bad")
+        self.assertEqual(stub.lbl_save_badge.cget("text"), "⚠ Save failed")
+        self.assertEqual(stub.lbl_status.cget("text"), "bad")
 
 
 if __name__ == "__main__":
