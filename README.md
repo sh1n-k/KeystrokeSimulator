@@ -1,56 +1,6 @@
 # Keystroke Simulator
 
-[English](#english) | [한국어](#korean)
-
-<a name="english"></a>
-## English
-
-A Python desktop automation tool that watches screen regions for pixel/color changes and replays predefined keystroke sequences. Built with Tkinter, primarily for macOS (PyObjC) with Windows (win32) support.
-
-### Features
-
-- **Pixel & region matching** — exact pixel or 5-checkpoint area matching via MSS + NumPy
-- **Condition chains** — events can depend on other events' states (DFS cycle detection)
-- **Group priority** — mutually exclusive events within a group (lowest priority wins)
-- **Inverted matching** — trigger when a pixel/region does *not* match
-- **Independent threads** — per-event threads for time-critical responses
-- **Profile management** — auto-save, favorites, copy/delete, import/export
-- **Event graph visualization** — directed graph of condition relationships
-- **Korean UI** — event editor with tabs: 기본, 상세 설정, 조건/그룹
-
-### Quick Start
-
-```bash
-git clone https://github.com/sh1n-k/KeystrokeSimulator.git
-cd KeystrokeSimulator
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python main.py
-```
-
-### Requirements
-
-- Python 3.13 (with Tk/Tcl)
-- macOS: `pyobjc` (included in requirements.txt)
-- Windows: skip pyobjc, install `pywin32` separately
-
-### Testing
-
-```bash
-python run_tests.py
-```
-
-### Build
-
-```bash
-python _build.py    # PyInstaller single executable
-```
-
-### License
-
-MIT — see [LICENSE](LICENSE).
-
----
+[한국어](#korean) | [English](#english)
 
 <a name="korean"></a>
 ## 한국어
@@ -99,3 +49,53 @@ python _build.py    # PyInstaller 단일 실행 파일
 ### 라이선스
 
 MIT — [LICENSE](LICENSE) 참조.
+
+---
+
+<a name="english"></a>
+## English
+
+A Python desktop automation tool that watches screen regions for pixel/color changes and replays predefined keystroke sequences. Built with Tkinter, primarily for macOS (PyObjC) with Windows (win32) support.
+
+### Features
+
+- **Pixel & region matching** — exact pixel or 5-checkpoint area matching via MSS + NumPy
+- **Condition chains** — events can depend on other events' states (DFS cycle detection)
+- **Group priority** — mutually exclusive events within a group (lowest priority wins)
+- **Inverted matching** — trigger when a pixel/region does *not* match
+- **Independent threads** — per-event threads for time-critical responses
+- **Profile management** — auto-save, favorites, copy/delete, import/export
+- **Event graph visualization** — directed graph of condition relationships
+- **Korean UI** — event editor with tabs: 기본, 상세 설정, 조건/그룹
+
+### Quick Start
+
+```bash
+git clone https://github.com/sh1n-k/KeystrokeSimulator.git
+cd KeystrokeSimulator
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
+
+### Requirements
+
+- Python 3.13 (with Tk/Tcl)
+- macOS: `pyobjc` (included in requirements.txt)
+- Windows: skip pyobjc, install `pywin32` separately
+
+### Testing
+
+```bash
+python run_tests.py
+```
+
+### Build
+
+```bash
+python _build.py    # PyInstaller single executable
+```
+
+### License
+
+MIT — see [LICENSE](LICENSE).
