@@ -1,5 +1,10 @@
 # Keystroke Simulator
 
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![Tkinter](https://img.shields.io/badge/Tkinter-GUI-FFCC33)
+![NumPy](https://img.shields.io/badge/NumPy-013243?logo=numpy&logoColor=white)
+
+
 [한국어](#korean) | [English](#english)
 
 <a name="korean"></a>
