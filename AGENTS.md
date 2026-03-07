@@ -12,38 +12,40 @@ Primary goals for agents:
 ## Setup commands
 
 Requirements:
-- Python 3.13 (venv recommended) with Tk/Tcl available.
+- `uv` 0.7+ and Python 3.13 with Tk/Tcl available.
 
-Create and use a venv:
+Sync the default environment:
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+uv python install 3.13
+uv sync
 ```
 
-Install dependencies (macOS-focused `requirements.txt`):
+Run commands inside the managed environment:
 ```bash
-pip install -r requirements.txt
+uv run python main.py
 ```
 
 Notes:
-- Windows: `requirements.txt` includes `pyobjc*` packages. You will likely need to skip/remove those and install `pywin32` separately.
+- Dependencies are managed in `pyproject.toml`; platform-specific packages are selected with environment markers.
+- Windows: close the running GUI before recreating `.venv` or re-syncing, because Python/DLL files may be locked.
 - macOS: the app typically requires Accessibility and Screen Recording permissions for input/capture.
+- Dependency source of truth is `pyproject.toml` with `uv.lock`.
 
 ## Run commands
 
 Run the GUI:
 ```bash
-python3 main.py
+uv run python main.py
 ```
 
 Run the auth-gated GUI:
 ```bash
-python3 main_secure.py
+uv run python main_secure.py
 ```
 
 Local auth test server:
 ```bash
-python3 _local_test_server.py
+uv run python _local_test_server.py
 ```
 
 Auth configuration:
@@ -54,30 +56,30 @@ Auth configuration:
 
 Run unit tests (`unittest` discovery under `tests/`):
 ```bash
-python3 run_tests.py
+uv run python run_tests.py
 ```
 
 Quieter output:
 ```bash
-python3 run_tests.py -q
+uv run python run_tests.py -q
 ```
 
 If you need to force a specific interpreter:
 ```bash
-python3 run_tests.py --python .venv/bin/python
+uv run python run_tests.py --python <path-to-python>
 ```
 
 Run GUI-including tests (when display/Tk environment is available):
 ```bash
-RUN_GUI_TESTS=1 python3 run_tests.py --python .venv/bin/python -q
+RUN_GUI_TESTS=1 uv run python run_tests.py --python <path-to-python> -q
 ```
 
 ## Build commands
 
-Build uses PyInstaller (not pinned in `requirements.txt`):
+Build uses PyInstaller from the `build` dependency group:
 ```bash
-pip install pyinstaller
-python3 _build.py
+uv sync --group build
+uv run python _build.py
 ```
 
 Important safety note:

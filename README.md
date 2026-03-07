@@ -28,27 +28,38 @@
 ```bash
 git clone https://github.com/sh1n-k/KeystrokeSimulator.git
 cd KeystrokeSimulator
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python main.py
+uv python install 3.13
+uv sync
+uv run python main.py
 ```
+
+### 실행 스크립트
+
+```bash
+run_main.cmd         # Windows
+./run_main.command   # macOS
+```
+
+검증만 하려면 `--check` 옵션을 사용할 수 있습니다.
 
 ### 요구사항
 
-- Python 3.13 (Tk/Tcl 포함)
-- macOS: `pyobjc` (requirements.txt에 포함)
-- Windows: pyobjc 건너뛰고 `pywin32` 별도 설치
+- `uv` 0.7+
+- Python 3.13 (Tk/Tcl 포함, `.python-version` / `requires-python`로 고정)
+- macOS/Windows 의존성은 `pyproject.toml`의 환경 마커로 자동 선택
+- 의존성 기준(source of truth)은 `pyproject.toml`과 `uv.lock`입니다.
 
 ### 테스트
 
 ```bash
-python run_tests.py
+uv run python run_tests.py
 ```
 
 ### 빌드
 
 ```bash
-python _build.py    # PyInstaller 단일 실행 파일
+uv sync --group build
+uv run python _build.py    # PyInstaller 단일 실행 파일
 ```
 
 ### 라이선스
@@ -78,27 +89,38 @@ A Python desktop automation tool that watches screen regions for pixel/color cha
 ```bash
 git clone https://github.com/sh1n-k/KeystrokeSimulator.git
 cd KeystrokeSimulator
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python main.py
+uv python install 3.13
+uv sync
+uv run python main.py
 ```
+
+### Launch Scripts
+
+```bash
+run_main.cmd         # Windows
+./run_main.command   # macOS
+```
+
+Use `--check` to verify the environment without opening the GUI.
 
 ### Requirements
 
-- Python 3.13 (with Tk/Tcl)
-- macOS: `pyobjc` (included in requirements.txt)
-- Windows: skip pyobjc, install `pywin32` separately
+- `uv` 0.7+
+- Python 3.13 (with Tk/Tcl, pinned via `.python-version` / `requires-python`)
+- macOS/Windows dependencies are selected automatically via environment markers in `pyproject.toml`
+- `pyproject.toml` and `uv.lock` are the source of truth for dependencies
 
 ### Testing
 
 ```bash
-python run_tests.py
+uv run python run_tests.py
 ```
 
 ### Build
 
 ```bash
-python _build.py    # PyInstaller single executable
+uv sync --group build
+uv run python _build.py    # PyInstaller single executable
 ```
 
 ### License

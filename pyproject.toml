@@ -1,0 +1,33 @@
+[project]
+name = "keystroke-simulator"
+version = "3.0.0"
+description = "Tkinter desktop automation app that watches screen regions and replays keystrokes."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "loguru==0.7.3",
+    "mss==10.1.0",
+    "numpy==2.3.4",
+    "pillow==12.0.0",
+    "pygame==2.6.1",
+    "pynput==1.8.1",
+    "python-dotenv==1.1.1",
+    "requests==2.32.5",
+    "screeninfo==0.8.1",
+    "pywin32==311; sys_platform == 'win32'",
+    "pyobjc-core==11.1; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa==11.1; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz==11.1; sys_platform == 'darwin'",
+]
+
+[dependency-groups]
+build = [
+    "pyinstaller==6.16.0",
+]
+
+[tool.uv]
+package = false
+environments = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'darwin'",
+]
