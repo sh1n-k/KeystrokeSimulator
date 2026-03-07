@@ -103,5 +103,38 @@ class TestValidateNumeric(unittest.TestCase):
         self.assertFalse(KeystrokeSettings._validate_numeric("99999"))
 
 
+class TestKeystrokeSettingsWindowState(unittest.TestCase):
+    @patch("keystroke_settings.StateUtils.load_main_app_state")
+    @patch("keystroke_settings.WindowUtils.center_window")
+    def test_restore_window_position_uses_saved_coordinates(self, mock_center, mock_load_state):
+        mock_load_state.return_value = {"settings_position": "120/340"}
+        stub = MagicMock()
+
+        KeystrokeSettings._restore_window_position(stub)
+
+        stub.geometry.assert_called_once_with("+120+340")
+        mock_center.assert_not_called()
+
+    @patch("keystroke_settings.StateUtils.load_main_app_state")
+    @patch("keystroke_settings.WindowUtils.center_window")
+    def test_restore_window_position_centers_when_missing(self, mock_center, mock_load_state):
+        mock_load_state.return_value = {}
+        stub = MagicMock()
+
+        KeystrokeSettings._restore_window_position(stub)
+
+        mock_center.assert_called_once_with(stub)
+
+    @patch("keystroke_settings.StateUtils.save_main_app_state")
+    def test_save_window_position_persists_coordinates(self, mock_save_state):
+        stub = MagicMock()
+        stub.winfo_x.return_value = 55
+        stub.winfo_y.return_value = 77
+
+        KeystrokeSettings._save_window_position(stub)
+
+        mock_save_state.assert_called_once_with(settings_position="55/77")
+
+
 if __name__ == "__main__":
     unittest.main()

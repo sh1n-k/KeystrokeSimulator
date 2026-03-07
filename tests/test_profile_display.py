@@ -4,6 +4,7 @@ from profile_display import (
     FAVORITE_PREFIX,
     QUICK_PROFILE_NAME,
     build_profile_display_values,
+    get_favorite_prefix,
     to_profile_display_name,
 )
 
@@ -60,7 +61,7 @@ class TestBuildProfileDisplayValues(unittest.TestCase):
                 favorites,
                 quick_profile_name="Fast",
             ),
-            ["Fast", "⭐ A"],
+            ["Fast", f"{get_favorite_prefix()}A"],
         )
 
 

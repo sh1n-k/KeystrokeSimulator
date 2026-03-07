@@ -60,6 +60,7 @@ def event_to_dict(evt: EventModel) -> Dict[str, Any]:
     return {
         "event_name": getattr(evt, "event_name", None),
         "use_event": bool(getattr(evt, "use_event", True)),
+        "capture_size": list(getattr(evt, "capture_size", (100, 100)) or [100, 100]),
         "latest_position": list(getattr(evt, "latest_position", None) or [])
         or None,
         "clicked_position": list(getattr(evt, "clicked_position", None) or [])
@@ -93,9 +94,11 @@ def event_from_dict(d: Dict[str, Any]) -> EventModel:
     clicked_pos = _to_xy(d.get("clicked_position"))
     ref_pixel = _to_rgba(d.get("ref_pixel_value"))
     region_size = _to_xy(d.get("region_size"))
+    capture_size = _to_xy(d.get("capture_size")) or (100, 100)
 
     return EventModel(
         event_name=d.get("event_name"),
+        capture_size=capture_size,
         latest_position=latest_pos,
         clicked_position=clicked_pos,
         latest_screenshot=None,  # removed from persisted format
@@ -159,6 +162,8 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
     for e in p.event_list:
         if not hasattr(e, "use_event"):
             e.use_event = True
+        if not hasattr(e, "capture_size") or not getattr(e, "capture_size", None):
+            e.capture_size = (100, 100)
         if not hasattr(e, "match_mode"):
             e.match_mode = "pixel"
         if not hasattr(e, "invert_match"):

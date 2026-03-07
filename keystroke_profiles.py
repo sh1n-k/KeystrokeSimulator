@@ -1055,6 +1055,7 @@ class EventListFrame(ttk.Frame):
             # 수동으로 이벤트 복사
             new = EventModel(
                 event_name=f"{txt('Copy of', '복사본')} {evt.event_name}",
+                capture_size=getattr(evt, "capture_size", (100, 100)),
                 latest_position=evt.latest_position,
                 clicked_position=evt.clicked_position,
                 latest_screenshot=None,  # not persisted; left preview is always live capture

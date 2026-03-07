@@ -244,6 +244,46 @@ class TestRuntimeEditGuards(unittest.TestCase):
 
         mock_modkeys.assert_called_once_with(app, "Quick")
 
+    @patch("keystroke_simulator_app.KeystrokeSettings")
+    def test_open_settings_opens_when_missing(self, mock_settings):
+        app = _make_app_stub()
+        app.settings_window = None
+        app.unbind_events = MagicMock()
+
+        KeystrokeSimulatorApp.open_settings(app)
+
+        app.unbind_events.assert_called_once()
+        mock_settings.assert_called_once_with(app)
+        self.assertEqual(app.settings_window, mock_settings.return_value)
+
+    def test_open_settings_reuses_existing_window(self):
+        app = _make_app_stub()
+        existing = MagicMock()
+        existing.winfo_exists.return_value = True
+        app.settings_window = existing
+        app.unbind_events = MagicMock()
+
+        KeystrokeSimulatorApp.open_settings(app)
+
+        app.unbind_events.assert_not_called()
+        existing.lift.assert_called_once()
+        existing.focus_force.assert_called_once()
+        existing.grab_set.assert_called_once()
+
+    @patch("keystroke_simulator_app.KeystrokeSettings")
+    def test_open_settings_recreates_stale_window_reference(self, mock_settings):
+        app = _make_app_stub()
+        stale = MagicMock()
+        stale.winfo_exists.return_value = False
+        app.settings_window = stale
+        app.unbind_events = MagicMock()
+
+        KeystrokeSimulatorApp.open_settings(app)
+
+        app.unbind_events.assert_called_once()
+        mock_settings.assert_called_once_with(app)
+        self.assertEqual(app.settings_window, mock_settings.return_value)
+
 
 class TestSaveLatestState(unittest.TestCase):
     @patch("keystroke_simulator_app.StateUtils.save_main_app_state")

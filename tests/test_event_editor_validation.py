@@ -1,6 +1,8 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
+import tkinter as tk
+from PIL import Image
 
 from keystroke_event_editor import KeystrokeEventEditor
 from keystroke_models import EventModel
@@ -107,6 +109,96 @@ class TestValidateRequiredFields(unittest.TestCase):
         )
         result = KeystrokeEventEditor._validate_required_fields(stub)
         self.assertTrue(result)
+
+
+class TestRegionSizeClamp(unittest.TestCase):
+    def test_on_region_size_change_allows_20x20(self):
+        stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        interp = tk.Tcl()
+        stub.region_w_var = tk.IntVar(master=interp, value=10)
+        stub.region_h_var = tk.IntVar(master=interp, value=15)
+        stub.held_img = None
+        stub.clicked_pos = None
+        stub.lbl_img2 = None
+        stub._draw_overlay = MagicMock()
+        stub._sync_region_constraints = MagicMock()
+
+        KeystrokeEventEditor._on_region_size_change(stub)
+
+        self.assertEqual(stub.region_w_var.get(), 20)
+        self.assertEqual(stub.region_h_var.get(), 20)
+
+    def test_on_region_size_change_clamps_to_available_bounds(self):
+        stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        interp = tk.Tcl()
+        stub.region_w_var = tk.IntVar(master=interp, value=80)
+        stub.region_h_var = tk.IntVar(master=interp, value=70)
+        stub.held_img = Image.new("RGB", (100, 100))
+        stub.clicked_pos = (30, 30)
+        stub.lbl_img2 = None
+        stub._draw_overlay = MagicMock()
+        stub._sync_region_constraints = MagicMock()
+
+        KeystrokeEventEditor._on_region_size_change(stub)
+
+        self.assertEqual(stub.region_w_var.get(), 61)
+        self.assertEqual(stub.region_h_var.get(), 61)
+
+    def test_sync_region_constraints_disables_inputs_when_point_is_too_close_to_edge(self):
+        stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        interp = tk.Tcl()
+        stub.match_mode_var = tk.StringVar(master=interp, value="region")
+        stub.held_img = Image.new("RGB", (100, 100))
+        stub.clicked_pos = (5, 50)
+        stub.entry_region_w = MagicMock()
+        stub.entry_region_h = MagicMock()
+
+        KeystrokeEventEditor._sync_region_constraints(stub)
+
+        stub.entry_region_w.config.assert_called_once_with(to=20, state="disabled")
+        stub.entry_region_h.config.assert_called_once_with(to=100, state="disabled")
+
+
+class TestRegionBoundsValidation(unittest.TestCase):
+    def _make_stub(self, clicked_position=(50, 50), image_size=(100, 100), mode="region"):
+        stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        interp = tk.Tcl()
+        stub.match_mode_var = tk.StringVar(master=interp, value=mode)
+        stub.clicked_pos = clicked_position
+        stub.held_img = Image.new("RGB", image_size)
+        return stub
+
+    def test_max_region_dimension_even_and_odd(self):
+        self.assertEqual(KeystrokeEventEditor._max_region_dimension(50, 100), 100)
+        self.assertEqual(KeystrokeEventEditor._max_region_dimension(99, 100), 2)
+        self.assertEqual(KeystrokeEventEditor._max_region_dimension(0, 100), 1)
+
+    @patch("keystroke_event_editor.messagebox")
+    def test_validate_region_bounds_rejects_edge_point_under_minimum(self, mock_messagebox):
+        stub = self._make_stub(clicked_position=(5, 50))
+
+        result = KeystrokeEventEditor._validate_region_bounds(stub, 20, 20)
+
+        self.assertFalse(result)
+        mock_messagebox.showerror.assert_called_once()
+
+    @patch("keystroke_event_editor.messagebox")
+    def test_validate_region_bounds_rejects_size_over_limit(self, mock_messagebox):
+        stub = self._make_stub(clicked_position=(30, 30), image_size=(100, 100))
+
+        result = KeystrokeEventEditor._validate_region_bounds(stub, 80, 80)
+
+        self.assertFalse(result)
+        mock_messagebox.showerror.assert_called_once()
+
+    @patch("keystroke_event_editor.messagebox")
+    def test_validate_region_bounds_accepts_valid_size(self, mock_messagebox):
+        stub = self._make_stub(clicked_position=(30, 30), image_size=(100, 100))
+
+        result = KeystrokeEventEditor._validate_region_bounds(stub, 20, 20)
+
+        self.assertTrue(result)
+        mock_messagebox.showerror.assert_not_called()
 
 
 if __name__ == "__main__":

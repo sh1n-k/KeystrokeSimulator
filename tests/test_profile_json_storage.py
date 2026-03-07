@@ -30,6 +30,7 @@ class TestProfileJsonStorage(unittest.TestCase):
 
             evt = EventModel(
                 event_name="E1",
+                capture_size=(320, 180),
                 latest_position=(100, 200),
                 clicked_position=(10, 20),
                 latest_screenshot=latest,
@@ -62,6 +63,7 @@ class TestProfileJsonStorage(unittest.TestCase):
             self.assertIsNone(e2.latest_screenshot)
             self.assertIsNotNone(e2.held_screenshot)
             self.assertEqual(e2.held_screenshot.size, (3, 3))
+            self.assertEqual(e2.capture_size, (320, 180))
 
     def test_legacy_pickle_migration_promotes_latest_to_held(self):
         with tempfile.TemporaryDirectory() as td:
@@ -218,6 +220,7 @@ class TestEventRoundtrip(unittest.TestCase):
         held = Image.new("RGB", (4, 4), color=(50, 100, 150))
         evt = EventModel(
             event_name="Round",
+            capture_size=(444, 222),
             latest_position=(10, 20),
             clicked_position=(5, 15),
             held_screenshot=held,
@@ -240,6 +243,7 @@ class TestEventRoundtrip(unittest.TestCase):
         restored = event_from_dict(d)
 
         self.assertEqual(restored.event_name, "Round")
+        self.assertEqual(restored.capture_size, (444, 222))
         self.assertEqual(restored.clicked_position, (5, 15))
         self.assertEqual(restored.key_to_enter, "B")
         self.assertEqual(restored.press_duration_ms, 200.0)
@@ -261,9 +265,20 @@ class TestEventRoundtrip(unittest.TestCase):
         d = event_to_dict(evt)
         restored = event_from_dict(d)
         self.assertEqual(restored.event_name, "Minimal")
+        self.assertEqual(restored.capture_size, (100, 100))
         self.assertIsNone(restored.clicked_position)
         self.assertIsNone(restored.held_screenshot)
         self.assertIsNone(restored.ref_pixel_value)
+
+    def test_missing_capture_size_defaults_to_100(self):
+        """구버전 데이터에 capture_size가 없어도 100x100으로 복원"""
+        raw = {
+            "event_name": "Legacy",
+            "latest_position": [1, 2],
+            "clicked_position": [3, 4],
+        }
+        restored = event_from_dict(raw)
+        self.assertEqual(restored.capture_size, (100, 100))
 
     def test_image_roundtrip_preserves_pixels(self):
         """이미지 포함 roundtrip에서 픽셀 보존"""

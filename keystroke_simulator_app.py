@@ -640,9 +640,16 @@ class KeystrokeSimulatorApp(tk.Tk):
         KeystrokeQuickEventEditor(self)
 
     def open_settings(self):
-        if not self.settings_window:
-            self.unbind_events()
-            self.settings_window = KeystrokeSettings(self)
+        existing_window = self.settings_window
+        if existing_window and safe_call(existing_window.winfo_exists):
+            safe_call(existing_window.lift)
+            safe_call(existing_window.focus_force)
+            safe_call(existing_window.grab_set)
+            return
+        if existing_window:
+            self.settings_window = None
+        self.unbind_events()
+        self.settings_window = KeystrokeSettings(self)
 
     def _save_latest_state(self):
         StateUtils.save_main_app_state(

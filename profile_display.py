@@ -1,7 +1,12 @@
+import sys
 from typing import Iterable
 
 
-FAVORITE_PREFIX = "⭐ "
+def get_favorite_prefix() -> str:
+    return "★ " if sys.platform == "win32" else "⭐ "
+
+
+FAVORITE_PREFIX = get_favorite_prefix()
 QUICK_PROFILE_NAME = "Quick"
 
 

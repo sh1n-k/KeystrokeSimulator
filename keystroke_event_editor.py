@@ -221,7 +221,7 @@ class KeystrokeEventEditor:
         self.entry_region_w = ttk.Spinbox(
             gb_size,
             textvariable=self.region_w_var,
-            from_=50,
+            from_=20,
             to=1000,
             width=5,
         )
@@ -233,7 +233,7 @@ class KeystrokeEventEditor:
         self.entry_region_h = ttk.Spinbox(
             gb_size,
             textvariable=self.region_h_var,
-            from_=50,
+            from_=20,
             to=1000,
             width=5,
         )
@@ -267,18 +267,17 @@ class KeystrokeEventEditor:
 
     def _on_match_mode_change(self, *args):
         """매칭 모드 변경 시 영역 크기 필드 활성/비활성"""
-        is_region = self.match_mode_var.get() == "region"
-        state = "normal" if is_region else "disabled"
-        if self.entry_region_w:
-            self.entry_region_w.config(state=state)
-        if self.entry_region_h:
-            self.entry_region_h.config(state=state)
+        self._sync_region_constraints()
 
     def _on_capture_size_change(self, *args):
         """캡처 크기 변경 시 capturer 동기화"""
         try:
             w = max(50, min(1000, self.capture_w_var.get()))
             h = max(50, min(1000, self.capture_h_var.get()))
+            if self.capture_w_var.get() != w:
+                self.capture_w_var.set(w)
+            if self.capture_h_var.get() != h:
+                self.capture_h_var.set(h)
             self.capturer.set_capture_size(w, h)
         except (ValueError, tk.TclError):
             pass
@@ -286,15 +285,96 @@ class KeystrokeEventEditor:
     def _on_region_size_change(self, *args):
         """영역 크기 변경 시 오버레이 갱신"""
         try:
-            w = max(50, min(1000, self.region_w_var.get()))
-            h = max(50, min(1000, self.region_h_var.get()))
+            limits = self._get_region_limits()
+            max_w, max_h = limits if limits else (1000, 1000)
+            w = max(20, min(1000, self.region_w_var.get()))
+            h = max(20, min(1000, self.region_h_var.get()))
+            if max_w >= 20:
+                w = min(w, max_w)
+            if max_h >= 20:
+                h = min(h, max_h)
             if self.region_w_var.get() != w:
                 self.region_w_var.set(w)
             if self.region_h_var.get() != h:
                 self.region_h_var.set(h)
+            self._sync_region_constraints()
             self._draw_overlay(self.held_img, self.lbl_img2)
         except (ValueError, tk.TclError):
             pass
+
+    @staticmethod
+    def _max_region_dimension(center: int, total: int) -> int:
+        if total <= 0:
+            return 0
+        size = min(1000, total)
+        while size > 0:
+            if center - size // 2 >= 0 and center + size // 2 + (size % 2) <= total:
+                return size
+            size -= 1
+        return 0
+
+    def _get_region_limits(self) -> Optional[tuple[int, int]]:
+        if not self.held_img or not self.clicked_pos:
+            return None
+        cx, cy = self.clicked_pos
+        img_w, img_h = self.held_img.size
+        return (
+            self._max_region_dimension(cx, img_w),
+            self._max_region_dimension(cy, img_h),
+        )
+
+    def _sync_region_constraints(self):
+        limits = self._get_region_limits()
+        max_w, max_h = limits if limits else (1000, 1000)
+        can_edit = (
+            self.match_mode_var.get() == "region"
+            and (not limits or (max_w >= 20 and max_h >= 20))
+        )
+        state = "normal" if can_edit else "disabled"
+        if self.entry_region_w:
+            self.entry_region_w.config(to=max(20, max_w), state=state)
+        if self.entry_region_h:
+            self.entry_region_h.config(to=max(20, max_h), state=state)
+
+    def _validate_region_bounds(self, rw: int, rh: int) -> bool:
+        if self.match_mode_var.get() != "region":
+            return True
+
+        limits = self._get_region_limits()
+        if not limits:
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt(
+                    "Please capture an image and select a target point for Region mode.",
+                    "영역 모드를 사용하려면 이미지를 캡처하고 대상 지점을 선택해 주세요.",
+                ),
+            )
+            return False
+
+        max_w, max_h = limits
+        if max_w < 20 or max_h < 20:
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt(
+                    "The selected point is too close to the edge for Region mode. Move the point inward or increase Capture Size.",
+                    "선택한 지점이 가장자리에 너무 가까워 영역 모드를 사용할 수 없습니다. 지점을 안쪽으로 옮기거나 캡처 크기를 키워 주세요.",
+                ),
+            )
+            return False
+
+        if rw > max_w or rh > max_h:
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt(
+                    "Region size exceeds the captured image bounds for this point. Maximum allowed here is {width}x{height}.",
+                    "이 지점에서는 영역 크기가 캡처 이미지 범위를 벗어납니다. 여기서 가능한 최대 크기는 {width}x{height}입니다.",
+                    width=max_w,
+                    height=max_h,
+                ),
+            )
+            return False
+
+        return True
 
     def _get_existing_groups(self) -> List[str]:
         """기존 이벤트에서 그룹 ID 목록 추출"""
@@ -595,6 +675,8 @@ class KeystrokeEventEditor:
             self.held_img = self.latest_img.copy()
             self._update_img_lbl(self.lbl_img2, self._scale_for_display(self.latest_img))
             if self.clicked_pos:
+                self._sync_region_constraints()
+                self._on_region_size_change()
                 self._draw_overlay(self.held_img, self.lbl_img2)
                 self._update_ref_pixel(self.held_img, self.clicked_pos)
 
@@ -618,6 +700,8 @@ class KeystrokeEventEditor:
         self.clicked_pos = (ix, iy)
         self._update_ref_pixel(self.held_img, (ix, iy))  # deepcopy 제거 (불필요)
         self._set_entries(self.coord_entries[2:], ix, iy)
+        self._sync_region_constraints()
+        self._on_region_size_change()
         self._draw_overlay(self.held_img, self.lbl_img2)
 
     def _draw_overlay(self, img, lbl):
@@ -631,6 +715,21 @@ class KeystrokeEventEditor:
 
         if self.match_mode_var.get() == "region":
             try:
+                limits = self._get_region_limits()
+                if limits and (limits[0] < 20 or limits[1] < 20):
+                    marker = 6
+                    draw.line(
+                        [(max(0, cx - marker), cy), (min(w - 1, cx + marker), cy)],
+                        fill="red",
+                        width=2,
+                    )
+                    draw.line(
+                        [(cx, max(0, cy - marker)), (cx, min(h - 1, cy + marker))],
+                        fill="red",
+                        width=2,
+                    )
+                    self._update_img_lbl(lbl, self._scale_for_display(res_img))
+                    return
                 rw = self.region_w_var.get() // 2
                 rh = self.region_h_var.get() // 2
                 x1, y1 = max(0, cx - rw), max(0, cy - rh)
@@ -915,8 +1014,12 @@ class KeystrokeEventEditor:
             return
 
         dur, rand, rw, rh, prio = parsed
+        cap_w = max(50, min(1000, self.capture_w_var.get()))
+        cap_h = max(50, min(1000, self.capture_h_var.get()))
 
         if not self._validate_timing_values(dur, rand):
+            return
+        if not self._validate_region_bounds(rw, rh):
             return
 
         cycle_path = self._validate_cycles(final_name, self.temp_conditions)
@@ -947,6 +1050,7 @@ class KeystrokeEventEditor:
             press_duration_ms=dur,
             randomization_ms=rand,
             independent_thread=self.independent_thread.get(),
+            capture_size=(cap_w, cap_h),
             match_mode=self.match_mode_var.get(),
             invert_match=self.invert_match_var.get(),
             region_size=(rw, rh),
@@ -1049,6 +1153,10 @@ class KeystrokeEventEditor:
 
         self.match_mode_var.set(getattr(evt, "match_mode", "pixel"))
         self.invert_match_var.set(getattr(evt, "invert_match", False))
+        cap_size = getattr(evt, "capture_size", (100, 100)) or (100, 100)
+        self.capture_w_var.set(cap_size[0])
+        self.capture_h_var.set(cap_size[1])
+        self.capturer.set_capture_size(cap_size[0], cap_size[1])
         if r_size := getattr(evt, "region_size", None):
             self.region_w_var.set(r_size[0])
             self.region_h_var.set(r_size[1])
@@ -1074,6 +1182,8 @@ class KeystrokeEventEditor:
 
         # 매칭 모드에 따른 영역 크기 필드 상태 동기화
         self._on_match_mode_change()
+        self._sync_region_constraints()
+        self._on_region_size_change()
 
         self._draw_overlay(self.held_img, self.lbl_img2)
 

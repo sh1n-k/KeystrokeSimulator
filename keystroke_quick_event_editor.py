@@ -130,6 +130,10 @@ class KeystrokeQuickEventEditor:
         try:
             w = max(50, min(1000, self.capture_w_var.get()))
             h = max(50, min(1000, self.capture_h_var.get()))
+            if self.capture_w_var.get() != w:
+                self.capture_w_var.set(w)
+            if self.capture_h_var.get() != h:
+                self.capture_h_var.set(h)
             self.capturer.set_capture_size(w, h)
         except (ValueError, tk.TclError):
             pass
@@ -273,12 +277,13 @@ class KeystrokeQuickEventEditor:
         ):
             self.events.append(
                 EventModel(
-                    str(self.event_idx),
-                    self.latest_pos,
-                    self.clicked_pos,
-                    None,  # latest_screenshot is not persisted
-                    self.held_img,
-                    self.ref_pixel,
+                    event_name=str(self.event_idx),
+                    capture_size=(self.capture_w_var.get(), self.capture_h_var.get()),
+                    latest_position=self.latest_pos,
+                    clicked_position=self.clicked_pos,
+                    latest_screenshot=None,  # latest_screenshot is not persisted
+                    held_screenshot=self.held_img,
+                    ref_pixel_value=self.ref_pixel,
                     match_mode="pixel",
                     region_size=None,
                 )

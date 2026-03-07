@@ -195,6 +195,7 @@ class EventImporter:
         """이벤트 깊은 복사 (PIL Image 포함) - 매우 중요"""
         new_evt = EventModel(
             event_name=evt.event_name,
+            capture_size=getattr(evt, "capture_size", (100, 100)),
             latest_position=evt.latest_position,
             clicked_position=evt.clicked_position,
             latest_screenshot=None,  # not persisted; left preview is always live capture

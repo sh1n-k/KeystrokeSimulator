@@ -32,6 +32,7 @@ class EventModel:
     randomization_ms: float | None = None
     independent_thread: bool | None = False
     use_event: bool = True
+    capture_size: Tuple[int, int] = (100, 100)
 
     # --- Phase 1 Added Fields ---
     # 매칭 모드: 'pixel' (기본) 또는 'region'

@@ -8,7 +8,7 @@ from tkinter import ttk, messagebox
 from loguru import logger
 from i18n import LANGUAGE_LABELS, normalize_language, set_language, txt, dual_text_width
 from keystroke_models import UserSettings
-from keystroke_utils import WindowUtils
+from keystroke_utils import WindowUtils, StateUtils
 
 
 class KeystrokeSettings(tk.Toplevel):
@@ -26,10 +26,38 @@ class KeystrokeSettings(tk.Toplevel):
         self._create_widgets()
 
     def _setup_window(self):
+        if self.master:
+            self.transient(self.master)
         self.grid_columnconfigure((1, 2), weight=1)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind("<Escape>", self.on_close)
+        self._restore_window_position()
+        self.lift()
+        self.attributes("-topmost", True)
+        self.after(10, lambda: self.attributes("-topmost", False))
+        self.grab_set()
+        self.focus_force()
+        self.after(10, self.lift)
+
+    def _restore_window_position(self):
+        state = StateUtils.load_main_app_state() or {}
+        pos = state.get("settings_position")
+        if pos:
+            try:
+                x_str, y_str = pos.split("/", 1)
+                self.geometry(f"+{int(x_str)}+{int(y_str)}")
+                return
+            except (ValueError, TypeError, tk.TclError):
+                pass
         WindowUtils.center_window(self)
+
+    def _save_window_position(self):
+        try:
+            StateUtils.save_main_app_state(
+                settings_position=f"{self.winfo_x()}/{self.winfo_y()}"
+            )
+        except tk.TclError:
+            pass
 
     def _load_settings(self):
         s_file = Path("user_settings.json")
@@ -248,11 +276,15 @@ class KeystrokeSettings(tk.Toplevel):
             txt("Reset settings?", "설정을 초기화하시겠습니까?"),
             parent=self,
         ):
+            self._save_window_position()
             self.settings = UserSettings()
+            replacement = KeystrokeSettings(self.master)
+            if self.master and hasattr(self.master, "settings_window"):
+                self.master.settings_window = replacement
             self.destroy()
-            KeystrokeSettings(self.master)
 
     def on_close(self, event=None):
+        self._save_window_position()
         if self.master and hasattr(self.master, "settings_window"):
             self.master.settings_window = None
             if hasattr(self.master, "load_settings"):
