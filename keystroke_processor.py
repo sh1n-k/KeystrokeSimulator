@@ -1,5 +1,6 @@
 import asyncio
 import ctypes
+import os
 import platform
 import random
 import re
@@ -19,6 +20,16 @@ if platform.system() == "Windows":
     import win32gui, win32process
 elif platform.system() == "Darwin":
     from Quartz import CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap
+
+
+def _processor_perf_enabled() -> bool:
+    return os.getenv("KEYSIM_PROFILE_PERF") == "1"
+
+
+def _log_perf(label: str, start: float) -> None:
+    if _processor_perf_enabled():
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        print(f"[perf] {label}: {elapsed_ms:.3f}ms")
 
 
 def _normalize_key_name(
@@ -149,6 +160,7 @@ class KeystrokeProcessor:
         self.event_data_list, self.independent_events, self.mega_rect = (
             self._init_event_data(events)
         )
+        self.main_capture_groups = self._build_capture_groups(self.event_data_list)
 
         self.loop = asyncio.new_event_loop()
         self.main_thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -240,11 +252,13 @@ class KeystrokeProcessor:
                 if e.held_screenshot:
                     full_img = np.array(e.held_screenshot.convert("RGB"))
                     cx, cy = e.clicked_position
-                    y1, y2 = max(0, cy - h // 2), min(
-                        full_img.shape[0], cy + h // 2 + (h % 2)
+                    y1, y2 = (
+                        max(0, cy - h // 2),
+                        min(full_img.shape[0], cy + h // 2 + (h % 2)),
                     )
-                    x1, x2 = max(0, cx - w // 2), min(
-                        full_img.shape[1], cx + w // 2 + (w % 2)
+                    x1, x2 = (
+                        max(0, cx - w // 2),
+                        min(full_img.shape[1], cx + w // 2 + (w % 2)),
                     )
                     evt_data["ref_img"] = full_img[y1:y2, x1:x2][:, :, ::-1].copy()
 
@@ -252,13 +266,18 @@ class KeystrokeProcessor:
                     if rh > 0 and rw > 0:
                         # Target count (actual may be less after dedup for very small ROIs)
                         n = max(5, min(25, (rw * rh) // 100))
-                        cols = max(2, int(n ** 0.5))
+                        cols = max(2, int(n**0.5))
                         rows = max(2, (n + cols - 1) // cols)
-                        pts = list(dict.fromkeys(
-                            (int((rw - 1) * c / (cols - 1)), int((rh - 1) * r / (rows - 1)))
-                            for r in range(rows)
-                            for c in range(cols)
-                        ))
+                        pts = list(
+                            dict.fromkeys(
+                                (
+                                    int((rw - 1) * c / (cols - 1)),
+                                    int((rh - 1) * r / (rows - 1)),
+                                )
+                                for r in range(rows)
+                                for c in range(cols)
+                            )
+                        )
                         evt_data["check_points"] = [
                             {"pos": (px, py), "color": evt_data["ref_img"][py, px]}
                             for px, py in pts
@@ -268,6 +287,8 @@ class KeystrokeProcessor:
                 evt_data["ref_bgr"] = np.array(ref_rgb[::-1], dtype=np.uint8)
 
             if is_indep:
+                evt_data["capture_rect"] = self._build_capture_rect(evt_data)
+                evt_data["next_run_at"] = 0.0
                 independent_data.append(evt_data)
             else:
                 events_data.append(evt_data)
@@ -309,7 +330,7 @@ class KeystrokeProcessor:
             self.loop.close()
 
     async def _process_main(self):
-        if not self.event_data_list:
+        if not self.event_data_list or not self.main_capture_groups:
             return
 
         last_proc_check_time = 0
@@ -336,14 +357,87 @@ class KeystrokeProcessor:
                     await asyncio.sleep(0.1)
                     continue
 
-                if self.mega_rect:
-                    try:
-                        img = np.array(sct.grab(self.mega_rect))
-                        await self._evaluate_and_execute_main(img)
-                    except Exception as e:
-                        logger.error(f"Capture failed: {e}")
+                try:
+                    cycle_started = time.perf_counter()
+                    local_match_states = {}
+                    for group in self.main_capture_groups:
+                        img = np.array(sct.grab(group["rect"]))
+                        local_match_states.update(
+                            self._evaluate_capture_group(img, group["events"])
+                        )
+                    await self._apply_local_match_states(local_match_states)
+                    _log_perf("processor_main_cycle", cycle_started)
+                except Exception as e:
+                    logger.error(f"Capture failed: {e}")
 
                 await asyncio.sleep(random.uniform(*self.delays))
+
+    @staticmethod
+    def _rect_area(rect: Dict[str, int]) -> int:
+        return max(1, rect["width"]) * max(1, rect["height"])
+
+    @staticmethod
+    def _merge_rects(rect_a: Dict[str, int], rect_b: Dict[str, int]) -> Dict[str, int]:
+        left = min(rect_a["left"], rect_b["left"])
+        top = min(rect_a["top"], rect_b["top"])
+        right = max(rect_a["left"] + rect_a["width"], rect_b["left"] + rect_b["width"])
+        bottom = max(rect_a["top"] + rect_a["height"], rect_b["top"] + rect_b["height"])
+        return {
+            "left": left,
+            "top": top,
+            "width": max(1, right - left),
+            "height": max(1, bottom - top),
+        }
+
+    def _assign_group_relative_coords(self, group: Dict[str, Any]) -> None:
+        rect = group["rect"]
+        for evt in group["events"]:
+            evt["rel_x"] = evt["center_x"] - rect["left"]
+            evt["rel_y"] = evt["center_y"] - rect["top"]
+
+    def _build_capture_groups(self, events_data: List[Dict]) -> List[Dict]:
+        if not events_data:
+            return []
+
+        max_group_area = 250_000
+        max_gap = 160
+        sorted_events = sorted(
+            events_data,
+            key=lambda evt: (evt["center_x"], evt["center_y"], evt.get("name", "")),
+        )
+        groups: List[Dict[str, Any]] = []
+
+        for evt in sorted_events:
+            evt_rect = self._build_capture_rect(evt)
+            evt["capture_rect"] = evt_rect
+            if not groups:
+                groups.append({"rect": evt_rect.copy(), "events": [evt]})
+                continue
+
+            current = groups[-1]
+            current_rect = current["rect"]
+            merged = self._merge_rects(current_rect, evt_rect)
+            gap_x = max(
+                evt_rect["left"] - (current_rect["left"] + current_rect["width"]),
+                current_rect["left"] - (evt_rect["left"] + evt_rect["width"]),
+                0,
+            )
+            gap_y = max(
+                evt_rect["top"] - (current_rect["top"] + current_rect["height"]),
+                current_rect["top"] - (evt_rect["top"] + evt_rect["height"]),
+                0,
+            )
+            merged_area = self._rect_area(merged)
+            if merged_area > max_group_area or gap_x > max_gap or gap_y > max_gap:
+                groups.append({"rect": evt_rect.copy(), "events": [evt]})
+                continue
+
+            current["rect"] = merged
+            current["events"].append(evt)
+
+        for group in groups:
+            self._assign_group_relative_coords(group)
+        return groups
 
     def _select_by_group_priority(self, events: List[Dict]) -> List[Dict]:
         """그룹별 우선순위로 이벤트 선택"""
@@ -364,7 +458,9 @@ class KeystrokeProcessor:
 
         return final_events
 
-    def _resolve_effective_states(self, local_match_states: Dict[str, bool]) -> Dict[str, bool]:
+    def _resolve_effective_states(
+        self, local_match_states: Dict[str, bool]
+    ) -> Dict[str, bool]:
         """
         조건 체인을 포함한 '실제 활성 상태' 계산.
         - raw match가 False면 비활성
@@ -414,16 +510,17 @@ class KeystrokeProcessor:
 
         return resolved
 
-    async def _evaluate_and_execute_main(self, img: np.ndarray):
-        # 1. raw match 상태 수집
+    def _evaluate_capture_group(
+        self, img: np.ndarray, events: List[Dict]
+    ) -> Dict[str, bool]:
         local_match_states = {}
-
-        for evt in self.event_data_list:
+        for evt in events:
             local_match_states[evt["name"]] = self._check_match(
                 img, evt, is_independent=False
             )
+        return local_match_states
 
-        # 2. 조건 체인을 반영한 실제 활성 상태 계산
+    async def _apply_local_match_states(self, local_match_states: Dict[str, bool]):
         local_states = self._resolve_effective_states(local_match_states)
 
         with self.state_lock:
@@ -446,6 +543,11 @@ class KeystrokeProcessor:
 
         if tasks:
             await asyncio.gather(*tasks)
+
+    async def _evaluate_and_execute_main(self, img: np.ndarray):
+        await self._apply_local_match_states(
+            self._evaluate_capture_group(img, self.event_data_list)
+        )
 
     def _build_capture_rect(self, evt: Dict) -> Dict[str, int]:
         """이벤트에 대한 캡처 영역 생성"""
@@ -490,6 +592,56 @@ class KeystrokeProcessor:
                     logger.error(f"Error in indep thread {evt['name']}: {e}")
 
                 time.sleep(random.uniform(*self.delays))
+
+    def _run_independent_worker(self):
+        last_proc_check_time = 0.0
+        is_proc_active_cached = True
+        proc_check_interval = 0.3
+
+        with mss.mss() as sct:
+            while not self.term_event.is_set():
+                now = time.time()
+                if self.pid and (now - last_proc_check_time > proc_check_interval):
+                    is_proc_active_cached = ProcessUtils.is_process_active(self.pid)
+                    last_proc_check_time = now
+
+                if self.pid and not is_proc_active_cached:
+                    time.sleep(0.5)
+                    continue
+
+                due_events = [
+                    evt
+                    for evt in self.independent_events
+                    if evt.get("next_run_at", 0.0) <= now
+                ]
+                if not due_events:
+                    next_run = min(
+                        (
+                            evt.get("next_run_at", now + 0.05)
+                            for evt in self.independent_events
+                        ),
+                        default=now + 0.05,
+                    )
+                    time.sleep(max(0.01, min(0.05, next_run - now)))
+                    continue
+
+                for evt in due_events:
+                    started = time.perf_counter()
+                    try:
+                        img = np.array(sct.grab(evt["capture_rect"]))
+                        is_match = self._check_match(img, evt, is_independent=True)
+                        is_active = is_match and self._check_conditions(evt)
+
+                        with self.state_lock:
+                            self.current_states[evt["name"]] = is_active
+
+                        if is_active and evt["exec"]:
+                            self._sync_press_key(evt)
+                    except Exception as e:
+                        logger.error(f"Error in indep worker {evt['name']}: {e}")
+                    finally:
+                        evt["next_run_at"] = time.time() + random.uniform(*self.delays)
+                        _log_perf(f"independent_event[{evt['name']}]", started)
 
     def _extract_roi(
         self, img: np.ndarray, evt: Dict, is_independent: bool

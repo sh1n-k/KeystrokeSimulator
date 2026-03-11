@@ -1,5 +1,8 @@
+import threading
 import unittest
 from unittest.mock import patch, MagicMock
+
+from PIL import Image
 
 from keystroke_capturer import ScreenshotCapturer
 
@@ -11,7 +14,9 @@ class TestSetCaptureSize(unittest.TestCase):
         monitor = MagicMock()
         monitor.width = screen_w
         monitor.height = screen_h
-        with patch("keystroke_capturer.screeninfo.get_monitors", return_value=[monitor]):
+        with patch(
+            "keystroke_capturer.screeninfo.get_monitors", return_value=[monitor]
+        ):
             return ScreenshotCapturer()
 
     def test_default_box_size(self):
@@ -91,7 +96,9 @@ class TestCapturerAttributes(unittest.TestCase):
         monitor = MagicMock()
         monitor.width = screen_w
         monitor.height = screen_h
-        with patch("keystroke_capturer.screeninfo.get_monitors", return_value=[monitor]):
+        with patch(
+            "keystroke_capturer.screeninfo.get_monitors", return_value=[monitor]
+        ):
             return ScreenshotCapturer()
 
     def test_screenshot_callback_settable(self):
@@ -112,6 +119,42 @@ class TestCapturerAttributes(unittest.TestCase):
         pos = capturer.get_current_mouse_position()
         self.assertIsInstance(pos, tuple)
         self.assertEqual(len(pos), 2)
+
+    def test_capture_screenshot_keeps_grabbing_when_position_is_unchanged(self):
+        capturer = self._make_capturer()
+        capturer.current_position = (10, 10)
+        capturer.screenshot_callback = MagicMock(
+            side_effect=lambda *_: capturer.capturing.clear()
+        )
+        capturer.capturing.set()
+
+        fake_image = MagicMock()
+        fake_image.size = (10, 10)
+        fake_image.bgra = b"\x00" * 400
+        fake_sct = MagicMock()
+        fake_sct.grab.return_value = fake_image
+        fake_ctx = MagicMock()
+        fake_ctx.__enter__.return_value = fake_sct
+        fake_ctx.__exit__.return_value = False
+
+        with (
+            patch("keystroke_capturer.mss.mss", return_value=fake_ctx),
+            patch(
+                "keystroke_capturer.Image.frombytes",
+                return_value=Image.new("RGB", (10, 10)),
+            ),
+            patch("keystroke_capturer.time.sleep", return_value=None),
+        ):
+            capturer._last_capture_signature = (
+                (10, 10),
+                capturer.box_w,
+                capturer.box_h,
+            )
+            capturer._idle_cycles = 5
+            capturer.capture_screenshot()
+
+        fake_sct.grab.assert_called_once()
+        capturer.screenshot_callback.assert_called_once()
 
 
 if __name__ == "__main__":
