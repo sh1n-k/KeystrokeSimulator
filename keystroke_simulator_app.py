@@ -1,4 +1,5 @@
 import json
+import os
 import platform
 import re
 import threading
@@ -21,6 +22,7 @@ from keystroke_profile_storage import (
     delete_profile_files,
     ensure_quick_profile,
     list_profile_names,
+    load_profile_favorites,
     load_profile,
     load_profile_meta_favorite,
 )
@@ -93,6 +95,7 @@ class ProfileFrame(tk.Frame):
         self.profile_names = []
         self.name_to_index = {}
         self.favorite_names = set()
+        self._profile_favorite_cache = {}
 
         self._normal_font = tkfont.nametofont("TkTextFont").copy()
         self._bold_font = tkfont.nametofont("TkTextFont").copy()
@@ -118,7 +121,8 @@ class ProfileFrame(tk.Frame):
     def _apply_selected_profile_font(self, profile_name: str):
         font = (
             self._bold_font
-            if profile_name in self.favorite_names and profile_name != QUICK_PROFILE_NAME
+            if profile_name in self.favorite_names
+            and profile_name != QUICK_PROFILE_NAME
             else self._normal_font
         )
         self.profile_combobox.configure(font=font)
@@ -146,17 +150,28 @@ class ProfileFrame(tk.Frame):
         return self.selected_profile_var.get()
 
     def load_profiles(self, select_name: str | None = None):
+        started = time.perf_counter()
         self.profiles_dir.mkdir(exist_ok=True)
         ensure_quick_profile(self.profiles_dir)
 
+        names = [
+            name
+            for name in list_profile_names(self.profiles_dir)
+            if name != QUICK_PROFILE_NAME
+        ]
         favs, non_favs = [], []
-        for name in list_profile_names(self.profiles_dir):
-            if name == QUICK_PROFILE_NAME:
-                continue
+        favorite_map = {}
+        try:
+            favorite_map = load_profile_favorites(self.profiles_dir, names)
+        except Exception as e:
+            logger.warning(f"Favorite map load failed: {e}")
+
+        for name in names:
             try:
-                (favs if load_profile_meta_favorite(self.profiles_dir, name) else non_favs).append(
-                    name
-                )
+                is_favorite = favorite_map.get(name)
+                if is_favorite is None:
+                    is_favorite = load_profile_meta_favorite(self.profiles_dir, name)
+                (favs if is_favorite else non_favs).append(name)
             except Exception as e:
                 logger.warning(f"Load failed {name}: {e}")
                 non_favs.append(name)
@@ -178,10 +193,16 @@ class ProfileFrame(tk.Frame):
             self._apply_selected_profile_font("")
             return
 
-        target_name = select_name or self.selected_profile_var.get() or QUICK_PROFILE_NAME
+        target_name = (
+            select_name or self.selected_profile_var.get() or QUICK_PROFILE_NAME
+        )
         if not self.set_selected_profile(target_name):
             self.profile_combobox.current(0)
             self._on_profile_selected()
+        if os.getenv("KEYSIM_PROFILE_PERF") == "1":
+            print(
+                f"[perf] load_profiles: {(time.perf_counter() - started) * 1000.0:.3f}ms"
+            )
 
     def refresh_texts(self):
         self.lbl_profiles.config(text=txt("Profiles:", "프로필:"))
@@ -203,7 +224,11 @@ class ProfileFrame(tk.Frame):
         ).exists():
             messagebox.showwarning(
                 txt("Warning", "경고"),
-                txt("Profile '{name}' already exists.", "'{name}' 프로필이 이미 존재합니다.", name=dst_name),
+                txt(
+                    "Profile '{name}' already exists.",
+                    "'{name}' 프로필이 이미 존재합니다.",
+                    name=dst_name,
+                ),
                 parent=self,
             )
             return
@@ -224,13 +249,20 @@ class ProfileFrame(tk.Frame):
         if curr == QUICK_PROFILE_NAME:
             messagebox.showinfo(
                 txt("Info", "안내"),
-                txt("The default profile cannot be deleted.", "기본 프로필은 삭제할 수 없습니다."),
+                txt(
+                    "The default profile cannot be deleted.",
+                    "기본 프로필은 삭제할 수 없습니다.",
+                ),
                 parent=self,
             )
             return
         if messagebox.askokcancel(
             txt("Warning", "경고"),
-            txt("Delete profile '{name}'?", "프로필 '{name}'을(를) 삭제하시겠습니까?", name=curr),
+            txt(
+                "Delete profile '{name}'?",
+                "프로필 '{name}'을(를) 삭제하시겠습니까?",
+                name=curr,
+            ),
         ):
             delete_profile_files(self.profiles_dir, curr)
             self.load_profiles()
@@ -382,7 +414,9 @@ class KeystrokeSimulatorApp(tk.Tk):
             )
         except Exception:
             self.settings = UserSettings()
-        self.settings.language = normalize_language(getattr(self.settings, "language", None))
+        self.settings.language = normalize_language(
+            getattr(self.settings, "language", None)
+        )
         set_language(self.settings.language)
         s_file.write_text(json.dumps(asdict(self.settings), indent=2), encoding="utf-8")
         self._refresh_ui_texts()
@@ -467,11 +501,12 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def _check_for_long_alt_shift(self):
         last_state, last_time = False, 0
+        idle_sleep = 0.01
         while self.ctrl_check_active:
             try:
                 curr_time = time.time()
                 if curr_time - last_time < 0.1:
-                    time.sleep(0.01)
+                    time.sleep(idle_sleep)
                     continue
 
                 curr_state = KeyUtils.mod_key_pressed(
@@ -480,8 +515,10 @@ class KeystrokeSimulatorApp(tk.Tk):
                 if curr_state and not last_state:
                     self.after(0, self.toggle_start_stop)
                     last_time = curr_time
+                    idle_sleep = 0.01
                 last_state = curr_state
-                time.sleep(0.01)
+                idle_sleep = 0.01 if curr_state else min(0.05, idle_sleep + 0.005)
+                time.sleep(idle_sleep)
             except Exception:
                 time.sleep(0.1)
 
@@ -554,7 +591,9 @@ class KeystrokeSimulatorApp(tk.Tk):
             return False
 
         try:
-            profile = load_profile(Path(self.profiles_dir), self.selected_profile.get(), migrate=True)
+            profile = load_profile(
+                Path(self.profiles_dir), self.selected_profile.get(), migrate=True
+            )
         except Exception:
             profile = ProfileModel()
 

@@ -1,7 +1,9 @@
 import base64
 import io
 import json
+import os
 import pickle
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -11,6 +13,19 @@ from keystroke_models import EventModel, ProfileModel
 
 
 PROFILE_SCHEMA_VERSION = 1
+_PNG_B64_ATTR = "_ks_png_b64"
+_PNG_IDENTITY_ATTR = "_ks_png_identity"
+_PROFILE_META_CACHE: Dict[Path, tuple[tuple[int, int], bool]] = {}
+
+
+def _perf_enabled() -> bool:
+    return os.getenv("KEYSIM_PROFILE_PERF") == "1"
+
+
+def _log_perf(label: str, start: float) -> None:
+    if _perf_enabled():
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        print(f"[perf] {label}: {elapsed_ms:.3f}ms")
 
 
 def _json_path(profiles_dir: Path, name: str) -> Path:
@@ -21,17 +36,82 @@ def _pkl_path(profiles_dir: Path, name: str) -> Path:
     return profiles_dir / f"{name}.pkl"
 
 
+def _image_identity(img: Image.Image) -> tuple[int, tuple[int, int], str]:
+    return (id(img), img.size, img.mode)
+
+
+def _cache_png_b64(img: Image.Image, data_b64: str) -> None:
+    setattr(img, _PNG_B64_ATTR, data_b64)
+    setattr(img, _PNG_IDENTITY_ATTR, _image_identity(img))
+
+
+def _get_cached_png_b64(img: Image.Image) -> Optional[str]:
+    cached_b64 = getattr(img, _PNG_B64_ATTR, None)
+    cached_identity = getattr(img, _PNG_IDENTITY_ATTR, None)
+    if cached_b64 and cached_identity == _image_identity(img):
+        return cached_b64
+    return None
+
+
+def _profile_file_signature(path: Path) -> Optional[tuple[int, int]]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def _load_json_meta_favorite(path: Path) -> bool:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    meta = (data or {}).get("profile") or {}
+    return bool(meta.get("favorite", False))
+
+
+def _load_profile_meta_favorite_cached(profiles_dir: Path, name: str) -> bool:
+    jpath = _json_path(profiles_dir, name)
+    if jpath.exists():
+        signature = _profile_file_signature(jpath)
+        cached = _PROFILE_META_CACHE.get(jpath)
+        if cached and cached[0] == signature:
+            return cached[1]
+
+        favorite = _load_json_meta_favorite(jpath)
+        if signature is not None:
+            _PROFILE_META_CACHE[jpath] = (signature, favorite)
+        return favorite
+
+    pkl_path = _pkl_path(profiles_dir, name)
+    signature = _profile_file_signature(pkl_path)
+    cached = _PROFILE_META_CACHE.get(pkl_path)
+    if cached and cached[0] == signature:
+        return cached[1]
+
+    profile = load_profile(profiles_dir, name, migrate=False)
+    favorite = bool(getattr(profile, "favorite", False))
+    if signature is not None:
+        _PROFILE_META_CACHE[pkl_path] = (signature, favorite)
+    return favorite
+
+
 def _img_to_png_b64(img: Image.Image) -> str:
+    if cached := _get_cached_png_b64(img):
+        return cached
+
     buf = io.BytesIO()
     # PNG is lossless (important for pixel/region matching reproducibility).
     img.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode("ascii")
+    data_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    _cache_png_b64(img, data_b64)
+    return data_b64
 
 
 def _png_b64_to_img(data_b64: str) -> Image.Image:
     raw = base64.b64decode(data_b64.encode("ascii"))
     with Image.open(io.BytesIO(raw)) as im:
-        return im.copy()
+        img = im.copy()
+    _cache_png_b64(img, data_b64)
+    return img
 
 
 def _to_xy(v: Any) -> Optional[tuple[int, int]]:
@@ -61,10 +141,8 @@ def event_to_dict(evt: EventModel) -> Dict[str, Any]:
         "event_name": getattr(evt, "event_name", None),
         "use_event": bool(getattr(evt, "use_event", True)),
         "capture_size": list(getattr(evt, "capture_size", (100, 100)) or [100, 100]),
-        "latest_position": list(getattr(evt, "latest_position", None) or [])
-        or None,
-        "clicked_position": list(getattr(evt, "clicked_position", None) or [])
-        or None,
+        "latest_position": list(getattr(evt, "latest_position", None) or []) or None,
+        "clicked_position": list(getattr(evt, "clicked_position", None) or []) or None,
         "ref_pixel_value": list(getattr(evt, "ref_pixel_value", None) or []) or None,
         "key_to_enter": getattr(evt, "key_to_enter", None),
         "press_duration_ms": getattr(evt, "press_duration_ms", None),
@@ -182,9 +260,8 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
             e.independent_thread = False
 
         # Legacy fallback: if only latest_screenshot exists, promote it to held_screenshot.
-        if (
-            not getattr(e, "held_screenshot", None)
-            and getattr(e, "latest_screenshot", None)
+        if not getattr(e, "held_screenshot", None) and getattr(
+            e, "latest_screenshot", None
         ):
             e.held_screenshot = e.latest_screenshot
 
@@ -215,25 +292,25 @@ def load_profile_meta_favorite(profiles_dir: Path, name: str) -> bool:
     Favorite lookup without constructing models or decoding images.
     Falls back to legacy pickle if JSON doesn't exist yet.
     """
-    jpath = _json_path(profiles_dir, name)
-    if jpath.exists():
-        with open(jpath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        meta = (data or {}).get("profile") or {}
-        return bool(meta.get("favorite", False))
+    return _load_profile_meta_favorite_cached(profiles_dir, name)
 
-    # Avoid implicit migration when we are only listing metadata.
-    p = load_profile(profiles_dir, name, migrate=False)
-    return bool(getattr(p, "favorite", False))
+
+def load_profile_favorites(profiles_dir: Path, names: list[str]) -> Dict[str, bool]:
+    return {
+        name: _load_profile_meta_favorite_cached(profiles_dir, name) for name in names
+    }
 
 
 def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> ProfileModel:
+    started = time.perf_counter()
     profiles_dir.mkdir(exist_ok=True)
     jpath = _json_path(profiles_dir, name)
     if jpath.exists():
         with open(jpath, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return profile_from_dict(data or {})
+        profile = profile_from_dict(data or {})
+        _log_perf(f"load_profile[{name}]", started)
+        return profile
 
     pkl = _pkl_path(profiles_dir, name)
     if pkl.exists():
@@ -242,24 +319,36 @@ def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> Profile
         _ensure_profile_defaults(p)
         if migrate:
             save_profile(profiles_dir, p, name=name)
+        _log_perf(f"load_profile[{name}]", started)
         return p
 
     p = ProfileModel(name=name, event_list=[], favorite=False)
     _ensure_profile_defaults(p)
+    _log_perf(f"load_profile[{name}]", started)
     return p
 
 
 def save_profile(
     profiles_dir: Path, profile: ProfileModel, name: Optional[str] = None
 ) -> Path:
+    started = time.perf_counter()
     profiles_dir.mkdir(exist_ok=True)
-    prof_name = (name or getattr(profile, "name", None) or "Unnamed").strip() or "Unnamed"
+    prof_name = (
+        name or getattr(profile, "name", None) or "Unnamed"
+    ).strip() or "Unnamed"
     profile.name = prof_name
     _ensure_profile_defaults(profile)
 
     path = _json_path(profiles_dir, prof_name)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(profile_to_dict(profile), f, ensure_ascii=False, indent=2)
+    signature = _profile_file_signature(path)
+    if signature is not None:
+        _PROFILE_META_CACHE[path] = (
+            signature,
+            bool(getattr(profile, "favorite", False)),
+        )
+    _log_perf(f"save_profile[{prof_name}]", started)
     return path
 
 
@@ -272,7 +361,10 @@ def copy_profile(profiles_dir: Path, src_name: str, dst_name: str) -> None:
     dst_name = (dst_name or "").strip()
     if not dst_name:
         raise ValueError("dst_name is empty")
-    if _json_path(profiles_dir, dst_name).exists() or _pkl_path(profiles_dir, dst_name).exists():
+    if (
+        _json_path(profiles_dir, dst_name).exists()
+        or _pkl_path(profiles_dir, dst_name).exists()
+    ):
         raise FileExistsError(f"'{dst_name}' exists.")
     prof = load_profile(profiles_dir, src_name, migrate=True)
     save_profile(profiles_dir, prof, name=dst_name)

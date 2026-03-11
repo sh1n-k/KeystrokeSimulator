@@ -104,12 +104,15 @@ class TestBuildCaptureRect(unittest.TestCase):
         evt = {"center_x": 100, "center_y": 200, "mode": "pixel"}
         rect = self.proc._build_capture_rect(evt)
 
-        self.assertEqual(rect, {
-            "top": 200,
-            "left": 100,
-            "width": 1,
-            "height": 1,
-        })
+        self.assertEqual(
+            rect,
+            {
+                "top": 200,
+                "left": 100,
+                "width": 1,
+                "height": 1,
+            },
+        )
 
     def test_region_mode_centered_rect(self):
         """영역 모드: 중심점 기준 영역"""
@@ -122,12 +125,15 @@ class TestBuildCaptureRect(unittest.TestCase):
         }
         rect = self.proc._build_capture_rect(evt)
 
-        self.assertEqual(rect, {
-            "top": 200 - 15,  # cy - h//2
-            "left": 100 - 10,  # cx - w//2
-            "width": 20,
-            "height": 30,
-        })
+        self.assertEqual(
+            rect,
+            {
+                "top": 200 - 15,  # cy - h//2
+                "left": 100 - 10,  # cx - w//2
+                "width": 20,
+                "height": 30,
+            },
+        )
 
     def test_region_mode_odd_size(self):
         """영역 모드: 홀수 크기"""
@@ -140,8 +146,8 @@ class TestBuildCaptureRect(unittest.TestCase):
         }
         rect = self.proc._build_capture_rect(evt)
 
-        self.assertEqual(rect["left"], 50 - 5)   # 11 // 2 = 5
-        self.assertEqual(rect["top"], 50 - 3)    # 7 // 2 = 3
+        self.assertEqual(rect["left"], 50 - 5)  # 11 // 2 = 5
+        self.assertEqual(rect["top"], 50 - 3)  # 7 // 2 = 3
         self.assertEqual(rect["width"], 11)
         self.assertEqual(rect["height"], 7)
 
@@ -151,6 +157,34 @@ class TestBuildCaptureRect(unittest.TestCase):
         rect = self.proc._build_capture_rect(evt)
 
         self.assertEqual(rect, {"top": 0, "left": 0, "width": 1, "height": 1})
+
+
+class TestBuildCaptureGroups(unittest.TestCase):
+    def setUp(self):
+        self.proc = make_processor_stub()
+
+    def test_nearby_events_share_group(self):
+        events = [
+            {"name": "A", "center_x": 10, "center_y": 10, "mode": "pixel"},
+            {"name": "B", "center_x": 30, "center_y": 25, "mode": "pixel"},
+        ]
+
+        groups = self.proc._build_capture_groups(events)
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(len(groups[0]["events"]), 2)
+
+    def test_distant_events_split_groups(self):
+        events = [
+            {"name": "A", "center_x": 10, "center_y": 10, "mode": "pixel"},
+            {"name": "B", "center_x": 500, "center_y": 500, "mode": "pixel"},
+        ]
+
+        groups = self.proc._build_capture_groups(events)
+
+        self.assertEqual(len(groups), 2)
+        self.assertEqual(groups[0]["events"][0]["name"], "A")
+        self.assertEqual(groups[1]["events"][0]["name"], "B")
 
 
 class TestCheckMatchRegionROIIntegration(unittest.TestCase):
@@ -230,23 +264,35 @@ class TestExtractROIWarning(unittest.TestCase):
         """이벤트명이 다르면 각각 1회씩 경고"""
         img = np.zeros((10, 10, 3), dtype=np.uint8)
         with patch("keystroke_processor.logger") as mock_log:
-            self.proc._extract_roi(img, self._out_of_bounds_evt("EvtA"), is_independent=False)
-            self.proc._extract_roi(img, self._out_of_bounds_evt("EvtB"), is_independent=False)
+            self.proc._extract_roi(
+                img, self._out_of_bounds_evt("EvtA"), is_independent=False
+            )
+            self.proc._extract_roi(
+                img, self._out_of_bounds_evt("EvtB"), is_independent=False
+            )
             self.assertEqual(mock_log.warning.call_count, 2)
 
     def test_warning_message_contains_event_name_and_sizes(self):
         """경고 메시지에 이벤트명과 크기 정보가 포함됨"""
         img = np.zeros((10, 10, 3), dtype=np.uint8)
         with patch("keystroke_processor.logger") as mock_log:
-            self.proc._extract_roi(img, self._out_of_bounds_evt("MyEvent"), is_independent=False)
+            self.proc._extract_roi(
+                img, self._out_of_bounds_evt("MyEvent"), is_independent=False
+            )
             msg = mock_log.warning.call_args[0][0]
             self.assertIn("MyEvent", msg)
-            self.assertIn("50", msg)   # region_w / region_h
+            self.assertIn("50", msg)  # region_w / region_h
 
     def test_no_warning_on_successful_extraction(self):
         """정상 ROI 추출 시 경고 없음"""
         img = np.zeros((100, 100, 3), dtype=np.uint8)
-        evt = {"name": "OkEvt", "region_w": 10, "region_h": 10, "rel_x": 50, "rel_y": 50}
+        evt = {
+            "name": "OkEvt",
+            "region_w": 10,
+            "region_h": 10,
+            "rel_x": 50,
+            "rel_y": 50,
+        }
         with patch("keystroke_processor.logger") as mock_log:
             self.proc._extract_roi(img, evt, is_independent=False)
             mock_log.warning.assert_not_called()

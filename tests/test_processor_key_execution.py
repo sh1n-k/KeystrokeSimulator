@@ -1,7 +1,7 @@
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from keystroke_processor import KeystrokeProcessor
 
@@ -99,6 +99,36 @@ class TestPressKeySync(unittest.TestCase):
             proc._sync_press_key(evt)
 
         self.assertNotIn("A", proc.pressed_keys)
+
+
+class TestProcessorStart(unittest.TestCase):
+    def test_start_creates_thread_per_independent_event(self):
+        proc = KeystrokeProcessor.__new__(KeystrokeProcessor)
+        proc.pid = None
+        proc.main_thread = MagicMock()
+        proc.indep_threads = []
+        proc.independent_events = [{"name": "A"}, {"name": "B"}]
+        proc._run_independent_loop = MagicMock()
+
+        created_threads = []
+
+        def make_thread(*args, **kwargs):
+            thread = MagicMock()
+            thread.target = kwargs.get("target")
+            thread.args = kwargs.get("args")
+            created_threads.append(thread)
+            return thread
+
+        with patch("keystroke_processor.threading.Thread", side_effect=make_thread):
+            KeystrokeProcessor.start(proc)
+
+        proc.main_thread.start.assert_called_once()
+        self.assertEqual(len(created_threads), 2)
+        self.assertEqual(
+            [thread.args for thread in created_threads],
+            [({"name": "A"},), ({"name": "B"},)],
+        )
+        self.assertEqual(len(proc.indep_threads), 2)
 
 
 if __name__ == "__main__":

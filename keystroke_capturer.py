@@ -22,7 +22,9 @@ class ScreenshotCapturer:
 
         self.capturing: Event = Event()
         self.capture_thread: Optional[Thread] = None
-        self.screenshot_callback: Callable[[Tuple, Image.Image], None] = None
+        self.screenshot_callback: Optional[Callable[[Tuple, Image.Image], None]] = None
+        self._last_capture_signature = None
+        self._idle_cycles = 0
 
     def get_current_mouse_position(self) -> Optional[Tuple[int, int]]:
         return self.current_position
@@ -45,6 +47,8 @@ class ScreenshotCapturer:
 
     def start_capture(self):
         self.capturing.set()
+        self._last_capture_signature = None
+        self._idle_cycles = 0
         self.capture_thread = Thread(target=self.capture_screenshot)
         self.capture_thread.start()
 
@@ -57,8 +61,15 @@ class ScreenshotCapturer:
                 try:
                     position = self.get_current_mouse_position()
                     callback = self.screenshot_callback
-                    if position and self.screenshot_callback:
+                    if position and callback:
                         box_w, box_h = self.box_w, self.box_h
+                        capture_signature = (position, box_w, box_h)
+                        if capture_signature == self._last_capture_signature:
+                            self._idle_cycles = min(self._idle_cycles + 1, 5)
+                        else:
+                            self._last_capture_signature = capture_signature
+                            self._idle_cycles = 0
+
                         image = sct.grab(
                             {
                                 "top": position[1],
@@ -75,5 +86,4 @@ class ScreenshotCapturer:
                     logger.error(f"Event windows has been destroyed: {e}")
                     self.capturing.clear()
                     break
-
-                time.sleep(0.2)
+                time.sleep(0.2 if self._idle_cycles == 0 else 0.3)

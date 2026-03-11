@@ -3,6 +3,7 @@ import pickle
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -15,6 +16,7 @@ from keystroke_profile_storage import (
     event_to_dict,
     list_profile_names,
     load_profile,
+    load_profile_favorites,
     load_profile_meta_favorite,
     rename_profile_files,
     save_profile,
@@ -136,7 +138,9 @@ class TestCopyProfile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
             evt = EventModel(event_name="E1", key_to_enter="A")
-            save_profile(prof_dir, ProfileModel(name="Src", event_list=[evt]), name="Src")
+            save_profile(
+                prof_dir, ProfileModel(name="Src", event_list=[evt]), name="Src"
+            )
             copy_profile(prof_dir, "Src", "Dst")
 
             self.assertTrue((prof_dir / "Dst.json").exists())
@@ -188,7 +192,9 @@ class TestListProfileNames(unittest.TestCase):
         """JSON+PKL 혼합"""
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
-            save_profile(prof_dir, ProfileModel(name="Alpha", event_list=[]), name="Alpha")
+            save_profile(
+                prof_dir, ProfileModel(name="Alpha", event_list=[]), name="Alpha"
+            )
             # Create a fake PKL
             (prof_dir / "Beta.pkl").write_bytes(b"fake")
             names = list_profile_names(prof_dir)
@@ -199,8 +205,12 @@ class TestListProfileNames(unittest.TestCase):
         """Quick 프로필이 항상 첫 번째"""
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
-            save_profile(prof_dir, ProfileModel(name="Zebra", event_list=[]), name="Zebra")
-            save_profile(prof_dir, ProfileModel(name="Quick", event_list=[]), name="Quick")
+            save_profile(
+                prof_dir, ProfileModel(name="Zebra", event_list=[]), name="Zebra"
+            )
+            save_profile(
+                prof_dir, ProfileModel(name="Quick", event_list=[]), name="Quick"
+            )
             names = list_profile_names(prof_dir)
             self.assertEqual(names[0], "Quick")
 
@@ -288,6 +298,21 @@ class TestEventRoundtrip(unittest.TestCase):
         restored = event_from_dict(d)
         self.assertEqual(restored.held_screenshot.getpixel((0, 0)), (42, 84, 126))
 
+    def test_loaded_image_reuses_cached_base64_on_save(self):
+        """로드된 이미지 저장 시 PNG/Base64 재인코딩을 재사용"""
+        img = Image.new("RGB", (2, 2), color=(42, 84, 126))
+        restored = event_from_dict(
+            event_to_dict(EventModel(event_name="Cached", held_screenshot=img))
+        )
+
+        with patch.object(
+            Image.Image, "save", side_effect=AssertionError("unexpected re-encode")
+        ):
+            payload = event_to_dict(restored)["held_screenshot"]
+
+        self.assertEqual(payload["format"], "png")
+        self.assertTrue(payload["data_b64"])
+
 
 class TestEnsureQuickProfile(unittest.TestCase):
     """ensure_quick_profile: Quick 프로필 자동 생성"""
@@ -304,7 +329,9 @@ class TestEnsureQuickProfile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
             evt = EventModel(event_name="Existing", key_to_enter="X")
-            save_profile(prof_dir, ProfileModel(name="Quick", event_list=[evt]), name="Quick")
+            save_profile(
+                prof_dir, ProfileModel(name="Quick", event_list=[evt]), name="Quick"
+            )
             ensure_quick_profile(prof_dir)
             p = load_profile(prof_dir, "Quick")
             self.assertEqual(len(p.event_list), 1)
@@ -318,7 +345,11 @@ class TestLoadProfileMetaFavorite(unittest.TestCase):
         """JSON에서 favorite 조회"""
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
-            save_profile(prof_dir, ProfileModel(name="Fav", event_list=[], favorite=True), name="Fav")
+            save_profile(
+                prof_dir,
+                ProfileModel(name="Fav", event_list=[], favorite=True),
+                name="Fav",
+            )
             self.assertTrue(load_profile_meta_favorite(prof_dir, "Fav"))
 
     def test_nonexistent_defaults_false(self):
@@ -328,7 +359,30 @@ class TestLoadProfileMetaFavorite(unittest.TestCase):
             result = load_profile_meta_favorite(prof_dir, "NonExistent")
             self.assertFalse(result)
 
+    def test_load_profile_favorites_refreshes_when_file_changes(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            save_profile(
+                prof_dir,
+                ProfileModel(name="A", event_list=[], favorite=False),
+                name="A",
+            )
+            save_profile(
+                prof_dir, ProfileModel(name="B", event_list=[], favorite=True), name="B"
+            )
+
+            self.assertEqual(
+                load_profile_favorites(prof_dir, ["A", "B"]), {"A": False, "B": True}
+            )
+
+            save_profile(
+                prof_dir, ProfileModel(name="A", event_list=[], favorite=True), name="A"
+            )
+
+            self.assertEqual(
+                load_profile_favorites(prof_dir, ["A", "B"]), {"A": True, "B": True}
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
-

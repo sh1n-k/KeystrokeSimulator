@@ -57,9 +57,15 @@ class TestEditorCycleValidation(unittest.TestCase):
 class TestValidateRequiredFields(unittest.TestCase):
     """KeystrokeEventEditor._validate_required_fields: 필수 필드 검증"""
 
-    def _make_editor_stub(self, latest_pos=None, clicked_pos=None,
-                          held_img=None, ref_pixel=None, key_to_enter=None,
-                          execute_action=True):
+    def _make_editor_stub(
+        self,
+        latest_pos=None,
+        clicked_pos=None,
+        held_img=None,
+        ref_pixel=None,
+        key_to_enter=None,
+        execute_action=True,
+    ):
         stub = SimpleNamespace(
             latest_pos=latest_pos,
             clicked_pos=clicked_pos,
@@ -74,8 +80,11 @@ class TestValidateRequiredFields(unittest.TestCase):
     def test_missing_position_fails(self, mock_msgbox):
         """좌표 누락 시 False"""
         stub = self._make_editor_stub(
-            latest_pos=None, clicked_pos=(10, 20),
-            held_img="img", ref_pixel=(1, 2, 3), key_to_enter="A",
+            latest_pos=None,
+            clicked_pos=(10, 20),
+            held_img="img",
+            ref_pixel=(1, 2, 3),
+            key_to_enter="A",
         )
         result = KeystrokeEventEditor._validate_required_fields(stub)
         self.assertFalse(result)
@@ -84,8 +93,11 @@ class TestValidateRequiredFields(unittest.TestCase):
     def test_missing_key_when_execute_action(self, mock_msgbox):
         """execute_action=True에서 키 누락 시 False"""
         stub = self._make_editor_stub(
-            latest_pos=(1, 2), clicked_pos=(10, 20),
-            held_img="img", ref_pixel=(1, 2, 3), key_to_enter=None,
+            latest_pos=(1, 2),
+            clicked_pos=(10, 20),
+            held_img="img",
+            ref_pixel=(1, 2, 3),
+            key_to_enter=None,
             execute_action=True,
         )
         result = KeystrokeEventEditor._validate_required_fields(stub)
@@ -95,8 +107,11 @@ class TestValidateRequiredFields(unittest.TestCase):
     def test_missing_held_img_fails(self, mock_msgbox):
         """held_img 누락 시 False (region 모드에서 특히 중요)"""
         stub = self._make_editor_stub(
-            latest_pos=(1, 2), clicked_pos=(10, 20),
-            held_img=None, ref_pixel=(1, 2, 3), key_to_enter="A",
+            latest_pos=(1, 2),
+            clicked_pos=(10, 20),
+            held_img=None,
+            ref_pixel=(1, 2, 3),
+            key_to_enter="A",
         )
         result = KeystrokeEventEditor._validate_required_fields(stub)
         self.assertFalse(result)
@@ -104,8 +119,11 @@ class TestValidateRequiredFields(unittest.TestCase):
     def test_valid_event_passes(self):
         """유효한 이벤트 → True"""
         stub = self._make_editor_stub(
-            latest_pos=(1, 2), clicked_pos=(10, 20),
-            held_img="img", ref_pixel=(1, 2, 3), key_to_enter="A",
+            latest_pos=(1, 2),
+            clicked_pos=(10, 20),
+            held_img="img",
+            ref_pixel=(1, 2, 3),
+            key_to_enter="A",
         )
         result = KeystrokeEventEditor._validate_required_fields(stub)
         self.assertTrue(result)
@@ -144,7 +162,9 @@ class TestRegionSizeClamp(unittest.TestCase):
         self.assertEqual(stub.region_w_var.get(), 61)
         self.assertEqual(stub.region_h_var.get(), 61)
 
-    def test_sync_region_constraints_disables_inputs_when_point_is_too_close_to_edge(self):
+    def test_sync_region_constraints_disables_inputs_when_point_is_too_close_to_edge(
+        self,
+    ):
         stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
         interp = tk.Tcl()
         stub.match_mode_var = tk.StringVar(master=interp, value="region")
@@ -160,7 +180,9 @@ class TestRegionSizeClamp(unittest.TestCase):
 
 
 class TestRegionBoundsValidation(unittest.TestCase):
-    def _make_stub(self, clicked_position=(50, 50), image_size=(100, 100), mode="region"):
+    def _make_stub(
+        self, clicked_position=(50, 50), image_size=(100, 100), mode="region"
+    ):
         stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
         interp = tk.Tcl()
         stub.match_mode_var = tk.StringVar(master=interp, value=mode)
@@ -174,7 +196,9 @@ class TestRegionBoundsValidation(unittest.TestCase):
         self.assertEqual(KeystrokeEventEditor._max_region_dimension(0, 100), 1)
 
     @patch("keystroke_event_editor.messagebox")
-    def test_validate_region_bounds_rejects_edge_point_under_minimum(self, mock_messagebox):
+    def test_validate_region_bounds_rejects_edge_point_under_minimum(
+        self, mock_messagebox
+    ):
         stub = self._make_stub(clicked_position=(5, 50))
 
         result = KeystrokeEventEditor._validate_region_bounds(stub, 20, 20)
@@ -199,6 +223,32 @@ class TestRegionBoundsValidation(unittest.TestCase):
 
         self.assertTrue(result)
         mock_messagebox.showerror.assert_not_called()
+
+
+class TestLivePreviewUpdates(unittest.TestCase):
+    def test_update_capture_image_does_not_skip_different_frame_with_same_sample_points(
+        self,
+    ):
+        editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        editor.win = SimpleNamespace(
+            winfo_exists=lambda: True, after=lambda _delay, cb: cb()
+        )
+        editor.lbl_img1 = SimpleNamespace(winfo_exists=lambda: True)
+        editor.latest_pos = None
+        editor.latest_img = None
+        editor._safe_update_img_lbl = MagicMock()
+
+        img1 = Image.new("RGB", (20, 20), color=(0, 0, 0))
+        img2 = Image.new("RGB", (20, 20), color=(0, 0, 0))
+        img2.putpixel((5, 5), (255, 0, 0))
+
+        with patch.object(
+            KeystrokeEventEditor, "_scale_for_display", side_effect=lambda img: img
+        ):
+            KeystrokeEventEditor.update_capture_image(editor, (1, 1), img1)
+            KeystrokeEventEditor.update_capture_image(editor, (1, 1), img2)
+
+        self.assertEqual(editor._safe_update_img_lbl.call_count, 2)
 
 
 if __name__ == "__main__":

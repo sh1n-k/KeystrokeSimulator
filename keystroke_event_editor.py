@@ -208,12 +208,15 @@ class KeystrokeEventEditor:
         ).pack(side="left", padx=10)
         ttk.Checkbutton(
             gb_mode,
-            text=txt("Invert match (trigger on mismatch)", "반전 매칭 (불일치 시 트리거)"),
+            text=txt(
+                "Invert match (trigger on mismatch)", "반전 매칭 (불일치 시 트리거)"
+            ),
             variable=self.invert_match_var,
         ).pack(side="left", padx=10)
 
         gb_size = ttk.LabelFrame(
-            f_main, text=txt("Region Size (Region mode only)", "영역 크기 (영역 모드 전용)")
+            f_main,
+            text=txt("Region Size (Region mode only)", "영역 크기 (영역 모드 전용)"),
         )
         gb_size.pack(fill="x", pady=5)
 
@@ -242,7 +245,10 @@ class KeystrokeEventEditor:
             self.entry_region_h.bind(seq, self._on_region_size_change)
 
         gb_time = ttk.LabelFrame(
-            f_main, text=txt("Timing (Override global settings)", "타이밍 (전역 설정 덮어쓰기)")
+            f_main,
+            text=txt(
+                "Timing (Override global settings)", "타이밍 (전역 설정 덮어쓰기)"
+            ),
         )
         gb_time.pack(fill="x", pady=5)
 
@@ -326,9 +332,8 @@ class KeystrokeEventEditor:
     def _sync_region_constraints(self):
         limits = self._get_region_limits()
         max_w, max_h = limits if limits else (1000, 1000)
-        can_edit = (
-            self.match_mode_var.get() == "region"
-            and (not limits or (max_w >= 20 and max_h >= 20))
+        can_edit = self.match_mode_var.get() == "region" and (
+            not limits or (max_w >= 20 and max_h >= 20)
         )
         state = "normal" if can_edit else "disabled"
         if self.entry_region_w:
@@ -414,7 +419,10 @@ class KeystrokeEventEditor:
 
         ttk.Checkbutton(
             gb_exec,
-            text=txt("Independent thread (ignore group/conditions)", "독립 스레드 (그룹/조건 무시)"),
+            text=txt(
+                "Independent thread (ignore group/conditions)",
+                "독립 스레드 (그룹/조건 무시)",
+            ),
             variable=self.independent_thread,
         ).pack(padx=10, pady=(5, 0), anchor="w")
         self.lbl_indep_warning = ttk.Label(
@@ -428,18 +436,22 @@ class KeystrokeEventEditor:
         # 초기에는 숨김 — _on_indep_toggle에서 동적으로 표시
 
         # --- 그룹 및 우선순위 ---
-        gb_grp = ttk.LabelFrame(f_main, text=txt("Group and Priority", "그룹 및 우선순위"))
+        gb_grp = ttk.LabelFrame(
+            f_main, text=txt("Group and Priority", "그룹 및 우선순위")
+        )
         gb_grp.pack(fill="x", pady=5)
 
-        ttk.Label(gb_grp, text=txt("Group ID:", "그룹 ID:")).grid(row=0, column=0, padx=5, pady=5)
+        ttk.Label(gb_grp, text=txt("Group ID:", "그룹 ID:")).grid(
+            row=0, column=0, padx=5, pady=5
+        )
 
         self.cmb_group = ttk.Combobox(gb_grp, textvariable=self.group_id_var, width=15)
         self.cmb_group.grid(row=0, column=1, padx=5, pady=5)
         self.cmb_group["values"] = self._get_existing_groups()
 
-        ttk.Label(gb_grp, text=txt("Priority (0 is highest):", "우선순위 (0이 가장 높음):")).grid(
-            row=0, column=2, padx=5, pady=5
-        )
+        ttk.Label(
+            gb_grp, text=txt("Priority (0 is highest):", "우선순위 (0이 가장 높음):")
+        ).grid(row=0, column=2, padx=5, pady=5)
         self.entry_priority = ttk.Entry(
             gb_grp,
             textvariable=self.priority_var,
@@ -451,7 +463,10 @@ class KeystrokeEventEditor:
 
         self.lbl_group_hint = ttk.Label(
             gb_grp,
-            text=txt("Select an existing group or enter a new name", "기존 그룹 선택 또는 새 이름 입력"),
+            text=txt(
+                "Select an existing group or enter a new name",
+                "기존 그룹 선택 또는 새 이름 입력",
+            ),
             foreground="gray",
         )
         self.lbl_group_hint.grid(
@@ -460,7 +475,11 @@ class KeystrokeEventEditor:
 
         # --- 조건 설정 ---
         gb_cond = ttk.LabelFrame(
-            f_main, text=txt("Condition Settings (Click to cycle state)", "조건 설정 (클릭으로 상태 전환)")
+            f_main,
+            text=txt(
+                "Condition Settings (Click to cycle state)",
+                "조건 설정 (클릭으로 상태 전환)",
+            ),
         )
         gb_cond.pack(fill="both", expand=True, pady=5)
 
@@ -518,20 +537,18 @@ class KeystrokeEventEditor:
         f_btn = tk.Frame(self.win)
         f_btn.pack(pady=10, fill="x")
 
-        tk.Button(f_btn, text=txt("Capture (Ctrl)", "캡처 (Ctrl)"), command=self.hold_image).pack(
-            side="left", padx=20
-        )
-        tk.Button(f_btn, text=txt("Cancel (ESC)", "취소 (ESC)"), command=self.close_window).pack(
-            side="right", padx=20
-        )
+        tk.Button(
+            f_btn, text=txt("Capture (Ctrl)", "캡처 (Ctrl)"), command=self.hold_image
+        ).pack(side="left", padx=20)
+        tk.Button(
+            f_btn, text=txt("Cancel (ESC)", "취소 (ESC)"), command=self.close_window
+        ).pack(side="right", padx=20)
         tk.Button(
             f_btn,
             text=txt("Save (Enter)", "저장 (Enter)"),
             command=self.save_event,
             bg="#dddddd",
-        ).pack(
-            side="right", padx=5
-        )
+        ).pack(side="right", padx=5)
 
     def _on_indep_toggle(self, *args):
         """독립 스레드 활성화 시 그룹/우선순위/조건 비활성화"""
@@ -664,7 +681,9 @@ class KeystrokeEventEditor:
                 and self.lbl_img1.winfo_exists()
             ):
                 scaled = self._scale_for_display(img)
-                self.win.after(0, lambda s=scaled: self._safe_update_img_lbl(self.lbl_img1, s))
+                self.win.after(
+                    0, lambda s=scaled: self._safe_update_img_lbl(self.lbl_img1, s)
+                )
         except (tk.TclError, AttributeError, RuntimeError):
             # 윈도우가 이미 파괴된 경우 무시
             pass
@@ -673,7 +692,9 @@ class KeystrokeEventEditor:
         if self.latest_pos and self.latest_img:
             self._set_entries(self.coord_entries[:2], *self.latest_pos)
             self.held_img = self.latest_img.copy()
-            self._update_img_lbl(self.lbl_img2, self._scale_for_display(self.latest_img))
+            self._update_img_lbl(
+                self.lbl_img2, self._scale_for_display(self.latest_img)
+            )
             if self.clicked_pos:
                 self._sync_region_constraints()
                 self._on_region_size_change()
@@ -865,9 +886,7 @@ class KeystrokeEventEditor:
 
         new_state_disp, new_val = self._cycle_condition_state(curr_state)
         tag = self._get_condition_tag(new_val)
-        self.tree_cond.item(
-            item_id, values=(evt_name, new_state_disp), tags=(tag,)
-        )
+        self.tree_cond.item(item_id, values=(evt_name, new_state_disp), tags=(tag,))
 
         if new_val is None:
             self.temp_conditions.pop(evt_name, None)
@@ -986,7 +1005,10 @@ class KeystrokeEventEditor:
         if dur and dur < 50:
             messagebox.showerror(
                 txt("Error", "오류"),
-                txt("Duration must be at least 50ms.", "지속 시간은 최소 50ms여야 합니다."),
+                txt(
+                    "Duration must be at least 50ms.",
+                    "지속 시간은 최소 50ms여야 합니다.",
+                ),
             )
             return False
         if dur and rand and rand < 30:

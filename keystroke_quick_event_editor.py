@@ -1,4 +1,3 @@
-import copy
 import tkinter as tk
 import tkinter.ttk as ttk
 import time
@@ -78,16 +77,26 @@ class KeystrokeQuickEventEditor:
         # Capture Size
         f_size = tk.Frame(self.win)
         f_size.pack(pady=3)
-        tk.Label(f_size, text=txt("Capture Width:", "캡처 너비:")).pack(side=tk.LEFT, padx=5)
+        tk.Label(f_size, text=txt("Capture Width:", "캡처 너비:")).pack(
+            side=tk.LEFT, padx=5
+        )
         self.spn_capture_w = ttk.Spinbox(
-            f_size, textvariable=self.capture_w_var, from_=50, to=1000, width=5,
+            f_size,
+            textvariable=self.capture_w_var,
+            from_=50,
+            to=1000,
+            width=5,
         )
         self.spn_capture_w.pack(side=tk.LEFT)
         for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
             self.spn_capture_w.bind(seq, self._on_capture_size_change)
         tk.Label(f_size, text=txt("Height:", "높이:")).pack(side=tk.LEFT, padx=5)
         self.spn_capture_h = ttk.Spinbox(
-            f_size, textvariable=self.capture_h_var, from_=50, to=1000, width=5,
+            f_size,
+            textvariable=self.capture_h_var,
+            from_=50,
+            to=1000,
+            width=5,
         )
         self.spn_capture_h.pack(side=tk.LEFT)
         for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
@@ -99,19 +108,17 @@ class KeystrokeQuickEventEditor:
         tk.Button(
             f_btn,
             text=txt("Grab (Ctrl)", "캡처 (Ctrl)"),
-            width=dual_text_width("Grab (Ctrl)", "캡처 (Ctrl)", padding=2, min_width=11),
+            width=dual_text_width(
+                "Grab (Ctrl)", "캡처 (Ctrl)", padding=2, min_width=11
+            ),
             command=self.hold_image,
-        ).pack(
-            side=tk.LEFT, padx=5
-        )
+        ).pack(side=tk.LEFT, padx=5)
         tk.Button(
             f_btn,
             text=txt("Close (ESC)", "닫기 (ESC)"),
             width=dual_text_width("Close (ESC)", "닫기 (ESC)", padding=2, min_width=11),
             command=self.close,
-        ).pack(
-            side=tk.LEFT, padx=5
-        )
+        ).pack(side=tk.LEFT, padx=5)
 
         # Info
         tk.Label(
@@ -231,7 +238,7 @@ class KeystrokeQuickEventEditor:
             return
         cx, cy = self.clicked_pos
 
-        res = copy.deepcopy(img)
+        res = img.copy()
         px = res.load()
         w, h = res.size
         for x in range(w):
