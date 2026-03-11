@@ -178,6 +178,17 @@ class TestMainUiState(unittest.TestCase):
         app.profile_button_frame.modkeys_button = MagicMock()
         app.profile_button_frame.settings_button = MagicMock()
         app.profile_button_frame.sort_button = MagicMock()
+        app._get_readiness_snapshot = MagicMock(
+            return_value={
+                "can_start": not running,
+                "badge_text": "Ready",
+                "title": "title",
+                "detail": "detail",
+                "bg": "bg",
+                "fg": "fg",
+            }
+        )
+        app._update_main_status = MagicMock()
         return app
 
     def test_update_ui_disables_quick_events_and_modkeys_when_running(self):
@@ -202,6 +213,27 @@ class TestMainUiState(unittest.TestCase):
         )
         app.profile_button_frame.modkeys_button.config.assert_called_once_with(
             state="normal"
+        )
+
+    def test_update_ui_updates_start_button_label_for_running_state(self):
+        app = self._make_ui_stub(running=True)
+
+        KeystrokeSimulatorApp._update_ui(app)
+
+        app.button_frame.start_stop_button.config.assert_called_once_with(
+            text="Stop",
+            state="normal",
+        )
+
+    def test_update_ui_disables_start_button_when_not_ready(self):
+        app = self._make_ui_stub(running=False)
+        app._get_readiness_snapshot.return_value["can_start"] = False
+
+        KeystrokeSimulatorApp._update_ui(app)
+
+        app.button_frame.start_stop_button.config.assert_called_once_with(
+            text="Start",
+            state="disabled",
         )
 
 

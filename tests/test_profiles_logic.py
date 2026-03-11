@@ -291,6 +291,7 @@ class TestProfileOverviewBadges(unittest.TestCase):
         stub.lbl_attention_badge = FakeWidget()
         stub.lbl_save_badge = FakeWidget()
         stub.lbl_status = FakeWidget()
+        stub._overview_status_text = ""
         return stub
 
     def test_refresh_profile_overview_updates_counts(self):
@@ -306,6 +307,21 @@ class TestProfileOverviewBadges(unittest.TestCase):
         self.assertEqual(stub.lbl_events_badge.cget("text"), "⚙️ Events 3")
         self.assertEqual(stub.lbl_groups_badge.cget("text"), "🧩 Groups 2")
         self.assertEqual(stub.lbl_attention_badge.cget("text"), "⚠ Attention 2")
+        self.assertIn("condition-only: 1", stub._overview_status_text)
+        self.assertIn("missing key: 1", stub._overview_status_text)
+
+    def test_refresh_profile_overview_sets_ok_detail_when_attention_zero(self):
+        stub = self._make_profile_stub(
+            [EventModel(event_name="A", execute_action=True, key_to_enter="X")]
+        )
+
+        stub._refresh_profile_overview()
+
+        self.assertEqual(stub.lbl_attention_badge.cget("text"), "✅ Attention 0")
+        self.assertEqual(
+            stub._overview_status_text,
+            "All events are ready for autosave and run checks.",
+        )
 
     def test_save_status_badge_prefixes(self):
         stub = self._make_profile_stub([EventModel(event_name="A", key_to_enter="X")])
@@ -316,6 +332,18 @@ class TestProfileOverviewBadges(unittest.TestCase):
         stub._set_save_status("error", "bad")
         self.assertEqual(stub.lbl_save_badge.cget("text"), "⚠ Save failed")
         self.assertEqual(stub.lbl_status.cget("text"), "bad")
+
+    def test_saved_status_uses_overview_text_when_detail_missing(self):
+        stub = self._make_profile_stub([EventModel(event_name="A", key_to_enter="X")])
+
+        with patch("keystroke_profiles.time.strftime", return_value="12:34:56"):
+            stub._set_save_status("saved")
+
+        self.assertEqual(stub.lbl_save_badge.cget("text"), "✅ Saved 12:34:56")
+        self.assertEqual(
+            stub.lbl_status.cget("text"),
+            "All events are ready for autosave and run checks.",
+        )
 
 
 if __name__ == "__main__":

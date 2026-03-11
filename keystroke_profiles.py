@@ -1377,6 +1377,7 @@ class KeystrokeProfiles:
         self._dirty = False
         self._autosave_after_id = None
         self._last_saved_fingerprint = None
+        self._overview_status_text = ""
 
         self.win = tk.Toplevel(main_win)
         self.win.title(f"{txt('Profile Manager', '프로필 관리자')} - {self.prof_name}")
@@ -1549,12 +1550,38 @@ class KeystrokeProfiles:
             fg="#2f6f3e",
         )
         if warning_count:
+            warning_parts = []
+            if condition_only_count:
+                warning_parts.append(
+                    txt(
+                        "condition-only: {count}",
+                        "조건 전용: {count}",
+                        count=condition_only_count,
+                    )
+                )
+            if missing_key_count:
+                warning_parts.append(
+                    txt(
+                        "missing key: {count}",
+                        "입력 키 없음: {count}",
+                        count=missing_key_count,
+                    )
+                )
+            self._overview_status_text = txt(
+                "Review: {details}",
+                "확인 필요: {details}",
+                details=", ".join(warning_parts),
+            )
             self.lbl_attention_badge.config(
                 text=txt(f"⚠ Attention {warning_count}", f"⚠ 주의 {warning_count}"),
                 bg=BADGE_BG_WARN,
                 fg=BADGE_FG_WARN,
             )
             return
+        self._overview_status_text = txt(
+            "All events are ready for autosave and run checks.",
+            "모든 이벤트가 자동저장 및 실행 점검 기준을 통과했습니다.",
+        )
         self.lbl_attention_badge.config(
             text=txt("✅ Attention 0", "✅ 주의 0"),
             bg=BADGE_BG_OK,
@@ -1580,7 +1607,7 @@ class KeystrokeProfiles:
                 fg=BADGE_FG_OK,
             )
             self.lbl_status.config(
-                text=detail if detail else "",
+                text=detail if detail else self._overview_status_text,
                 foreground="gray",
             )
             return

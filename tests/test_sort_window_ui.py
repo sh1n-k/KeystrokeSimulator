@@ -52,6 +52,15 @@ class TestSortWindowFormatting(unittest.TestCase):
             ("Condition", SW_FG_MUTED),
         )
 
+    def test_build_summary_text(self):
+        stub = KeystrokeSortEvents.__new__(KeystrokeSortEvents)
+        stub.events = [EventModel(event_name="A"), EventModel(event_name="B")]
+
+        text = stub._build_summary_text()
+
+        self.assertIn("2 event(s)", text)
+        self.assertIn("Drag a row", text)
+
 
 class TestSortWindowMessages(unittest.TestCase):
     def setUp(self):

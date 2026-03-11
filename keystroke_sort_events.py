@@ -58,6 +58,7 @@ class KeystrokeSortEvents(tk.Toplevel):
         self.events = self.profile.event_list
         self._preview_win = None
         self._preview_photo = None
+        self.lbl_summary = None
 
         self._create_ui()
         self._load_state()
@@ -95,6 +96,16 @@ class KeystrokeSortEvents(tk.Toplevel):
             command=self.save,
         ).pack(side=tk.RIGHT, padx=(0, SW_PAD_MD), pady=SW_PAD_SM)
 
+        self.lbl_summary = tk.Label(
+            self,
+            bg=SW_BG_BASE,
+            fg=SW_FG_MUTED,
+            justify="left",
+            anchor="w",
+            wraplength=760,
+        )
+        self.lbl_summary.pack(fill=tk.X, padx=SW_PAD_MD, pady=(0, SW_PAD_SM))
+
         # 3. [New] Column Headers
         self._create_header()
 
@@ -127,6 +138,13 @@ class KeystrokeSortEvents(tk.Toplevel):
         )
 
         self._refresh_list()
+
+    def _build_summary_text(self) -> str:
+        return txt(
+            "{count} event(s). Drag a row by its text area to reorder it. Click an image to open a full preview.",
+            "이벤트 {count}개. 각 행의 텍스트 영역을 드래그해서 순서를 바꾸고, 이미지를 클릭하면 크게 볼 수 있습니다.",
+            count=len(self.events),
+        )
 
     def _create_header(self):
         """컬럼 타이틀 헤더 생성"""
@@ -167,6 +185,8 @@ class KeystrokeSortEvents(tk.Toplevel):
             w.destroy()
         for i, evt in enumerate(self.events):
             self._add_row(i, evt)
+        if self.lbl_summary:
+            self.lbl_summary.config(text=self._build_summary_text())
 
     @staticmethod
     def _format_group_text(evt: EventModel) -> str:

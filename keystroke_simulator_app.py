@@ -41,6 +41,15 @@ from keystroke_utils import (
     ProcessCollector,
 )
 
+STATUS_BG_INFO = "#eef3ff"
+STATUS_FG_INFO = "#1e3a8a"
+STATUS_BG_OK = "#e6f4ea"
+STATUS_FG_OK = "#1e5f3a"
+STATUS_BG_WARN = "#fff4cc"
+STATUS_FG_WARN = "#7a5b00"
+STATUS_BG_ERR = "#fdecea"
+STATUS_FG_ERR = "#9f1f1f"
+
 
 def safe_call(func, *args, **kwargs):
     """예외를 무시하고 함수 호출"""
@@ -235,6 +244,16 @@ class ProfileFrame(tk.Frame):
         try:
             copy_profile_storage(self.profiles_dir, curr, dst_name)
             self.load_profiles(select_name=dst_name)
+            messagebox.showinfo(
+                txt("Profile Copied", "프로필 복사 완료"),
+                txt(
+                    "Copied '{src}' to '{dst}' and selected it.",
+                    "'{src}' 프로필을 '{dst}'(으)로 복사하고 선택했습니다.",
+                    src=curr,
+                    dst=dst_name,
+                ),
+                parent=self,
+            )
         except Exception as e:
             messagebox.showerror(
                 txt("Error", "오류"),
@@ -263,9 +282,19 @@ class ProfileFrame(tk.Frame):
                 "프로필 '{name}'을(를) 삭제하시겠습니까?",
                 name=curr,
             ),
+            parent=self,
         ):
             delete_profile_files(self.profiles_dir, curr)
             self.load_profiles()
+            messagebox.showinfo(
+                txt("Profile Deleted", "프로필 삭제 완료"),
+                txt(
+                    "Deleted '{name}'.",
+                    "'{name}' 프로필을 삭제했습니다.",
+                    name=curr,
+                ),
+                parent=self,
+            )
 
 
 class ButtonFrame(tk.Frame):
@@ -364,12 +393,52 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.last_alt_shift_toggle_time = 0
         self.ctrl_check_thread = None
         self.ctrl_check_active = False
+        self._selection_trace_handles = []
 
         self._create_ui()
+        self._bind_selection_traces()
         self._load_settings_and_state()
         self._setup_event_handlers()
+        self._update_ui()
 
     def _create_ui(self):
+        self.status_frame = tk.LabelFrame(self, padx=10, pady=8)
+        self.status_frame.pack(fill="x", padx=10, pady=(10, 5))
+
+        self.lbl_status_badge = tk.Label(
+            self.status_frame,
+            relief="groove",
+            borderwidth=1,
+            padx=8,
+            pady=2,
+        )
+        self.lbl_status_badge.pack(anchor="w")
+        self.lbl_status_title = tk.Label(
+            self.status_frame,
+            font=tkfont.nametofont("TkHeadingFont")
+            if "TkHeadingFont" in tkfont.names()
+            else tkfont.nametofont("TkDefaultFont"),
+            anchor="w",
+            justify="left",
+        )
+        self.lbl_status_title.pack(anchor="w", pady=(6, 2))
+        self.lbl_status_detail = tk.Label(
+            self.status_frame,
+            anchor="w",
+            justify="left",
+            fg="#555555",
+            wraplength=560,
+        )
+        self.lbl_status_detail.pack(anchor="w")
+        self.lbl_hotkey_hint = tk.Label(
+            self.status_frame,
+            anchor="w",
+            justify="left",
+            fg="#666666",
+            wraplength=560,
+        )
+        self.lbl_hotkey_hint.pack(anchor="w", pady=(4, 0))
+
         self.process_frame = ProcessFrame(self, self.selected_process)
         self.profile_frame = ProfileFrame(
             self, self.selected_profile, self.profiles_dir
@@ -398,6 +467,12 @@ class KeystrokeSimulatorApp(tk.Tk):
         style.configure("TEntry", fieldbackground="white")
         self._refresh_ui_texts()
         WindowUtils.center_window(self)
+
+    def _bind_selection_traces(self):
+        for var in (self.selected_process, self.selected_profile):
+            self._selection_trace_handles.append(
+                var.trace_add("write", lambda *_: self.after_idle(self._update_ui))
+            )
 
     def _load_settings_and_state(self):
         # Load settings
@@ -436,8 +511,11 @@ class KeystrokeSimulatorApp(tk.Tk):
                 self.selected_process.set(match)
         if prof := state.get("profile"):
             self.profile_frame.set_selected_profile(prof)
+        self._update_ui()
 
     def _refresh_ui_texts(self):
+        if hasattr(self, "status_frame"):
+            self.status_frame.config(text=txt("Ready Check", "실행 준비"))
         if hasattr(self, "process_frame"):
             self.process_frame.refresh_texts()
         if hasattr(self, "profile_frame"):
@@ -446,6 +524,195 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.button_frame.refresh_texts()
         if hasattr(self, "profile_button_frame"):
             self.profile_button_frame.refresh_texts()
+        if hasattr(self, "lbl_hotkey_hint"):
+            self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
+        if hasattr(self, "lbl_status_badge"):
+            self._update_main_status()
+
+    def _get_hotkey_hint_text(self) -> str:
+        if not hasattr(self, "settings"):
+            return ""
+        if platform.system() == "Darwin" and self.settings.toggle_start_stop_mac:
+            trigger = txt("Alt + Shift", "Alt + Shift")
+        elif platform.system() == "Windows" and self.settings.use_alt_shift_hotkey:
+            trigger = txt("Alt + Shift", "Alt + Shift")
+        elif self.settings.start_stop_key == "DISABLED":
+            return txt(
+                "Start/stop hotkey is disabled. Use the Start button.",
+                "시작/중지 단축키가 꺼져 있습니다. 시작 버튼을 사용하세요.",
+            )
+        elif self.settings.start_stop_key == "W_UP":
+            trigger = txt("Mouse wheel up", "마우스 휠 위")
+        elif self.settings.start_stop_key == "W_DN":
+            trigger = txt("Mouse wheel down", "마우스 휠 아래")
+        else:
+            trigger = self.settings.start_stop_key
+
+        return txt(
+            "Start or stop with {trigger}.",
+            "{trigger}(으)로 시작 또는 중지할 수 있습니다.",
+            trigger=trigger,
+        )
+
+    def _get_readiness_snapshot(self) -> dict[str, object]:
+        if self.is_running.get():
+            return {
+                "can_start": True,
+                "badge_text": txt("Running", "실행 중"),
+                "title": txt(
+                    "Simulation is active for the selected target.",
+                    "선택한 대상에 대해 시뮬레이션이 실행 중입니다.",
+                ),
+                "detail": txt(
+                    "Stop first if you want to change process, profile, or event settings.",
+                    "프로세스, 프로필, 이벤트 설정을 바꾸려면 먼저 중지하세요.",
+                ),
+                "bg": STATUS_BG_OK,
+                "fg": STATUS_FG_OK,
+            }
+
+        if not self.selected_process.get() or "(" not in self.selected_process.get():
+            return {
+                "can_start": False,
+                "badge_text": txt("Select Process", "프로세스 선택"),
+                "title": txt(
+                    "Choose the target app before starting.",
+                    "시작하기 전에 대상 앱을 선택하세요.",
+                ),
+                "detail": txt(
+                    "Pick the process you want to watch in the Process list.",
+                    "감시할 대상을 프로세스 목록에서 고르세요.",
+                ),
+                "bg": STATUS_BG_WARN,
+                "fg": STATUS_FG_WARN,
+            }
+
+        if not self.selected_profile.get():
+            return {
+                "can_start": False,
+                "badge_text": txt("Select Profile", "프로필 선택"),
+                "title": txt(
+                    "Select a profile with saved events.",
+                    "저장된 이벤트가 있는 프로필을 선택하세요.",
+                ),
+                "detail": txt(
+                    "Use Quick for fast capture or open Profile Manager to edit events.",
+                    "빠른 캡처는 Quick을, 상세 편집은 프로필 편집을 사용하세요.",
+                ),
+                "bg": STATUS_BG_WARN,
+                "fg": STATUS_FG_WARN,
+            }
+
+        try:
+            profile = load_profile(
+                Path(self.profiles_dir), self.selected_profile.get(), migrate=True
+            )
+        except Exception as exc:
+            return {
+                "can_start": False,
+                "badge_text": txt("Profile Error", "프로필 오류"),
+                "title": txt(
+                    "The selected profile could not be loaded.",
+                    "선택한 프로필을 불러오지 못했습니다.",
+                ),
+                "detail": txt(
+                    "Open the profile again or choose another profile.\nError: {error}",
+                    "프로필을 다시 열거나 다른 프로필을 선택하세요.\n오류: {error}",
+                    error=exc,
+                ),
+                "bg": STATUS_BG_ERR,
+                "fg": STATUS_FG_ERR,
+            }
+
+        events = list(profile.event_list or [])
+        enabled_count = sum(1 for evt in events if getattr(evt, "use_event", True))
+        runnable_count = sum(
+            1
+            for evt in events
+            if getattr(evt, "use_event", True)
+            and (
+                getattr(evt, "key_to_enter", None)
+                or not getattr(evt, "execute_action", True)
+            )
+        )
+
+        if not events:
+            return {
+                "can_start": False,
+                "badge_text": txt("Add Events", "이벤트 추가"),
+                "title": txt(
+                    "This profile has no events yet.",
+                    "이 프로필에는 아직 이벤트가 없습니다.",
+                ),
+                "detail": txt(
+                    "Open Profile Manager or Quick Events and save at least one event first.",
+                    "프로필 편집 또는 빠른 이벤트에서 이벤트를 먼저 하나 이상 저장하세요.",
+                ),
+                "bg": STATUS_BG_WARN,
+                "fg": STATUS_FG_WARN,
+            }
+
+        if enabled_count == 0:
+            return {
+                "can_start": False,
+                "badge_text": txt("Enable Event", "이벤트 활성화"),
+                "title": txt(
+                    "All events in this profile are disabled.",
+                    "이 프로필의 모든 이벤트가 비활성화되어 있습니다.",
+                ),
+                "detail": txt(
+                    "Turn on at least one event in Profile Manager before starting.",
+                    "시작하기 전에 프로필 편집에서 이벤트를 하나 이상 활성화하세요.",
+                ),
+                "bg": STATUS_BG_WARN,
+                "fg": STATUS_FG_WARN,
+            }
+
+        if runnable_count == 0:
+            return {
+                "can_start": False,
+                "badge_text": txt("Check Events", "이벤트 확인"),
+                "title": txt(
+                    "Enabled events need a key or condition-only mode.",
+                    "활성 이벤트에는 입력 키 또는 조건 전용 설정이 필요합니다.",
+                ),
+                "detail": txt(
+                    "Open Profile Manager and review events with missing input keys.",
+                    "프로필 편집에서 입력 키가 비어 있는 이벤트를 확인하세요.",
+                ),
+                "bg": STATUS_BG_WARN,
+                "fg": STATUS_FG_WARN,
+            }
+
+        return {
+            "can_start": True,
+            "badge_text": txt("Ready", "준비 완료"),
+            "title": txt(
+                "Everything is ready to start monitoring.",
+                "모니터링을 시작할 준비가 끝났습니다.",
+            ),
+            "detail": txt(
+                "Profile '{name}' has {count} runnable event(s).",
+                "프로필 '{name}'에 실행 가능한 이벤트가 {count}개 있습니다.",
+                name=self.selected_profile.get(),
+                count=runnable_count,
+            ),
+            "bg": STATUS_BG_INFO,
+            "fg": STATUS_FG_INFO,
+        }
+
+    def _update_main_status(self):
+        if not hasattr(self, "lbl_status_badge"):
+            return
+        snapshot = self._get_readiness_snapshot()
+        self.lbl_status_badge.config(
+            text=snapshot["badge_text"],
+            bg=snapshot["bg"],
+            fg=snapshot["fg"],
+        )
+        self.lbl_status_title.config(text=snapshot["title"])
+        self.lbl_status_detail.config(text=snapshot["detail"])
+        self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
 
     def _setup_event_handlers(self):
         self.unbind_events()
@@ -578,6 +845,8 @@ class KeystrokeSimulatorApp(tk.Tk):
             if self.start_simulation():
                 self.is_running.set(True)
                 self.update_ui()
+            else:
+                self._update_ui()
         else:
             self.is_running.set(False)
             self.stop_simulation()
@@ -637,6 +906,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         running = self.is_running.get()
         state = "disabled" if running else "normal"
         readonly_state = "disabled" if running else "readonly"
+        readiness = self._get_readiness_snapshot()
 
         self.process_frame.process_combobox.config(state=readonly_state)
         self.process_frame.refresh_button.config(state=state)
@@ -645,7 +915,8 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_frame.del_button.config(state=state)
 
         self.button_frame.start_stop_button.config(
-            text=txt("Stop", "중지") if running else txt("Start", "시작")
+            text=txt("Stop", "중지") if running else txt("Start", "시작"),
+            state="normal" if running or readiness["can_start"] else "disabled",
         )
         self.button_frame.quick_events_button.config(state=state)
         self.button_frame.settings_button.config(state=state)
@@ -654,6 +925,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_button_frame.modkeys_button.config(state=state)
         self.profile_button_frame.settings_button.config(state=state)
         self.profile_button_frame.sort_button.config(state=state)
+        self._update_main_status()
 
     def open_modkeys(self):
         if self.is_running.get():
@@ -667,6 +939,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def reload_profiles(self, new_name):
         self.profile_frame.load_profiles(select_name=new_name)
+        self._update_ui()
 
     def sort_profile_events(self):
         self.unbind_events()

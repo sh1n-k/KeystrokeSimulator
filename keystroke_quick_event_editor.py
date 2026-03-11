@@ -33,12 +33,16 @@ class KeystrokeQuickEventEditor:
         self.latest_img = None
         self.held_img = None
         self.ref_pixel = None
+        self.saved_count = 0
 
         self.capture_w_var = tk.IntVar(value=100)
         self.capture_h_var = tk.IntVar(value=100)
 
         self.spn_capture_w = None
         self.spn_capture_h = None
+        self.lbl_step = None
+        self.lbl_session = None
+        self.lbl_feedback = None
 
         self.capturer = ScreenshotCapturer()
         self.capturer.screenshot_callback = self.update_capture
@@ -54,11 +58,37 @@ class KeystrokeQuickEventEditor:
         self.chk_thread.start()
 
     def _create_ui(self):
+        f_intro = ttk.LabelFrame(self.win, text=txt("Quick Flow", "빠른 작업 순서"))
+        f_intro.pack(fill="x", padx=8, pady=(8, 5))
+        ttk.Label(
+            f_intro,
+            text=txt(
+                "1. Move the mouse with ALT.\n2. Press CTRL to freeze the left preview.\n3. Click the right preview to choose the pixel.\n4. Press CTRL again to save the Quick event.",
+                "1. ALT로 마우스를 이동합니다.\n2. CTRL로 왼쪽 미리보기를 고정합니다.\n3. 오른쪽 미리보기에서 픽셀을 클릭합니다.\n4. CTRL을 다시 눌러 Quick 이벤트를 저장합니다.",
+            ),
+            justify="left",
+            wraplength=360,
+        ).pack(anchor="w", padx=8, pady=(4, 2))
+        self.lbl_step = ttk.Label(f_intro, text="", foreground="#1e3a8a")
+        self.lbl_step.pack(anchor="w", padx=8, pady=(0, 2))
+        self.lbl_session = ttk.Label(f_intro, text="", foreground="#555555")
+        self.lbl_session.pack(anchor="w", padx=8, pady=(0, 6))
+
         # Images
         f_img = tk.Frame(self.win)
         f_img.pack(pady=5)
-        self.lbl_img1 = self._mk_lbl(f_img, "red", 0, 0)
-        self.lbl_img2 = self._mk_lbl(f_img, "gray", 0, 1)
+        tk.Label(
+            f_img,
+            text=txt("Live Preview", "실시간 미리보기"),
+            fg="#555555",
+        ).grid(row=0, column=0, pady=(0, 3))
+        tk.Label(
+            f_img,
+            text=txt("Captured Target", "저장 대상"),
+            fg="#555555",
+        ).grid(row=0, column=1, pady=(0, 3))
+        self.lbl_img1 = self._mk_lbl(f_img, "red", 1, 0)
+        self.lbl_img2 = self._mk_lbl(f_img, "gray", 1, 1)
         for seq in ("<Button-1>", "<B1-Motion>"):
             self.lbl_img2.bind(seq, self._on_click_held)
 
@@ -120,17 +150,16 @@ class KeystrokeQuickEventEditor:
             command=self.close,
         ).pack(side=tk.LEFT, padx=5)
 
-        # Info
-        tk.Label(
+        self.lbl_feedback = ttk.Label(
             self.win,
-            text=txt(
-                "ALT: Area selection\nCTRL: Grab current image\nLeft-click to set crossline, then press CTRL to save.",
-                "ALT: 영역 선택\nCTRL: 현재 이미지 캡처\n클릭으로 교차선을 맞춘 뒤 CTRL로 저장합니다.",
-            ),
+            text="",
             anchor="center",
-            fg="black",
-            wraplength=320,
-        ).pack(pady=5, fill="both")
+            justify="center",
+            foreground="#555555",
+            wraplength=360,
+        )
+        self.lbl_feedback.pack(pady=(0, 8), fill="both")
+        self._refresh_status_text()
 
     def _on_capture_size_change(self, *args):
         """캡처 크기 변경 시 capturer 동기화"""
@@ -200,20 +229,45 @@ class KeystrokeQuickEventEditor:
                 if self.lbl_img1.winfo_exists():
                     scaled = self._scale_for_display(img)
                     self.win.after(0, lambda s=scaled: self._upd_img(self.lbl_img1, s))
+                    self.win.after(0, self._refresh_status_text)
             except (tk.TclError, AttributeError):
                 pass
 
     def hold_image(self):
-        if self.latest_pos and self.latest_img:
-            self._set_entries(self.entries[:2], *self.latest_pos)
-            self.held_img = self.latest_img.copy()
-            self._upd_img(self.lbl_img2, self._scale_for_display(self.latest_img))
-            if self.clicked_pos:
-                self._apply_overlay(self.held_img, self.lbl_img2)
-                self.save_event()
+        if not (self.latest_pos and self.latest_img):
+            self._set_feedback(
+                txt(
+                    "Move the mouse over the target first so the live preview can update.",
+                    "먼저 대상 위로 마우스를 움직여 실시간 미리보기가 보이게 하세요.",
+                ),
+                color="#7a5b00",
+            )
+            self._refresh_status_text()
+            return
+        self._set_entries(self.entries[:2], *self.latest_pos)
+        self.held_img = self.latest_img.copy()
+        self._upd_img(self.lbl_img2, self._scale_for_display(self.latest_img))
+        if self.clicked_pos:
+            self._apply_overlay(self.held_img, self.lbl_img2)
+            self.save_event()
+            return
+        self._set_feedback(
+            txt(
+                "Captured. Now click the right preview to choose the trigger pixel.",
+                "캡처했습니다. 이제 오른쪽 미리보기에서 트리거 픽셀을 클릭하세요.",
+            )
+        )
+        self._refresh_status_text()
 
     def _on_click_held(self, event):
         if not self.held_img:
+            self._set_feedback(
+                txt(
+                    "Capture the live preview first, then choose a pixel on the right image.",
+                    "먼저 실시간 미리보기를 캡처한 뒤 오른쪽 이미지에서 픽셀을 고르세요.",
+                ),
+                color="#7a5b00",
+            )
             return
 
         display_w = self.lbl_img2.winfo_width()
@@ -231,6 +285,13 @@ class KeystrokeQuickEventEditor:
             self._upd_img(self.lbl_ref, Image.new("RGBA", (25, 25), self.ref_pixel))
             self._set_entries(self.entries[2:], ix, iy)
             self._apply_overlay(self.held_img, self.lbl_img2)
+            self._set_feedback(
+                txt(
+                    "Target selected. Press CTRL once more to save the Quick event.",
+                    "대상을 선택했습니다. Quick 이벤트를 저장하려면 CTRL을 한 번 더 누르세요.",
+                )
+            )
+            self._refresh_status_text()
 
     def _apply_overlay(self, img, lbl):
         """십자선 오버레이"""
@@ -272,6 +333,52 @@ class KeystrokeQuickEventEditor:
             ents[i].delete(0, tk.END)
             ents[i].insert(0, str(v))
 
+    def _set_feedback(self, text: str, color: str = "#555555"):
+        if self.lbl_feedback:
+            self.lbl_feedback.config(text=text, foreground=color)
+
+    def _refresh_status_text(self):
+        if self.lbl_session:
+            self.lbl_session.config(
+                text=txt(
+                    "{count} Quick event(s) saved in this session.",
+                    "이번 세션에서 Quick 이벤트 {count}개를 저장했습니다.",
+                    count=self.saved_count,
+                )
+            )
+        if not self.lbl_step:
+            return
+        if not self.latest_img:
+            self.lbl_step.config(
+                text=txt(
+                    "Current step: move the mouse over the target until the live preview follows it.",
+                    "현재 단계: 실시간 미리보기가 따라오도록 대상 위로 마우스를 움직이세요.",
+                )
+            )
+            return
+        if not self.held_img:
+            self.lbl_step.config(
+                text=txt(
+                    "Current step: press CTRL to freeze the current area.",
+                    "현재 단계: CTRL로 현재 영역을 고정하세요.",
+                )
+            )
+            return
+        if not self.clicked_pos:
+            self.lbl_step.config(
+                text=txt(
+                    "Current step: click the right preview to choose the trigger pixel.",
+                    "현재 단계: 오른쪽 미리보기를 클릭해 트리거 픽셀을 고르세요.",
+                )
+            )
+            return
+        self.lbl_step.config(
+            text=txt(
+                "Current step: press CTRL again to save this Quick event.",
+                "현재 단계: 이 Quick 이벤트를 저장하려면 CTRL을 다시 누르세요.",
+            )
+        )
+
     def save_event(self):
         if all(
             [
@@ -299,6 +406,16 @@ class KeystrokeQuickEventEditor:
             p = load_profile(self.prof_dir, "Quick", migrate=True)
             p.event_list = self.events
             save_profile(self.prof_dir, p, name="Quick")
+            self.saved_count += 1
+            self._set_feedback(
+                txt(
+                    "Quick event #{count} saved. Move to a new target to capture the next one.",
+                    "Quick 이벤트 #{count} 저장 완료. 다음 대상을 캡처하려면 마우스를 옮기세요.",
+                    count=self.saved_count,
+                ),
+                color="#1e5f3a",
+            )
+            self._refresh_status_text()
 
     def close(self, event=None):
         self.chk_active = False
@@ -325,3 +442,4 @@ class KeystrokeQuickEventEditor:
             pt = eval(ptr)
             self._set_entries(self.entries[:2], *pt)
             self.capturer.set_current_mouse_position(pt)
+        self._refresh_status_text()

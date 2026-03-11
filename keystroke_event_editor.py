@@ -70,6 +70,8 @@ class KeystrokeEventEditor:
         self.lbl_condition_summary = None
         self.btn_reset_conditions = None
         self.lbl_group_hint = None
+        self.lbl_basic_step = None
+        self.lbl_bottom_hint = None
         self.entry_capture_w = None
         self.entry_capture_h = None
         self.entry_region_w = None
@@ -96,6 +98,9 @@ class KeystrokeEventEditor:
         self.region_w_var.trace_add("write", lambda *a: self._redraw_overlay())
         self.region_h_var.trace_add("write", lambda *a: self._redraw_overlay())
         self.independent_thread.trace_add("write", self._on_indep_toggle)
+        self.execute_action_var.trace_add(
+            "write", lambda *_: self._refresh_basic_guidance()
+        )
 
     def _create_layout(self):
         self.notebook = ttk.Notebook(self.win)
@@ -181,6 +186,14 @@ class KeystrokeEventEditor:
             ),
             fg="gray",
         ).pack(pady=5)
+        self.lbl_basic_step = ttk.Label(
+            self.tab_basic,
+            text="",
+            foreground="#1e3a8a",
+            wraplength=420,
+            justify="left",
+        )
+        self.lbl_basic_step.pack(anchor="w", padx=10, pady=(0, 6))
 
     def _create_numeric_validator(self):
         """숫자 입력 검증 함수 생성 (재사용)"""
@@ -537,6 +550,13 @@ class KeystrokeEventEditor:
         f_btn = tk.Frame(self.win)
         f_btn.pack(pady=10, fill="x")
 
+        self.lbl_bottom_hint = ttk.Label(
+            f_btn,
+            text="",
+            foreground="#555555",
+        )
+        self.lbl_bottom_hint.pack(side="left", padx=10)
+
         tk.Button(
             f_btn, text=txt("Capture (Ctrl)", "캡처 (Ctrl)"), command=self.hold_image
         ).pack(side="left", padx=20)
@@ -589,6 +609,33 @@ class KeystrokeEventEditor:
         if inactive:
             parts.append(txt("Inactive: {count}", "비활성: {count}", count=inactive))
         self.lbl_condition_summary.config(text=" | ".join(parts) if parts else "")
+
+    def _refresh_basic_guidance(self):
+        if not getattr(self, "lbl_basic_step", None):
+            return
+        if not self.held_img:
+            message = txt(
+                "Step 1: move the mouse over the target, then press CTRL to capture the current area.",
+                "1단계: 대상 위로 마우스를 옮긴 뒤 CTRL로 현재 영역을 캡처하세요.",
+            )
+        elif not self.clicked_pos:
+            message = txt(
+                "Step 2: click the right image to choose the trigger pixel or region center.",
+                "2단계: 오른쪽 이미지를 클릭해 트리거 픽셀 또는 영역 중심을 고르세요.",
+            )
+        elif self.execute_action_var.get() and not self.key_to_enter:
+            message = txt(
+                "Step 3: choose an input key, then save the event.",
+                "3단계: 입력 키를 선택한 뒤 이벤트를 저장하세요.",
+            )
+        else:
+            message = txt(
+                "Ready to save. Review advanced settings only if you need custom matching, timing, or conditions.",
+                "이제 저장할 수 있습니다. 맞춤 매칭, 타이밍, 조건이 필요할 때만 상세 설정을 확인하세요.",
+            )
+        self.lbl_basic_step.config(text=message)
+        if getattr(self, "lbl_bottom_hint", None):
+            self.lbl_bottom_hint.config(text=message)
 
     def create_coord_entries(self, parent, labels):
         entries = []
@@ -646,11 +693,12 @@ class KeystrokeEventEditor:
         self.win.bind("<Escape>", self.close_window)
         self.win.bind("<Return>", self.save_event)
         self.win.protocol("WM_DELETE_WINDOW", self.close_window)
-        self.key_combobox.bind(
-            "<<ComboboxSelected>>",
-            lambda e: setattr(self, "key_to_enter", self.key_combobox.get()),
-        )
+        self.key_combobox.bind("<<ComboboxSelected>>", self._on_key_selected)
         self.key_combobox.bind("<KeyPress>", self.filter_key_combobox)
+
+    def _on_key_selected(self, event=None):
+        self.key_to_enter = self.key_combobox.get()
+        self._refresh_basic_guidance()
 
     def filter_key_combobox(self, event):
         key = (event.keysym or event.char).upper()
@@ -661,6 +709,7 @@ class KeystrokeEventEditor:
             if match := [k for k in self.key_combobox["values"] if k.startswith(val)]:
                 self.key_combobox.set(match[0])
                 self.key_to_enter = match[0]
+        self._refresh_basic_guidance()
 
     def update_capture_image(self, pos, img):
         """
@@ -684,6 +733,7 @@ class KeystrokeEventEditor:
                 self.win.after(
                     0, lambda s=scaled: self._safe_update_img_lbl(self.lbl_img1, s)
                 )
+                self.win.after(0, self._refresh_basic_guidance)
         except (tk.TclError, AttributeError, RuntimeError):
             # 윈도우가 이미 파괴된 경우 무시
             pass
@@ -700,6 +750,7 @@ class KeystrokeEventEditor:
                 self._on_region_size_change()
                 self._draw_overlay(self.held_img, self.lbl_img2)
                 self._update_ref_pixel(self.held_img, self.clicked_pos)
+            self._refresh_basic_guidance()
 
     def get_coordinates_of_held_image(self, event):
         if (
@@ -724,6 +775,7 @@ class KeystrokeEventEditor:
         self._sync_region_constraints()
         self._on_region_size_change()
         self._draw_overlay(self.held_img, self.lbl_img2)
+        self._refresh_basic_guidance()
 
     def _draw_overlay(self, img, lbl):
         if not self.clicked_pos:
@@ -1124,6 +1176,7 @@ class KeystrokeEventEditor:
             default_name = f"Event_{len(self.existing_events) + 1}"
             self.entry_name.insert(0, default_name)
             self._populate_condition_tree()
+            self._refresh_basic_guidance()
             return
 
         self.event_name, self.latest_pos, self.clicked_pos = (
@@ -1208,6 +1261,7 @@ class KeystrokeEventEditor:
         self._on_region_size_change()
 
         self._draw_overlay(self.held_img, self.lbl_img2)
+        self._refresh_basic_guidance()
 
     @staticmethod
     def _set_entries(entries, x, y):
