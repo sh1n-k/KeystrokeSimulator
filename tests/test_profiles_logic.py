@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from keystroke_models import EventModel, ProfileModel
 from keystroke_profiles import EventListFrame, EventRow, KeystrokeProfiles
@@ -42,6 +42,15 @@ class FakeToolTip:
 
     def update_text(self, text):
         self.text = text
+
+
+class FakeDestroyable:
+    def __init__(self):
+        self.destroyed = False
+        self.row_num = 0
+
+    def destroy(self):
+        self.destroyed = True
 
 
 def _make_event_list_frame_stub():
@@ -137,6 +146,126 @@ class TestUpdateConditionReferences(unittest.TestCase):
         stub._update_condition_references("NonExistent", "NewName")
 
         self.assertEqual(events[0].conditions, {"X": True})
+
+
+class TestEditorSaveRenamePropagation(unittest.TestCase):
+    """EventListFrame._on_editor_save: 편집기 저장 시 이름 변경 전파"""
+
+    def test_edit_rename_updates_dependent_conditions(self):
+        stub = _make_event_list_frame_stub()
+        dependent = EventModel(event_name="Dependent", conditions={"OldName": True})
+        stub.profile = ProfileModel(
+            event_list=[
+                EventModel(event_name="OldName", key_to_enter="A"),
+                dependent,
+            ]
+        )
+        stub.update_events = MagicMock()
+        stub.save_cb = MagicMock()
+
+        edited = EventModel(event_name="NewName", key_to_enter="A")
+        stub._on_editor_save(edited, is_edit=True, row=0)
+
+        self.assertEqual(stub.profile.event_list[0].event_name, "NewName")
+        self.assertEqual(dependent.conditions, {"NewName": True})
+        stub.update_events.assert_called_once()
+        stub.save_cb.assert_called_once_with(check_name=False)
+
+    def test_add_event_does_not_touch_existing_conditions(self):
+        stub = _make_event_list_frame_stub()
+        dependent = EventModel(event_name="Dependent", conditions={"Existing": False})
+        stub.profile = ProfileModel(event_list=[dependent])
+        stub.update_events = MagicMock()
+        stub.save_cb = MagicMock()
+
+        new_evt = EventModel(event_name="NewEvent", key_to_enter="B")
+        stub._on_editor_save(new_evt, is_edit=False, row=1)
+
+        self.assertEqual(stub.profile.event_list[-1].event_name, "NewEvent")
+        self.assertEqual(dependent.conditions, {"Existing": False})
+        stub.update_events.assert_called_once()
+        stub.save_cb.assert_called_once_with(check_name=False)
+
+    def test_save_names_keeps_pending_rename_after_row_refresh(self):
+        frame = _make_event_list_frame_stub()
+        dependent = EventModel(event_name="Dependent", conditions={"OldName": True})
+        renamed = EventModel(event_name="OldName", key_to_enter="A")
+        frame.profile = ProfileModel(event_list=[renamed, dependent])
+
+        row = EventRow.__new__(EventRow)
+        row.event = renamed
+        row.use_var = FakeVar()
+        row.entry = FakeEntry(text="NewName")
+        row.lbl_indep = FakeWidget(text="")
+        row.lbl_cond = FakeWidget(text="")
+        row.lbl_grp = FakeWidget(text="")
+        row.lbl_key = FakeWidget(text="")
+        row._tip_indep = FakeToolTip()
+        row._tip_cond = FakeToolTip()
+        row._tip_grp = FakeToolTip()
+        row._tip_key = FakeToolTip()
+        row._last_saved_name = "OldName"
+        row._bound_event_id = id(renamed)
+        row.cbs = {"save": lambda: None}
+
+        EventRow._on_name_changed(row)
+        row.update_display()
+
+        frame.rows = [row]
+        frame.save_names()
+
+        self.assertEqual(frame.profile.event_list[0].event_name, "NewName")
+        self.assertEqual(dependent.conditions, {"NewName": True})
+
+
+class TestRemoveRowConditionCleanup(unittest.TestCase):
+    """EventListFrame._remove_row: 삭제 시 조건 참조 정리"""
+
+    def test_remove_row_cleans_orphaned_condition_references(self):
+        stub = _make_event_list_frame_stub()
+        dependent = EventModel(event_name="B", conditions={"A": True, "Other": False})
+        stub.profile = ProfileModel(
+            event_list=[EventModel(event_name="A"), dependent, EventModel(event_name="C")]
+        )
+        first_row = FakeDestroyable()
+        second_row = FakeDestroyable()
+        third_row = FakeDestroyable()
+        stub.rows = [first_row, second_row, third_row]
+        stub._update_row_indices = MagicMock()
+        stub._update_delete_buttons = MagicMock()
+        stub._sync_empty_state = MagicMock()
+        stub.save_cb = MagicMock()
+        stub.win = type("FakeWin", (), {"update_idletasks": lambda self: None})()
+
+        stub._remove_row(first_row, 0)
+
+        self.assertTrue(first_row.destroyed)
+        self.assertEqual(dependent.conditions, {"Other": False})
+        stub.save_cb.assert_called_once()
+
+    def test_remove_row_preserves_conditions_when_same_name_still_exists(self):
+        stub = _make_event_list_frame_stub()
+        dependent = EventModel(event_name="B", conditions={"A": True})
+        stub.profile = ProfileModel(
+            event_list=[
+                EventModel(event_name="A"),
+                EventModel(event_name="A"),
+                dependent,
+            ]
+        )
+        first_row = FakeDestroyable()
+        second_row = FakeDestroyable()
+        third_row = FakeDestroyable()
+        stub.rows = [first_row, second_row, third_row]
+        stub._update_row_indices = MagicMock()
+        stub._update_delete_buttons = MagicMock()
+        stub._sync_empty_state = MagicMock()
+        stub.save_cb = MagicMock()
+        stub.win = type("FakeWin", (), {"update_idletasks": lambda self: None})()
+
+        stub._remove_row(first_row, 0)
+
+        self.assertEqual(dependent.conditions, {"A": True})
 
 
 class TestSortEventsLogic(unittest.TestCase):

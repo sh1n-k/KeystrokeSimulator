@@ -445,6 +445,7 @@ class EventRow(ttk.Frame):
         self.row_num, self.event, self.cbs = row_num, event, cbs
         self.use_var = tk.BooleanVar(value=event.use_event if event else True)
         self._last_saved_name = event.event_name if event else ""
+        self._bound_event_id = id(event) if event else None
 
         # 1. Index
         ttk.Label(self, text=str(row_num + 1), width=2, anchor="center").pack(
@@ -531,10 +532,14 @@ class EventRow(ttk.Frame):
         self.use_var.set(self.event.use_event)
 
         # Name
-        if self.entry.get() != (self.event.event_name or ""):
+        event_name = self.event.event_name or ""
+        event_rebound = getattr(self, "_bound_event_id", None) != id(self.event)
+        if self.entry.get() != event_name:
             self.entry.delete(0, tk.END)
-            self.entry.insert(0, self.event.event_name or "")
-        self._last_saved_name = self.event.event_name or ""
+            self.entry.insert(0, event_name)
+        if event_rebound:
+            self._last_saved_name = event_name
+        self._bound_event_id = id(self.event)
 
         # Independent Thread
         is_indep = getattr(self.event, "independent_thread", False)
@@ -1226,7 +1231,11 @@ class EventListFrame(ttk.Frame):
 
     def _on_editor_save(self, evt, is_edit, row=0):
         if is_edit and 0 <= row < len(self.profile.event_list):
+            old_name = self.profile.event_list[row].event_name
             self.profile.event_list[row] = evt
+            new_name = evt.event_name
+            if old_name and new_name and old_name != new_name:
+                self._update_condition_references(old_name, new_name)
         else:
             self.profile.event_list.append(evt)
         self.update_events()
@@ -1284,8 +1293,15 @@ class EventListFrame(ttk.Frame):
             return
         row_widget.destroy()
         self.rows.remove(row_widget)
+        removed_name = None
         if 0 <= row_num < len(self.profile.event_list):
-            self.profile.event_list.pop(row_num)
+            removed = self.profile.event_list.pop(row_num)
+            removed_name = getattr(removed, "event_name", None)
+        if removed_name and all(
+            getattr(evt, "event_name", None) != removed_name
+            for evt in self.profile.event_list
+        ):
+            self._remove_condition_references(removed_name)
         for i, row in enumerate(self.rows):
             row.row_num = i
         self._update_row_indices()
@@ -1368,6 +1384,12 @@ class EventListFrame(ttk.Frame):
         for evt in self.profile.event_list:
             if hasattr(evt, "conditions") and old_name in evt.conditions:
                 evt.conditions[new_name] = evt.conditions.pop(old_name)
+
+    def _remove_condition_references(self, removed_name: str):
+        """삭제된 이벤트를 참조하는 조건을 제거"""
+        for evt in self.profile.event_list:
+            if hasattr(evt, "conditions") and removed_name in evt.conditions:
+                evt.conditions.pop(removed_name, None)
 
 
 class KeystrokeProfiles:
