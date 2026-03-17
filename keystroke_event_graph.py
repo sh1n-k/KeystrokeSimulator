@@ -50,7 +50,6 @@ BADGE_R = 8
 BADGE_OFFSET_X = NODE_W - 6
 BADGE_OFFSET_Y = -4
 
-BADGE_COLOR_THREAD = (100, 80, 180)
 BADGE_COLOR_MISSING = (220, 160, 40)
 BADGE_COLOR_DISABLED = (160, 160, 160)
 BADGE_COLOR_CONDITION = (80, 140, 200)
@@ -75,7 +74,6 @@ class GraphNode:
     group_id: str | None
     use_event: bool
     execute_action: bool
-    independent_thread: bool
     missing: bool = False
 
 
@@ -201,7 +199,6 @@ def _build_graph(profile: ProfileModel) -> Tuple[List[GraphNode], List[GraphEdge
             group_id=getattr(evt, "group_id", None),
             use_event=getattr(evt, "use_event", True),
             execute_action=getattr(evt, "execute_action", True),
-            independent_thread=getattr(evt, "independent_thread", False),
             missing=False,
         )
         nodes.append(node)
@@ -228,7 +225,6 @@ def _build_graph(profile: ProfileModel) -> Tuple[List[GraphNode], List[GraphEdge
                         group_id=None,
                         use_event=False,
                         execute_action=False,
-                        independent_thread=False,
                         missing=True,
                     )
                     missing_nodes[cond_name] = missing
@@ -646,8 +642,6 @@ def _draw_node_badges(
     font_small: ImageFont.ImageFont,
 ) -> None:
     badges: List[Tuple[str, Tuple[int, int, int]]] = []
-    if node.independent_thread:
-        badges.append(("thread", BADGE_COLOR_THREAD))
     if node.missing:
         badges.append(("warn", BADGE_COLOR_MISSING))
     if not node.use_event and not node.missing:
@@ -683,10 +677,7 @@ def _draw_badge(
     )
     white = (255, 255, 255)
 
-    if badge_type == "thread":
-        draw.line([(cx - 3, cy - 4), (cx - 3, cy + 4)], fill=white, width=2)
-        draw.line([(cx + 3, cy - 4), (cx + 3, cy + 4)], fill=white, width=2)
-    elif badge_type == "warn":
+    if badge_type == "warn":
         draw.line([(cx, cy - 4), (cx, cy + 1)], fill=white, width=2)
         draw.ellipse([cx - 1, cy + 3, cx + 1, cy + 5], fill=white)
     elif badge_type == "off":
@@ -1145,7 +1136,6 @@ def _draw_legend(
         draw.text((col_x + sw + 6, iy + 2), label, fill=TEXT_COLOR, font=font_legend)
 
     badge_items = [
-        ("thread", BADGE_COLOR_THREAD, "Independent thread (독립 스레드)"),
         ("warn", BADGE_COLOR_MISSING, "Missing reference (참조 누락)"),
         ("off", BADGE_COLOR_DISABLED, "Disabled event (비활성 이벤트)"),
         ("eye", BADGE_COLOR_CONDITION, "Condition-only (조건 전용)"),

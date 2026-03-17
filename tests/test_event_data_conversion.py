@@ -146,22 +146,23 @@ class TestInitEventDataFiltering(unittest.TestCase):
         ])
         self.assertEqual(len(events), 0)
 
-    def test_independent_thread_goes_to_independent_list(self):
-        """independent_thread=True → independent_data에 분류"""
+    def test_independent_thread_is_ignored_and_event_stays_in_main_list(self):
+        """independent_thread=True여도 메인 이벤트로 처리한다"""
         proc = _make_processor_with_key_codes()
         events, independent, _ = proc._init_event_data([
             _make_basic_event(independent_thread=True)
         ])
-        self.assertEqual(len(events), 0)
-        self.assertEqual(len(independent), 1)
-        self.assertEqual(independent[0]["name"], "TestEvent")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(len(independent), 0)
+        self.assertEqual(events[0]["name"], "TestEvent")
+        self.assertFalse(events[0]["independent"])
 
-    def test_duplicate_signature_deduplicated(self):
-        """동일 시그니처 이벤트는 중복 제거"""
+    def test_duplicate_signature_is_preserved_in_init(self):
+        """초기화 단계에서는 동일 시그니처 이벤트도 유지"""
         proc = _make_processor_with_key_codes()
         e = _make_basic_event()
         events, _, _ = proc._init_event_data([e, e])
-        self.assertEqual(len(events), 1)
+        self.assertEqual(len(events), 2)
 
 
 class TestInitEventDataMegaRect(unittest.TestCase):

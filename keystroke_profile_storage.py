@@ -4,6 +4,7 @@ import json
 import os
 import pickle
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -128,6 +129,47 @@ def _to_rgba(v: Any) -> Optional[tuple[int, ...]]:
     if isinstance(v, (list, tuple)) and len(v) >= 3:
         return tuple(int(x) for x in v)
     return None
+
+
+def _normalized_event_name(name: Any) -> str:
+    return str(name or "").strip()
+
+
+def _next_available_event_name(base_name: str, used_names: set[str]) -> str:
+    candidate = base_name
+    suffix = 2
+    while candidate in used_names:
+        candidate = f"{base_name} ({suffix})"
+        suffix += 1
+    return candidate
+
+
+def _normalize_loaded_event_names(profile: ProfileModel) -> bool:
+    events = list(getattr(profile, "event_list", []) or [])
+    if not events:
+        return False
+
+    raw_names = [_normalized_event_name(getattr(evt, "event_name", None)) for evt in events]
+    duplicates = {
+        name for name, count in Counter(name for name in raw_names if name).items() if count > 1
+    }
+
+    used_names: set[str] = set()
+    changed = False
+    for index, evt in enumerate(events, start=1):
+        current_name = _normalized_event_name(getattr(evt, "event_name", None))
+        base_name = current_name or f"Event {index}"
+        if current_name in duplicates or not current_name:
+            final_name = _next_available_event_name(base_name, used_names)
+        else:
+            final_name = base_name
+
+        if getattr(evt, "event_name", None) != final_name:
+            evt.event_name = final_name
+            changed = True
+        used_names.add(final_name)
+
+    return changed
 
 
 def event_to_dict(evt: EventModel) -> Dict[str, Any]:
@@ -309,6 +351,9 @@ def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> Profile
         with open(jpath, "r", encoding="utf-8") as f:
             data = json.load(f)
         profile = profile_from_dict(data or {})
+        changed = _normalize_loaded_event_names(profile)
+        if migrate and changed:
+            save_profile(profiles_dir, profile, name=name)
         _log_perf(f"load_profile[{name}]", started)
         return profile
 
@@ -317,6 +362,7 @@ def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> Profile
         with open(pkl, "rb") as f:
             p = pickle.load(f)
         _ensure_profile_defaults(p)
+        changed = _normalize_loaded_event_names(p)
         if migrate:
             save_profile(profiles_dir, p, name=name)
         _log_perf(f"load_profile[{name}]", started)

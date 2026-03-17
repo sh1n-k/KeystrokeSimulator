@@ -554,6 +554,16 @@ class KeystrokeSimulatorApp(tk.Tk):
             trigger=trigger,
         )
 
+    @staticmethod
+    def _find_duplicate_event_names(events: list[EventModel]) -> list[str]:
+        counts: dict[str, int] = {}
+        for evt in events:
+            name = (getattr(evt, "event_name", None) or "").strip()
+            if not name:
+                continue
+            counts[name] = counts.get(name, 0) + 1
+        return sorted(name for name, count in counts.items() if count > 1)
+
     def _get_readiness_snapshot(self) -> dict[str, object]:
         if self.is_running.get():
             return {
@@ -625,6 +635,24 @@ class KeystrokeSimulatorApp(tk.Tk):
             }
 
         events = list(profile.event_list or [])
+        duplicate_names = self._find_duplicate_event_names(events)
+        if duplicate_names:
+            dup_text = ", ".join(duplicate_names)
+            return {
+                "can_start": False,
+                "badge_text": txt("Duplicate Events", "중복 이벤트"),
+                "title": txt(
+                    "Duplicate event names were found in this profile.",
+                    "이 프로필에서 중복 이벤트 이름이 발견되었습니다.",
+                ),
+                "detail": txt(
+                    "Rename duplicated event names before starting.\nDuplicates: {names}",
+                    "시작하기 전에 중복 이벤트 이름을 변경하세요.\n중복: {names}",
+                    names=dup_text,
+                ),
+                "bg": STATUS_BG_ERR,
+                "fg": STATUS_FG_ERR,
+            }
         enabled_count = sum(1 for evt in events if getattr(evt, "use_event", True))
         runnable_count = sum(
             1
@@ -873,6 +901,8 @@ class KeystrokeSimulatorApp(tk.Tk):
             if p.use_event
             and (p.key_to_enter or not getattr(p, "execute_action", True))
         ]
+        if self._find_duplicate_event_names(list(profile.event_list or [])):
+            return False
         if not events:
             return False
 

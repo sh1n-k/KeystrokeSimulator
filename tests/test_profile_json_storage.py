@@ -99,6 +99,61 @@ class TestProfileJsonStorage(unittest.TestCase):
             self.assertIsNotNone(e2.held_screenshot)
             self.assertEqual(e2.held_screenshot.size, (2, 2))
 
+    def test_load_profile_normalizes_duplicate_and_blank_event_names_from_json(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            payload = {
+                "schema_version": 1,
+                "profile": {"name": "Legacy", "favorite": False, "modification_keys": None},
+                "events": [
+                    {"event_name": "A", "key_to_enter": "X"},
+                    {"event_name": "A", "key_to_enter": "Y"},
+                    {"event_name": "  ", "key_to_enter": "Z"},
+                ],
+            }
+            (prof_dir / "Legacy.json").write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+            )
+
+            loaded = load_profile(prof_dir, "Legacy", migrate=False)
+
+            self.assertEqual(
+                [evt.event_name for evt in loaded.event_list],
+                ["A", "A (2)", "Event 3"],
+            )
+            raw = json.loads((prof_dir / "Legacy.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                [evt["event_name"] for evt in raw["events"]],
+                ["A", "A", "  "],
+            )
+
+    def test_load_profile_migrates_duplicate_event_names_from_pickle(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            profile = ProfileModel(
+                name="Legacy",
+                event_list=[
+                    EventModel(event_name="Same", key_to_enter="X"),
+                    EventModel(event_name="Same", key_to_enter="Y"),
+                    EventModel(event_name="", key_to_enter="Z"),
+                ],
+            )
+
+            with open(prof_dir / "Legacy.pkl", "wb") as f:
+                pickle.dump(profile, f)
+
+            loaded = load_profile(prof_dir, "Legacy", migrate=True)
+
+            self.assertEqual(
+                [evt.event_name for evt in loaded.event_list],
+                ["Same", "Same (2)", "Event 3"],
+            )
+            migrated = load_profile(prof_dir, "Legacy", migrate=False)
+            self.assertEqual(
+                [evt.event_name for evt in migrated.event_list],
+                ["Same", "Same (2)", "Event 3"],
+            )
+
 
 class TestRenameProfileFiles(unittest.TestCase):
     """rename_profile_files: 프로필 파일 이름 변경"""

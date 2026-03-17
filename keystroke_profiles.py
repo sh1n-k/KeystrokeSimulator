@@ -71,6 +71,20 @@ def _profile_fingerprint(profile: ProfileModel, profile_name: str, favorite: boo
     )
 
 
+def _normalized_event_name(name: str | None) -> str:
+    return (name or "").strip()
+
+
+def _find_duplicate_event_names(events: List[EventModel]) -> List[str]:
+    counts: dict[str, int] = {}
+    for evt in events:
+        name = _normalized_event_name(getattr(evt, "event_name", None))
+        if not name:
+            continue
+        counts[name] = counts.get(name, 0) + 1
+    return sorted(name for name, count in counts.items() if count > 1)
+
+
 class ToolTip:
     """경량 툴팁: 위젯에 마우스를 올리면 설명 텍스트를 표시한다."""
 
@@ -457,20 +471,12 @@ class EventRow(ttk.Frame):
             side=tk.LEFT
         )
 
-        # 3. Independent Thread Indicator
-        self.lbl_indep = ttk.Label(
-            self, text="", width=8, anchor="center", cursor="hand2"
-        )
-        self.lbl_indep.bind("<Button-1>", self._on_indep_click)
-        self.lbl_indep.pack(side=tk.LEFT)
-        self._tip_indep = ToolTip(self.lbl_indep)
-
-        # 4. Condition Indicator
+        # 3. Condition Indicator
         self.lbl_cond = ttk.Label(self, text="", width=9, anchor="center")
         self.lbl_cond.pack(side=tk.LEFT)
         self._tip_cond = ToolTip(self.lbl_cond)
 
-        # 5. Group ID Label (클릭 가능)
+        # 4. Group ID Label (클릭 가능)
         self.lbl_grp = ttk.Label(
             self, text="", width=14, anchor="center", relief="sunken", cursor="hand2"
         )
@@ -478,7 +484,7 @@ class EventRow(ttk.Frame):
         self.lbl_grp.bind("<Button-1>", self._on_group_click)
         self._tip_grp = ToolTip(self.lbl_grp)
 
-        # 6. Key Display Label (NEW)
+        # 5. Key Display Label
         self.lbl_key = ttk.Label(
             self, text="", width=12, anchor="center", relief="groove"
         )
@@ -488,13 +494,13 @@ class EventRow(ttk.Frame):
         )  # 클릭 바인딩 추가
         self._tip_key = ToolTip(self.lbl_key)
 
-        # 7. Event Name Entry
+        # 6. Event Name Entry
         self.entry = ttk.Entry(self)
         self.entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         if event:
             self.entry.insert(0, event.event_name or "")
 
-        # 8. Action Buttons
+        # 7. Action Buttons
         self.btn_delete = None
         for en, ko, key, min_width in [
             ("Edit", "편집", "open", 7),
@@ -523,7 +529,6 @@ class EventRow(ttk.Frame):
     def update_display(self):
         """이벤트 상태에 따라 UI 갱신"""
         if not self.event:
-            self.lbl_indep.config(text="")
             self.lbl_cond.config(text="")
             self.lbl_grp.config(text="")
             self.lbl_key.config(text="")
@@ -540,21 +545,6 @@ class EventRow(ttk.Frame):
         if event_rebound:
             self._last_saved_name = event_name
         self._bound_event_id = id(self.event)
-
-        # Independent Thread
-        is_indep = getattr(self.event, "independent_thread", False)
-        self.lbl_indep.config(text=txt("🧵 Indep", "🧵 독립") if is_indep else "")
-        self._tip_indep.update_text(
-            txt(
-                "This event runs independently. Click to switch to normal mode.",
-                "현재 독립 실행 상태입니다. 클릭하면 일반 실행으로 바뀝니다.",
-            )
-            if is_indep
-            else txt(
-                "Click to switch this event to independent mode.",
-                "클릭하면 독립 실행으로 전환됩니다.",
-            )
-        )
 
         # Condition Only
         is_cond = not getattr(self.event, "execute_action", True)
@@ -587,10 +577,13 @@ class EventRow(ttk.Frame):
             )
         )
 
-        # Key (NEW)
+        # Key
         key = self.event.key_to_enter or ""
         invert = getattr(self.event, "invert_match", False)
-        display = key if key else txt("⌨️ None", "⌨️ 없음")
+        if is_cond:
+            display = txt("🔎 Condition", "🔎 조건용")
+        else:
+            display = key if key else txt("⌨️ None", "⌨️ 없음")
         if invert:
             display = f"🔁 {display}"
         self.lbl_key.config(text=display)
@@ -599,6 +592,13 @@ class EventRow(ttk.Frame):
                 txt(
                     "Invert match is enabled. It runs when the target does not match.",
                     "반전 매칭이 켜져 있습니다. 기준과 불일치할 때 실행됩니다.",
+                )
+            )
+        elif is_cond:
+            self._tip_key.update_text(
+                txt(
+                    "Condition-only event. No input key is needed.",
+                    "조건 전용 이벤트입니다. 입력 키가 필요하지 않습니다.",
                 )
             )
         elif key:
@@ -616,21 +616,6 @@ class EventRow(ttk.Frame):
                 )
             )
 
-    def _on_indep_click(self, event=None):
-        if self.event:
-            # 토글
-            self.event.independent_thread = not getattr(
-                self.event, "independent_thread", False
-            )
-
-            # Independent 설정 시 그룹 해제
-            if self.event.independent_thread:
-                self.event.group_id = None
-
-            self.update_display()
-            if "save" in self.cbs:
-                self.cbs["save"]()
-
     def _on_toggle_use(self):
         if self.event:
             self.event.use_event = self.use_var.get()
@@ -639,16 +624,6 @@ class EventRow(ttk.Frame):
 
     def _on_group_click(self, event=None):
         if self.event:
-            if getattr(self.event, "independent_thread", False):
-                messagebox.showinfo(
-                    txt("Info", "안내"),
-                    txt(
-                        "Independent thread events cannot be grouped.",
-                        "독립 실행 이벤트는 그룹으로 묶을 수 없습니다.",
-                    ),
-                    parent=self.master,
-                )
-                return
             if "group_select" in self.cbs:
                 self.cbs["group_select"](self.row_num, self.event)
 
@@ -772,8 +747,8 @@ class EventListFrame(ttk.Frame):
         ToolTip(
             self.btn_sort,
             txt(
-                "Sort events automatically by priority rules.",
-                "우선순위 규칙에 맞게 이벤트를 자동 정렬합니다.",
+                "Sort events automatically by event type and then by name.",
+                "이벤트 타입 우선, 그다음 이름순으로 자동 정렬합니다.",
             ),
         )
 
@@ -866,26 +841,23 @@ class EventListFrame(ttk.Frame):
         # 기타 특수문자
         return (4, ord(base_key[0]) if base_key else 999, base_key)
 
+    @staticmethod
+    def _get_event_type_sort_order(event: EventModel) -> int:
+        """조건 전용 이벤트를 먼저, 키 입력 실행 이벤트를 나중에 배치한다."""
+        return 0 if not getattr(event, "execute_action", True) else 1
+
     def _sort_events(self):
         """
         이벤트 목록 자동 정렬 로직
-        1. Independent Thread (True -> False)
-        2. Group ID (String, Empty last)
-        3. Priority (Ascending)
-        4. Key (0-9 → A-Z → F1-F12 → Special → None)
-        5. Name (Ascending)
+        1. Event Type (Condition -> Action)
+        2. Name (Ascending)
         """
         if not self.profile.event_list:
             return
 
         def sort_key(e: EventModel):
-            is_indep = 0 if getattr(e, "independent_thread", False) else 1
-            grp = getattr(e, "group_id", "") or ""
-            grp_order = 0 if grp else 1
-            prio = getattr(e, "priority", 0)
-            key_order = self._get_key_sort_order(e.key_to_enter)
             name = e.event_name or ""
-            return (is_indep, grp_order, grp, prio, key_order, name)
+            return (self._get_event_type_sort_order(e), name.casefold(), name)
 
         self.save_names()
         self.profile.event_list.sort(key=sort_key)
@@ -894,8 +866,8 @@ class EventListFrame(ttk.Frame):
         messagebox.showinfo(
             txt("Auto Sort Complete", "자동 정렬 완료"),
             txt(
-                "Events were sorted by:\nIndependent → Group → Priority → Input Key (0-9→A-Z→F1-F12→Special) → Name",
-                "이벤트를 다음 순서로 정렬했습니다:\n독립 실행 → 그룹 → 우선순위 → 입력 키(0-9→A-Z→F1-F12→특수키) → 이름",
+                "Events were sorted by:\nEvent Type (Condition → Action) → Name",
+                "이벤트를 다음 순서로 정렬했습니다:\n이벤트 타입(조건 → 실행) → 이름",
             ),
             parent=self.win,
         )
@@ -1075,13 +1047,6 @@ class EventListFrame(ttk.Frame):
                 txt("Uncheck to skip this event.", "체크 해제 시 이벤트를 건너뜁니다"),
             ),
             (
-                txt("Independent", "독립 실행"),
-                8,
-                "center",
-                {},
-                txt("Independent execution state.", "독립 실행 상태"),
-            ),
-            (
                 txt("Type", "실행 유형"),
                 10,
                 "center",
@@ -1229,7 +1194,30 @@ class EventListFrame(ttk.Frame):
             existing_events=self.profile.event_list,
         )
 
+    def _is_duplicate_event_name(self, name: str, ignore_index: int | None = None) -> bool:
+        target = _normalized_event_name(name)
+        if not target:
+            return False
+        for idx, evt in enumerate(self.profile.event_list):
+            if ignore_index is not None and idx == ignore_index:
+                continue
+            if _normalized_event_name(getattr(evt, "event_name", None)) == target:
+                return True
+        return False
+
     def _on_editor_save(self, evt, is_edit, row=0):
+        ignore_index = row if is_edit else None
+        if self._is_duplicate_event_name(evt.event_name, ignore_index=ignore_index):
+            messagebox.showerror(
+                txt("Duplicate Event Name", "중복 이벤트 이름"),
+                txt(
+                    "Event name '{name}' already exists in this profile.",
+                    "이 프로필에 '{name}' 이벤트 이름이 이미 존재합니다.",
+                    name=evt.event_name,
+                ),
+                parent=self.win,
+            )
+            return
         if is_edit and 0 <= row < len(self.profile.event_list):
             old_name = self.profile.event_list[row].event_name
             self.profile.event_list[row] = evt
@@ -1265,7 +1253,7 @@ class EventListFrame(ttk.Frame):
                 key_to_enter=evt.key_to_enter,
                 press_duration_ms=getattr(evt, "press_duration_ms", None),
                 randomization_ms=getattr(evt, "randomization_ms", None),
-                independent_thread=getattr(evt, "independent_thread", False),
+                independent_thread=False,
                 match_mode=getattr(evt, "match_mode", "pixel"),
                 invert_match=getattr(evt, "invert_match", False),
                 region_size=getattr(evt, "region_size", None),
@@ -1482,6 +1470,18 @@ class KeystrokeProfiles:
         except Exception:
             return ProfileModel(name=self.prof_name, event_list=[], favorite=False)
 
+    def _ensure_unique_event_names(self):
+        duplicates = _find_duplicate_event_names(self.profile.event_list or [])
+        if duplicates:
+            dup_text = ", ".join(duplicates)
+            raise ValueError(
+                txt(
+                    "Duplicate event names are not allowed: {names}",
+                    "중복 이벤트 이름은 허용되지 않습니다: {names}",
+                    names=dup_text,
+                )
+            )
+
     def _save(self, check_name=True, reload=True):
         started = time.perf_counter()
         if not self.profile.event_list:
@@ -1526,6 +1526,7 @@ class KeystrokeProfiles:
         if reload:
             self.e_frame.update_events()
             self.e_frame.save_names()
+        self._ensure_unique_event_names()
         if renamed or next_fingerprint != self._last_saved_fingerprint:
             save_profile(self.prof_dir, self.profile, name=self.prof_name)
             self._last_saved_fingerprint = _profile_fingerprint(
@@ -1559,7 +1560,7 @@ class KeystrokeProfiles:
             for e in events
             if getattr(e, "execute_action", True) and not (e.key_to_enter or "").strip()
         )
-        warning_count = condition_only_count + missing_key_count
+        warning_count = missing_key_count
 
         self.lbl_events_badge.config(
             text=txt(f"⚙️ Events {event_count}", f"⚙️ 이벤트 {event_count}"),
@@ -1573,14 +1574,6 @@ class KeystrokeProfiles:
         )
         if warning_count:
             warning_parts = []
-            if condition_only_count:
-                warning_parts.append(
-                    txt(
-                        "condition-only: {count}",
-                        "조건 전용: {count}",
-                        count=condition_only_count,
-                    )
-                )
             if missing_key_count:
                 warning_parts.append(
                     txt(
@@ -1600,10 +1593,17 @@ class KeystrokeProfiles:
                 fg=BADGE_FG_WARN,
             )
             return
-        self._overview_status_text = txt(
-            "All events are ready for autosave and run checks.",
-            "모든 이벤트가 자동저장 및 실행 점검 기준을 통과했습니다.",
-        )
+        if condition_only_count:
+            self._overview_status_text = txt(
+                "Condition-only events are configured: {count}.",
+                "조건 전용 이벤트가 {count}개 설정되어 있습니다.",
+                count=condition_only_count,
+            )
+        else:
+            self._overview_status_text = txt(
+                "All events are ready for autosave and run checks.",
+                "모든 이벤트가 자동저장 및 실행 점검 기준을 통과했습니다.",
+            )
         self.lbl_attention_badge.config(
             text=txt("✅ Attention 0", "✅ 주의 0"),
             bg=BADGE_BG_OK,

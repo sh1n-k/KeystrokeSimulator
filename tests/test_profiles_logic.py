@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from keystroke_models import EventModel, ProfileModel
@@ -186,6 +187,27 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         stub.update_events.assert_called_once()
         stub.save_cb.assert_called_once_with(check_name=False)
 
+    def test_edit_duplicate_name_is_rejected(self):
+        stub = _make_event_list_frame_stub()
+        stub.profile = ProfileModel(
+            event_list=[
+                EventModel(event_name="A", key_to_enter="X"),
+                EventModel(event_name="B", key_to_enter="Y"),
+            ]
+        )
+        stub.update_events = MagicMock()
+        stub.save_cb = MagicMock()
+        stub.win = object()
+
+        edited = EventModel(event_name="B", key_to_enter="X")
+        with patch("keystroke_profiles.messagebox.showerror") as mock_error:
+            stub._on_editor_save(edited, is_edit=True, row=0)
+
+        self.assertEqual(stub.profile.event_list[0].event_name, "A")
+        stub.update_events.assert_not_called()
+        stub.save_cb.assert_not_called()
+        mock_error.assert_called_once()
+
     def test_save_names_keeps_pending_rename_after_row_refresh(self):
         frame = _make_event_list_frame_stub()
         dependent = EventModel(event_name="Dependent", conditions={"OldName": True})
@@ -196,11 +218,9 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         row.event = renamed
         row.use_var = FakeVar()
         row.entry = FakeEntry(text="NewName")
-        row.lbl_indep = FakeWidget(text="")
         row.lbl_cond = FakeWidget(text="")
         row.lbl_grp = FakeWidget(text="")
         row.lbl_key = FakeWidget(text="")
-        row._tip_indep = FakeToolTip()
         row._tip_cond = FakeToolTip()
         row._tip_grp = FakeToolTip()
         row._tip_key = FakeToolTip()
@@ -279,69 +299,43 @@ class TestSortEventsLogic(unittest.TestCase):
 
     def _sort_key(self, stub, e):
         """_sort_events 내부 sort_key 람다 재현"""
-        is_indep = 0 if getattr(e, "independent_thread", False) else 1
-        grp = getattr(e, "group_id", "") or ""
-        grp_order = 0 if grp else 1
-        prio = getattr(e, "priority", 0)
-        key_order = stub._get_key_sort_order(e.key_to_enter)
         name = e.event_name or ""
-        return (is_indep, grp_order, grp, prio, key_order, name)
+        return (stub._get_event_type_sort_order(e), name.casefold(), name)
 
-    def test_independent_thread_first(self):
-        """independent_thread=True 이벤트가 먼저"""
+    def test_condition_type_before_action_type(self):
+        """조건 전용 이벤트가 키 입력 실행 이벤트보다 먼저"""
         events = [
-            EventModel(event_name="Normal", independent_thread=False, key_to_enter="A"),
-            EventModel(event_name="Indep", independent_thread=True, key_to_enter="B"),
+            EventModel(event_name="Action", execute_action=True, key_to_enter="A"),
+            EventModel(event_name="Condition", execute_action=False, key_to_enter=None),
         ]
         stub = self._make_sortable_stub(events)
         sorted_events = sorted(events, key=lambda e: self._sort_key(stub, e))
-        self.assertEqual(sorted_events[0].event_name, "Indep")
+        self.assertEqual(sorted_events[0].event_name, "Condition")
 
-    def test_group_before_no_group(self):
-        """그룹 있는 이벤트가 그룹 없는 이벤트보다 먼저"""
+    def test_same_type_sorted_by_name(self):
+        """같은 타입 내에서는 이름순"""
         events = [
-            EventModel(event_name="NoGroup", group_id=None, key_to_enter="A"),
-            EventModel(event_name="HasGroup", group_id="G1", key_to_enter="A"),
-        ]
-        stub = self._make_sortable_stub(events)
-        sorted_events = sorted(events, key=lambda e: self._sort_key(stub, e))
-        self.assertEqual(sorted_events[0].event_name, "HasGroup")
-
-    def test_same_group_by_priority(self):
-        """같은 그룹 내 priority 순 (오름차순)"""
-        events = [
-            EventModel(event_name="Low", group_id="G1", priority=10, key_to_enter="A"),
-            EventModel(event_name="High", group_id="G1", priority=1, key_to_enter="A"),
-        ]
-        stub = self._make_sortable_stub(events)
-        sorted_events = sorted(events, key=lambda e: self._sort_key(stub, e))
-        self.assertEqual(sorted_events[0].event_name, "High")
-
-    def test_key_order_digit_before_alpha_before_function(self):
-        """키 순서: 숫자 < 알파벳 < 펑션키"""
-        events = [
-            EventModel(event_name="Alpha", group_id="G1", priority=0, key_to_enter="A"),
-            EventModel(event_name="Func", group_id="G1", priority=0, key_to_enter="F1"),
-            EventModel(event_name="Digit", group_id="G1", priority=0, key_to_enter="3"),
-        ]
-        stub = self._make_sortable_stub(events)
-        sorted_events = sorted(events, key=lambda e: self._sort_key(stub, e))
-        self.assertEqual([e.event_name for e in sorted_events], ["Digit", "Alpha", "Func"])
-
-    def test_same_conditions_by_name(self):
-        """모든 조건 동일 시 이름순"""
-        events = [
-            EventModel(event_name="Zebra", group_id="G1", priority=0, key_to_enter="A"),
-            EventModel(event_name="Apple", group_id="G1", priority=0, key_to_enter="A"),
+            EventModel(event_name="Zebra", execute_action=True, key_to_enter="A"),
+            EventModel(event_name="Apple", execute_action=True, key_to_enter="B"),
         ]
         stub = self._make_sortable_stub(events)
         sorted_events = sorted(events, key=lambda e: self._sort_key(stub, e))
         self.assertEqual(sorted_events[0].event_name, "Apple")
 
+    def test_type_order_applies_before_name(self):
+        """이름보다 타입 우선 정렬"""
+        events = [
+            EventModel(event_name="Alpha", execute_action=True, key_to_enter="A"),
+            EventModel(event_name="Zulu", execute_action=False, key_to_enter=None),
+        ]
+        stub = self._make_sortable_stub(events)
+        sorted_events = sorted(events, key=lambda e: self._sort_key(stub, e))
+        self.assertEqual([e.event_name for e in sorted_events], ["Zulu", "Alpha"])
+
     def test_sort_events_uses_default_language_dialog_message(self):
         events = [
-            EventModel(event_name="B", key_to_enter="B"),
-            EventModel(event_name="A", key_to_enter="A"),
+            EventModel(event_name="B", execute_action=True, key_to_enter="B"),
+            EventModel(event_name="A", execute_action=False, key_to_enter=None),
         ]
         stub = self._make_sortable_stub(events)
         stub.win = object()
@@ -355,7 +349,7 @@ class TestSortEventsLogic(unittest.TestCase):
         mock_show.assert_called_once()
         args, kwargs = mock_show.call_args
         self.assertEqual(args[0], "Auto Sort Complete")
-        self.assertIn("Events were sorted by:", args[1])
+        self.assertIn("Event Type (Condition", args[1])
         self.assertEqual(kwargs["parent"], stub.win)
 
 
@@ -366,21 +360,18 @@ class TestEventRowBadges(unittest.TestCase):
         row.event = event
         row.use_var = FakeVar()
         row.entry = FakeEntry(text="")
-        row.lbl_indep = FakeWidget(text="")
         row.lbl_cond = FakeWidget(text="")
         row.lbl_grp = FakeWidget(text="")
         row.lbl_key = FakeWidget(text="")
-        row._tip_indep = FakeToolTip()
         row._tip_cond = FakeToolTip()
         row._tip_grp = FakeToolTip()
         row._tip_key = FakeToolTip()
         row._last_saved_name = ""
         return row
 
-    def test_row_displays_independent_and_condition_badges(self):
+    def test_row_displays_condition_badges(self):
         evt = EventModel(
             event_name="Evt",
-            independent_thread=True,
             execute_action=False,
             group_id="G1",
             key_to_enter="A",
@@ -389,10 +380,9 @@ class TestEventRowBadges(unittest.TestCase):
 
         row.update_display()
 
-        self.assertEqual(row.lbl_indep.cget("text"), "🧵 Indep")
         self.assertEqual(row.lbl_cond.cget("text"), "🔎 Cond")
         self.assertEqual(row.lbl_grp.cget("text"), "G1")
-        self.assertEqual(row.lbl_key.cget("text"), "A")
+        self.assertEqual(row.lbl_key.cget("text"), "🔎 Condition")
         self.assertEqual(row.entry.cget("foreground"), "gray")
 
     def test_row_displays_invert_and_missing_key_badges(self):
@@ -435,9 +425,21 @@ class TestProfileOverviewBadges(unittest.TestCase):
 
         self.assertEqual(stub.lbl_events_badge.cget("text"), "⚙️ Events 3")
         self.assertEqual(stub.lbl_groups_badge.cget("text"), "🧩 Groups 2")
-        self.assertEqual(stub.lbl_attention_badge.cget("text"), "⚠ Attention 2")
-        self.assertIn("condition-only: 1", stub._overview_status_text)
+        self.assertEqual(stub.lbl_attention_badge.cget("text"), "⚠ Attention 1")
         self.assertIn("missing key: 1", stub._overview_status_text)
+
+    def test_refresh_profile_overview_treats_condition_only_as_normal_info(self):
+        stub = self._make_profile_stub(
+            [EventModel(event_name="A", execute_action=False)]
+        )
+
+        stub._refresh_profile_overview()
+
+        self.assertEqual(stub.lbl_attention_badge.cget("text"), "✅ Attention 0")
+        self.assertEqual(
+            stub._overview_status_text,
+            "Condition-only events are configured: 1.",
+        )
 
     def test_refresh_profile_overview_sets_ok_detail_when_attention_zero(self):
         stub = self._make_profile_stub(
@@ -473,6 +475,28 @@ class TestProfileOverviewBadges(unittest.TestCase):
             stub.lbl_status.cget("text"),
             "All events are ready for autosave and run checks.",
         )
+
+
+class TestProfileSaveValidation(unittest.TestCase):
+    def test_save_rejects_duplicate_event_names(self):
+        set_language("en")
+        stub = KeystrokeProfiles.__new__(KeystrokeProfiles)
+        stub.profile = ProfileModel(
+            name="Test",
+            event_list=[
+                EventModel(event_name="A", key_to_enter="X"),
+                EventModel(event_name="A", key_to_enter="Y"),
+            ],
+            favorite=False,
+        )
+        stub.prof_name = "Test"
+        stub.prof_dir = Path(".")
+        stub.p_frame = MagicMock(get_data=lambda: ("Test", False))
+        stub._last_saved_fingerprint = None
+        stub.ext_save_cb = None
+
+        with self.assertRaisesRegex(ValueError, "Duplicate event names"):
+            stub._save(check_name=True, reload=False)
 
 
 if __name__ == "__main__":

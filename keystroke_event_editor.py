@@ -46,7 +46,6 @@ class KeystrokeEventEditor:
         self.execute_action_var = tk.BooleanVar(value=True)
         self.group_id_var = tk.StringVar()
         self.priority_var = tk.IntVar(value=0)
-        self.independent_thread = tk.BooleanVar(value=False)
 
         self.save_cb = save_callback
         self.capturer = ScreenshotCapturer()
@@ -64,7 +63,6 @@ class KeystrokeEventEditor:
         self.temp_conditions: Dict[str, bool] = {}
 
         # UI 위젯 참조 (Phase 1-3)
-        self.lbl_indep_warning = None
         self.lbl_hidden_notice = None
         self.lbl_condition_hint = None
         self.lbl_condition_summary = None
@@ -89,6 +87,7 @@ class KeystrokeEventEditor:
         self.key_check_active = True
         self.key_check_thread = Thread(target=self.check_key_states, daemon=True)
         self.key_check_thread.start()
+        self._is_closing = False
 
         self.load_latest_position()
 
@@ -97,7 +96,6 @@ class KeystrokeEventEditor:
         self.match_mode_var.trace_add("write", self._on_match_mode_change)
         self.region_w_var.trace_add("write", lambda *a: self._redraw_overlay())
         self.region_h_var.trace_add("write", lambda *a: self._redraw_overlay())
-        self.independent_thread.trace_add("write", self._on_indep_toggle)
         self.execute_action_var.trace_add(
             "write", lambda *_: self._refresh_basic_guidance()
         )
@@ -430,24 +428,6 @@ class KeystrokeEventEditor:
             foreground="gray",
         ).pack(padx=25, anchor="w")
 
-        ttk.Checkbutton(
-            gb_exec,
-            text=txt(
-                "Independent thread (ignore group/conditions)",
-                "독립 스레드 (그룹/조건 무시)",
-            ),
-            variable=self.independent_thread,
-        ).pack(padx=10, pady=(5, 0), anchor="w")
-        self.lbl_indep_warning = ttk.Label(
-            gb_exec,
-            text=txt(
-                "⚠ When enabled, the group/condition settings below are ignored",
-                "⚠ 활성화 시 아래 그룹·조건 설정이 무시됩니다",
-            ),
-            foreground="#b30000",
-        )
-        # 초기에는 숨김 — _on_indep_toggle에서 동적으로 표시
-
         # --- 그룹 및 우선순위 ---
         gb_grp = ttk.LabelFrame(
             f_main, text=txt("Group and Priority", "그룹 및 우선순위")
@@ -477,8 +457,8 @@ class KeystrokeEventEditor:
         self.lbl_group_hint = ttk.Label(
             gb_grp,
             text=txt(
-                "Select an existing group or enter a new name",
-                "기존 그룹 선택 또는 새 이름 입력",
+                "Select an existing group or enter a new name. Only one action event per group runs at a time.",
+                "기존 그룹 선택 또는 새 이름 입력. 같은 그룹에서는 한 번에 실행 이벤트 1개만 동작합니다.",
             ),
             foreground="gray",
         )
@@ -570,28 +550,6 @@ class KeystrokeEventEditor:
             bg="#dddddd",
         ).pack(side="right", padx=5)
 
-    def _on_indep_toggle(self, *args):
-        """독립 스레드 활성화 시 그룹/우선순위/조건 비활성화"""
-        if self.independent_thread.get():
-            self.cmb_group.set("")
-            self.cmb_group.config(state="disabled")
-            self.group_id_var.set("")
-            if self.entry_priority:
-                self.entry_priority.config(state="disabled")
-                self.priority_var.set(0)
-            self.tree_cond.config(selectmode="none")
-            self.tree_cond.unbind("<Button-1>")
-            if self.lbl_indep_warning:
-                self.lbl_indep_warning.pack(padx=25, pady=(0, 5), anchor="w")
-        else:
-            self.cmb_group.config(state="normal")
-            if self.entry_priority:
-                self.entry_priority.config(state="normal")
-            self.tree_cond.config(selectmode="browse")
-            self.tree_cond.bind("<Button-1>", self._on_tree_click)
-            if self.lbl_indep_warning:
-                self.lbl_indep_warning.pack_forget()
-
     def _reset_all_conditions(self):
         """모든 조건을 무시 상태로 초기화"""
         self.temp_conditions.clear()
@@ -611,7 +569,10 @@ class KeystrokeEventEditor:
         self.lbl_condition_summary.config(text=" | ".join(parts) if parts else "")
 
     def _refresh_basic_guidance(self):
-        if not getattr(self, "lbl_basic_step", None):
+        if getattr(self, "_is_closing", False):
+            return
+        basic_label = getattr(self, "lbl_basic_step", None)
+        if not basic_label:
             return
         if not self.held_img:
             message = txt(
@@ -633,9 +594,14 @@ class KeystrokeEventEditor:
                 "Ready to save. Review advanced settings only if you need custom matching, timing, or conditions.",
                 "이제 저장할 수 있습니다. 맞춤 매칭, 타이밍, 조건이 필요할 때만 상세 설정을 확인하세요.",
             )
-        self.lbl_basic_step.config(text=message)
-        if getattr(self, "lbl_bottom_hint", None):
-            self.lbl_bottom_hint.config(text=message)
+        try:
+            basic_label.config(text=message)
+            bottom_hint = getattr(self, "lbl_bottom_hint", None)
+            if bottom_hint:
+                bottom_hint.config(text=message)
+        except tk.TclError:
+            # 예약된 after/trace 콜백이 창 파괴 이후 도착할 수 있다.
+            return
 
     def create_coord_entries(self, parent, labels):
         entries = []
@@ -1071,6 +1037,23 @@ class KeystrokeEventEditor:
             return False
         return True
 
+    def _validate_unique_event_name(self, final_name: str) -> bool:
+        """현재 프로필 내 이벤트 이름 중복 여부 검증"""
+        for idx, evt in enumerate(self.existing_events):
+            if self.is_edit and idx == self.row_num:
+                continue
+            if (getattr(evt, "event_name", None) or "").strip() == final_name:
+                messagebox.showerror(
+                    txt("Duplicate Event Name", "중복 이벤트 이름"),
+                    txt(
+                        "Event name '{name}' already exists in this profile.",
+                        "이 프로필에 '{name}' 이벤트 이름이 이미 존재합니다.",
+                        name=final_name,
+                    ),
+                )
+                return False
+        return True
+
     def save_event(self, event=None):
         if not self._validate_required_fields():
             return
@@ -1081,6 +1064,8 @@ class KeystrokeEventEditor:
                 txt("Error", "오류"),
                 txt("Please enter an event name.", "이벤트 이름을 입력해 주세요."),
             )
+            return
+        if not self._validate_unique_event_name(final_name):
             return
 
         parsed = self._parse_numeric_inputs()
@@ -1108,10 +1093,7 @@ class KeystrokeEventEditor:
                 ),
             )
 
-        # 독립 스레드일 경우 그룹 제거
         grp_id = self.group_id_var.get()
-        if self.independent_thread.get():
-            grp_id = None
 
         evt = EventModel(
             event_name=final_name,
@@ -1123,7 +1105,7 @@ class KeystrokeEventEditor:
             key_to_enter=self.key_to_enter,
             press_duration_ms=dur,
             randomization_ms=rand,
-            independent_thread=self.independent_thread.get(),
+            independent_thread=False,
             capture_size=(cap_w, cap_h),
             match_mode=self.match_mode_var.get(),
             invert_match=self.invert_match_var.get(),
@@ -1139,6 +1121,7 @@ class KeystrokeEventEditor:
 
     def close_window(self, event=None):
         # 콜백 비활성화를 위해 capturer 콜백을 None으로 설정
+        self._is_closing = True
         self.capturer.stop_capture()
         self.capturer.screenshot_callback = None
         self.key_check_active = False
@@ -1218,9 +1201,6 @@ class KeystrokeEventEditor:
         if self.key_to_enter in self.key_combobox["values"]:
             self.key_combobox.set(self.key_to_enter)
 
-        is_indep = getattr(evt, "independent_thread", False)
-        self.independent_thread.set(is_indep)
-
         if d := getattr(evt, "press_duration_ms", None):
             self.entry_dur.insert(0, str(int(d)))
         if r := getattr(evt, "randomization_ms", None):
@@ -1239,16 +1219,6 @@ class KeystrokeEventEditor:
 
         gid = getattr(evt, "group_id", "") or ""
         self.group_id_var.set(gid)
-
-        # 독립 스레드면 그룹/우선순위/조건 UI 비활성화 동기화
-        if is_indep:
-            self.cmb_group.config(state="disabled")
-            if self.entry_priority:
-                self.entry_priority.config(state="disabled")
-            self.tree_cond.config(selectmode="none")
-            self.tree_cond.unbind("<Button-1>")
-            if self.lbl_indep_warning:
-                self.lbl_indep_warning.pack(padx=25, pady=(0, 5), anchor="w")
 
         self.priority_var.set(getattr(evt, "priority", 0))
 

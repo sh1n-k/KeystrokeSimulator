@@ -39,7 +39,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
             lambda _img, evt, is_independent=False: match_map[evt["name"]]
         )
 
-        async def fake_press(evt):
+        async def fake_press(evt, _local_states):
             pressed.append(evt["name"])
 
         proc._press_key_async = fake_press
@@ -82,7 +82,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
             lambda _img, evt, is_independent=False: match_map[evt["name"]]
         )
 
-        async def fake_press(evt):
+        async def fake_press(evt, _local_states):
             pressed.append(evt["name"])
 
         proc._press_key_async = fake_press
@@ -125,7 +125,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
             lambda _img, evt, is_independent=False: match_map[evt["name"]]
         )
 
-        async def fake_press(evt):
+        async def fake_press(evt, _local_states):
             pressed.append(evt["name"])
 
         proc._press_key_async = fake_press
@@ -169,7 +169,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
             lambda _img, evt, is_independent=False: match_map[evt["name"]]
         )
 
-        async def fake_press(evt):
+        async def fake_press(evt, _local_states):
             pressed.append(evt["name"])
 
         proc._press_key_async = fake_press
@@ -214,7 +214,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
             lambda _img, evt, is_independent=False: match_map[evt["name"]]
         )
 
-        async def fake_press(evt):
+        async def fake_press(evt, _local_states):
             pressed.append(evt["name"])
 
         proc._press_key_async = fake_press
@@ -265,7 +265,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
             lambda _img, evt, is_independent=False: match_map[evt["name"]]
         )
 
-        async def fake_press(evt):
+        async def fake_press(evt, _local_states):
             pressed.append(evt["name"])
 
         proc._press_key_async = fake_press
@@ -319,7 +319,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
             lambda _img, evt, is_independent=False: match_map[evt["name"]]
         )
 
-        async def fake_press(evt):
+        async def fake_press(evt, _local_states):
             pressed.append(evt["name"])
 
         proc._press_key_async = fake_press

@@ -129,6 +129,44 @@ class TestValidateRequiredFields(unittest.TestCase):
         self.assertTrue(result)
 
 
+class TestUniqueEventNameValidation(unittest.TestCase):
+    @patch("keystroke_event_editor.messagebox")
+    def test_unique_name_passes(self, mock_msgbox):
+        editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        editor.existing_events = [EventModel(event_name="A"), EventModel(event_name="B")]
+        editor.is_edit = False
+        editor.row_num = 0
+
+        result = KeystrokeEventEditor._validate_unique_event_name(editor, "C")
+
+        self.assertTrue(result)
+        mock_msgbox.showerror.assert_not_called()
+
+    @patch("keystroke_event_editor.messagebox")
+    def test_duplicate_name_fails_when_adding(self, mock_msgbox):
+        editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        editor.existing_events = [EventModel(event_name="A"), EventModel(event_name="B")]
+        editor.is_edit = False
+        editor.row_num = 0
+
+        result = KeystrokeEventEditor._validate_unique_event_name(editor, "A")
+
+        self.assertFalse(result)
+        mock_msgbox.showerror.assert_called_once()
+
+    @patch("keystroke_event_editor.messagebox")
+    def test_editing_same_row_name_is_allowed(self, mock_msgbox):
+        editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        editor.existing_events = [EventModel(event_name="A"), EventModel(event_name="B")]
+        editor.is_edit = True
+        editor.row_num = 0
+
+        result = KeystrokeEventEditor._validate_unique_event_name(editor, "A")
+
+        self.assertTrue(result)
+        mock_msgbox.showerror.assert_not_called()
+
+
 class TestRegionSizeClamp(unittest.TestCase):
     def test_on_region_size_change_allows_20x20(self):
         stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
@@ -249,6 +287,26 @@ class TestLivePreviewUpdates(unittest.TestCase):
             KeystrokeEventEditor.update_capture_image(editor, (1, 1), img2)
 
         self.assertEqual(editor._safe_update_img_lbl.call_count, 2)
+
+
+class TestBasicGuidanceSafety(unittest.TestCase):
+    def test_refresh_basic_guidance_ignores_destroyed_label(self):
+        editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        interp = tk.Tcl()
+        editor._is_closing = False
+        editor.lbl_basic_step = MagicMock(
+            config=MagicMock(side_effect=tk.TclError("invalid command name"))
+        )
+        editor.lbl_bottom_hint = MagicMock()
+        editor.held_img = None
+        editor.clicked_pos = None
+        editor.key_to_enter = None
+        editor.execute_action_var = tk.BooleanVar(master=interp, value=True)
+
+        KeystrokeEventEditor._refresh_basic_guidance(editor)
+
+        editor.lbl_basic_step.config.assert_called_once()
+        editor.lbl_bottom_hint.config.assert_not_called()
 
 
 if __name__ == "__main__":

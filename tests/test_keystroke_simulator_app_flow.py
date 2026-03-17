@@ -84,6 +84,37 @@ class TestStartSimulation(unittest.TestCase):
         passed_events = mock_processor_cls.call_args.args[2]
         self.assertEqual([e.event_name for e in passed_events], ["Action", "ConditionOnly"])
 
+    @patch("keystroke_simulator_app.KeystrokeProcessor")
+    @patch("keystroke_simulator_app.load_profile")
+    def test_start_simulation_accepts_legacy_independent_thread_events(
+        self, mock_load_profile, mock_processor_cls
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+
+        profile = ProfileModel(
+            name="Quick",
+            event_list=[
+                EventModel(
+                    event_name="LegacyIndependent",
+                    use_event=True,
+                    key_to_enter="A",
+                    independent_thread=True,
+                )
+            ],
+            modification_keys={},
+        )
+        mock_load_profile.return_value = profile
+        mock_processor = MagicMock()
+        mock_processor_cls.return_value = mock_processor
+
+        result = KeystrokeSimulatorApp._start_simulation(app)
+
+        self.assertTrue(result)
+        passed_events = mock_processor_cls.call_args.args[2]
+        self.assertEqual([e.event_name for e in passed_events], ["LegacyIndependent"])
+
     @patch("keystroke_simulator_app.load_profile", side_effect=RuntimeError("boom"))
     def test_start_simulation_returns_false_on_profile_load_error(self, _mock_load_profile):
         app = _make_app_stub()

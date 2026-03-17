@@ -19,6 +19,19 @@ class TestConditionFiltering(unittest.TestCase):
 
         self.assertEqual(selected_names, {"G1_HIGH", "NO_GROUP"})
 
+    def test_select_by_group_priority_uses_name_as_tie_breaker(self):
+        proc = make_processor_stub()
+        events = [
+            {"name": "Zeta", "group": "G1", "priority": 0},
+            {"name": "Alpha", "group": "G1", "priority": 0},
+            {"name": "Solo", "group": None, "priority": 5},
+        ]
+
+        selected = proc._select_by_group_priority(events)
+        selected_names = {evt["name"] for evt in selected}
+
+        self.assertEqual(selected_names, {"Alpha", "Solo"})
+
     def test_check_conditions_from_current_states(self):
         proc = make_processor_stub()
         proc.current_states = {"A": True, "B": False}
@@ -62,7 +75,7 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
             lambda _img, evt, is_independent=False: match_map[evt["name"]]
         )
 
-        async def fake_press(evt):
+        async def fake_press(evt, _local_states):
             pressed.append(evt["name"])
 
         proc._press_key_async = fake_press
@@ -74,6 +87,41 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
             proc.current_states,
             {"A": True, "B": True, "C": True, "D": False},
         )
+
+    async def test_group_selection_ignores_condition_only_events_for_key_press(self):
+        proc = make_processor_stub()
+        proc.event_data_list = [
+            {
+                "name": "COND",
+                "conds": {},
+                "group": "G1",
+                "priority": 0,
+                "exec": False,
+            },
+            {
+                "name": "ACTION",
+                "conds": {"COND": True},
+                "group": "G1",
+                "priority": 0,
+                "exec": True,
+            },
+        ]
+        match_map = {"COND": True, "ACTION": True}
+        pressed = []
+
+        proc._check_match = (
+            lambda _img, evt, is_independent=False: match_map[evt["name"]]
+        )
+
+        async def fake_press(evt, _local_states):
+            pressed.append(evt["name"])
+
+        proc._press_key_async = fake_press
+
+        await proc._evaluate_and_execute_main(img=None)
+
+        self.assertEqual(pressed, ["ACTION"])
+        self.assertEqual(proc.current_states, {"COND": True, "ACTION": True})
 
     async def test_evaluate_and_execute_strict_chain_blocks_child(self):
         proc = make_processor_stub()
@@ -103,7 +151,7 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
             lambda _img, evt, is_independent=False: match_map[evt["name"]]
         )
 
-        async def fake_press(evt):
+        async def fake_press(evt, _local_states):
             pressed.append(evt["name"])
 
         proc._press_key_async = fake_press
@@ -112,6 +160,117 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(pressed, [])
         self.assertEqual(proc.current_states, {"A": False, "B": False, "C": False})
+
+    async def test_execution_dedupe_keeps_only_one_identical_action(self):
+        proc = make_processor_stub()
+        proc.event_data_list = [
+            {
+                "name": "A1",
+                "mode": "pixel",
+                "center_x": 100,
+                "center_y": 200,
+                "ref_bgr": [1, 2, 3],
+                "invert": False,
+                "key": "A",
+                "dur": 100,
+                "rand": 0,
+                "conds": {},
+                "group": None,
+                "priority": 0,
+                "exec": True,
+                "independent": False,
+            },
+            {
+                "name": "A2",
+                "mode": "pixel",
+                "center_x": 100,
+                "center_y": 200,
+                "ref_bgr": [1, 2, 3],
+                "invert": False,
+                "key": "A",
+                "dur": 100,
+                "rand": 0,
+                "conds": {},
+                "group": None,
+                "priority": 0,
+                "exec": True,
+                "independent": False,
+            },
+        ]
+        match_map = {"A1": True, "A2": True}
+        pressed = []
+
+        proc._check_match = (
+            lambda _img, evt, is_independent=False: match_map[evt["name"]]
+        )
+
+        async def fake_press(evt, _local_states):
+            pressed.append(evt["name"])
+
+        proc._press_key_async = fake_press
+
+        await proc._evaluate_and_execute_main(img=None)
+
+        self.assertEqual(pressed, ["A1"])
+
+    async def test_execution_dedupe_does_not_merge_different_conditions(self):
+        proc = make_processor_stub()
+        proc.event_data_list = [
+            {
+                "name": "Gate",
+                "conds": {},
+                "group": None,
+                "priority": 0,
+                "exec": False,
+            },
+            {
+                "name": "A1",
+                "mode": "pixel",
+                "center_x": 100,
+                "center_y": 200,
+                "ref_bgr": [1, 2, 3],
+                "invert": False,
+                "key": "A",
+                "dur": 100,
+                "rand": 0,
+                "conds": {},
+                "group": None,
+                "priority": 0,
+                "exec": True,
+                "independent": False,
+            },
+            {
+                "name": "A2",
+                "mode": "pixel",
+                "center_x": 100,
+                "center_y": 200,
+                "ref_bgr": [1, 2, 3],
+                "invert": False,
+                "key": "A",
+                "dur": 100,
+                "rand": 0,
+                "conds": {"Gate": True},
+                "group": None,
+                "priority": 0,
+                "exec": True,
+                "independent": False,
+            },
+        ]
+        match_map = {"Gate": True, "A1": True, "A2": True}
+        pressed = []
+
+        proc._check_match = (
+            lambda _img, evt, is_independent=False: match_map[evt["name"]]
+        )
+
+        async def fake_press(evt, _local_states):
+            pressed.append(evt["name"])
+
+        proc._press_key_async = fake_press
+
+        await proc._evaluate_and_execute_main(img=None)
+
+        self.assertEqual(pressed, ["A1", "A2"])
 
 
 class TestSafetyAndNormalization(unittest.TestCase):

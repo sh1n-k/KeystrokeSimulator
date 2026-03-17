@@ -39,7 +39,6 @@ def _make_node(node_id, name=None, group_id=None, **kwargs):
         group_id=group_id,
         use_event=kwargs.get("use_event", True),
         execute_action=kwargs.get("execute_action", True),
-        independent_thread=kwargs.get("independent_thread", False),
         missing=kwargs.get("missing", False),
     )
 
@@ -122,7 +121,6 @@ class TestBuildGraph(unittest.TestCase):
                     group_id="G1",
                     use_event=False,
                     execute_action=False,
-                    independent_thread=True,
                 ),
             ],
         )
@@ -131,7 +129,6 @@ class TestBuildGraph(unittest.TestCase):
         self.assertEqual(node.group_id, "G1")
         self.assertFalse(node.use_event)
         self.assertFalse(node.execute_action)
-        self.assertTrue(node.independent_thread)
 
     def test_duplicate_event_names(self):
         """동명 이벤트가 있으면 조건 엣지가 모든 동명 노드에 연결"""

@@ -11,7 +11,9 @@ def _make_processor_stub() -> KeystrokeProcessor:
     proc.term_event = threading.Event()
     proc.key_codes = {"A": 65}
     proc.key_lock = threading.Lock()
+    proc.state_lock = threading.Lock()
     proc.pressed_keys = set()
+    proc.current_states = {}
     proc.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
     proc._calculate_press_duration = lambda _evt: 0.05
     return proc
@@ -67,6 +69,34 @@ class TestPressKeyAsync(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("A", proc.pressed_keys)
 
+    async def test_press_key_async_logs_only_referenced_conditions(self):
+        proc = _make_processor_stub()
+
+        async def fake_wait(_end_time, _check_interval=0.02):
+            return None
+
+        proc._wait_until_async = fake_wait
+        evt = {
+            "name": "A_EVT",
+            "key": "A",
+            "conds": {"[조건-비활성] 채널링 중": False, "[조건] 버프 준비": True},
+        }
+        state_snapshot = {
+            "[조건-비활성] 채널링 중": False,
+            "[조건] 버프 준비": True,
+            "무관한 조건": True,
+        }
+
+        with patch("keystroke_processor.logger.info") as mock_info:
+            await proc._press_key_async(evt, state_snapshot)
+
+        mock_info.assert_called_once()
+        log_line = mock_info.call_args[0][0]
+        self.assertIn("Async Key Pressed: A", log_line)
+        self.assertIn("[조건-비활성] 채널링 중=False", log_line)
+        self.assertIn("[조건] 버프 준비=True", log_line)
+        self.assertNotIn("무관한 조건", log_line)
+
 
 class TestPressKeySync(unittest.TestCase):
     def test_sync_press_key_presses_and_releases(self):
@@ -100,35 +130,41 @@ class TestPressKeySync(unittest.TestCase):
 
         self.assertNotIn("A", proc.pressed_keys)
 
+    def test_sync_press_key_logs_referenced_conditions_from_current_states(self):
+        proc = _make_processor_stub()
+        proc._wait_until_sync = lambda _end_time, _check_interval=0.02: None
+        proc.current_states = {
+            "[조건-비활성] 채널링 중": False,
+            "[조건] 버프 준비": True,
+            "무관한 조건": True,
+        }
+        evt = {
+            "name": "A_EVT",
+            "key": "A",
+            "conds": {"[조건-비활성] 채널링 중": False, "[조건] 버프 준비": True},
+        }
+
+        with patch("keystroke_processor.logger.info") as mock_info:
+            proc._sync_press_key(evt)
+
+        mock_info.assert_called_once()
+        log_line = mock_info.call_args[0][0]
+        self.assertIn("Sync Key Pressed: A", log_line)
+        self.assertIn("[조건-비활성] 채널링 중=False", log_line)
+        self.assertIn("[조건] 버프 준비=True", log_line)
+        self.assertNotIn("무관한 조건", log_line)
+
 
 class TestProcessorStart(unittest.TestCase):
-    def test_start_creates_thread_per_independent_event(self):
+    def test_start_only_starts_main_thread(self):
         proc = KeystrokeProcessor.__new__(KeystrokeProcessor)
         proc.pid = None
         proc.main_thread = MagicMock()
-        proc.indep_threads = []
         proc.independent_events = [{"name": "A"}, {"name": "B"}]
-        proc._run_independent_loop = MagicMock()
 
-        created_threads = []
-
-        def make_thread(*args, **kwargs):
-            thread = MagicMock()
-            thread.target = kwargs.get("target")
-            thread.args = kwargs.get("args")
-            created_threads.append(thread)
-            return thread
-
-        with patch("keystroke_processor.threading.Thread", side_effect=make_thread):
-            KeystrokeProcessor.start(proc)
+        KeystrokeProcessor.start(proc)
 
         proc.main_thread.start.assert_called_once()
-        self.assertEqual(len(created_threads), 2)
-        self.assertEqual(
-            [thread.args for thread in created_threads],
-            [({"name": "A"},), ({"name": "B"},)],
-        )
-        self.assertEqual(len(proc.indep_threads), 2)
 
 
 if __name__ == "__main__":
