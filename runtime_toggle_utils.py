@@ -216,6 +216,10 @@ def runtime_toggle_member_count(events: Iterable[EventModel]) -> int:
     return sum(1 for evt in events if getattr(evt, "runtime_toggle_member", False))
 
 
+def active_runtime_toggle_events(events: Iterable[EventModel]) -> list[EventModel]:
+    return [evt for evt in events if getattr(evt, "use_event", True)]
+
+
 def _resolve_start_stop_trigger(settings, os_name: str | None = None) -> str | None:
     if settings is None:
         return None
@@ -242,6 +246,7 @@ def collect_runtime_toggle_validation_errors(
         return []
 
     errors: list[str] = []
+    active_events = active_runtime_toggle_events(events)
     trigger_raw = (getattr(profile, "runtime_toggle_key", None) or "").strip()
     trigger = normalize_runtime_toggle_trigger(trigger_raw)
 
@@ -261,7 +266,7 @@ def collect_runtime_toggle_validation_errors(
             )
         )
 
-    if runtime_toggle_member_count(events) == 0:
+    if runtime_toggle_member_count(active_events) == 0:
         errors.append(
             txt(
                 "Runtime Event Group has no selected events.",
@@ -304,7 +309,7 @@ def collect_runtime_toggle_validation_errors(
                 (
                     getattr(evt, "event_name", None) or txt("Unnamed", "이름 없음")
                 ).strip()
-                for evt in events
+                for evt in active_events
                 if getattr(evt, "execute_action", True)
                 and normalize_runtime_toggle_trigger(getattr(evt, "key_to_enter", None))
                 == trigger

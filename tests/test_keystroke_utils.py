@@ -7,6 +7,7 @@ from unittest.mock import patch
 from keystroke_models import EventModel, ProfileModel
 from keystroke_utils import KeyUtils, PermissionUtils, StateUtils
 from runtime_toggle_utils import (
+    active_runtime_toggle_events,
     MOUSE_BUTTON_3_TRIGGER,
     WHEEL_DOWN_TRIGGER,
     WHEEL_UP_TRIGGER,
@@ -205,6 +206,55 @@ class TestRuntimeToggleUtils(unittest.TestCase):
 
         self.assertEqual(len(errors), 1)
         self.assertIn("conflicts with event input key 'F6'", errors[0])
+
+    def test_collect_validation_errors_ignore_disabled_events(self):
+        profile = ProfileModel(
+            name="P1",
+            runtime_toggle_enabled=True,
+            runtime_toggle_key="F6",
+            event_list=[
+                EventModel(
+                    event_name="DisabledExtra",
+                    key_to_enter="A",
+                    runtime_toggle_member=True,
+                    use_event=False,
+                ),
+                EventModel(
+                    event_name="DisabledConflict",
+                    key_to_enter="F6",
+                    use_event=False,
+                ),
+            ],
+        )
+
+        errors = collect_runtime_toggle_validation_errors(
+            profile,
+            profile.event_list,
+            settings=type(
+                "SettingsStub",
+                (),
+                {
+                    "toggle_start_stop_mac": False,
+                    "use_alt_shift_hotkey": False,
+                    "start_stop_key": "DISABLED",
+                },
+            )(),
+            os_name="Darwin",
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("has no selected events", errors[0])
+
+    def test_active_runtime_toggle_events_filters_disabled_rows(self):
+        events = [
+            EventModel(event_name="Enabled", use_event=True),
+            EventModel(event_name="Disabled", use_event=False),
+        ]
+
+        self.assertEqual(
+            [evt.event_name for evt in active_runtime_toggle_events(events)],
+            ["Enabled"],
+        )
 
     def test_collect_validation_errors_for_alt_shift_conflict(self):
         profile = ProfileModel(

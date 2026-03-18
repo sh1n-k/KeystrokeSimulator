@@ -138,7 +138,11 @@ class TestProfileJsonStorage(unittest.TestCase):
             prof_dir = Path(td)
             payload = {
                 "schema_version": 1,
-                "profile": {"name": "Legacy", "favorite": False, "modification_keys": None},
+                "profile": {
+                    "name": "Legacy",
+                    "favorite": False,
+                    "modification_keys": None,
+                },
                 "events": [
                     {"event_name": "A", "key_to_enter": "X"},
                     {"event_name": "A", "key_to_enter": "Y"},
@@ -160,6 +164,21 @@ class TestProfileJsonStorage(unittest.TestCase):
                 [evt["event_name"] for evt in raw["events"]],
                 ["A", "A", "  "],
             )
+
+    def test_save_profile_preserves_unrecognized_runtime_toggle_key(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            profile = ProfileModel(
+                name="CrossOs",
+                event_list=[EventModel(event_name="Extra", runtime_toggle_member=True)],
+                runtime_toggle_enabled=True,
+                runtime_toggle_key="Alt",
+            )
+
+            save_profile(prof_dir, profile, name=profile.name)
+
+            raw = json.loads((prof_dir / "CrossOs.json").read_text(encoding="utf-8"))
+            self.assertEqual(raw["profile"]["runtime_toggle_key"], "Alt")
 
     def test_load_profile_migrates_duplicate_event_names_from_pickle(self):
         with tempfile.TemporaryDirectory() as td:

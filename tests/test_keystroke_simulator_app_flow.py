@@ -568,6 +568,22 @@ class TestEventHandlerSetup(unittest.TestCase):
         mock_mouse_listener.assert_called_once()
         mock_mouse_listener.return_value.start.assert_called_once()
 
+    @patch("keystroke_simulator_app.threading.Thread")
+    @patch("keystroke_simulator_app.platform.system", return_value="Darwin")
+    @patch("keystroke_simulator_app.pynput.keyboard.Listener")
+    def test_setup_event_handlers_uses_mac_polling_for_runtime_keyboard_trigger_only(
+        self, mock_keyboard_listener, _mock_system, mock_thread
+    ):
+        app = _make_app_stub()
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = "Q"
+        app.settings.toggle_start_stop_mac = False
+
+        KeystrokeSimulatorApp._setup_event_handlers(app)
+
+        mock_thread.assert_called_once()
+        mock_keyboard_listener.assert_not_called()
+
     def test_open_settings_reuses_existing_window(self):
         app = _make_app_stub()
         existing = MagicMock()
@@ -690,6 +706,35 @@ class TestRuntimeToggleKeyHandling(unittest.TestCase):
 
         app.after.assert_called_once()
         self.assertEqual(app.last_runtime_toggle_time, 100.0)
+
+
+class TestMacPollingBehavior(unittest.TestCase):
+    @patch("keystroke_simulator_app.KeyUtils.key_pressed", return_value=False)
+    @patch("keystroke_simulator_app.KeyUtils.mod_key_pressed", side_effect=[True, True])
+    @patch("keystroke_simulator_app.time.sleep", side_effect=RuntimeError("stop"))
+    @patch("keystroke_simulator_app.time.time", side_effect=[100.0, 100.0])
+    @patch("keystroke_simulator_app.platform.system", return_value="Darwin")
+    def test_mac_polling_does_not_toggle_start_stop_when_disabled(
+        self,
+        _mock_system,
+        _mock_time,
+        _mock_sleep,
+        _mock_mod_pressed,
+        _mock_key_pressed,
+    ):
+        app = _make_app_stub()
+        app.after = MagicMock()
+        app.ctrl_check_active = True
+        app.settings.toggle_start_stop_mac = False
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = "Q"
+
+        try:
+            KeystrokeSimulatorApp._check_for_long_alt_shift(app)
+        except RuntimeError:
+            pass
+
+        app.after.assert_not_called()
 
 
 if __name__ == "__main__":

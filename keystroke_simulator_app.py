@@ -1011,10 +1011,16 @@ class KeystrokeSimulatorApp(tk.Tk):
                     time.sleep(idle_sleep)
                     continue
 
-                curr_state = KeyUtils.mod_key_pressed(
-                    "alt"
-                ) and KeyUtils.mod_key_pressed("shift")
-                if curr_state and not last_state:
+                start_stop_enabled = bool(
+                    platform.system() == "Darwin"
+                    and getattr(self.settings, "toggle_start_stop_mac", False)
+                )
+                curr_state = (
+                    start_stop_enabled
+                    and KeyUtils.mod_key_pressed("alt")
+                    and KeyUtils.mod_key_pressed("shift")
+                )
+                if start_stop_enabled and curr_state and not last_state:
                     self.after(0, self.toggle_start_stop)
                     last_time = curr_time
                     idle_sleep = 0.01

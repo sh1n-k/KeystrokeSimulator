@@ -150,9 +150,13 @@ def _normalize_loaded_event_names(profile: ProfileModel) -> bool:
     if not events:
         return False
 
-    raw_names = [_normalized_event_name(getattr(evt, "event_name", None)) for evt in events]
+    raw_names = [
+        _normalized_event_name(getattr(evt, "event_name", None)) for evt in events
+    ]
     duplicates = {
-        name for name, count in Counter(name for name in raw_names if name).items() if count > 1
+        name
+        for name, count in Counter(name for name in raw_names if name).items()
+        if count > 1
     }
 
     used_names: set[str] = set()
@@ -243,8 +247,12 @@ def event_from_dict(d: Dict[str, Any]) -> EventModel:
 
 
 def profile_to_dict(profile: ProfileModel) -> Dict[str, Any]:
-    runtime_toggle_key = normalize_runtime_toggle_trigger(
-        getattr(profile, "runtime_toggle_key", None)
+    raw_runtime_toggle_key = getattr(profile, "runtime_toggle_key", None)
+    normalized_runtime_toggle_key = normalize_runtime_toggle_trigger(
+        raw_runtime_toggle_key
+    )
+    runtime_toggle_key = normalized_runtime_toggle_key or (
+        str(raw_runtime_toggle_key).strip() if raw_runtime_toggle_key else None
     )
     return {
         "schema_version": PROFILE_SCHEMA_VERSION,
@@ -285,7 +293,9 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
     if normalized_toggle_key:
         p.runtime_toggle_key = normalized_toggle_key
     else:
-        p.runtime_toggle_key = str(runtime_toggle_key).strip() if runtime_toggle_key else None
+        p.runtime_toggle_key = (
+            str(runtime_toggle_key).strip() if runtime_toggle_key else None
+        )
 
     # Ensure modification_keys default: all keys enabled with Pass mode
     if not getattr(p, "modification_keys", None):
@@ -299,9 +309,7 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
         p.event_list = []
 
     for evt in p.event_list:
-        evt.runtime_toggle_member = bool(
-            getattr(evt, "runtime_toggle_member", False)
-        )
+        evt.runtime_toggle_member = bool(getattr(evt, "runtime_toggle_member", False))
 
     for e in p.event_list:
         if not hasattr(e, "use_event"):
