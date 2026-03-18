@@ -46,8 +46,15 @@ class TestProfileJsonStorage(unittest.TestCase):
                 group_id="G",
                 priority=7,
                 conditions={"Other": True},
+                runtime_toggle_member=True,
             )
-            p = ProfileModel(name="P1", event_list=[evt], favorite=True)
+            p = ProfileModel(
+                name="P1",
+                event_list=[evt],
+                favorite=True,
+                runtime_toggle_enabled=True,
+                runtime_toggle_key="F6",
+            )
             save_profile(prof_dir, p, name="P1")
 
             # Verify JSON doesn't contain latest_screenshot.
@@ -56,6 +63,9 @@ class TestProfileJsonStorage(unittest.TestCase):
             self.assertEqual(len(raw["events"]), 1)
             self.assertNotIn("latest_screenshot", raw["events"][0])
             self.assertIn("held_screenshot", raw["events"][0])
+            self.assertTrue(raw["events"][0]["runtime_toggle_member"])
+            self.assertTrue(raw["profile"]["runtime_toggle_enabled"])
+            self.assertEqual(raw["profile"]["runtime_toggle_key"], "F6")
 
             p2 = load_profile(prof_dir, "P1", migrate=False)
             self.assertEqual(p2.name, "P1")
@@ -66,6 +76,9 @@ class TestProfileJsonStorage(unittest.TestCase):
             self.assertIsNotNone(e2.held_screenshot)
             self.assertEqual(e2.held_screenshot.size, (3, 3))
             self.assertEqual(e2.capture_size, (320, 180))
+            self.assertTrue(e2.runtime_toggle_member)
+            self.assertTrue(p2.runtime_toggle_enabled)
+            self.assertEqual(p2.runtime_toggle_key, "F6")
 
     def test_legacy_pickle_migration_promotes_latest_to_held(self):
         with tempfile.TemporaryDirectory() as td:

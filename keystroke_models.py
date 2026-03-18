@@ -49,6 +49,8 @@ class EventModel:
     priority: int = 0
     # 조건 목록: { '다른_이벤트_이름': True/False } (True: 활성 기대, False: 비활성 기대)
     conditions: Dict[str, bool] = field(default_factory=dict)
+    # 실행 중 토글되는 추가 이벤트 묶음에 포함되는지 여부
+    runtime_toggle_member: bool = False
 
     def __iter__(self):
         return ((f, getattr(self, f.name)) for f in fields(self))
@@ -60,6 +62,8 @@ class ProfileModel:
     event_list: list[EventModel] = field(default_factory=list)
     modification_keys: dict | None = None
     favorite: bool = False
+    runtime_toggle_enabled: bool = False
+    runtime_toggle_key: str | None = None
 
     def __iter__(self):
         return iter(self.event_list)

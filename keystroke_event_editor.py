@@ -12,7 +12,7 @@ from loguru import logger
 from i18n import txt, dual_text_width
 from keystroke_capturer import ScreenshotCapturer
 from keystroke_models import EventModel
-from keystroke_utils import KeyUtils, StateUtils
+from keystroke_utils import KeyUtils, PermissionUtils, StateUtils
 
 
 class KeystrokeEventEditor:
@@ -574,7 +574,19 @@ class KeystrokeEventEditor:
         basic_label = getattr(self, "lbl_basic_step", None)
         if not basic_label:
             return
-        if not self.held_img:
+        missing_permissions = PermissionUtils.missing_macos_permissions()
+        if missing_permissions:
+            missing_labels = []
+            if "screen" in missing_permissions:
+                missing_labels.append(txt("Screen Recording", "화면 기록"))
+            if "accessibility" in missing_permissions:
+                missing_labels.append(txt("Accessibility", "손쉬운 사용"))
+            message = txt(
+                "macOS permission required: {missing}. Grant access in System Settings before capturing or sending keys.",
+                "macOS 권한 필요: {missing}. 캡처 또는 키 입력 전에 시스템 설정에서 권한을 허용하세요.",
+                missing=", ".join(missing_labels),
+            )
+        elif not self.held_img:
             message = txt(
                 "Step 1: move the mouse over the target, then press CTRL to capture the current area.",
                 "1단계: 대상 위로 마우스를 옮긴 뒤 CTRL로 현재 영역을 캡처하세요.",

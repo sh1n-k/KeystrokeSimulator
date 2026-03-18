@@ -14,7 +14,7 @@ from keystroke_event_editor import KeystrokeEventEditor
 from keystroke_event_importer import EventImporter
 from keystroke_models import ProfileModel, EventModel
 from keystroke_profile_storage import load_profile, rename_profile_files, save_profile
-from keystroke_utils import WindowUtils, StateUtils
+from keystroke_utils import WindowUtils, StateUtils, KeyUtils
 
 UI_PAD_XS = 2
 UI_PAD_SM = 4
@@ -59,6 +59,7 @@ def _event_fingerprint(evt: EventModel):
         getattr(evt, "group_id", None),
         int(getattr(evt, "priority", 0) or 0),
         tuple(sorted(dict(getattr(evt, "conditions", {}) or {}).items())),
+        bool(getattr(evt, "runtime_toggle_member", False)),
         _image_identity(getattr(evt, "held_screenshot", None)),
     )
 
@@ -67,6 +68,8 @@ def _profile_fingerprint(profile: ProfileModel, profile_name: str, favorite: boo
     return (
         profile_name,
         bool(favorite),
+        bool(getattr(profile, "runtime_toggle_enabled", False)),
+        getattr(profile, "runtime_toggle_key", None),
         tuple(_event_fingerprint(evt) for evt in (profile.event_list or [])),
     )
 
@@ -200,6 +203,74 @@ class ProfileFrame(ttk.Frame):
         self._validate()
         if self.on_change:
             self.on_change()
+
+
+class RuntimeToggleSettingsFrame(ttk.LabelFrame):
+    def __init__(self, master, profile: ProfileModel, on_change: Optional[Callable[[], None]] = None):
+        super().__init__(master, text=txt("Runtime Event Group", "실행 중 추가 이벤트 묶음"))
+        self.on_change = on_change
+        self._key_names = KeyUtils.get_key_name_list()
+        self.enabled_var = tk.BooleanVar(
+            value=bool(getattr(profile, "runtime_toggle_enabled", False))
+        )
+        self.key_var = tk.StringVar(value=getattr(profile, "runtime_toggle_key", None) or "")
+
+        self.columnconfigure(3, weight=1)
+
+        ttk.Checkbutton(
+            self,
+            text=txt("Enable", "사용"),
+            variable=self.enabled_var,
+            command=self._notify_changed,
+        ).grid(row=0, column=0, padx=(UI_PAD_MD, UI_PAD_SM), pady=UI_PAD_SM, sticky="w")
+
+        ttk.Label(self, text=txt("Toggle key:", "토글 키:")).grid(
+            row=0, column=1, padx=(0, UI_PAD_SM), pady=UI_PAD_SM, sticky="w"
+        )
+        self.key_combo = ttk.Combobox(
+            self,
+            textvariable=self.key_var,
+            values=self._key_names,
+            state="readonly",
+            width=14,
+        )
+        self.key_combo.grid(row=0, column=2, padx=(0, UI_PAD_MD), pady=UI_PAD_SM, sticky="w")
+        self.key_combo.bind("<<ComboboxSelected>>", lambda _e: self._notify_changed())
+
+        self.lbl_help = ttk.Label(
+            self,
+            text=txt(
+                "Checked events start disabled and can be toggled while the target app is active.",
+                "체크된 이벤트는 시작 시 비활성이고, 대상 앱이 활성일 때 토글할 수 있습니다.",
+            ),
+            foreground="gray",
+        )
+        self.lbl_help.grid(
+            row=1,
+            column=0,
+            columnspan=4,
+            padx=UI_PAD_MD,
+            pady=(0, UI_PAD_SM),
+            sticky="w",
+        )
+        self._sync_state()
+
+    def get_data(self) -> tuple[bool, Optional[str]]:
+        key = (self.key_var.get() or "").strip()
+        return self.enabled_var.get(), (key or None)
+
+    def apply_to_profile(self, profile: ProfileModel) -> None:
+        enabled, key = self.get_data()
+        profile.runtime_toggle_enabled = enabled
+        profile.runtime_toggle_key = key
+
+    def _notify_changed(self):
+        self._sync_state()
+        if self.on_change:
+            self.on_change()
+
+    def _sync_state(self):
+        self.key_combo.config(state="readonly" if self.enabled_var.get() else "disabled")
 
 
 class GroupSelector(tk.Toplevel):
@@ -458,6 +529,9 @@ class EventRow(ttk.Frame):
         super().__init__(master)
         self.row_num, self.event, self.cbs = row_num, event, cbs
         self.use_var = tk.BooleanVar(value=event.use_event if event else True)
+        self.runtime_toggle_var = tk.BooleanVar(
+            value=bool(getattr(event, "runtime_toggle_member", False)) if event else False
+        )
         self._last_saved_name = event.event_name if event else ""
         self._bound_event_id = id(event) if event else None
 
@@ -471,12 +545,21 @@ class EventRow(ttk.Frame):
             side=tk.LEFT
         )
 
-        # 3. Condition Indicator
+        # 3. Runtime Toggle Membership
+        self.chk_runtime_toggle = ttk.Checkbutton(
+            self,
+            variable=self.runtime_toggle_var,
+            command=self._on_toggle_runtime_member,
+        )
+        self.chk_runtime_toggle.pack(side=tk.LEFT, padx=(0, UI_PAD_XS))
+        self._tip_runtime_toggle = ToolTip(self.chk_runtime_toggle)
+
+        # 4. Condition Indicator
         self.lbl_cond = ttk.Label(self, text="", width=9, anchor="center")
         self.lbl_cond.pack(side=tk.LEFT)
         self._tip_cond = ToolTip(self.lbl_cond)
 
-        # 4. Group ID Label (클릭 가능)
+        # 5. Group ID Label (클릭 가능)
         self.lbl_grp = ttk.Label(
             self, text="", width=14, anchor="center", relief="sunken", cursor="hand2"
         )
@@ -484,7 +567,7 @@ class EventRow(ttk.Frame):
         self.lbl_grp.bind("<Button-1>", self._on_group_click)
         self._tip_grp = ToolTip(self.lbl_grp)
 
-        # 5. Key Display Label
+        # 6. Key Display Label
         self.lbl_key = ttk.Label(
             self, text="", width=12, anchor="center", relief="groove"
         )
@@ -494,13 +577,13 @@ class EventRow(ttk.Frame):
         )  # 클릭 바인딩 추가
         self._tip_key = ToolTip(self.lbl_key)
 
-        # 6. Event Name Entry
+        # 7. Event Name Entry
         self.entry = ttk.Entry(self)
         self.entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         if event:
             self.entry.insert(0, event.event_name or "")
 
-        # 7. Action Buttons
+        # 8. Action Buttons
         self.btn_delete = None
         for en, ko, key, min_width in [
             ("Edit", "편집", "open", 7),
@@ -529,12 +612,33 @@ class EventRow(ttk.Frame):
     def update_display(self):
         """이벤트 상태에 따라 UI 갱신"""
         if not self.event:
+            runtime_toggle_var = getattr(self, "runtime_toggle_var", None)
+            if runtime_toggle_var is not None:
+                runtime_toggle_var.set(False)
             self.lbl_cond.config(text="")
             self.lbl_grp.config(text="")
             self.lbl_key.config(text="")
             return
 
         self.use_var.set(self.event.use_event)
+        runtime_toggle_var = getattr(self, "runtime_toggle_var", None)
+        runtime_toggle_tip = getattr(self, "_tip_runtime_toggle", None)
+        if runtime_toggle_var is not None:
+            runtime_toggle_var.set(
+                bool(getattr(self.event, "runtime_toggle_member", False))
+            )
+            if runtime_toggle_tip is not None:
+                runtime_toggle_tip.update_text(
+                    txt(
+                        "This event joins the runtime extra group.",
+                        "이 이벤트를 실행 중 추가 이벤트 묶음에 포함합니다.",
+                    )
+                    if runtime_toggle_var.get()
+                    else txt(
+                        "Leave unchecked to keep this event always active.",
+                        "체크하지 않으면 이 이벤트는 항상 기본 묶음으로 유지됩니다.",
+                    )
+                )
 
         # Name
         event_name = self.event.event_name or ""
@@ -626,6 +730,13 @@ class EventRow(ttk.Frame):
         if self.event:
             if "group_select" in self.cbs:
                 self.cbs["group_select"](self.row_num, self.event)
+
+    def _on_toggle_runtime_member(self):
+        if self.event:
+            self.event.runtime_toggle_member = self.runtime_toggle_var.get()
+            self.update_display()
+            if "save" in self.cbs:
+                self.cbs["save"]()
 
     def _on_click(self, key):
         if key == "open":
@@ -1047,6 +1158,16 @@ class EventListFrame(ttk.Frame):
                 txt("Uncheck to skip this event.", "체크 해제 시 이벤트를 건너뜁니다"),
             ),
             (
+                txt("Extra", "추가"),
+                4,
+                "center",
+                {},
+                txt(
+                    "Checked events belong to the runtime extra group.",
+                    "체크된 이벤트는 실행 중 추가 이벤트 묶음에 속합니다.",
+                ),
+            ),
+            (
                 txt("Type", "실행 유형"),
                 10,
                 "center",
@@ -1261,6 +1382,9 @@ class EventListFrame(ttk.Frame):
                 group_id=getattr(evt, "group_id", None),
                 priority=getattr(evt, "priority", 0),
                 conditions=copy.deepcopy(getattr(evt, "conditions", {})),
+                runtime_toggle_member=bool(
+                    getattr(evt, "runtime_toggle_member", False)
+                ),
             )
             new.use_event = evt.use_event
 
@@ -1405,6 +1529,14 @@ class KeystrokeProfiles:
             profiles_dir=self.prof_dir,
         )
         self.p_frame.pack(fill="x", padx=UI_PAD_MD, pady=(UI_PAD_MD, UI_PAD_SM))
+        self.runtime_toggle_frame = RuntimeToggleSettingsFrame(
+            self.win,
+            self.profile,
+            on_change=self._on_changed,
+        )
+        self.runtime_toggle_frame.pack(
+            fill="x", padx=UI_PAD_MD, pady=(0, UI_PAD_SM)
+        )
 
         f_status = ttk.Frame(self.win)
         f_status.pack(fill="x", padx=UI_PAD_MD, pady=(0, UI_PAD_SM))
@@ -1501,6 +1633,9 @@ class KeystrokeProfiles:
             new_name = self.prof_name
         self.profile.favorite = is_fav
         self.profile.name = new_name
+        runtime_toggle_frame = getattr(self, "runtime_toggle_frame", None)
+        if runtime_toggle_frame is not None:
+            runtime_toggle_frame.apply_to_profile(self.profile)
         next_fingerprint = _profile_fingerprint(self.profile, new_name, is_fav)
 
         old_name = self.prof_name
@@ -1560,7 +1695,22 @@ class KeystrokeProfiles:
             for e in events
             if getattr(e, "execute_action", True) and not (e.key_to_enter or "").strip()
         )
-        warning_count = missing_key_count
+        runtime_toggle_member_count = sum(
+            1 for e in events if getattr(e, "runtime_toggle_member", False)
+        )
+        runtime_toggle_missing_key = bool(
+            getattr(self.profile, "runtime_toggle_enabled", False)
+            and not (getattr(self.profile, "runtime_toggle_key", None) or "").strip()
+        )
+        runtime_toggle_missing_member = bool(
+            getattr(self.profile, "runtime_toggle_enabled", False)
+            and runtime_toggle_member_count == 0
+        )
+        warning_count = (
+            missing_key_count
+            + int(runtime_toggle_missing_key)
+            + int(runtime_toggle_missing_member)
+        )
 
         self.lbl_events_badge.config(
             text=txt(f"⚙️ Events {event_count}", f"⚙️ 이벤트 {event_count}"),
@@ -1582,6 +1732,14 @@ class KeystrokeProfiles:
                         count=missing_key_count,
                     )
                 )
+            if runtime_toggle_missing_key:
+                warning_parts.append(
+                    txt("extra-group key missing", "추가 묶음 키 없음")
+                )
+            if runtime_toggle_missing_member:
+                warning_parts.append(
+                    txt("extra-group events missing", "추가 묶음 이벤트 없음")
+                )
             self._overview_status_text = txt(
                 "Review: {details}",
                 "확인 필요: {details}",
@@ -1594,10 +1752,24 @@ class KeystrokeProfiles:
             )
             return
         if condition_only_count:
+            if runtime_toggle_member_count:
+                self._overview_status_text = txt(
+                    "Condition-only events: {cond_count}. Runtime extra events: {toggle_count}.",
+                    "조건 전용 이벤트: {cond_count}개. 실행 중 추가 이벤트: {toggle_count}개.",
+                    cond_count=condition_only_count,
+                    toggle_count=runtime_toggle_member_count,
+                )
+            else:
+                self._overview_status_text = txt(
+                    "Condition-only events are configured: {count}.",
+                    "조건 전용 이벤트가 {count}개 설정되어 있습니다.",
+                    count=condition_only_count,
+                )
+        elif runtime_toggle_member_count:
             self._overview_status_text = txt(
-                "Condition-only events are configured: {count}.",
-                "조건 전용 이벤트가 {count}개 설정되어 있습니다.",
-                count=condition_only_count,
+                "Runtime extra events are configured: {count}.",
+                "실행 중 추가 이벤트가 {count}개 설정되어 있습니다.",
+                count=runtime_toggle_member_count,
             )
         else:
             self._overview_status_text = txt(

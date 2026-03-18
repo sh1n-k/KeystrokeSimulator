@@ -197,6 +197,7 @@ def event_to_dict(evt: EventModel) -> Dict[str, Any]:
         "group_id": getattr(evt, "group_id", None),
         "priority": int(getattr(evt, "priority", 0) or 0),
         "conditions": dict(getattr(evt, "conditions", {}) or {}),
+        "runtime_toggle_member": bool(getattr(evt, "runtime_toggle_member", False)),
         "held_screenshot": held_payload,
     }
 
@@ -236,6 +237,7 @@ def event_from_dict(d: Dict[str, Any]) -> EventModel:
         group_id=d.get("group_id"),
         priority=int(d.get("priority", 0) or 0),
         conditions=dict(d.get("conditions") or {}),
+        runtime_toggle_member=bool(d.get("runtime_toggle_member", False)),
     )
 
 
@@ -246,6 +248,10 @@ def profile_to_dict(profile: ProfileModel) -> Dict[str, Any]:
             "name": getattr(profile, "name", None),
             "favorite": bool(getattr(profile, "favorite", False)),
             "modification_keys": getattr(profile, "modification_keys", None),
+            "runtime_toggle_enabled": bool(
+                getattr(profile, "runtime_toggle_enabled", False)
+            ),
+            "runtime_toggle_key": getattr(profile, "runtime_toggle_key", None),
         },
         "events": [event_to_dict(e) for e in (profile.event_list or [])],
     }
@@ -260,6 +266,8 @@ def profile_from_dict(d: Dict[str, Any]) -> ProfileModel:
         event_list=events,
         modification_keys=meta.get("modification_keys"),
         favorite=bool(meta.get("favorite", False)),
+        runtime_toggle_enabled=bool(meta.get("runtime_toggle_enabled", False)),
+        runtime_toggle_key=meta.get("runtime_toggle_key"),
     )
     _ensure_profile_defaults(p)
     return p
@@ -267,6 +275,9 @@ def profile_from_dict(d: Dict[str, Any]) -> ProfileModel:
 
 def _ensure_profile_defaults(p: ProfileModel) -> None:
     p.favorite = bool(getattr(p, "favorite", False))
+    p.runtime_toggle_enabled = bool(getattr(p, "runtime_toggle_enabled", False))
+    runtime_toggle_key = getattr(p, "runtime_toggle_key", None)
+    p.runtime_toggle_key = str(runtime_toggle_key).strip() if runtime_toggle_key else None
 
     # Ensure modification_keys default: all keys enabled with Pass mode
     if not getattr(p, "modification_keys", None):
@@ -278,6 +289,11 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
 
     if getattr(p, "event_list", None) is None:
         p.event_list = []
+
+    for evt in p.event_list:
+        evt.runtime_toggle_member = bool(
+            getattr(evt, "runtime_toggle_member", False)
+        )
 
     for e in p.event_list:
         if not hasattr(e, "use_event"):

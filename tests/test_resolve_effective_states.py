@@ -58,6 +58,17 @@ class TestResolveEffectiveStatesBasic(unittest.TestCase):
         result = proc._resolve_effective_states({"B": True})
         self.assertFalse(result["B"])
 
+    def test_runtime_toggle_member_stays_inactive_until_enabled(self):
+        proc = make_processor_stub([
+            _evt("Base"),
+            _evt("Extra", runtime_toggle_member=True),
+        ])
+
+        result = proc._resolve_effective_states({"Base": True, "Extra": True})
+
+        self.assertTrue(result["Base"])
+        self.assertFalse(result["Extra"])
+
 
 class TestResolveEffectiveStatesChain(unittest.TestCase):
     """_resolve_effective_states: 조건 체인"""

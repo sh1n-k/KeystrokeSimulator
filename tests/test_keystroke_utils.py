@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from keystroke_utils import KeyUtils, StateUtils
+from keystroke_utils import KeyUtils, PermissionUtils, StateUtils
 
 
 class TestStateUtils(unittest.TestCase):
@@ -67,6 +67,27 @@ class TestKeyUtils(unittest.TestCase):
         names = KeyUtils.get_key_name_list()
         self.assertIsInstance(names, list)
         self.assertGreater(len(names), 0)
+
+
+class TestPermissionUtils(unittest.TestCase):
+    @patch("keystroke_utils.IS_MAC", True)
+    @patch("keystroke_utils.PermissionUtils.has_screen_capture_access", return_value=False)
+    @patch("keystroke_utils.PermissionUtils.has_accessibility_access", return_value=True)
+    def test_missing_macos_permissions_returns_screen_only(
+        self, _mock_accessibility, _mock_screen
+    ):
+        self.assertEqual(PermissionUtils.missing_macos_permissions(), ["screen"])
+
+    @patch("keystroke_utils.IS_MAC", True)
+    @patch("keystroke_utils.PermissionUtils.has_screen_capture_access", return_value=False)
+    @patch("keystroke_utils.PermissionUtils.has_accessibility_access", return_value=False)
+    def test_missing_macos_permissions_returns_both(
+        self, _mock_accessibility, _mock_screen
+    ):
+        self.assertEqual(
+            PermissionUtils.missing_macos_permissions(),
+            ["screen", "accessibility"],
+        )
 
 
 if __name__ == "__main__":

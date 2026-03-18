@@ -11,4 +11,5 @@ def make_processor_stub(event_data_list=None) -> KeystrokeProcessor:
     proc.term_event = threading.Event()
     proc.default_press_times = (0.1, 0.1)
     proc.event_data_list = event_data_list or []
+    proc.runtime_toggle_active = False
     return proc

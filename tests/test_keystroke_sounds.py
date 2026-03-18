@@ -33,6 +33,12 @@ class TestKeystrokeSounds(unittest.TestCase):
         player.play_stop_sound()
         player.stop_sound.play.assert_called_once()
 
+        player.play_runtime_toggle_on_sound()
+        self.assertEqual(player.start_sound.play.call_count, 2)
+
+        player.play_runtime_toggle_off_sound()
+        self.assertEqual(player.stop_sound.play.call_count, 2)
+
     @patch("keystroke_sounds.pygame.mixer.init")
     def test_play_sound_when_not_loaded(self, mock_init):
         player = SoundPlayer()
@@ -43,6 +49,8 @@ class TestKeystrokeSounds(unittest.TestCase):
         try:
             player.play_start_sound()
             player.play_stop_sound()
+            player.play_runtime_toggle_on_sound()
+            player.play_runtime_toggle_off_sound()
         except Exception as e:
             self.fail(f"play_sound raised an exception when sounds are None: {e}")
 
