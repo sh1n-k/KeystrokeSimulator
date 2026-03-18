@@ -187,6 +187,26 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         stub.update_events.assert_called_once()
         stub.save_cb.assert_called_once_with(check_name=False)
 
+    def test_edit_preserves_runtime_toggle_member_and_use_event(self):
+        stub = _make_event_list_frame_stub()
+        original = EventModel(
+            event_name="OldName",
+            key_to_enter="A",
+            runtime_toggle_member=True,
+            use_event=False,
+        )
+        stub.profile = ProfileModel(event_list=[original])
+        stub.update_events = MagicMock()
+        stub.save_cb = MagicMock()
+
+        edited = EventModel(event_name="OldName", key_to_enter="B")
+        stub._on_editor_save(edited, is_edit=True, row=0)
+
+        self.assertTrue(stub.profile.event_list[0].runtime_toggle_member)
+        self.assertFalse(stub.profile.event_list[0].use_event)
+        stub.update_events.assert_called_once()
+        stub.save_cb.assert_called_once_with(check_name=False)
+
     def test_edit_duplicate_name_is_rejected(self):
         stub = _make_event_list_frame_stub()
         stub.profile = ProfileModel(
@@ -245,7 +265,11 @@ class TestRemoveRowConditionCleanup(unittest.TestCase):
         stub = _make_event_list_frame_stub()
         dependent = EventModel(event_name="B", conditions={"A": True, "Other": False})
         stub.profile = ProfileModel(
-            event_list=[EventModel(event_name="A"), dependent, EventModel(event_name="C")]
+            event_list=[
+                EventModel(event_name="A"),
+                dependent,
+                EventModel(event_name="C"),
+            ]
         )
         first_row = FakeDestroyable()
         second_row = FakeDestroyable()
@@ -405,6 +429,21 @@ class TestProfileOverviewBadges(unittest.TestCase):
         set_language("en")
         stub = KeystrokeProfiles.__new__(KeystrokeProfiles)
         stub.profile = ProfileModel(name="Test", event_list=events)
+        stub.main_win = type(
+            "MainWinStub",
+            (),
+            {
+                "settings": type(
+                    "SettingsStub",
+                    (),
+                    {
+                        "toggle_start_stop_mac": False,
+                        "use_alt_shift_hotkey": False,
+                        "start_stop_key": "DISABLED",
+                    },
+                )()
+            },
+        )()
         stub.lbl_events_badge = FakeWidget()
         stub.lbl_groups_badge = FakeWidget()
         stub.lbl_attention_badge = FakeWidget()
@@ -416,7 +455,9 @@ class TestProfileOverviewBadges(unittest.TestCase):
     def test_refresh_profile_overview_updates_counts(self):
         events = [
             EventModel(event_name="A", group_id="G1", execute_action=False),
-            EventModel(event_name="B", group_id="G2", execute_action=True, key_to_enter=None),
+            EventModel(
+                event_name="B", group_id="G2", execute_action=True, key_to_enter=None
+            ),
             EventModel(event_name="C", execute_action=True, key_to_enter="X"),
         ]
         stub = self._make_profile_stub(events)
@@ -453,6 +494,26 @@ class TestProfileOverviewBadges(unittest.TestCase):
             stub._overview_status_text,
             "All events are ready for autosave and run checks.",
         )
+
+    def test_refresh_profile_overview_includes_runtime_toggle_conflict(self):
+        stub = self._make_profile_stub(
+            [
+                EventModel(event_name="Base", execute_action=True, key_to_enter="F6"),
+                EventModel(
+                    event_name="Extra",
+                    execute_action=True,
+                    key_to_enter="A",
+                    runtime_toggle_member=True,
+                ),
+            ]
+        )
+        stub.profile.runtime_toggle_enabled = True
+        stub.profile.runtime_toggle_key = "F6"
+
+        stub._refresh_profile_overview()
+
+        self.assertEqual(stub.lbl_attention_badge.cget("text"), "⚠ Attention 1")
+        self.assertIn("conflicts with event input key 'F6'", stub._overview_status_text)
 
     def test_save_status_badge_prefixes(self):
         stub = self._make_profile_stub([EventModel(event_name="A", key_to_enter="X")])

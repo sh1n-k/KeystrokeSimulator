@@ -34,6 +34,23 @@ from keystroke_settings import KeystrokeSettings
 from keystroke_sort_events import KeystrokeSortEvents
 from keystroke_sounds import SoundPlayer
 from profile_display import QUICK_PROFILE_NAME, build_profile_display_values
+from runtime_toggle_utils import (
+    MOUSE_BUTTON_3_TRIGGER,
+    MOUSE_BUTTON_4_TRIGGER,
+    RUNTIME_TOGGLE_DEBOUNCE_SECONDS,
+    RUNTIME_TOGGLE_SCROLL_GESTURE_SECONDS,
+    WHEEL_DOWN_TRIGGER,
+    WHEEL_UP_TRIGGER,
+    collect_runtime_toggle_validation_errors,
+    display_runtime_toggle_trigger,
+    is_keyboard_runtime_toggle_trigger,
+    is_mouse_button_runtime_toggle_trigger,
+    is_supported_runtime_toggle_trigger,
+    is_wheel_runtime_toggle_trigger,
+    normalize_runtime_toggle_listener_key,
+    normalize_runtime_toggle_trigger,
+    runtime_toggle_member_count,
+)
 from keystroke_utils import (
     ProcessUtils,
     PermissionUtils,
@@ -389,6 +406,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         # Input Listeners
         self.start_stop_mouse_listener = None
+        self.runtime_toggle_mouse_listener = None
         self.keyboard_listener = None
         self.alt_pressed = False
         self.shift_pressed = False
@@ -401,6 +419,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.runtime_toggle_active = False
         self.runtime_toggle_member_count = 0
         self.last_runtime_toggle_time = 0
+        self.latest_runtime_scroll_time = None
         self.toggle_transition_in_progress = False
 
         self._create_ui()
@@ -562,19 +581,21 @@ class KeystrokeSimulatorApp(tk.Tk):
             trigger=trigger,
         )
         if self.runtime_toggle_enabled and self.runtime_toggle_key:
-            toggle_state = txt("ON", "켜짐") if self.runtime_toggle_active else txt("OFF", "꺼짐")
+            toggle_state = (
+                txt("ON", "켜짐") if self.runtime_toggle_active else txt("OFF", "꺼짐")
+            )
             hint = txt(
-                "{base}\nRuntime extra group: {key} ({state})",
-                "{base}\n실행 중 추가 이벤트 묶음: {key} ({state})",
+                "{base}\nRuntime extra group: {trigger} ({state})",
+                "{base}\n실행 중 추가 이벤트 묶음: {trigger} ({state})",
                 base=hint,
-                key=self.runtime_toggle_key,
+                trigger=display_runtime_toggle_trigger(self.runtime_toggle_key),
                 state=toggle_state,
             )
         return hint
 
     @staticmethod
     def _listener_key_name(key) -> str:
-        return str(key).replace("Key.", "").replace("'", "").upper()
+        return normalize_runtime_toggle_listener_key(key)
 
     def _selected_process_pid(self) -> int | None:
         pid_match = re.search(r"\((\d+)\)", self.selected_process.get())
@@ -588,30 +609,45 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.runtime_toggle_key = None
         self.runtime_toggle_active = False
         self.runtime_toggle_member_count = 0
+        self.latest_runtime_scroll_time = None
 
     def _runtime_toggle_conflicts_with_start_stop(self, toggle_key: str | None) -> bool:
-        if not toggle_key or not hasattr(self, "settings"):
-            return False
-        if platform.system() == "Darwin" and self.settings.toggle_start_stop_mac:
-            return False
-        if platform.system() == "Windows" and self.settings.use_alt_shift_hotkey:
-            return False
-        start_stop_key = getattr(self.settings, "start_stop_key", None) or ""
-        if not start_stop_key or start_stop_key == "DISABLED" or start_stop_key.startswith("W_"):
-            return False
-        return start_stop_key.upper() == toggle_key.upper()
+        profile = ProfileModel(
+            runtime_toggle_enabled=True,
+            runtime_toggle_key=toggle_key,
+        )
+        return bool(
+            collect_runtime_toggle_validation_errors(
+                profile,
+                [],
+                settings=getattr(self, "settings", None),
+                os_name=platform.system(),
+            )
+        )
+
+    def _runtime_toggle_validation_errors(
+        self, profile: ProfileModel, events: list[EventModel]
+    ) -> list[str]:
+        return collect_runtime_toggle_validation_errors(
+            profile,
+            events,
+            settings=getattr(self, "settings", None),
+            os_name=platform.system(),
+        )
 
     def _configure_runtime_toggle_session(
         self, profile: ProfileModel, events: list[EventModel]
     ) -> None:
         self._reset_runtime_toggle_session()
-        toggle_key = (getattr(profile, "runtime_toggle_key", None) or "").strip() or None
-        member_count = sum(1 for evt in events if getattr(evt, "runtime_toggle_member", False))
+        toggle_key = normalize_runtime_toggle_trigger(
+            getattr(profile, "runtime_toggle_key", None)
+        )
+        member_count = runtime_toggle_member_count(events)
         enabled = bool(
             getattr(profile, "runtime_toggle_enabled", False)
             and toggle_key
             and member_count > 0
-            and not self._runtime_toggle_conflicts_with_start_stop(toggle_key)
+            and not self._runtime_toggle_validation_errors(profile, events)
         )
         self.runtime_toggle_enabled = enabled
         self.runtime_toggle_key = toggle_key
@@ -635,11 +671,13 @@ class KeystrokeSimulatorApp(tk.Tk):
             )
             if self.runtime_toggle_enabled and self.runtime_toggle_key:
                 detail = txt(
-                    "{detail}\nExtra group: {key} ({state})",
-                    "{detail}\n추가 이벤트 묶음: {key} ({state})",
+                    "{detail}\nExtra group: {trigger} ({state})",
+                    "{detail}\n추가 이벤트 묶음: {trigger} ({state})",
                     detail=detail,
-                    key=self.runtime_toggle_key,
-                    state=txt("ON", "켜짐") if self.runtime_toggle_active else txt("OFF", "꺼짐"),
+                    trigger=display_runtime_toggle_trigger(self.runtime_toggle_key),
+                    state=txt("ON", "켜짐")
+                    if self.runtime_toggle_active
+                    else txt("OFF", "꺼짐"),
                 )
             return {
                 "can_start": True,
@@ -657,13 +695,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         if missing_permissions:
             missing_labels = []
             if "screen" in missing_permissions:
-                missing_labels.append(
-                    txt("Screen Recording", "화면 기록")
-                )
+                missing_labels.append(txt("Screen Recording", "화면 기록"))
             if "accessibility" in missing_permissions:
-                missing_labels.append(
-                    txt("Accessibility", "손쉬운 사용")
-                )
+                missing_labels.append(txt("Accessibility", "손쉬운 사용"))
             return {
                 "can_start": False,
                 "badge_text": txt("Permissions", "권한 필요"),
@@ -812,6 +846,22 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "fg": STATUS_FG_WARN,
             }
 
+        toggle_validation_errors = self._runtime_toggle_validation_errors(
+            profile, events
+        )
+        if toggle_validation_errors:
+            return {
+                "can_start": False,
+                "badge_text": txt("Toggle Conflict", "토글 충돌"),
+                "title": txt(
+                    "Runtime Event Group trigger settings need attention.",
+                    "실행 중 추가 이벤트 묶음의 트리거 설정을 확인해야 합니다.",
+                ),
+                "detail": toggle_validation_errors[0],
+                "bg": STATUS_BG_ERR,
+                "fg": STATUS_FG_ERR,
+            }
+
         return {
             "can_start": True,
             "badge_text": txt("Ready", "준비 완료"),
@@ -847,15 +897,22 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.bind("<Escape>", self.on_closing)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        if platform.system() == "Darwin" and (
-            self.settings.toggle_start_stop_mac or self.runtime_toggle_enabled
-        ):
+        runtime_toggle_trigger = normalize_runtime_toggle_trigger(
+            self.runtime_toggle_key
+        )
+        use_mac_polling = platform.system() == "Darwin" and (
+            self.settings.toggle_start_stop_mac
+            or (
+                self.runtime_toggle_enabled
+                and is_keyboard_runtime_toggle_trigger(runtime_toggle_trigger)
+            )
+        )
+        if use_mac_polling:
             self.ctrl_check_active = True
             self.ctrl_check_thread = threading.Thread(
                 target=self._check_for_long_alt_shift, daemon=True
             )
             self.ctrl_check_thread.start()
-            return
 
         key = self.settings.start_stop_key
         if key.startswith("W_"):
@@ -864,12 +921,25 @@ class KeystrokeSimulatorApp(tk.Tk):
             )
             self.start_stop_mouse_listener.start()
 
+        if self.runtime_toggle_enabled and (
+            is_wheel_runtime_toggle_trigger(runtime_toggle_trigger)
+            or is_mouse_button_runtime_toggle_trigger(runtime_toggle_trigger)
+        ):
+            self.runtime_toggle_mouse_listener = pynput.mouse.Listener(
+                on_scroll=self._on_runtime_toggle_mouse_scroll,
+                on_click=self._on_runtime_toggle_mouse_click,
+            )
+            self.runtime_toggle_mouse_listener.start()
+
         should_listen_keyboard = (
-            self.runtime_toggle_enabled
+            (
+                self.runtime_toggle_enabled
+                and is_keyboard_runtime_toggle_trigger(runtime_toggle_trigger)
+            )
             or (platform.system() == "Windows" and self.settings.use_alt_shift_hotkey)
             or (key != "DISABLED" and not key.startswith("W_"))
         )
-        if should_listen_keyboard:
+        if should_listen_keyboard and not use_mac_polling:
             self.keyboard_listener = pynput.keyboard.Listener(
                 on_press=self._on_key_press, on_release=self._on_key_release
             )
@@ -910,18 +980,23 @@ class KeystrokeSimulatorApp(tk.Tk):
     def _should_toggle_start_stop(self, key_str: str) -> bool:
         return (
             bool(key_str)
-            and not (platform.system() == "Windows" and self.settings.use_alt_shift_hotkey)
+            and not (
+                platform.system() == "Windows" and self.settings.use_alt_shift_hotkey
+            )
             and self.settings.start_stop_key not in {"DISABLED", "W_UP", "W_DN"}
             and key_str == self.settings.start_stop_key.upper()
         )
 
     def _should_toggle_runtime_group(self, key_str: str, current_time: float) -> bool:
+        runtime_trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
         return (
             self.runtime_toggle_enabled
             and self.is_running.get()
-            and bool(self.runtime_toggle_key)
-            and key_str == self.runtime_toggle_key.upper()
-            and current_time - self.last_runtime_toggle_time >= 0.2
+            and bool(runtime_trigger)
+            and is_keyboard_runtime_toggle_trigger(runtime_trigger)
+            and key_str == runtime_trigger.upper()
+            and current_time - self.last_runtime_toggle_time
+            >= RUNTIME_TOGGLE_DEBOUNCE_SECONDS
             and self._target_process_is_active()
         )
 
@@ -949,12 +1024,14 @@ class KeystrokeSimulatorApp(tk.Tk):
                     self.runtime_toggle_enabled
                     and self.is_running.get()
                     and self._target_process_is_active()
+                    and is_keyboard_runtime_toggle_trigger(self.runtime_toggle_key)
                     and KeyUtils.key_pressed(self.runtime_toggle_key)
                 )
                 if (
                     runtime_toggle_pressed
                     and not last_runtime_toggle_state
-                    and curr_time - self.last_runtime_toggle_time >= 0.2
+                    and curr_time - self.last_runtime_toggle_time
+                    >= RUNTIME_TOGGLE_DEBOUNCE_SECONDS
                 ):
                     self.last_runtime_toggle_time = curr_time
                     self.after(0, self.toggle_runtime_event_group)
@@ -978,6 +1055,55 @@ class KeystrokeSimulatorApp(tk.Tk):
         if (key == "W_UP" and dy > 0) or (key == "W_DN" and dy < 0):
             self.after(0, self.toggle_start_stop)
         self.latest_scroll_time = curr_time
+
+    def _runtime_toggle_trigger_ready(self, current_time: float) -> bool:
+        return (
+            self.runtime_toggle_enabled
+            and self.is_running.get()
+            and bool(normalize_runtime_toggle_trigger(self.runtime_toggle_key))
+            and current_time - self.last_runtime_toggle_time
+            >= RUNTIME_TOGGLE_DEBOUNCE_SECONDS
+            and self._target_process_is_active()
+        )
+
+    def _on_runtime_toggle_mouse_scroll(self, x, y, dx, dy):
+        trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
+        curr_time = time.time()
+        if not self._runtime_toggle_trigger_ready(curr_time):
+            return
+        if (
+            self.latest_runtime_scroll_time
+            and curr_time - self.latest_runtime_scroll_time
+            <= RUNTIME_TOGGLE_SCROLL_GESTURE_SECONDS
+        ):
+            return
+        if (trigger == WHEEL_UP_TRIGGER and dy > 0) or (
+            trigger == WHEEL_DOWN_TRIGGER and dy < 0
+        ):
+            self.latest_runtime_scroll_time = curr_time
+            self.last_runtime_toggle_time = curr_time
+            self.after(0, self.toggle_runtime_event_group)
+
+    def _on_runtime_toggle_mouse_click(self, x, y, button, pressed):
+        if not pressed:
+            return
+
+        trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
+        curr_time = time.time()
+        if not self._runtime_toggle_trigger_ready(curr_time):
+            return
+
+        button_name = str(getattr(button, "name", button) or "").lower()
+        if button_name in {"button.x1", "x1"}:
+            button_trigger = MOUSE_BUTTON_3_TRIGGER
+        elif button_name in {"button.x2", "x2"}:
+            button_trigger = MOUSE_BUTTON_4_TRIGGER
+        else:
+            button_trigger = None
+
+        if button_trigger == trigger:
+            self.last_runtime_toggle_time = curr_time
+            self.after(0, self.toggle_runtime_event_group)
 
     def clear_local_logs(self):
         log_dir = Path("logs")
@@ -1062,6 +1188,8 @@ class KeystrokeSimulatorApp(tk.Tk):
         if self._find_duplicate_event_names(list(profile.event_list or [])):
             return False
         if not events:
+            return False
+        if self._runtime_toggle_validation_errors(profile, events):
             return False
         self._configure_runtime_toggle_session(profile, events)
         # Keep the mac polling thread alive while Option+Shift is still held.
@@ -1191,11 +1319,16 @@ class KeystrokeSimulatorApp(tk.Tk):
     def unbind_events(self):
         safe_call(self.unbind, "<Escape>")
 
-        for listener in (self.keyboard_listener, self.start_stop_mouse_listener):
+        for listener in (
+            self.keyboard_listener,
+            self.start_stop_mouse_listener,
+            self.runtime_toggle_mouse_listener,
+        ):
             if listener:
                 safe_call(listener.stop)
         self.keyboard_listener = None
         self.start_stop_mouse_listener = None
+        self.runtime_toggle_mouse_listener = None
 
         self.ctrl_check_active = False
         if self.ctrl_check_thread and self.ctrl_check_thread.is_alive():

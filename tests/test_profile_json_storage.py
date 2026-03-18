@@ -112,6 +112,27 @@ class TestProfileJsonStorage(unittest.TestCase):
             self.assertIsNotNone(e2.held_screenshot)
             self.assertEqual(e2.held_screenshot.size, (2, 2))
 
+    def test_json_roundtrip_keeps_mouse_runtime_toggle_tokens(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            for trigger in ("W_UP", "W_DN", "MB_3", "MB_4"):
+                profile = ProfileModel(
+                    name=f"P-{trigger}",
+                    event_list=[
+                        EventModel(
+                            event_name="Extra",
+                            key_to_enter="A",
+                            runtime_toggle_member=True,
+                        )
+                    ],
+                    runtime_toggle_enabled=True,
+                    runtime_toggle_key=trigger,
+                )
+                save_profile(prof_dir, profile, name=profile.name)
+
+                loaded = load_profile(prof_dir, profile.name, migrate=False)
+                self.assertEqual(loaded.runtime_toggle_key, trigger)
+
     def test_load_profile_normalizes_duplicate_and_blank_event_names_from_json(self):
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)

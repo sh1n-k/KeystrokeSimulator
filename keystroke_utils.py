@@ -213,6 +213,16 @@ class KeyUtils:
         return list(cls.CURRENT_KEYS.keys())
 
     @classmethod
+    def get_key_name_for_keycode(cls, code: int | None) -> str | None:
+        if code is None:
+            return None
+
+        for name, mapped_code in cls.CURRENT_KEYS.items():
+            if mapped_code == code:
+                return name
+        return None
+
+    @classmethod
     def get_keycode(cls, char: str):
         return cls.CURRENT_KEYS.get(char.capitalize())
 
@@ -250,9 +260,7 @@ class KeyUtils:
         if IS_WIN:
             return ctypes.windll.user32.GetAsyncKeyState(code) & 0x8000 != 0
         elif IS_MAC:
-            return bool(
-                CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, code)
-            )
+            return bool(CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, code))
         return False
 
 

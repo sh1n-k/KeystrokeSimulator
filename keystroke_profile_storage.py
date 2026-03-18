@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 from PIL import Image
 
 from keystroke_models import EventModel, ProfileModel
+from runtime_toggle_utils import normalize_runtime_toggle_trigger
 
 
 PROFILE_SCHEMA_VERSION = 1
@@ -242,6 +243,9 @@ def event_from_dict(d: Dict[str, Any]) -> EventModel:
 
 
 def profile_to_dict(profile: ProfileModel) -> Dict[str, Any]:
+    runtime_toggle_key = normalize_runtime_toggle_trigger(
+        getattr(profile, "runtime_toggle_key", None)
+    )
     return {
         "schema_version": PROFILE_SCHEMA_VERSION,
         "profile": {
@@ -251,7 +255,7 @@ def profile_to_dict(profile: ProfileModel) -> Dict[str, Any]:
             "runtime_toggle_enabled": bool(
                 getattr(profile, "runtime_toggle_enabled", False)
             ),
-            "runtime_toggle_key": getattr(profile, "runtime_toggle_key", None),
+            "runtime_toggle_key": runtime_toggle_key,
         },
         "events": [event_to_dict(e) for e in (profile.event_list or [])],
     }
@@ -277,7 +281,11 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
     p.favorite = bool(getattr(p, "favorite", False))
     p.runtime_toggle_enabled = bool(getattr(p, "runtime_toggle_enabled", False))
     runtime_toggle_key = getattr(p, "runtime_toggle_key", None)
-    p.runtime_toggle_key = str(runtime_toggle_key).strip() if runtime_toggle_key else None
+    normalized_toggle_key = normalize_runtime_toggle_trigger(runtime_toggle_key)
+    if normalized_toggle_key:
+        p.runtime_toggle_key = normalized_toggle_key
+    else:
+        p.runtime_toggle_key = str(runtime_toggle_key).strip() if runtime_toggle_key else None
 
     # Ensure modification_keys default: all keys enabled with Pass mode
     if not getattr(p, "modification_keys", None):
