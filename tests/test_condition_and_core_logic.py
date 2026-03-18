@@ -272,6 +272,51 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(pressed, ["A1", "A2"])
 
+    async def test_runtime_toggle_group_blocks_then_allows_member_execution(self):
+        proc = make_processor_stub()
+        proc.event_data_list = [
+            {
+                "name": "Base",
+                "conds": {},
+                "group": None,
+                "priority": 0,
+                "exec": True,
+                "key": "A",
+                "runtime_toggle_member": False,
+            },
+            {
+                "name": "Extra",
+                "conds": {},
+                "group": None,
+                "priority": 0,
+                "exec": True,
+                "key": "B",
+                "runtime_toggle_member": True,
+            },
+        ]
+        match_map = {"Base": True, "Extra": True}
+        pressed = []
+
+        proc._check_match = (
+            lambda _img, evt, is_independent=False: match_map[evt["name"]]
+        )
+
+        async def fake_press(evt, _local_states):
+            pressed.append(evt["name"])
+
+        proc._press_key_async = fake_press
+
+        await proc._evaluate_and_execute_main(img=None)
+
+        self.assertEqual(pressed, ["Base"])
+        self.assertEqual(proc.current_states, {"Base": True, "Extra": False})
+
+        proc.set_runtime_toggle_active(True)
+        await proc._evaluate_and_execute_main(img=None)
+
+        self.assertEqual(pressed[-2:], ["Base", "Extra"])
+        self.assertEqual(proc.current_states, {"Base": True, "Extra": True})
+
 
 class TestSafetyAndNormalization(unittest.TestCase):
     def test_calculate_press_duration_has_minimum_floor(self):

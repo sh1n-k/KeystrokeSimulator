@@ -28,7 +28,10 @@ class TestSimulatorEventNameValidation(unittest.TestCase):
             ],
         )
 
-        with patch("keystroke_simulator_app.load_profile", return_value=profile):
+        with patch("keystroke_simulator_app.load_profile", return_value=profile), patch(
+            "keystroke_simulator_app.PermissionUtils.missing_macos_permissions",
+            return_value=[],
+        ):
             snapshot = app._get_readiness_snapshot()
 
         self.assertFalse(snapshot["can_start"])

@@ -155,6 +155,7 @@ class KeystrokeProcessor:
 
         self.pressed_keys: Set[str] = set()
         self.current_states: Dict[str, bool] = {}
+        self.runtime_toggle_active = False
         self._roi_warn_logged: Set[str] = set()
 
         self.event_data_list, self.independent_events, self.mega_rect = self._init_event_data(events)
@@ -210,6 +211,9 @@ class KeystrokeProcessor:
                 "group": getattr(e, "group_id", None),
                 "priority": getattr(e, "priority", 0),
                 "conds": getattr(e, "conditions", {}),
+                "runtime_toggle_member": bool(
+                    getattr(e, "runtime_toggle_member", False)
+                ),
                 # independent_thread is deprecated at runtime; all events now
                 # flow through the main evaluation pipeline.
                 "independent": False,
@@ -481,6 +485,20 @@ class KeystrokeProcessor:
             deduped.append(evt)
         return deduped
 
+    def is_runtime_toggle_active(self) -> bool:
+        with self.state_lock:
+            return bool(self.runtime_toggle_active)
+
+    def set_runtime_toggle_active(self, active: bool) -> bool:
+        active = bool(active)
+        with self.state_lock:
+            self.runtime_toggle_active = active
+            if not active:
+                for evt in self.event_data_list:
+                    if evt.get("runtime_toggle_member"):
+                        self.current_states[evt["name"]] = False
+        return active
+
     def _resolve_effective_states(
         self, local_match_states: Dict[str, bool]
     ) -> Dict[str, bool]:
@@ -493,6 +511,7 @@ class KeystrokeProcessor:
         events_by_name = {evt["name"]: evt for evt in self.event_data_list}
         with self.state_lock:
             base_states = dict(self.current_states)
+            runtime_toggle_active = bool(self.runtime_toggle_active)
 
         resolved: Dict[str, bool] = {}
         visiting: Set[str] = set()
@@ -507,6 +526,10 @@ class KeystrokeProcessor:
             evt = events_by_name.get(name)
             if not evt:
                 return base_states.get(name, False)
+
+            if evt.get("runtime_toggle_member") and not runtime_toggle_active:
+                resolved[name] = False
+                return False
 
             if not local_match_states.get(name, False):
                 resolved[name] = False

@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 from PIL import Image
 
 from keystroke_models import EventModel, ProfileModel
+from runtime_toggle_utils import normalize_runtime_toggle_trigger
 
 
 PROFILE_SCHEMA_VERSION = 1
@@ -149,9 +150,13 @@ def _normalize_loaded_event_names(profile: ProfileModel) -> bool:
     if not events:
         return False
 
-    raw_names = [_normalized_event_name(getattr(evt, "event_name", None)) for evt in events]
+    raw_names = [
+        _normalized_event_name(getattr(evt, "event_name", None)) for evt in events
+    ]
     duplicates = {
-        name for name, count in Counter(name for name in raw_names if name).items() if count > 1
+        name
+        for name, count in Counter(name for name in raw_names if name).items()
+        if count > 1
     }
 
     used_names: set[str] = set()
@@ -197,6 +202,7 @@ def event_to_dict(evt: EventModel) -> Dict[str, Any]:
         "group_id": getattr(evt, "group_id", None),
         "priority": int(getattr(evt, "priority", 0) or 0),
         "conditions": dict(getattr(evt, "conditions", {}) or {}),
+        "runtime_toggle_member": bool(getattr(evt, "runtime_toggle_member", False)),
         "held_screenshot": held_payload,
     }
 
@@ -236,16 +242,28 @@ def event_from_dict(d: Dict[str, Any]) -> EventModel:
         group_id=d.get("group_id"),
         priority=int(d.get("priority", 0) or 0),
         conditions=dict(d.get("conditions") or {}),
+        runtime_toggle_member=bool(d.get("runtime_toggle_member", False)),
     )
 
 
 def profile_to_dict(profile: ProfileModel) -> Dict[str, Any]:
+    raw_runtime_toggle_key = getattr(profile, "runtime_toggle_key", None)
+    normalized_runtime_toggle_key = normalize_runtime_toggle_trigger(
+        raw_runtime_toggle_key
+    )
+    runtime_toggle_key = normalized_runtime_toggle_key or (
+        str(raw_runtime_toggle_key).strip() if raw_runtime_toggle_key else None
+    )
     return {
         "schema_version": PROFILE_SCHEMA_VERSION,
         "profile": {
             "name": getattr(profile, "name", None),
             "favorite": bool(getattr(profile, "favorite", False)),
             "modification_keys": getattr(profile, "modification_keys", None),
+            "runtime_toggle_enabled": bool(
+                getattr(profile, "runtime_toggle_enabled", False)
+            ),
+            "runtime_toggle_key": runtime_toggle_key,
         },
         "events": [event_to_dict(e) for e in (profile.event_list or [])],
     }
@@ -260,6 +278,8 @@ def profile_from_dict(d: Dict[str, Any]) -> ProfileModel:
         event_list=events,
         modification_keys=meta.get("modification_keys"),
         favorite=bool(meta.get("favorite", False)),
+        runtime_toggle_enabled=bool(meta.get("runtime_toggle_enabled", False)),
+        runtime_toggle_key=meta.get("runtime_toggle_key"),
     )
     _ensure_profile_defaults(p)
     return p
@@ -267,6 +287,15 @@ def profile_from_dict(d: Dict[str, Any]) -> ProfileModel:
 
 def _ensure_profile_defaults(p: ProfileModel) -> None:
     p.favorite = bool(getattr(p, "favorite", False))
+    p.runtime_toggle_enabled = bool(getattr(p, "runtime_toggle_enabled", False))
+    runtime_toggle_key = getattr(p, "runtime_toggle_key", None)
+    normalized_toggle_key = normalize_runtime_toggle_trigger(runtime_toggle_key)
+    if normalized_toggle_key:
+        p.runtime_toggle_key = normalized_toggle_key
+    else:
+        p.runtime_toggle_key = (
+            str(runtime_toggle_key).strip() if runtime_toggle_key else None
+        )
 
     # Ensure modification_keys default: all keys enabled with Pass mode
     if not getattr(p, "modification_keys", None):
@@ -278,6 +307,9 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
 
     if getattr(p, "event_list", None) is None:
         p.event_list = []
+
+    for evt in p.event_list:
+        evt.runtime_toggle_member = bool(getattr(evt, "runtime_toggle_member", False))
 
     for e in p.event_list:
         if not hasattr(e, "use_event"):

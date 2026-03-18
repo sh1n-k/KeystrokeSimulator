@@ -3,6 +3,12 @@ from unittest.mock import MagicMock, patch
 
 from keystroke_models import EventModel, ProfileModel
 from keystroke_simulator_app import KeystrokeSimulatorApp
+from keystroke_utils import KeyUtils
+from runtime_toggle_utils import (
+    MOUSE_BUTTON_3_TRIGGER,
+    WHEEL_DOWN_TRIGGER,
+    WHEEL_UP_TRIGGER,
+)
 
 
 class FakeVar:
@@ -28,7 +34,30 @@ def _make_app_stub() -> KeystrokeSimulatorApp:
     app._save_latest_state = MagicMock()
     app.update_ui = MagicMock()
     app._update_ui = MagicMock()
+    app._update_main_status = MagicMock()
+    app._target_process_is_active = MagicMock(return_value=True)
+    app._setup_event_handlers = MagicMock()
     app.winfo_exists = MagicMock(return_value=True)
+    app.bind = MagicMock()
+    app.protocol = MagicMock()
+    app.unbind_events = MagicMock()
+    app.runtime_toggle_enabled = False
+    app.runtime_toggle_key = None
+    app.runtime_toggle_active = False
+    app.runtime_toggle_member_count = 0
+    app.runtime_toggle_mouse_listener = None
+    app.last_runtime_toggle_time = 0
+    app.latest_runtime_scroll_time = None
+    app.toggle_transition_in_progress = False
+    app.settings = type(
+        "SettingsStub",
+        (),
+        {
+            "toggle_start_stop_mac": False,
+            "use_alt_shift_hotkey": False,
+            "start_stop_key": "DISABLED",
+        },
+    )()
     return app
 
 
@@ -82,7 +111,9 @@ class TestStartSimulation(unittest.TestCase):
         mock_processor.start.assert_called_once()
 
         passed_events = mock_processor_cls.call_args.args[2]
-        self.assertEqual([e.event_name for e in passed_events], ["Action", "ConditionOnly"])
+        self.assertEqual(
+            [e.event_name for e in passed_events], ["Action", "ConditionOnly"]
+        )
 
     @patch("keystroke_simulator_app.KeystrokeProcessor")
     @patch("keystroke_simulator_app.load_profile")
@@ -115,8 +146,102 @@ class TestStartSimulation(unittest.TestCase):
         passed_events = mock_processor_cls.call_args.args[2]
         self.assertEqual([e.event_name for e in passed_events], ["LegacyIndependent"])
 
+    @patch("keystroke_simulator_app.KeystrokeProcessor")
+    @patch("keystroke_simulator_app.load_profile")
+    def test_start_simulation_configures_runtime_toggle_session(
+        self, mock_load_profile, mock_processor_cls
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+
+        profile = ProfileModel(
+            name="Quick",
+            event_list=[
+                EventModel(
+                    event_name="Base",
+                    use_event=True,
+                    key_to_enter="A",
+                ),
+                EventModel(
+                    event_name="Extra",
+                    use_event=True,
+                    key_to_enter="B",
+                    runtime_toggle_member=True,
+                ),
+            ],
+            runtime_toggle_enabled=True,
+            runtime_toggle_key="F6",
+        )
+        mock_load_profile.return_value = profile
+        mock_processor_cls.return_value = MagicMock()
+
+        result = KeystrokeSimulatorApp._start_simulation(app)
+
+        self.assertTrue(result)
+        self.assertTrue(app.runtime_toggle_enabled)
+        self.assertEqual(app.runtime_toggle_key, "F6")
+        self.assertEqual(app.runtime_toggle_member_count, 1)
+
+    @patch("keystroke_simulator_app.KeystrokeProcessor")
+    @patch("keystroke_simulator_app.load_profile")
+    def test_start_simulation_returns_false_when_runtime_toggle_conflicts_with_event_key(
+        self, mock_load_profile, mock_processor_cls
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+
+        profile = ProfileModel(
+            name="Quick",
+            event_list=[
+                EventModel(event_name="Base", use_event=True, key_to_enter="F6"),
+                EventModel(
+                    event_name="Extra",
+                    use_event=True,
+                    key_to_enter="B",
+                    runtime_toggle_member=True,
+                ),
+            ],
+            runtime_toggle_enabled=True,
+            runtime_toggle_key="F6",
+        )
+        mock_load_profile.return_value = profile
+
+        result = KeystrokeSimulatorApp._start_simulation(app)
+
+        self.assertFalse(result)
+        mock_processor_cls.assert_not_called()
+
+    @patch("keystroke_simulator_app.platform.system", return_value="Darwin")
+    @patch("keystroke_simulator_app.KeystrokeProcessor")
+    @patch("keystroke_simulator_app.load_profile")
+    def test_start_simulation_keeps_active_mac_polling_thread(
+        self, mock_load_profile, mock_processor_cls, _mock_system
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+        app.ctrl_check_active = True
+        app.settings.toggle_start_stop_mac = True
+        profile = ProfileModel(
+            name="Quick",
+            event_list=[
+                EventModel(event_name="Base", use_event=True, key_to_enter="A")
+            ],
+        )
+        mock_load_profile.return_value = profile
+        mock_processor_cls.return_value = MagicMock()
+
+        result = KeystrokeSimulatorApp._start_simulation(app)
+
+        self.assertTrue(result)
+        app._setup_event_handlers.assert_not_called()
+
     @patch("keystroke_simulator_app.load_profile", side_effect=RuntimeError("boom"))
-    def test_start_simulation_returns_false_on_profile_load_error(self, _mock_load_profile):
+    def test_start_simulation_returns_false_on_profile_load_error(
+        self, _mock_load_profile
+    ):
         app = _make_app_stub()
         app.selected_process.set("Dummy Process (1234)")
         app.selected_profile.set("Quick")
@@ -160,6 +285,17 @@ class TestToggleAndStopSimulation(unittest.TestCase):
         self.assertFalse(app.is_running.get())
         app.stop_simulation.assert_called_once()
 
+    def test_toggle_start_stop_ignores_reentrant_requests(self):
+        app = _make_app_stub()
+        app.toggle_transition_in_progress = True
+        app.start_simulation = MagicMock()
+        app.stop_simulation = MagicMock()
+
+        KeystrokeSimulatorApp.toggle_start_stop(app)
+
+        app.start_simulation.assert_not_called()
+        app.stop_simulation.assert_not_called()
+
     def test_stop_simulation_stops_processor_and_updates_ui(self):
         app = _make_app_stub()
         processor = MagicMock()
@@ -183,6 +319,39 @@ class TestToggleAndStopSimulation(unittest.TestCase):
 
         app.sound_player.play_stop_sound.assert_not_called()
         app._update_ui.assert_not_called()
+
+    def test_toggle_runtime_event_group_updates_processor_and_sound(self):
+        app = _make_app_stub()
+        app.is_running.set(True)
+        app.keystroke_processor = MagicMock()
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = "F6"
+
+        self.assertTrue(KeystrokeSimulatorApp.toggle_runtime_event_group(app))
+        app.keystroke_processor.set_runtime_toggle_active.assert_called_once_with(True)
+        app.sound_player.play_runtime_toggle_on_sound.assert_called_once()
+        self.assertTrue(app.runtime_toggle_active)
+
+        self.assertTrue(KeystrokeSimulatorApp.toggle_runtime_event_group(app))
+        self.assertEqual(
+            app.keystroke_processor.set_runtime_toggle_active.call_count, 2
+        )
+        app.keystroke_processor.set_runtime_toggle_active.assert_called_with(False)
+        app.sound_player.play_runtime_toggle_off_sound.assert_called_once()
+        self.assertFalse(app.runtime_toggle_active)
+
+    @patch("keystroke_simulator_app.platform.system", return_value="Darwin")
+    def test_stop_simulation_keeps_mac_polling_thread_when_option_shift_enabled(
+        self, _mock_system
+    ):
+        app = _make_app_stub()
+        app.keystroke_processor = MagicMock()
+        app.ctrl_check_active = True
+        app.settings.toggle_start_stop_mac = True
+
+        KeystrokeSimulatorApp._stop_simulation(app)
+
+        app._setup_event_handlers.assert_not_called()
 
 
 class TestMainUiState(unittest.TestCase):
@@ -267,6 +436,35 @@ class TestMainUiState(unittest.TestCase):
             state="disabled",
         )
 
+    @patch("keystroke_simulator_app.load_profile")
+    def test_readiness_snapshot_reports_runtime_toggle_conflict(
+        self, mock_load_profile
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+        profile = ProfileModel(
+            name="Quick",
+            event_list=[
+                EventModel(event_name="SameKey", use_event=True, key_to_enter="F6"),
+                EventModel(
+                    event_name="Extra",
+                    use_event=True,
+                    key_to_enter="A",
+                    runtime_toggle_member=True,
+                ),
+            ],
+            runtime_toggle_enabled=True,
+            runtime_toggle_key="F6",
+        )
+        mock_load_profile.return_value = profile
+
+        snapshot = KeystrokeSimulatorApp._get_readiness_snapshot(app)
+
+        self.assertFalse(snapshot["can_start"])
+        self.assertEqual(snapshot["badge_text"], "Toggle Conflict")
+        self.assertIn("conflicts with event input key", snapshot["detail"])
+
 
 class TestRuntimeEditGuards(unittest.TestCase):
     @patch("keystroke_simulator_app.KeystrokeQuickEventEditor")
@@ -319,6 +517,73 @@ class TestRuntimeEditGuards(unittest.TestCase):
         mock_settings.assert_called_once_with(app)
         self.assertEqual(app.settings_window, mock_settings.return_value)
 
+
+class TestEventHandlerSetup(unittest.TestCase):
+    @patch("keystroke_simulator_app.threading.Thread")
+    @patch("keystroke_simulator_app.platform.system", return_value="Darwin")
+    @patch("keystroke_simulator_app.pynput.keyboard.Listener")
+    def test_setup_event_handlers_uses_mac_polling_without_keyboard_listener(
+        self, mock_keyboard_listener, _mock_system, mock_thread
+    ):
+        app = _make_app_stub()
+        app.runtime_toggle_enabled = True
+        app.settings.toggle_start_stop_mac = True
+        app.settings.start_stop_key = "`"
+        app.start_stop_mouse_listener = None
+
+        KeystrokeSimulatorApp._setup_event_handlers(app)
+
+        mock_thread.assert_called_once()
+        mock_thread.return_value.start.assert_called_once()
+        mock_keyboard_listener.assert_not_called()
+
+    @patch("keystroke_simulator_app.pynput.mouse.Listener")
+    @patch("keystroke_simulator_app.platform.system", return_value="Windows")
+    def test_setup_event_handlers_starts_runtime_toggle_mouse_listener_for_wheel(
+        self, _mock_system, mock_mouse_listener
+    ):
+        app = _make_app_stub()
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = WHEEL_UP_TRIGGER
+
+        KeystrokeSimulatorApp._setup_event_handlers(app)
+
+        self.assertEqual(mock_mouse_listener.call_count, 1)
+        mock_mouse_listener.return_value.start.assert_called_once()
+
+    @patch("keystroke_simulator_app.pynput.mouse.Listener")
+    @patch("keystroke_simulator_app.platform.system", return_value="Darwin")
+    @patch("keystroke_simulator_app.threading.Thread")
+    def test_setup_event_handlers_keeps_mac_polling_and_runtime_mouse_listener(
+        self, mock_thread, _mock_system, mock_mouse_listener
+    ):
+        app = _make_app_stub()
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = MOUSE_BUTTON_3_TRIGGER
+        app.settings.toggle_start_stop_mac = True
+
+        KeystrokeSimulatorApp._setup_event_handlers(app)
+
+        mock_thread.assert_called_once()
+        mock_mouse_listener.assert_called_once()
+        mock_mouse_listener.return_value.start.assert_called_once()
+
+    @patch("keystroke_simulator_app.threading.Thread")
+    @patch("keystroke_simulator_app.platform.system", return_value="Darwin")
+    @patch("keystroke_simulator_app.pynput.keyboard.Listener")
+    def test_setup_event_handlers_uses_mac_polling_for_runtime_keyboard_trigger_only(
+        self, mock_keyboard_listener, _mock_system, mock_thread
+    ):
+        app = _make_app_stub()
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = "Q"
+        app.settings.toggle_start_stop_mac = False
+
+        KeystrokeSimulatorApp._setup_event_handlers(app)
+
+        mock_thread.assert_called_once()
+        mock_keyboard_listener.assert_not_called()
+
     def test_open_settings_reuses_existing_window(self):
         app = _make_app_stub()
         existing = MagicMock()
@@ -358,6 +623,118 @@ class TestSaveLatestState(unittest.TestCase):
         KeystrokeSimulatorApp._save_latest_state(app)
 
         mock_save_state.assert_called_once_with(process="SomeProcess", profile="Quick")
+
+
+class TestRuntimeToggleMouseHandlers(unittest.TestCase):
+    @patch("keystroke_simulator_app.time.time", return_value=100.0)
+    def test_runtime_toggle_mouse_scroll_toggles_wheel_up(self, _mock_time):
+        app = _make_app_stub()
+        app.after = MagicMock()
+        app.is_running.set(True)
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = WHEEL_UP_TRIGGER
+
+        KeystrokeSimulatorApp._on_runtime_toggle_mouse_scroll(app, 0, 0, 0, 1)
+
+        app.after.assert_called_once()
+        self.assertEqual(app.last_runtime_toggle_time, 100.0)
+
+    @patch("keystroke_simulator_app.time.time", return_value=100.0)
+    def test_runtime_toggle_mouse_click_toggles_button_3(self, _mock_time):
+        app = _make_app_stub()
+        app.after = MagicMock()
+        app.is_running.set(True)
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = MOUSE_BUTTON_3_TRIGGER
+        button = type("ButtonStub", (), {"name": "x1"})()
+
+        KeystrokeSimulatorApp._on_runtime_toggle_mouse_click(
+            app,
+            0,
+            0,
+            button,
+            True,
+        )
+
+        app.after.assert_called_once()
+        self.assertEqual(app.last_runtime_toggle_time, 100.0)
+
+    @patch("keystroke_simulator_app.time.time", return_value=100.1)
+    def test_runtime_toggle_mouse_scroll_respects_debounce(self, _mock_time):
+        app = _make_app_stub()
+        app.after = MagicMock()
+        app.is_running.set(True)
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = WHEEL_DOWN_TRIGGER
+        app.last_runtime_toggle_time = 100.0
+
+        KeystrokeSimulatorApp._on_runtime_toggle_mouse_scroll(app, 0, 0, 0, -1)
+
+        app.after.assert_not_called()
+
+    @patch("keystroke_simulator_app.time.time", return_value=100.2)
+    def test_runtime_toggle_mouse_scroll_ignores_same_scroll_gesture(self, _mock_time):
+        app = _make_app_stub()
+        app.after = MagicMock()
+        app.is_running.set(True)
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = WHEEL_UP_TRIGGER
+        app.latest_runtime_scroll_time = 100.0
+
+        KeystrokeSimulatorApp._on_runtime_toggle_mouse_scroll(app, 0, 0, 0, 1)
+
+        app.after.assert_not_called()
+
+
+class TestRuntimeToggleKeyHandling(unittest.TestCase):
+    def test_listener_key_name_uses_vk_for_ime_independent_letters(self):
+        key = type("KeyStub", (), {"vk": KeyUtils.get_keycode("Q"), "char": "ㅂ"})()
+
+        self.assertEqual(KeystrokeSimulatorApp._listener_key_name(key), "Q")
+
+    @patch("keystroke_simulator_app.time.time", return_value=100.0)
+    def test_on_key_press_matches_runtime_toggle_with_ime_text(self, _mock_time):
+        app = _make_app_stub()
+        app.after = MagicMock()
+        app.is_running.set(True)
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = "Q"
+        app.settings.start_stop_key = "DISABLED"
+        key = type("KeyStub", (), {"vk": KeyUtils.get_keycode("Q"), "char": "ㅂ"})()
+
+        KeystrokeSimulatorApp._on_key_press(app, key)
+
+        app.after.assert_called_once()
+        self.assertEqual(app.last_runtime_toggle_time, 100.0)
+
+
+class TestMacPollingBehavior(unittest.TestCase):
+    @patch("keystroke_simulator_app.KeyUtils.key_pressed", return_value=False)
+    @patch("keystroke_simulator_app.KeyUtils.mod_key_pressed", side_effect=[True, True])
+    @patch("keystroke_simulator_app.time.sleep", side_effect=RuntimeError("stop"))
+    @patch("keystroke_simulator_app.time.time", side_effect=[100.0, 100.0])
+    @patch("keystroke_simulator_app.platform.system", return_value="Darwin")
+    def test_mac_polling_does_not_toggle_start_stop_when_disabled(
+        self,
+        _mock_system,
+        _mock_time,
+        _mock_sleep,
+        _mock_mod_pressed,
+        _mock_key_pressed,
+    ):
+        app = _make_app_stub()
+        app.after = MagicMock()
+        app.ctrl_check_active = True
+        app.settings.toggle_start_stop_mac = False
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = "Q"
+
+        try:
+            KeystrokeSimulatorApp._check_for_long_alt_shift(app)
+        except RuntimeError:
+            pass
+
+        app.after.assert_not_called()
 
 
 if __name__ == "__main__":

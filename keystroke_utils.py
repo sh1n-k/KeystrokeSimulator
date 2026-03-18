@@ -23,11 +23,14 @@ if IS_WIN:
     from win32process import GetWindowThreadProcessId, GetModuleFileNameEx
 elif IS_MAC:
     import AppKit
+    from ApplicationServices import AXIsProcessTrusted
     from Quartz import (
         kCGEventFlagMaskShift,
         kCGEventFlagMaskAlternate,
         kCGEventFlagMaskControl,
         CGEventSourceFlagsState,
+        CGEventSourceKeyState,
+        CGPreflightScreenCaptureAccess,
         kCGEventSourceStateHIDSystemState,
     )
 
@@ -210,6 +213,16 @@ class KeyUtils:
         return list(cls.CURRENT_KEYS.keys())
 
     @classmethod
+    def get_key_name_for_keycode(cls, code: int | None) -> str | None:
+        if code is None:
+            return None
+
+        for name, mapped_code in cls.CURRENT_KEYS.items():
+            if mapped_code == code:
+                return name
+        return None
+
+    @classmethod
     def get_keycode(cls, char: str):
         return cls.CURRENT_KEYS.get(char.capitalize())
 
@@ -233,6 +246,21 @@ class KeyUtils:
                 if mask
                 else False
             )
+        return False
+
+    @staticmethod
+    def key_pressed(key_name: str | None) -> bool:
+        if not key_name:
+            return False
+
+        code = KeyUtils.get_keycode(key_name)
+        if code is None:
+            return False
+
+        if IS_WIN:
+            return ctypes.windll.user32.GetAsyncKeyState(code) & 0x8000 != 0
+        elif IS_MAC:
+            return bool(CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, code))
         return False
 
 
@@ -260,6 +288,38 @@ class StateUtils:
         except Exception as e:
             logger.error(f"Load state failed: {e}")
             return {}
+
+
+class PermissionUtils:
+    @staticmethod
+    def has_screen_capture_access() -> bool:
+        if not IS_MAC:
+            return True
+        try:
+            return bool(CGPreflightScreenCaptureAccess())
+        except Exception:
+            return False
+
+    @staticmethod
+    def has_accessibility_access() -> bool:
+        if not IS_MAC:
+            return True
+        try:
+            return bool(AXIsProcessTrusted())
+        except Exception:
+            return False
+
+    @staticmethod
+    def missing_macos_permissions() -> list[str]:
+        if not IS_MAC:
+            return []
+
+        missing = []
+        if not PermissionUtils.has_screen_capture_access():
+            missing.append("screen")
+        if not PermissionUtils.has_accessibility_access():
+            missing.append("accessibility")
+        return missing
 
 
 class SoundUtils:
