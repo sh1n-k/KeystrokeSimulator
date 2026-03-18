@@ -720,64 +720,15 @@ class EventListFrame(ttk.Frame):
             ),
         )
 
-        self.btn_import = ttk.Button(
-            f_primary,
-            text=txt("📥 Import", "📥 가져오기"),
-            command=lambda: EventImporter(self.win, self._import),
-            width=dual_text_width("📥 Import", "📥 가져오기", padding=2, min_width=13),
-        )
-        self.btn_import.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
-        ToolTip(
-            self.btn_import,
-            txt(
-                "Import event settings into this profile.",
-                "다른 이벤트 설정을 현재 프로필로 가져옵니다.",
-            ),
-        )
-
-        self.btn_sort = ttk.Button(
-            f_secondary,
-            text=txt("↕ Auto Sort", "↕ 자동 정렬"),
-            command=self._sort_events,
-            width=dual_text_width(
-                "↕ Auto Sort", "↕ 자동 정렬", padding=2, min_width=12
-            ),
-        )
-        self.btn_sort.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
-        ToolTip(
-            self.btn_sort,
-            txt(
-                "Sort events automatically by event type and then by name.",
-                "이벤트 타입 우선, 그다음 이름순으로 자동 정렬합니다.",
-            ),
-        )
-
-        self.btn_manage_groups = ttk.Button(
-            f_secondary,
-            text=txt("🧩 Manage Groups", "🧩 그룹 관리"),
-            command=self._manage_groups,
-            width=dual_text_width(
-                "🧩 Manage Groups", "🧩 그룹 관리", padding=2, min_width=16
-            ),
-        )
-        self.btn_manage_groups.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
-        ToolTip(
-            self.btn_manage_groups,
-            txt(
-                "Rename groups or clear groups from events.",
-                "그룹 이름 변경 또는 그룹 해제를 관리합니다.",
-            ),
-        )
-
         self.btn_graph = ttk.Button(
-            f_secondary,
+            f_primary,
             text=txt("🗺 View Graph", "🗺 그래프 보기"),
             command=self._open_graph,
             width=dual_text_width(
                 "🗺 View Graph", "🗺 그래프 보기", padding=2, min_width=13
             ),
         )
-        self.btn_graph.pack(side=tk.LEFT)
+        self.btn_graph.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
         ToolTip(
             self.btn_graph,
             txt(
@@ -785,6 +736,64 @@ class EventListFrame(ttk.Frame):
                 "현재 이벤트 흐름을 그래프로 확인합니다.",
             ),
         )
+
+        self.btn_sort_name = ttk.Button(
+            f_secondary,
+            text=txt("↕ Sort (Name)", "↕ 정렬(이름순서)"),
+            command=self._sort_events_by_name,
+            width=dual_text_width(
+                "↕ Sort (Name)", "↕ 정렬(이름순서)", padding=2, min_width=16
+            ),
+        )
+        self.btn_sort_name.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
+        ToolTip(
+            self.btn_sort_name,
+            txt(
+                "Sort events automatically by event type and then by name.",
+                "이벤트 타입 우선, 그다음 이름순으로 자동 정렬합니다.",
+            ),
+        )
+
+        self.btn_sort_key = ttk.Button(
+            f_secondary,
+            text=txt("↕ Sort (Key)", "↕ 정렬(키 순서)"),
+            command=self._sort_events_by_key,
+            width=dual_text_width(
+                "↕ Sort (Key)", "↕ 정렬(키 순서)", padding=2, min_width=16
+            ),
+        )
+        self.btn_sort_key.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
+        ToolTip(
+            self.btn_sort_key,
+            txt(
+                "Sort events automatically by event type: conditions by name, actions by input key order.",
+                "이벤트 타입 우선으로 자동 정렬합니다: 조건은 이름순, 실행은 입력 키 순서입니다.",
+            ),
+        )
+
+        self.btn_more = ttk.Menubutton(
+            f_secondary,
+            text=txt("⋯ More", "⋯ 더보기"),
+            width=dual_text_width("⋯ More", "⋯ 더보기", padding=2, min_width=12),
+        )
+        self.btn_more.pack(side=tk.LEFT)
+        ToolTip(
+            self.btn_more,
+            txt(
+                "Open additional actions such as import and group management.",
+                "가져오기, 그룹 관리 같은 추가 작업을 엽니다.",
+            ),
+        )
+        self.more_menu = tk.Menu(self.btn_more, tearoff=0)
+        self.more_menu.add_command(
+            label=txt("📥 Import", "📥 가져오기"),
+            command=lambda: EventImporter(self.win, self._import),
+        )
+        self.more_menu.add_command(
+            label=txt("🧩 Manage Groups", "🧩 그룹 관리"),
+            command=self._manage_groups,
+        )
+        self.btn_more.configure(menu=self.more_menu)
 
         self.menu = tk.Menu(self, tearoff=0)
         self.menu.add_command(
@@ -846,31 +855,65 @@ class EventListFrame(ttk.Frame):
         """조건 전용 이벤트를 먼저, 키 입력 실행 이벤트를 나중에 배치한다."""
         return 0 if not getattr(event, "execute_action", True) else 1
 
-    def _sort_events(self):
-        """
-        이벤트 목록 자동 정렬 로직
-        1. Event Type (Condition -> Action)
-        2. Name (Ascending)
-        """
+    def _sort_events_with_feedback(
+        self, sort_key, title_text: str, message_text: str
+    ) -> None:
         if not self.profile.event_list:
             return
-
-        def sort_key(e: EventModel):
-            name = e.event_name or ""
-            return (self._get_event_type_sort_order(e), name.casefold(), name)
-
         self.save_names()
         self.profile.event_list.sort(key=sort_key)
         self.update_events()
         self.save_cb()
         messagebox.showinfo(
-            txt("Auto Sort Complete", "자동 정렬 완료"),
+            title_text,
+            message_text,
+            parent=self.win,
+        )
+
+    def _sort_events_by_name(self):
+        """이벤트 타입 우선, 같은 타입 내에서는 이름순 정렬."""
+
+        def sort_key(e: EventModel):
+            name = e.event_name or ""
+            return (self._get_event_type_sort_order(e), name.casefold(), name)
+
+        self._sort_events_with_feedback(
+            sort_key,
+            txt("Name Sort Complete", "이름순 정렬 완료"),
             txt(
                 "Events were sorted by:\nEvent Type (Condition → Action) → Name",
                 "이벤트를 다음 순서로 정렬했습니다:\n이벤트 타입(조건 → 실행) → 이름",
             ),
-            parent=self.win,
         )
+
+    def _sort_events_by_key(self):
+        """이벤트 타입 우선, 조건은 이름순/실행은 입력 키 순서로 정렬."""
+
+        def sort_key(e: EventModel):
+            name = e.event_name or ""
+            type_order = self._get_event_type_sort_order(e)
+            if type_order == 0:
+                return (type_order, 0, name.casefold(), name)
+            return (
+                type_order,
+                1,
+                *self._get_key_sort_order(getattr(e, "key_to_enter", None)),
+                name.casefold(),
+                name,
+            )
+
+        self._sort_events_with_feedback(
+            sort_key,
+            txt("Key Sort Complete", "키 순서 정렬 완료"),
+            txt(
+                "Events were sorted by:\nCondition → Name\nAction → Input Key",
+                "이벤트를 다음 순서로 정렬했습니다:\n조건 → 이름\n실행 → 입력 키",
+            ),
+        )
+
+    def _sort_events(self):
+        """기존 호출 호환용: 키 순서 정렬로 연결."""
+        self._sort_events_by_key()
 
     def _manage_groups(self):
         """그룹 관리 다이얼로그"""

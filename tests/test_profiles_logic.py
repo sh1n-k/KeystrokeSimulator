@@ -297,10 +297,23 @@ class TestSortEventsLogic(unittest.TestCase):
         stub.profile = ProfileModel(event_list=events)
         return stub
 
-    def _sort_key(self, stub, e):
-        """_sort_events 내부 sort_key 람다 재현"""
+    def _name_sort_key(self, stub, e):
         name = e.event_name or ""
         return (stub._get_event_type_sort_order(e), name.casefold(), name)
+
+    def _key_sort_key(self, stub, e):
+        """_sort_events_by_key 내부 sort_key 람다 재현"""
+        name = e.event_name or ""
+        type_order = stub._get_event_type_sort_order(e)
+        if type_order == 0:
+            return (type_order, 0, name.casefold(), name)
+        return (
+            type_order,
+            1,
+            *stub._get_key_sort_order(getattr(e, "key_to_enter", None)),
+            name.casefold(),
+            name,
+        )
 
     def test_condition_type_before_action_type(self):
         """조건 전용 이벤트가 키 입력 실행 이벤트보다 먼저"""
@@ -309,18 +322,47 @@ class TestSortEventsLogic(unittest.TestCase):
             EventModel(event_name="Condition", execute_action=False, key_to_enter=None),
         ]
         stub = self._make_sortable_stub(events)
-        sorted_events = sorted(events, key=lambda e: self._sort_key(stub, e))
+        sorted_events = sorted(events, key=lambda e: self._name_sort_key(stub, e))
         self.assertEqual(sorted_events[0].event_name, "Condition")
 
-    def test_same_type_sorted_by_name(self):
-        """같은 타입 내에서는 이름순"""
+    def test_action_type_sorted_by_input_key_order(self):
+        """실행 이벤트는 입력 키 순서"""
         events = [
-            EventModel(event_name="Zebra", execute_action=True, key_to_enter="A"),
-            EventModel(event_name="Apple", execute_action=True, key_to_enter="B"),
+            EventModel(event_name="Zebra", execute_action=True, key_to_enter="B"),
+            EventModel(event_name="Apple", execute_action=True, key_to_enter="A"),
         ]
         stub = self._make_sortable_stub(events)
-        sorted_events = sorted(events, key=lambda e: self._sort_key(stub, e))
+        sorted_events = sorted(events, key=lambda e: self._key_sort_key(stub, e))
         self.assertEqual(sorted_events[0].event_name, "Apple")
+
+    def test_condition_type_sorted_by_name(self):
+        """조건 이벤트는 이름순"""
+        events = [
+            EventModel(event_name="Zulu", execute_action=False, key_to_enter="B"),
+            EventModel(event_name="Alpha", execute_action=False, key_to_enter="A"),
+        ]
+        stub = self._make_sortable_stub(events)
+        sorted_events = sorted(events, key=lambda e: self._key_sort_key(stub, e))
+        self.assertEqual([e.event_name for e in sorted_events], ["Alpha", "Zulu"])
+
+    def test_same_key_order_falls_back_to_name(self):
+        """입력 키가 같으면 이름으로 안정 정렬"""
+        events = [
+            EventModel(event_name="Zebra", execute_action=True, key_to_enter="A"),
+            EventModel(event_name="Apple", execute_action=True, key_to_enter="A"),
+        ]
+        stub = self._make_sortable_stub(events)
+        sorted_events = sorted(events, key=lambda e: self._key_sort_key(stub, e))
+        self.assertEqual([e.event_name for e in sorted_events], ["Apple", "Zebra"])
+
+    def test_name_sort_uses_name_within_action_type(self):
+        events = [
+            EventModel(event_name="Zulu", execute_action=True, key_to_enter="A"),
+            EventModel(event_name="Alpha", execute_action=True, key_to_enter="B"),
+        ]
+        stub = self._make_sortable_stub(events)
+        sorted_events = sorted(events, key=lambda e: self._name_sort_key(stub, e))
+        self.assertEqual([e.event_name for e in sorted_events], ["Alpha", "Zulu"])
 
     def test_type_order_applies_before_name(self):
         """이름보다 타입 우선 정렬"""
@@ -329,10 +371,10 @@ class TestSortEventsLogic(unittest.TestCase):
             EventModel(event_name="Zulu", execute_action=False, key_to_enter=None),
         ]
         stub = self._make_sortable_stub(events)
-        sorted_events = sorted(events, key=lambda e: self._sort_key(stub, e))
+        sorted_events = sorted(events, key=lambda e: self._name_sort_key(stub, e))
         self.assertEqual([e.event_name for e in sorted_events], ["Zulu", "Alpha"])
 
-    def test_sort_events_uses_default_language_dialog_message(self):
+    def test_sort_events_by_key_uses_default_language_dialog_message(self):
         events = [
             EventModel(event_name="B", execute_action=True, key_to_enter="B"),
             EventModel(event_name="A", execute_action=False, key_to_enter=None),
@@ -344,12 +386,34 @@ class TestSortEventsLogic(unittest.TestCase):
         stub.save_cb = lambda *args, **kwargs: None
 
         with patch("keystroke_profiles.messagebox.showinfo") as mock_show:
-            stub._sort_events()
+            stub._sort_events_by_key()
 
         mock_show.assert_called_once()
         args, kwargs = mock_show.call_args
-        self.assertEqual(args[0], "Auto Sort Complete")
-        self.assertIn("Event Type (Condition", args[1])
+        self.assertEqual(args[0], "Key Sort Complete")
+        self.assertIn("Condition", args[1])
+        self.assertIn("Input Key", args[1])
+        self.assertEqual(kwargs["parent"], stub.win)
+
+    def test_sort_events_by_name_uses_default_language_dialog_message(self):
+        events = [
+            EventModel(event_name="B", execute_action=True, key_to_enter="B"),
+            EventModel(event_name="A", execute_action=False, key_to_enter=None),
+        ]
+        stub = self._make_sortable_stub(events)
+        stub.win = object()
+        stub.save_names = lambda: None
+        stub.update_events = lambda: None
+        stub.save_cb = lambda *args, **kwargs: None
+
+        with patch("keystroke_profiles.messagebox.showinfo") as mock_show:
+            stub._sort_events_by_name()
+
+        mock_show.assert_called_once()
+        args, kwargs = mock_show.call_args
+        self.assertEqual(args[0], "Name Sort Complete")
+        self.assertIn("Event Type", args[1])
+        self.assertIn("Name", args[1])
         self.assertEqual(kwargs["parent"], stub.win)
 
 
