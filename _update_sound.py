@@ -6,7 +6,7 @@ import re
 
 def update_sound_variable(sound_type: str, new_sound_path: str):
     """
-    Updates the START_SOUND or STOP_SOUND variable in keystroke_sounds.py
+    Updates the START_SOUND or STOP_SOUND variable in app/utils/sounds.py
     with a new base64-encoded sound file.
 
     Args:
@@ -29,7 +29,9 @@ def update_sound_variable(sound_type: str, new_sound_path: str):
         )
         return
 
-    target_file = os.path.join(os.path.dirname(__file__), "keystroke_sounds.py")
+    target_file = os.path.join(
+        os.path.dirname(__file__), "app", "utils", "sounds.py"
+    )
     if not os.path.exists(target_file):
         print(f"Error: Target file '{target_file}' not found.")
         return

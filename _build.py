@@ -5,6 +5,47 @@ import PyInstaller.__main__
 from dotenv import load_dotenv, find_dotenv
 
 VERSION = "3.0"
+PROJECT_ROOT = os.path.dirname(__file__)
+HIDDEN_IMPORTS = [
+    "app.core.models",
+    "app.core.capturer",
+    "app.core.processor",
+    "app.storage.profile_display",
+    "app.storage.profile_storage",
+    "app.ui.event_editor",
+    "app.ui.event_graph",
+    "app.ui.event_importer",
+    "app.ui.modkeys",
+    "app.ui.profiles",
+    "app.ui.quick_event_editor",
+    "app.ui.settings",
+    "app.ui.simulator_app",
+    "app.ui.sort_events",
+    "app.utils.i18n",
+    "app.utils.runtime_toggle",
+    "app.utils.sound_assets",
+    "app.utils.sounds",
+    "app.utils.system",
+    "i18n",
+    "keystroke_capturer",
+    "keystroke_event_editor",
+    "keystroke_event_graph",
+    "keystroke_event_importer",
+    "keystroke_models",
+    "keystroke_modkeys",
+    "keystroke_processor",
+    "keystroke_profile_storage",
+    "keystroke_profiles",
+    "keystroke_quick_event_editor",
+    "keystroke_settings",
+    "keystroke_simulator_app",
+    "keystroke_sounds",
+    "keystroke_sort_events",
+    "keystroke_utils",
+    "profile_display",
+    "runtime_toggle_sound_assets",
+    "runtime_toggle_utils",
+]
 
 # Load environment variables
 load_dotenv(find_dotenv())
@@ -42,6 +83,8 @@ if __name__ == "__main__":
                 "--clean",
                 "--noupx",
                 f"--name=main_secure_v{VERSION}",
+                f"--paths={PROJECT_ROOT}",
+                *[f"--hidden-import={module}" for module in HIDDEN_IMPORTS],
             ]
         )
     finally:
