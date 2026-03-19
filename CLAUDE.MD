@@ -19,29 +19,37 @@ If you prefer not to activate venv, use explicit interpreter paths:
 ```
 main.py                         # Entry point (GUI)
 main_secure.py                  # Entry point with auth gate
-keystroke_simulator_app.py      # Main Tkinter app (process/profile selection, start/stop)
-keystroke_processor.py          # Core 5-stage pipeline (capture → match → conditions → group → keystrokes)
-keystroke_models.py             # Dataclasses: EventModel, ProfileModel, UserSettings
-keystroke_event_editor.py       # Full event editor dialog (Korean UI)
-keystroke_quick_event_editor.py # Quick event creation (always pixel mode, capture size adjustable)
-keystroke_event_importer.py     # Import events between profiles
-keystroke_event_graph.py        # Condition chain graph visualization (Pillow)
-keystroke_capturer.py           # Screen capture thread (mss + screeninfo)
-keystroke_profile_storage.py    # Profile JSON serialization/deserialization (legacy pkl import)
-keystroke_profiles.py           # Profile manager (JSON load/save, auto-save)
-profile_display.py              # Profile combobox display formatting (favorite star prefix)
-keystroke_settings.py           # Settings dialog (JSON serialization)
-keystroke_sort_events.py        # Drag-and-drop event reordering
-keystroke_modkeys.py            # Modification keys (Alt/Ctrl/Shift) config window
-keystroke_sounds.py             # Start/stop sound playback (Pygame, base64-embedded)
-keystroke_utils.py              # Shared utilities: KeyUtils, ProcessUtils, StateUtils, WindowUtils
+app/ui/simulator_app.py         # Main Tkinter app
+app/core/processor.py           # Core 5-stage pipeline
+app/core/models.py              # Dataclasses: EventModel, ProfileModel, UserSettings
+app/ui/event_editor.py          # Full event editor dialog
+app/ui/quick_event_editor.py    # Quick event creation dialog
+app/ui/event_importer.py        # Import events between profiles
+app/ui/event_graph.py           # Condition chain graph visualization
+app/core/capturer.py            # Screen capture thread
+app/storage/profile_storage.py  # Profile JSON serialization + legacy pkl migration
+app/ui/profiles.py              # Profile manager/editing flow
+app/storage/profile_display.py  # Profile combobox display formatting
+app/ui/settings.py              # Settings dialog
+app/ui/sort_events.py           # Drag-and-drop event reordering
+app/ui/modkeys.py               # Modification keys config window
+app/utils/sounds.py             # Start/stop sound playback
+app/utils/system.py             # Shared system utilities
+app/utils/i18n.py               # Localization helpers
+app/utils/runtime_toggle.py     # Runtime toggle helpers
+app/compat/legacy.py            # Legacy module-name mapping source of truth
 _build.py                       # PyInstaller build script
 _lambda.py                      # AWS Lambda auth backend (server-side only)
 _local_test_server.py           # Local auth test server
-tests/                          # unittest test suite (10 test files)
+tests/                          # unittest test suite
 ```
 
-### 5-Stage Processor Pipeline (`keystroke_processor.py`)
+### Canonical Imports
+- Internal code and tests must import from `app.*`.
+- Root-level modules such as `keystroke_*.py`, `i18n.py`, `profile_display.py`, and `runtime_toggle_*.py` are compatibility shims only.
+- If backward compatibility changes, update `app/compat/legacy.py`, the root shim, build hidden imports, and legacy pickle loading in the same change.
+
+### 5-Stage Processor Pipeline (`app/core/processor.py`)
 1. Collect raw match states (pixel/region)
 2. Resolve effective states (condition chains with DFS cycle detection)
 3. Update `current_states` (thread-safe)
@@ -62,15 +70,15 @@ Capture events → Profile (JSON, 250ms debounce auto-save) → Processor builds
 ## Common Tasks
 
 ### Adding a New Event Field
-1. `keystroke_models.py`: Update `EventModel` dataclass
-2. `keystroke_event_editor.py`: Add UI controls
-3. `keystroke_processor.py`: Add processing logic + event_data conversion
+1. `app/core/models.py`: Update `EventModel` dataclass
+2. `app/ui/event_editor.py`: Add UI controls
+3. `app/core/processor.py`: Add processing logic + event_data conversion
 4. Ensure JSON schema compatibility (`schema_version`) or handle migration (legacy `profiles/*.pkl` import may exist)
 5. Add tests in `tests/`
 
 ### Adding a New Setting
-1. `keystroke_models.py`: Add to `UserSettings`
-2. `keystroke_settings.py`: Add UI controls + JSON serialization
+1. `app/core/models.py`: Add to `UserSettings`
+2. `app/ui/settings.py`: Add UI controls + JSON serialization
 
 ## File Locations
 - Profiles: `profiles/*.json` (legacy `profiles/*.pkl` may exist)
@@ -84,13 +92,14 @@ Python 3.13, Tkinter (Korean UI), mss + numpy (capture/vision), pynput + PyObjC/
 ## Testing
 - Framework: `unittest`
 - Run: `python run_tests.py` (auto-discovers `tests/test_*.py`)
+- Import rule guard: `tests/test_import_conventions.py` blocks new internal imports of legacy root shims
 - Test areas: condition chains, check_match, event data conversion, invert conditions, event graph algorithms, ROI extraction, resolve effective states, profile display, profile JSON storage, capture size (`set_capture_size`)
 
 ## Git Workflow
 - Main branch: `main`
 
 ## Known Constraints
-- Profiles use JSON (`keystroke_profile_storage.py`): legacy `.pkl` files auto-converted on load. `PROFILE_SCHEMA_VERSION` tracks schema changes.
+- Profiles use JSON (`app/storage/profile_storage.py`): legacy `.pkl` files auto-converted on load. `PROFILE_SCHEMA_VERSION` tracks schema changes.
 - macOS: requires Accessibility + Screen Recording permissions
 - `_lambda.py` is AWS Lambda server-side code, not part of the client app
 

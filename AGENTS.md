@@ -10,6 +10,12 @@ Primary goals for agents:
 - Maintain backward compatibility for saved profiles (`profiles/*.json` primary; legacy `profiles/*.pkl` may exist and should migrate cleanly).
 - Prefer the package layout under `app/` for new work; root-level legacy module names now exist only as compatibility shims for older imports, tests, scripts, and pickle migration paths.
 
+Module boundary rules:
+- Treat `app/*` as the only canonical implementation surface.
+- Do not add new logic to root-level `keystroke_*.py`, `i18n.py`, `profile_display.py`, or `runtime_toggle_*.py`; they are shim-only.
+- Do not import root-level legacy module names from new or modified internal code/tests. Import from `app.*` instead.
+- If a module move/rename affects backward compatibility, update `app/compat/legacy.py`, the related shim file, build hidden imports, and legacy pickle loading together.
+
 ## Setup commands
 
 Requirements:
@@ -115,10 +121,12 @@ Current module layout:
 Compatibility shims:
 - Root-level modules such as `keystroke_simulator_app.py`, `keystroke_profiles.py`, `keystroke_event_editor.py`, `keystroke_processor.py`, `keystroke_profile_storage.py`, `keystroke_utils.py`, `i18n.py`, and related `keystroke_*.py` files now forward to their canonical `app/` modules.
 - New code should import from `app.*`; use root-level names only when intentionally preserving external compatibility.
+- `app/compat/legacy.py` is the single source of truth for legacy module-name mapping.
 
 Tests:
 - `tests/`: `unittest` suite (`test_*.py`).
 - `tests/test_profile_display.py`: favorite profile display-label rules.
+- `tests/test_import_conventions.py`: blocks new internal imports of legacy root shim modules.
 
 Local state (gitignored; avoid relying on these being versioned):
 - `profiles/`: saved profiles (`*.json` primary; legacy `*.pkl` may exist).
