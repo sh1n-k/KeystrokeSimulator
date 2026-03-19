@@ -59,7 +59,10 @@ uv run python run_tests.py
 
 ```bash
 uv sync --group build
-uv run python _build.py    # PyInstaller 단일 실행 파일
+uv run python scripts/build_secure.py    # PyInstaller 단일 실행 파일
+
+./build_secure.command   # macOS wrapper
+build_secure.cmd         # Windows wrapper
 ```
 
 ### 라이선스
@@ -120,7 +123,10 @@ uv run python run_tests.py
 
 ```bash
 uv sync --group build
-uv run python _build.py    # PyInstaller single executable
+uv run python scripts/build_secure.py    # PyInstaller single executable
+
+./build_secure.command   # macOS wrapper
+build_secure.cmd         # Windows wrapper
 ```
 
 ### License

@@ -674,6 +674,8 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv_test/
+.uv-cache/
 env/
 venv/
 ENV/
@@ -711,9 +713,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-_build.py
-_timestamp.py
-
 .DS_Store
 *.txt
-*.mp3
+.ruff_cache/
