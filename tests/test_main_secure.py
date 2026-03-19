@@ -3,9 +3,6 @@ import unittest
 from unittest.mock import MagicMock, patch, call
 
 # main_secure imports Tkinter and requests at module level; patch heavy deps before import
-sys.modules.setdefault("keystroke_simulator_app", MagicMock())
-sys.modules.setdefault("keystroke_utils", MagicMock())
-
 import main_secure  # noqa: E402 — must come after sys.modules patching
 from main_secure import Application, AuthService, AuthUI, Config
 

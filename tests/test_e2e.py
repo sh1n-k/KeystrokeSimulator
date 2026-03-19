@@ -11,10 +11,10 @@ os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 # Headless CI guard: skip when RUN_GUI_TESTS is not set
 _RUN_GUI_TESTS = os.environ.get("RUN_GUI_TESTS", "0") == "1"
 
-from keystroke_simulator_app import KeystrokeSimulatorApp
-from keystroke_models import ProfileModel, EventModel
-from profile_display import QUICK_PROFILE_NAME
-from i18n import txt
+from app.ui.simulator_app import KeystrokeSimulatorApp
+from app.core.models import ProfileModel, EventModel
+from app.storage.profile_display import QUICK_PROFILE_NAME
+from app.utils.i18n import txt
 
 # Suppress loguru output during tests to prevent clutter
 from loguru import logger
@@ -39,11 +39,11 @@ class TestKeystrokeSimulatorE2E(unittest.TestCase):
 
     def setUp(self):
         # Prevent actually locking real hotkeys or moving mouse
-        self.patcher_keyboard = patch("keystroke_simulator_app.KeyUtils")
+        self.patcher_keyboard = patch("app.ui.simulator_app.KeyUtils")
         self.mock_keyboard = self.patcher_keyboard.start()
 
         # Mock SoundPlayer to not play real audio
-        self.patcher_sound = patch("keystroke_simulator_app.SoundPlayer")
+        self.patcher_sound = patch("app.ui.simulator_app.SoundPlayer")
         self.patcher_sound.start()
 
         # Prevent OS-level global listeners (pynput) from being created in GUI E2E.
@@ -82,7 +82,7 @@ class TestKeystrokeSimulatorE2E(unittest.TestCase):
 
     @patch("tkinter.messagebox.askokcancel")
     @patch("tkinter.messagebox.showwarning")
-    @patch("keystroke_simulator_app.copy_profile_storage")
+    @patch("app.ui.simulator_app.copy_profile_storage")
     def test_scenario_a_profile_management(self, mock_copy_storage, mock_warn, mock_askokcancel):
         """
         Scenario A: [Profile Management Flow]
@@ -116,7 +116,7 @@ class TestKeystrokeSimulatorE2E(unittest.TestCase):
         # 4. Verify fallback
         self.assertNotEqual(self.app.profile_frame.get_selected_profile_name(), expected_name)
 
-    @patch("keystroke_simulator_app.KeystrokeQuickEventEditor")
+    @patch("app.ui.simulator_app.KeystrokeQuickEventEditor")
     def test_scenario_b_event_creation_flow(self, mock_editor_class):
         """
         Scenario B: [Event Creation & Grouping Flow]
@@ -133,9 +133,9 @@ class TestKeystrokeSimulatorE2E(unittest.TestCase):
         self.app.open_quick_events()
         mock_editor_class.assert_called_once()
 
-    @patch("keystroke_simulator_app.load_profile")
-    @patch("keystroke_processor.KeystrokeProcessor.start")
-    @patch("keystroke_processor.KeystrokeProcessor.stop")
+    @patch("app.ui.simulator_app.load_profile")
+    @patch("app.core.processor.KeystrokeProcessor.start")
+    @patch("app.core.processor.KeystrokeProcessor.stop")
     def test_scenario_c_simulator_start_stop(self, mock_proc_stop, mock_proc_start, mock_load_profile):
         """
         Scenario C: [Simulator Start and Stop Flow]
@@ -169,9 +169,9 @@ class TestKeystrokeSimulatorE2E(unittest.TestCase):
         self.assertEqual(self.app.button_frame.start_stop_button["text"], txt("Start", "시작"))
         mock_proc_stop.assert_called_once()
 
-    @patch("keystroke_simulator_app.load_profile")
-    @patch("keystroke_processor.KeystrokeProcessor.start")
-    @patch("keystroke_processor.KeystrokeProcessor.stop")
+    @patch("app.ui.simulator_app.load_profile")
+    @patch("app.core.processor.KeystrokeProcessor.start")
+    @patch("app.core.processor.KeystrokeProcessor.stop")
     def test_scenario_d_running_state_locks_management_buttons(
         self, mock_proc_stop, mock_proc_start, mock_load_profile
     ):
@@ -208,8 +208,8 @@ class TestKeystrokeSimulatorE2E(unittest.TestCase):
         self.assertEqual(self.app.profile_button_frame.sort_button["state"], "normal")
         mock_proc_stop.assert_called_once()
 
-    @patch("keystroke_simulator_app.load_profile")
-    @patch("keystroke_processor.KeystrokeProcessor.start")
+    @patch("app.ui.simulator_app.load_profile")
+    @patch("app.core.processor.KeystrokeProcessor.start")
     def test_scenario_e_invalid_start_conditions_are_rejected(
         self, mock_proc_start, mock_load_profile
     ):
@@ -243,7 +243,7 @@ class TestKeystrokeSimulatorE2E(unittest.TestCase):
         self.assertFalse(self.app.is_running.get())
         mock_proc_start.assert_not_called()
 
-    @patch("keystroke_simulator_app.delete_profile_files")
+    @patch("app.ui.simulator_app.delete_profile_files")
     @patch("tkinter.messagebox.showinfo")
     def test_scenario_f_quick_profile_deletion_is_blocked(
         self, mock_showinfo, mock_delete_files

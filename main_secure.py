@@ -12,10 +12,10 @@ from typing import Dict, Optional
 import requests
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
-from i18n import dual_text_width, normalize_language, set_language, txt
+from app.utils.i18n import dual_text_width, normalize_language, set_language, txt
 
-from keystroke_simulator_app import KeystrokeSimulatorApp
-from keystroke_utils import WindowUtils
+from app.ui.simulator_app import KeystrokeSimulatorApp
+from app.utils.system import WindowUtils
 
 load_dotenv(find_dotenv())
 

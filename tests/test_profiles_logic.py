@@ -2,9 +2,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from keystroke_models import EventModel, ProfileModel
-from keystroke_profiles import EventListFrame, EventRow, KeystrokeProfiles
-from i18n import set_language
+from app.core.models import EventModel, ProfileModel
+from app.ui.profiles import EventListFrame, EventRow, KeystrokeProfiles
+from app.utils.i18n import set_language
 
 
 class FakeWidget:
@@ -220,7 +220,7 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         stub.win = object()
 
         edited = EventModel(event_name="B", key_to_enter="X")
-        with patch("keystroke_profiles.messagebox.showerror") as mock_error:
+        with patch("app.ui.profiles.messagebox.showerror") as mock_error:
             stub._on_editor_save(edited, is_edit=True, row=0)
 
         self.assertEqual(stub.profile.event_list[0].event_name, "A")
@@ -409,7 +409,7 @@ class TestSortEventsLogic(unittest.TestCase):
         stub.update_events = lambda: None
         stub.save_cb = lambda *args, **kwargs: None
 
-        with patch("keystroke_profiles.messagebox.showinfo") as mock_show:
+        with patch("app.ui.profiles.messagebox.showinfo") as mock_show:
             stub._sort_events_by_key()
 
         mock_show.assert_called_once()
@@ -430,7 +430,7 @@ class TestSortEventsLogic(unittest.TestCase):
         stub.update_events = lambda: None
         stub.save_cb = lambda *args, **kwargs: None
 
-        with patch("keystroke_profiles.messagebox.showinfo") as mock_show:
+        with patch("app.ui.profiles.messagebox.showinfo") as mock_show:
             stub._sort_events_by_name()
 
         mock_show.assert_called_once()
@@ -592,7 +592,7 @@ class TestProfileOverviewBadges(unittest.TestCase):
     def test_saved_status_uses_overview_text_when_detail_missing(self):
         stub = self._make_profile_stub([EventModel(event_name="A", key_to_enter="X")])
 
-        with patch("keystroke_profiles.time.strftime", return_value="12:34:56"):
+        with patch("app.ui.profiles.time.strftime", return_value="12:34:56"):
             stub._set_save_status("saved")
 
         self.assertEqual(stub.lbl_save_badge.cget("text"), "✅ Saved 12:34:56")
