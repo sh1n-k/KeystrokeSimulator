@@ -3,8 +3,8 @@ import unittest
 import numpy as np
 from PIL import Image as PilImage
 
-from keystroke_models import EventModel
-from keystroke_processor import KeystrokeProcessor
+from app.core.models import EventModel
+from app.core.processor import KeystrokeProcessor
 
 
 def _make_processor_with_key_codes() -> KeystrokeProcessor:

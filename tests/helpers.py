@@ -1,6 +1,6 @@
 import threading
 
-from keystroke_processor import KeystrokeProcessor
+from app.core.processor import KeystrokeProcessor
 
 
 def make_processor_stub(event_data_list=None) -> KeystrokeProcessor:

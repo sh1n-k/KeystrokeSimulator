@@ -2,14 +2,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from keystroke_models import EventModel, ProfileModel
-from keystroke_sort_events import (
+from app.core.models import EventModel, ProfileModel
+from app.ui.sort_events import (
     KeystrokeSortEvents,
     SW_FG_MUTED,
     SW_FG_PRIMARY,
     SW_FG_WARN,
 )
-from i18n import set_language
+from app.utils.i18n import set_language
 
 
 class FakeVar:
@@ -71,8 +71,8 @@ class TestSortWindowMessages(unittest.TestCase):
         stub.prof_dir = Path("profiles")
         stub.close = lambda *args, **kwargs: None
 
-        with patch("keystroke_sort_events.load_profile", side_effect=RuntimeError("boom")):
-            with patch("keystroke_sort_events.messagebox.showerror") as mock_error:
+        with patch("app.ui.sort_events.load_profile", side_effect=RuntimeError("boom")):
+            with patch("app.ui.sort_events.messagebox.showerror") as mock_error:
                 result = stub._load_profile("Quick")
 
         self.assertIsNone(result)
@@ -90,9 +90,9 @@ class TestSortWindowMessages(unittest.TestCase):
         stub.save_cb = lambda _name: None
         stub.close = lambda *args, **kwargs: None
 
-        with patch("keystroke_sort_events.save_profile", side_effect=RuntimeError("boom")):
-            with patch("keystroke_sort_events.logger.error") as mock_log:
-                with patch("keystroke_sort_events.messagebox.showerror") as mock_error:
+        with patch("app.ui.sort_events.save_profile", side_effect=RuntimeError("boom")):
+            with patch("app.ui.sort_events.logger.error") as mock_log:
+                with patch("app.ui.sort_events.messagebox.showerror") as mock_error:
                     stub.save()
 
         mock_log.assert_called_once()

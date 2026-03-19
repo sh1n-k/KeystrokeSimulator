@@ -4,9 +4,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from keystroke_models import EventModel, ProfileModel
-from keystroke_utils import KeyUtils, PermissionUtils, StateUtils
-from runtime_toggle_utils import (
+from app.core.models import EventModel, ProfileModel
+from app.utils.system import KeyUtils, PermissionUtils, StateUtils
+from app.utils.runtime_toggle import (
     active_runtime_toggle_events,
     MOUSE_BUTTON_3_TRIGGER,
     WHEEL_DOWN_TRIGGER,
@@ -87,24 +87,24 @@ class TestKeyUtils(unittest.TestCase):
 
 
 class TestPermissionUtils(unittest.TestCase):
-    @patch("keystroke_utils.IS_MAC", True)
+    @patch("app.utils.system.IS_MAC", True)
     @patch(
-        "keystroke_utils.PermissionUtils.has_screen_capture_access", return_value=False
+        "app.utils.system.PermissionUtils.has_screen_capture_access", return_value=False
     )
     @patch(
-        "keystroke_utils.PermissionUtils.has_accessibility_access", return_value=True
+        "app.utils.system.PermissionUtils.has_accessibility_access", return_value=True
     )
     def test_missing_macos_permissions_returns_screen_only(
         self, _mock_accessibility, _mock_screen
     ):
         self.assertEqual(PermissionUtils.missing_macos_permissions(), ["screen"])
 
-    @patch("keystroke_utils.IS_MAC", True)
+    @patch("app.utils.system.IS_MAC", True)
     @patch(
-        "keystroke_utils.PermissionUtils.has_screen_capture_access", return_value=False
+        "app.utils.system.PermissionUtils.has_screen_capture_access", return_value=False
     )
     @patch(
-        "keystroke_utils.PermissionUtils.has_accessibility_access", return_value=False
+        "app.utils.system.PermissionUtils.has_accessibility_access", return_value=False
     )
     def test_missing_macos_permissions_returns_both(
         self, _mock_accessibility, _mock_screen

@@ -1,10 +1,10 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from keystroke_sounds import SoundPlayer
+from app.utils.sounds import SoundPlayer
 
 class TestKeystrokeSounds(unittest.TestCase):
-    @patch("keystroke_sounds.pygame.mixer.Sound")
-    @patch("keystroke_sounds.pygame.mixer.init")
+    @patch("app.utils.sounds.pygame.mixer.Sound")
+    @patch("app.utils.sounds.pygame.mixer.init")
     def test_sound_player_init_success(self, mock_init, mock_sound):
         # init should try to load all four sounds
         player = SoundPlayer()
@@ -15,7 +15,7 @@ class TestKeystrokeSounds(unittest.TestCase):
         self.assertIsNotNone(player.runtime_toggle_on_sound)
         self.assertIsNotNone(player.runtime_toggle_off_sound)
 
-    @patch("keystroke_sounds.pygame.mixer.init")
+    @patch("app.utils.sounds.pygame.mixer.init")
     def test_sound_player_init_failure_handled(self, mock_init):
         # Force pygame to raise an exception
         mock_init.side_effect = Exception("No Audio Device")
@@ -25,7 +25,7 @@ class TestKeystrokeSounds(unittest.TestCase):
         self.assertIsNone(player.runtime_toggle_on_sound)
         self.assertIsNone(player.runtime_toggle_off_sound)
 
-    @patch("keystroke_sounds.pygame.mixer.init")
+    @patch("app.utils.sounds.pygame.mixer.init")
     def test_play_sound_when_loaded(self, mock_init):
         player = SoundPlayer()
         player.start_sound = MagicMock()
@@ -45,7 +45,7 @@ class TestKeystrokeSounds(unittest.TestCase):
         player.play_runtime_toggle_off_sound()
         player.runtime_toggle_off_sound.play.assert_called_once()
 
-    @patch("keystroke_sounds.pygame.mixer.init")
+    @patch("app.utils.sounds.pygame.mixer.init")
     def test_play_sound_when_not_loaded(self, mock_init):
         player = SoundPlayer()
         player.start_sound = None

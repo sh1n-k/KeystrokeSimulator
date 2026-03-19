@@ -4,8 +4,8 @@ from unittest.mock import patch, MagicMock
 import tkinter as tk
 from PIL import Image
 
-from keystroke_event_editor import KeystrokeEventEditor
-from keystroke_models import EventModel
+from app.ui.event_editor import KeystrokeEventEditor
+from app.core.models import EventModel
 
 
 class TestEditorCycleValidation(unittest.TestCase):
@@ -76,7 +76,7 @@ class TestValidateRequiredFields(unittest.TestCase):
         )
         return stub
 
-    @patch("keystroke_event_editor.messagebox")
+    @patch("app.ui.event_editor.messagebox")
     def test_missing_position_fails(self, mock_msgbox):
         """좌표 누락 시 False"""
         stub = self._make_editor_stub(
@@ -89,7 +89,7 @@ class TestValidateRequiredFields(unittest.TestCase):
         result = KeystrokeEventEditor._validate_required_fields(stub)
         self.assertFalse(result)
 
-    @patch("keystroke_event_editor.messagebox")
+    @patch("app.ui.event_editor.messagebox")
     def test_missing_key_when_execute_action(self, mock_msgbox):
         """execute_action=True에서 키 누락 시 False"""
         stub = self._make_editor_stub(
@@ -103,7 +103,7 @@ class TestValidateRequiredFields(unittest.TestCase):
         result = KeystrokeEventEditor._validate_required_fields(stub)
         self.assertFalse(result)
 
-    @patch("keystroke_event_editor.messagebox")
+    @patch("app.ui.event_editor.messagebox")
     def test_missing_held_img_fails(self, mock_msgbox):
         """held_img 누락 시 False (region 모드에서 특히 중요)"""
         stub = self._make_editor_stub(
@@ -130,7 +130,7 @@ class TestValidateRequiredFields(unittest.TestCase):
 
 
 class TestUniqueEventNameValidation(unittest.TestCase):
-    @patch("keystroke_event_editor.messagebox")
+    @patch("app.ui.event_editor.messagebox")
     def test_unique_name_passes(self, mock_msgbox):
         editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
         editor.existing_events = [EventModel(event_name="A"), EventModel(event_name="B")]
@@ -142,7 +142,7 @@ class TestUniqueEventNameValidation(unittest.TestCase):
         self.assertTrue(result)
         mock_msgbox.showerror.assert_not_called()
 
-    @patch("keystroke_event_editor.messagebox")
+    @patch("app.ui.event_editor.messagebox")
     def test_duplicate_name_fails_when_adding(self, mock_msgbox):
         editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
         editor.existing_events = [EventModel(event_name="A"), EventModel(event_name="B")]
@@ -154,7 +154,7 @@ class TestUniqueEventNameValidation(unittest.TestCase):
         self.assertFalse(result)
         mock_msgbox.showerror.assert_called_once()
 
-    @patch("keystroke_event_editor.messagebox")
+    @patch("app.ui.event_editor.messagebox")
     def test_editing_same_row_name_is_allowed(self, mock_msgbox):
         editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
         editor.existing_events = [EventModel(event_name="A"), EventModel(event_name="B")]
@@ -233,7 +233,7 @@ class TestRegionBoundsValidation(unittest.TestCase):
         self.assertEqual(KeystrokeEventEditor._max_region_dimension(99, 100), 2)
         self.assertEqual(KeystrokeEventEditor._max_region_dimension(0, 100), 1)
 
-    @patch("keystroke_event_editor.messagebox")
+    @patch("app.ui.event_editor.messagebox")
     def test_validate_region_bounds_rejects_edge_point_under_minimum(
         self, mock_messagebox
     ):
@@ -244,7 +244,7 @@ class TestRegionBoundsValidation(unittest.TestCase):
         self.assertFalse(result)
         mock_messagebox.showerror.assert_called_once()
 
-    @patch("keystroke_event_editor.messagebox")
+    @patch("app.ui.event_editor.messagebox")
     def test_validate_region_bounds_rejects_size_over_limit(self, mock_messagebox):
         stub = self._make_stub(clicked_position=(30, 30), image_size=(100, 100))
 
@@ -253,7 +253,7 @@ class TestRegionBoundsValidation(unittest.TestCase):
         self.assertFalse(result)
         mock_messagebox.showerror.assert_called_once()
 
-    @patch("keystroke_event_editor.messagebox")
+    @patch("app.ui.event_editor.messagebox")
     def test_validate_region_bounds_accepts_valid_size(self, mock_messagebox):
         stub = self._make_stub(clicked_position=(30, 30), image_size=(100, 100))
 

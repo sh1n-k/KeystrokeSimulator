@@ -1,7 +1,10 @@
 import signal
 import sys
 from pathlib import Path
+
 from loguru import logger
+
+from app.ui.simulator_app import KeystrokeSimulatorApp
 
 def main():
     log_path = Path("logs")
@@ -14,17 +17,16 @@ def main():
         enqueue=False,
     )
     Path("profiles").mkdir(exist_ok=True)
-    
-    from keystroke_simulator_app import KeystrokeSimulatorApp
+
     app = None
-    
+
     def graceful_shutdown(signum=None, frame=None):
         if app:
             app.after(0, app.on_closing)
-    
+
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)
-    
+
     try:
         app = KeystrokeSimulatorApp()
         logger.info("Application started.")

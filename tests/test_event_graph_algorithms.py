@@ -1,9 +1,9 @@
 import unittest
 from unittest.mock import patch
 
-import keystroke_event_graph as graph_module
+import app.ui.event_graph as graph_module
 
-from keystroke_event_graph import (
+from app.ui.event_graph import (
     PALETTE,
     GraphEdge,
     GraphNode,
@@ -27,7 +27,7 @@ from keystroke_event_graph import (
     _wrap_layers,
     ComponentLayout,
 )
-from keystroke_models import EventModel, ProfileModel
+from app.core.models import EventModel, ProfileModel
 
 
 def _make_node(node_id, name=None, group_id=None, **kwargs):

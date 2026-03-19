@@ -3,9 +3,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from keystroke_models import EventModel, ProfileModel
-from keystroke_simulator_app import KeystrokeSimulatorApp
-from i18n import set_language
+from app.core.models import EventModel, ProfileModel
+from app.ui.simulator_app import KeystrokeSimulatorApp
+from app.utils.i18n import set_language
 
 
 class TestSimulatorEventNameValidation(unittest.TestCase):
@@ -28,8 +28,8 @@ class TestSimulatorEventNameValidation(unittest.TestCase):
             ],
         )
 
-        with patch("keystroke_simulator_app.load_profile", return_value=profile), patch(
-            "keystroke_simulator_app.PermissionUtils.missing_macos_permissions",
+        with patch("app.ui.simulator_app.load_profile", return_value=profile), patch(
+            "app.ui.simulator_app.PermissionUtils.missing_macos_permissions",
             return_value=[],
         ):
             snapshot = app._get_readiness_snapshot()
@@ -52,7 +52,7 @@ class TestSimulatorEventNameValidation(unittest.TestCase):
             ],
         )
 
-        with patch("keystroke_simulator_app.load_profile", return_value=profile):
+        with patch("app.ui.simulator_app.load_profile", return_value=profile):
             result = app._start_simulation()
 
         self.assertFalse(result)
