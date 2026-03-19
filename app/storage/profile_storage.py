@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 
 from PIL import Image
 
+from app.compat.legacy import remap_legacy_module_name
 from app.core.models import EventModel, ProfileModel
 from app.utils.runtime_toggle import normalize_runtime_toggle_trigger
 
@@ -18,6 +19,11 @@ PROFILE_SCHEMA_VERSION = 1
 _PNG_B64_ATTR = "_ks_png_b64"
 _PNG_IDENTITY_ATTR = "_ks_png_identity"
 _PROFILE_META_CACHE: Dict[Path, tuple[tuple[int, int], bool]] = {}
+
+
+class _LegacyModuleUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str) -> Any:
+        return super().find_class(remap_legacy_module_name(module), name)
 
 
 def _perf_enabled() -> bool:
@@ -392,7 +398,7 @@ def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> Profile
     pkl = _pkl_path(profiles_dir, name)
     if pkl.exists():
         with open(pkl, "rb") as f:
-            p = pickle.load(f)
+            p = _LegacyModuleUnpickler(f).load()
         _ensure_profile_defaults(p)
         changed = _normalize_loaded_event_names(p)
         if migrate:

@@ -1,5 +1,3 @@
-import sys
+from app.compat.legacy import install_legacy_module_alias
 
-from app.utils import system as _impl
-
-sys.modules[__name__] = _impl
+install_legacy_module_alias(__name__)
