@@ -1,5 +1,4 @@
 import json
-import pickle
 import tempfile
 import unittest
 from pathlib import Path
@@ -80,38 +79,6 @@ class TestProfileJsonStorage(unittest.TestCase):
             self.assertTrue(p2.runtime_toggle_enabled)
             self.assertEqual(p2.runtime_toggle_key, "F6")
 
-    def test_legacy_pickle_migration_promotes_latest_to_held(self):
-        with tempfile.TemporaryDirectory() as td:
-            prof_dir = Path(td)
-
-            latest = Image.new("RGB", (2, 2), color=(9, 8, 7))
-            evt = EventModel(
-                event_name="E1",
-                latest_position=(1, 2),
-                clicked_position=(0, 1),
-                latest_screenshot=latest,
-                held_screenshot=None,
-                ref_pixel_value=(9, 8, 7),
-                key_to_enter="A",
-            )
-            p = ProfileModel(name="Legacy", event_list=[evt], favorite=False)
-
-            with open(prof_dir / "Legacy.pkl", "wb") as f:
-                pickle.dump(p, f)
-
-            # Load should read legacy and migrate to JSON.
-            migrated = load_profile(prof_dir, "Legacy", migrate=True)
-            self.assertEqual(migrated.name, "Legacy")
-            self.assertEqual(len(migrated.event_list), 1)
-
-            # JSON should exist; latest_screenshot should be dropped from persisted data.
-            self.assertTrue((prof_dir / "Legacy.json").exists())
-            p2 = load_profile(prof_dir, "Legacy", migrate=False)
-            e2 = p2.event_list[0]
-            self.assertIsNone(e2.latest_screenshot)
-            self.assertIsNotNone(e2.held_screenshot)
-            self.assertEqual(e2.held_screenshot.size, (2, 2))
-
     def test_json_roundtrip_keeps_mouse_runtime_toggle_tokens(self):
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
@@ -179,34 +146,6 @@ class TestProfileJsonStorage(unittest.TestCase):
 
             raw = json.loads((prof_dir / "CrossOs.json").read_text(encoding="utf-8"))
             self.assertEqual(raw["profile"]["runtime_toggle_key"], "Alt")
-
-    def test_load_profile_migrates_duplicate_event_names_from_pickle(self):
-        with tempfile.TemporaryDirectory() as td:
-            prof_dir = Path(td)
-            profile = ProfileModel(
-                name="Legacy",
-                event_list=[
-                    EventModel(event_name="Same", key_to_enter="X"),
-                    EventModel(event_name="Same", key_to_enter="Y"),
-                    EventModel(event_name="", key_to_enter="Z"),
-                ],
-            )
-
-            with open(prof_dir / "Legacy.pkl", "wb") as f:
-                pickle.dump(profile, f)
-
-            loaded = load_profile(prof_dir, "Legacy", migrate=True)
-
-            self.assertEqual(
-                [evt.event_name for evt in loaded.event_list],
-                ["Same", "Same (2)", "Event 3"],
-            )
-            migrated = load_profile(prof_dir, "Legacy", migrate=False)
-            self.assertEqual(
-                [evt.event_name for evt in migrated.event_list],
-                ["Same", "Same (2)", "Event 3"],
-            )
-
 
 class TestRenameProfileFiles(unittest.TestCase):
     """rename_profile_files: 프로필 파일 이름 변경"""
@@ -296,18 +235,15 @@ class TestDeleteProfileFiles(unittest.TestCase):
 class TestListProfileNames(unittest.TestCase):
     """list_profile_names: 프로필 이름 목록"""
 
-    def test_json_and_pkl_mixed(self):
-        """JSON+PKL 혼합"""
+    def test_json_profiles_are_listed(self):
+        """JSON 프로필 목록"""
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
             save_profile(
                 prof_dir, ProfileModel(name="Alpha", event_list=[]), name="Alpha"
             )
-            # Create a fake PKL
-            (prof_dir / "Beta.pkl").write_bytes(b"fake")
             names = list_profile_names(prof_dir)
             self.assertIn("Alpha", names)
-            self.assertIn("Beta", names)
 
     def test_quick_first(self):
         """Quick 프로필이 항상 첫 번째"""

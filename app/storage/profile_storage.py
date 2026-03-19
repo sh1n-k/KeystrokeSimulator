@@ -2,7 +2,6 @@ import base64
 import io
 import json
 import os
-import pickle
 import time
 from collections import Counter
 from pathlib import Path
@@ -10,7 +9,6 @@ from typing import Any, Dict, Optional
 
 from PIL import Image
 
-from app.compat.legacy import remap_legacy_module_name
 from app.core.models import EventModel, ProfileModel
 from app.utils.runtime_toggle import normalize_runtime_toggle_trigger
 
@@ -19,11 +17,6 @@ PROFILE_SCHEMA_VERSION = 1
 _PNG_B64_ATTR = "_ks_png_b64"
 _PNG_IDENTITY_ATTR = "_ks_png_identity"
 _PROFILE_META_CACHE: Dict[Path, tuple[tuple[int, int], bool]] = {}
-
-
-class _LegacyModuleUnpickler(pickle.Unpickler):
-    def find_class(self, module: str, name: str) -> Any:
-        return super().find_class(remap_legacy_module_name(module), name)
 
 
 def _perf_enabled() -> bool:
@@ -38,10 +31,6 @@ def _log_perf(label: str, start: float) -> None:
 
 def _json_path(profiles_dir: Path, name: str) -> Path:
     return profiles_dir / f"{name}.json"
-
-
-def _pkl_path(profiles_dir: Path, name: str) -> Path:
-    return profiles_dir / f"{name}.pkl"
 
 
 def _image_identity(img: Image.Image) -> tuple[int, tuple[int, int], str]:
@@ -88,18 +77,7 @@ def _load_profile_meta_favorite_cached(profiles_dir: Path, name: str) -> bool:
         if signature is not None:
             _PROFILE_META_CACHE[jpath] = (signature, favorite)
         return favorite
-
-    pkl_path = _pkl_path(profiles_dir, name)
-    signature = _profile_file_signature(pkl_path)
-    cached = _PROFILE_META_CACHE.get(pkl_path)
-    if cached and cached[0] == signature:
-        return cached[1]
-
-    profile = load_profile(profiles_dir, name, migrate=False)
-    favorite = bool(getattr(profile, "favorite", False))
-    if signature is not None:
-        _PROFILE_META_CACHE[pkl_path] = (signature, favorite)
-    return favorite
+    return False
 
 
 def _img_to_png_b64(img: Image.Image) -> str:
@@ -339,18 +317,10 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
         if not hasattr(e, "independent_thread"):
             e.independent_thread = False
 
-        # Legacy fallback: if only latest_screenshot exists, promote it to held_screenshot.
-        if not getattr(e, "held_screenshot", None) and getattr(
-            e, "latest_screenshot", None
-        ):
-            e.held_screenshot = e.latest_screenshot
-
-
 def list_profile_names(profiles_dir: Path) -> list[str]:
     profiles_dir.mkdir(exist_ok=True)
     json_names = {p.stem for p in profiles_dir.glob("*.json")}
-    pkl_names = {p.stem for p in profiles_dir.glob("*.pkl")}
-    names = sorted(json_names | pkl_names)
+    names = sorted(json_names)
     if "Quick" in names:
         names.remove("Quick")
         names.insert(0, "Quick")
@@ -361,17 +331,11 @@ def ensure_quick_profile(profiles_dir: Path) -> None:
     profiles_dir.mkdir(exist_ok=True)
     if _json_path(profiles_dir, "Quick").exists():
         return
-    if _pkl_path(profiles_dir, "Quick").exists():
-        load_profile(profiles_dir, "Quick", migrate=True)
-        return
     save_profile(profiles_dir, ProfileModel(name="Quick", event_list=[]), name="Quick")
 
 
 def load_profile_meta_favorite(profiles_dir: Path, name: str) -> bool:
-    """
-    Favorite lookup without constructing models or decoding images.
-    Falls back to legacy pickle if JSON doesn't exist yet.
-    """
+    """Favorite lookup without constructing models or decoding images."""
     return _load_profile_meta_favorite_cached(profiles_dir, name)
 
 
@@ -394,17 +358,6 @@ def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> Profile
             save_profile(profiles_dir, profile, name=name)
         _log_perf(f"load_profile[{name}]", started)
         return profile
-
-    pkl = _pkl_path(profiles_dir, name)
-    if pkl.exists():
-        with open(pkl, "rb") as f:
-            p = _LegacyModuleUnpickler(f).load()
-        _ensure_profile_defaults(p)
-        changed = _normalize_loaded_event_names(p)
-        if migrate:
-            save_profile(profiles_dir, p, name=name)
-        _log_perf(f"load_profile[{name}]", started)
-        return p
 
     p = ProfileModel(name=name, event_list=[], favorite=False)
     _ensure_profile_defaults(p)
@@ -445,10 +398,7 @@ def copy_profile(profiles_dir: Path, src_name: str, dst_name: str) -> None:
     dst_name = (dst_name or "").strip()
     if not dst_name:
         raise ValueError("dst_name is empty")
-    if (
-        _json_path(profiles_dir, dst_name).exists()
-        or _pkl_path(profiles_dir, dst_name).exists()
-    ):
+    if _json_path(profiles_dir, dst_name).exists():
         raise FileExistsError(f"'{dst_name}' exists.")
     prof = load_profile(profiles_dir, src_name, migrate=True)
     save_profile(profiles_dir, prof, name=dst_name)
@@ -460,13 +410,12 @@ def rename_profile_files(profiles_dir: Path, old_name: str, new_name: str) -> No
         raise ValueError("new_name is empty")
 
     dst = _json_path(profiles_dir, new_name)
-    if dst.exists() or _pkl_path(profiles_dir, new_name).exists():
+    if dst.exists():
         raise FileExistsError(f"'{new_name}' exists.")
 
     src_json = _json_path(profiles_dir, old_name)
     if src_json.exists():
         src_json.rename(dst)
-        _pkl_path(profiles_dir, old_name).unlink(missing_ok=True)
         return
 
     prof = load_profile(profiles_dir, old_name, migrate=False)

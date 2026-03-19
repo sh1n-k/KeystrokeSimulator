@@ -247,9 +247,7 @@ class ProfileFrame(tk.Frame):
         if not (curr := self.get_selected_profile_name()):
             return
         dst_name = f"{curr} - Copied"
-        if (self.profiles_dir / f"{dst_name}.json").exists() or (
-            self.profiles_dir / f"{dst_name}.pkl"
-        ).exists():
+        if (self.profiles_dir / f"{dst_name}.json").exists():
             messagebox.showwarning(
                 txt("Warning", "경고"),
                 txt(

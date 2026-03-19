@@ -2,13 +2,27 @@ import ast
 import unittest
 from pathlib import Path
 
-from app.compat.legacy import legacy_module_names
-
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LEGACY_IMPORT_ROOTS = set(legacy_module_names())
-ALLOWED_LEGACY_IMPORT_FILES = {
-    PROJECT_ROOT / f"{module_name}.py" for module_name in LEGACY_IMPORT_ROOTS
+REMOVED_LEGACY_MODULES = {
+    "i18n",
+    "keystroke_capturer",
+    "keystroke_event_editor",
+    "keystroke_event_graph",
+    "keystroke_event_importer",
+    "keystroke_models",
+    "keystroke_modkeys",
+    "keystroke_processor",
+    "keystroke_profile_storage",
+    "keystroke_profiles",
+    "keystroke_quick_event_editor",
+    "keystroke_settings",
+    "keystroke_simulator_app",
+    "keystroke_sounds",
+    "keystroke_sort_events",
+    "keystroke_utils",
+    "profile_display",
+    "runtime_toggle_sound_assets",
+    "runtime_toggle_utils",
 }
 
 
@@ -25,9 +39,6 @@ def _project_python_files() -> list[Path]:
 
 
 def _legacy_import_violations(path: Path) -> list[str]:
-    if path in ALLOWED_LEGACY_IMPORT_FILES:
-        return []
-
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     violations: list[str] = []
 
@@ -35,18 +46,18 @@ def _legacy_import_violations(path: Path) -> list[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 import_root = alias.name.split(".", 1)[0]
-                if import_root in LEGACY_IMPORT_ROOTS:
+                if import_root in REMOVED_LEGACY_MODULES:
                     violations.append(f"line {node.lineno}: import {alias.name}")
         elif isinstance(node, ast.ImportFrom) and node.module:
             import_root = node.module.split(".", 1)[0]
-            if import_root in LEGACY_IMPORT_ROOTS:
+            if import_root in REMOVED_LEGACY_MODULES:
                 violations.append(f"line {node.lineno}: from {node.module} import ...")
 
     return violations
 
 
 class TestImportConventions(unittest.TestCase):
-    def test_non_shim_files_do_not_import_legacy_root_modules(self):
+    def test_project_does_not_import_removed_legacy_root_modules(self):
         violations: list[str] = []
 
         for path in _project_python_files():
@@ -62,9 +73,17 @@ class TestImportConventions(unittest.TestCase):
         self.assertEqual(
             violations,
             [],
-            "Canonical app imports only. Legacy root modules are shim-only:\n"
+            "Removed legacy root modules must not be imported:\n"
             + "\n".join(violations),
         )
+
+    def test_removed_legacy_root_files_are_absent(self):
+        existing_paths = [
+            str((PROJECT_ROOT / f"{module_name}.py").relative_to(PROJECT_ROOT))
+            for module_name in sorted(REMOVED_LEGACY_MODULES)
+            if (PROJECT_ROOT / f"{module_name}.py").exists()
+        ]
+        self.assertEqual(existing_paths, [], "\n".join(existing_paths))
 
 
 if __name__ == "__main__":

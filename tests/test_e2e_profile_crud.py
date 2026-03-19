@@ -2,8 +2,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
-
 from app.core.models import EventModel, ProfileModel
 from app.storage.profile_storage import (
     copy_profile,
@@ -77,34 +75,6 @@ class TestProfileCRUDE2E(unittest.TestCase):
             names = list_profile_names(prof_dir)
             self.assertEqual(names[0], "Quick")
             self.assertIn("Alpha", names)
-
-    def test_legacy_pkl_migration_then_crud(self):
-        """레거시 PKL → JSON 마이그레이션 후 CRUD 동작"""
-        # NOTE: pickle is used intentionally here to test legacy migration path
-        import pickle
-
-        with tempfile.TemporaryDirectory() as td:
-            prof_dir = Path(td)
-
-            # Create legacy PKL
-            evt = EventModel(event_name="LegEvt", key_to_enter="B",
-                             latest_screenshot=Image.new("RGB", (2, 2), (5, 5, 5)))
-            p = ProfileModel(name="Legacy", event_list=[evt])
-            with open(prof_dir / "Legacy.pkl", "wb") as f:
-                pickle.dump(p, f)
-
-            # Load triggers migration
-            loaded = load_profile(prof_dir, "Legacy", migrate=True)
-            self.assertEqual(loaded.name, "Legacy")
-            self.assertTrue((prof_dir / "Legacy.json").exists())
-
-            # CRUD on migrated profile
-            rename_profile_files(prof_dir, "Legacy", "Migrated")
-            self.assertIn("Migrated", list_profile_names(prof_dir))
-
-            delete_profile_files(prof_dir, "Migrated")
-            self.assertNotIn("Migrated", list_profile_names(prof_dir))
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

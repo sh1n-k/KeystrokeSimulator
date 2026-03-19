@@ -63,10 +63,7 @@ class ModificationKeysWindow(tk.Toplevel):
         )
 
     def _load_data(self):
-        if not (
-            (self.prof_dir / f"{self.prof_name}.json").exists()
-            or (self.prof_dir / f"{self.prof_name}.pkl").exists()
-        ):
+        if not (self.prof_dir / f"{self.prof_name}.json").exists():
             logger.warning(f"Profile '{self.prof_name}' missing.")
             return self.destroy()
 

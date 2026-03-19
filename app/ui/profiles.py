@@ -205,10 +205,7 @@ class ProfileFrame(ttk.Frame):
                 text=txt("Enter profile name", "프로필 이름을 입력하세요")
             )
             return
-        if name != self._original_name and (
-            (self._profiles_dir / f"{name}.json").exists()
-            or (self._profiles_dir / f"{name}.pkl").exists()
-        ):
+        if name != self._original_name and (self._profiles_dir / f"{name}.json").exists():
             self.lbl_warn.config(
                 text=txt(f"'{name}' already exists", f"'{name}' 이미 존재합니다")
             )
@@ -1807,7 +1804,6 @@ class KeystrokeProfiles:
 
     def _load(self):
         try:
-            # JSON is primary. If only legacy pickle exists, it is migrated to JSON.
             return load_profile(self.prof_dir, self.prof_name, migrate=True)
         except Exception:
             return ProfileModel(name=self.prof_name, event_list=[], favorite=False)
@@ -1850,9 +1846,7 @@ class KeystrokeProfiles:
         old_name = self.prof_name
         renamed = False
         if new_name != self.prof_name:
-            if (self.prof_dir / f"{new_name}.json").exists() or (
-                self.prof_dir / f"{new_name}.pkl"
-            ).exists():
+            if (self.prof_dir / f"{new_name}.json").exists():
                 raise ValueError(
                     txt(
                         f"'{new_name}' already exists.",
@@ -1860,9 +1854,7 @@ class KeystrokeProfiles:
                     )
                 )
 
-            if (self.prof_dir / f"{self.prof_name}.json").exists() or (
-                self.prof_dir / f"{self.prof_name}.pkl"
-            ).exists():
+            if (self.prof_dir / f"{self.prof_name}.json").exists():
                 rename_profile_files(self.prof_dir, self.prof_name, new_name)
             self.prof_name = new_name
             renamed = True
