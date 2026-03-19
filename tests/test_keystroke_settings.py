@@ -4,8 +4,8 @@ import tkinter as tk
 import unittest
 from unittest.mock import patch, mock_open, MagicMock
 
-from keystroke_models import UserSettings
-from keystroke_settings import KeystrokeSettings
+from app.core.models import UserSettings
+from app.ui.settings import KeystrokeSettings
 
 _RUN_GUI_TESTS = os.environ.get("RUN_GUI_TESTS", "0") == "1"
 
@@ -20,8 +20,8 @@ class TestKeystrokeSettings(unittest.TestCase):
     def tearDown(self):
         self.root.destroy()
 
-    @patch("keystroke_settings.Path.exists")
-    @patch("keystroke_settings.Path.read_text")
+    @patch("app.ui.settings.Path.exists")
+    @patch("app.ui.settings.Path.read_text")
     def test_load_settings_success(self, mock_read_text, mock_exists):
         mock_exists.return_value = True
         fake_data = {
@@ -32,7 +32,7 @@ class TestKeystrokeSettings(unittest.TestCase):
         mock_read_text.return_value = json.dumps(fake_data)
 
         # Mock geometry/center_window to avoid screen size issues in headless
-        with patch("keystroke_settings.WindowUtils.center_window"):
+        with patch("app.ui.settings.WindowUtils.center_window"):
             settings_win = KeystrokeSettings(self.root)
 
         self.assertEqual(settings_win.settings.key_pressed_time_min, 100)
@@ -42,23 +42,23 @@ class TestKeystrokeSettings(unittest.TestCase):
         self.assertEqual(settings_win.settings.key_pressed_time_max, 135)
         settings_win.destroy()
 
-    @patch("keystroke_settings.Path.exists")
-    @patch("keystroke_settings.Path.read_text")
+    @patch("app.ui.settings.Path.exists")
+    @patch("app.ui.settings.Path.read_text")
     def test_load_settings_fallback_on_invalid_language(self, mock_read_text, mock_exists):
         mock_exists.return_value = True
         mock_read_text.return_value = json.dumps({"language": "jp"})
 
-        with patch("keystroke_settings.WindowUtils.center_window"):
+        with patch("app.ui.settings.WindowUtils.center_window"):
             settings_win = KeystrokeSettings(self.root)
 
         self.assertEqual(settings_win.settings.language, "en")
         settings_win.destroy()
 
-    @patch("keystroke_settings.Path.exists")
+    @patch("app.ui.settings.Path.exists")
     def test_load_settings_fallback_on_missing(self, mock_exists):
         mock_exists.return_value = False
 
-        with patch("keystroke_settings.WindowUtils.center_window"):
+        with patch("app.ui.settings.WindowUtils.center_window"):
             settings_win = KeystrokeSettings(self.root)
 
         # Should load default UserSettings
@@ -66,9 +66,9 @@ class TestKeystrokeSettings(unittest.TestCase):
         self.assertEqual(settings_win.settings.key_pressed_time_min, default_settings.key_pressed_time_min)
         settings_win.destroy()
 
-    @patch("keystroke_settings.Path.write_text")
+    @patch("app.ui.settings.Path.write_text")
     def test_save_settings(self, mock_write_text):
-        with patch("keystroke_settings.WindowUtils.center_window"):
+        with patch("app.ui.settings.WindowUtils.center_window"):
             settings_win = KeystrokeSettings(self.root)
 
         settings_win.settings.key_pressed_time_min = 123
@@ -104,8 +104,8 @@ class TestValidateNumeric(unittest.TestCase):
 
 
 class TestKeystrokeSettingsWindowState(unittest.TestCase):
-    @patch("keystroke_settings.StateUtils.load_main_app_state")
-    @patch("keystroke_settings.WindowUtils.center_window")
+    @patch("app.ui.settings.StateUtils.load_main_app_state")
+    @patch("app.ui.settings.WindowUtils.center_window")
     def test_restore_window_position_uses_saved_coordinates(self, mock_center, mock_load_state):
         mock_load_state.return_value = {"settings_position": "120/340"}
         stub = MagicMock()
@@ -115,8 +115,8 @@ class TestKeystrokeSettingsWindowState(unittest.TestCase):
         stub.geometry.assert_called_once_with("+120+340")
         mock_center.assert_not_called()
 
-    @patch("keystroke_settings.StateUtils.load_main_app_state")
-    @patch("keystroke_settings.WindowUtils.center_window")
+    @patch("app.ui.settings.StateUtils.load_main_app_state")
+    @patch("app.ui.settings.WindowUtils.center_window")
     def test_restore_window_position_centers_when_missing(self, mock_center, mock_load_state):
         mock_load_state.return_value = {}
         stub = MagicMock()
@@ -125,7 +125,7 @@ class TestKeystrokeSettingsWindowState(unittest.TestCase):
 
         mock_center.assert_called_once_with(stub)
 
-    @patch("keystroke_settings.StateUtils.save_main_app_state")
+    @patch("app.ui.settings.StateUtils.save_main_app_state")
     def test_save_window_position_persists_coordinates(self, mock_save_state):
         stub = MagicMock()
         stub.winfo_x.return_value = 55

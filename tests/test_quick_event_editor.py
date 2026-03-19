@@ -3,9 +3,9 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from keystroke_models import ProfileModel
-from keystroke_quick_event_editor import KeystrokeQuickEventEditor
-from i18n import set_language
+from app.core.models import ProfileModel
+from app.ui.quick_event_editor import KeystrokeQuickEventEditor
+from app.utils.i18n import set_language
 
 
 class FakeWidget:
@@ -89,8 +89,8 @@ class TestQuickEventEditorStatus(unittest.TestCase):
         self.assertEqual(stub.entries[1].value, "22")
         stub.save_event.assert_called_once()
 
-    @patch("keystroke_quick_event_editor.save_profile")
-    @patch("keystroke_quick_event_editor.load_profile")
+    @patch("app.ui.quick_event_editor.save_profile")
+    @patch("app.ui.quick_event_editor.load_profile")
     def test_save_event_updates_feedback_and_count(
         self, mock_load_profile, mock_save_profile
     ):
