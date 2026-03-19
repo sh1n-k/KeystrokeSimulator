@@ -4,8 +4,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from keystroke_models import EventModel, ProfileModel
-from keystroke_profile_storage import (
+from app.core.models import EventModel, ProfileModel
+from app.storage.profile_storage import (
     copy_profile,
     delete_profile_files,
     ensure_quick_profile,

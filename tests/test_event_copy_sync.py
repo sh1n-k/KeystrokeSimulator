@@ -4,8 +4,8 @@ import unittest
 
 from PIL import Image
 
-from keystroke_event_importer import EventImporter
-from keystroke_models import EventModel
+from app.ui.event_importer import EventImporter
+from app.core.models import EventModel
 
 
 def _make_importer_stub() -> EventImporter:

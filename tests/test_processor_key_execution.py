@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from keystroke_processor import KeystrokeProcessor
+from app.core.processor import KeystrokeProcessor
 
 
 def _make_processor_stub() -> KeystrokeProcessor:
@@ -87,7 +87,7 @@ class TestPressKeyAsync(unittest.IsolatedAsyncioTestCase):
             "무관한 조건": True,
         }
 
-        with patch("keystroke_processor.logger.info") as mock_info:
+        with patch("app.core.processor.logger.info") as mock_info:
             await proc._press_key_async(evt, state_snapshot)
 
         mock_info.assert_called_once()
@@ -144,7 +144,7 @@ class TestPressKeySync(unittest.TestCase):
             "conds": {"[조건-비활성] 채널링 중": False, "[조건] 버프 준비": True},
         }
 
-        with patch("keystroke_processor.logger.info") as mock_info:
+        with patch("app.core.processor.logger.info") as mock_info:
             proc._sync_press_key(evt)
 
         mock_info.assert_called_once()

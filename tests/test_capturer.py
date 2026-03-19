@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 
 from PIL import Image
 
-from keystroke_capturer import ScreenshotCapturer
+from app.core.capturer import ScreenshotCapturer
 
 
 class TestSetCaptureSize(unittest.TestCase):
@@ -15,7 +15,7 @@ class TestSetCaptureSize(unittest.TestCase):
         monitor.width = screen_w
         monitor.height = screen_h
         with patch(
-            "keystroke_capturer.screeninfo.get_monitors", return_value=[monitor]
+            "app.core.capturer.screeninfo.get_monitors", return_value=[monitor]
         ):
             return ScreenshotCapturer()
 
@@ -97,7 +97,7 @@ class TestCapturerAttributes(unittest.TestCase):
         monitor.width = screen_w
         monitor.height = screen_h
         with patch(
-            "keystroke_capturer.screeninfo.get_monitors", return_value=[monitor]
+            "app.core.capturer.screeninfo.get_monitors", return_value=[monitor]
         ):
             return ScreenshotCapturer()
 
@@ -138,12 +138,12 @@ class TestCapturerAttributes(unittest.TestCase):
         fake_ctx.__exit__.return_value = False
 
         with (
-            patch("keystroke_capturer.mss.mss", return_value=fake_ctx),
+            patch("app.core.capturer.mss.mss", return_value=fake_ctx),
             patch(
-                "keystroke_capturer.Image.frombytes",
+                "app.core.capturer.Image.frombytes",
                 return_value=Image.new("RGB", (10, 10)),
             ),
-            patch("keystroke_capturer.time.sleep", return_value=None),
+            patch("app.core.capturer.time.sleep", return_value=None),
         ):
             capturer._last_capture_signature = (
                 (10, 10),

@@ -1,0 +1,89 @@
+import time
+import tkinter as tk
+from threading import Event, Thread
+from typing import Callable, Optional, Tuple
+
+import mss
+import screeninfo
+from PIL import Image
+from loguru import logger
+
+
+class ScreenshotCapturer:
+    def __init__(self):
+        current_monitor = screeninfo.get_monitors()[0]
+        self.screen_width, self.screen_height = (
+            current_monitor.width,
+            current_monitor.height,
+        )
+        self.box_w = 100
+        self.box_h = 100
+        self.current_position = (0, 0)
+
+        self.capturing: Event = Event()
+        self.capture_thread: Optional[Thread] = None
+        self.screenshot_callback: Optional[Callable[[Tuple, Image.Image], None]] = None
+        self._last_capture_signature = None
+        self._idle_cycles = 0
+
+    def get_current_mouse_position(self) -> Optional[Tuple[int, int]]:
+        return self.current_position
+
+    def set_capture_size(self, w: int, h: int):
+        self.box_w, self.box_h = max(1, w), max(1, h)
+
+    def set_current_mouse_position(self, position):
+        mouse_x, mouse_y = position
+        if (
+            mouse_x + self.box_w >= self.screen_width
+            or mouse_y + self.box_h >= self.screen_height
+        ):
+            return
+
+        self.current_position = (mouse_x, mouse_y)
+
+    def set_mouse_position(self, position):
+        self.current_position = position
+
+    def start_capture(self):
+        self.capturing.set()
+        self._last_capture_signature = None
+        self._idle_cycles = 0
+        self.capture_thread = Thread(target=self.capture_screenshot)
+        self.capture_thread.start()
+
+    def stop_capture(self):
+        self.capturing.clear()
+
+    def capture_screenshot(self):
+        with mss.mss() as sct:
+            while self.capturing.is_set():
+                try:
+                    position = self.get_current_mouse_position()
+                    callback = self.screenshot_callback
+                    if position and callback:
+                        box_w, box_h = self.box_w, self.box_h
+                        capture_signature = (position, box_w, box_h)
+                        if capture_signature == self._last_capture_signature:
+                            self._idle_cycles = min(self._idle_cycles + 1, 5)
+                        else:
+                            self._last_capture_signature = capture_signature
+                            self._idle_cycles = 0
+
+                        image = sct.grab(
+                            {
+                                "top": position[1],
+                                "left": position[0],
+                                "width": box_w,
+                                "height": box_h,
+                            }
+                        )
+                        pil_image = Image.frombytes(
+                            "RGB", image.size, image.bgra, "raw", "BGRX"
+                        )
+                        callback(position, pil_image)
+                except tk.TclError as e:
+                    logger.error(f"Event windows has been destroyed: {e}")
+                    self.capturing.clear()
+                    break
+                time.sleep(0.2 if self._idle_cycles == 0 else 0.3)

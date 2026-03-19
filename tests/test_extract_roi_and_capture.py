@@ -246,7 +246,7 @@ class TestExtractROIWarning(unittest.TestCase):
     def test_warning_logged_on_first_failure(self):
         """경계 초과 최초 발생 시 logger.warning이 호출됨"""
         img = np.zeros((10, 10, 3), dtype=np.uint8)
-        with patch("keystroke_processor.logger") as mock_log:
+        with patch("app.core.processor.logger") as mock_log:
             self.proc._extract_roi(img, self._out_of_bounds_evt(), is_independent=False)
             mock_log.warning.assert_called_once()
 
@@ -254,7 +254,7 @@ class TestExtractROIWarning(unittest.TestCase):
         """동일 이벤트명은 두 번째 호출부터 경고를 출력하지 않음"""
         img = np.zeros((10, 10, 3), dtype=np.uint8)
         evt = self._out_of_bounds_evt("OnceOnly")
-        with patch("keystroke_processor.logger") as mock_log:
+        with patch("app.core.processor.logger") as mock_log:
             self.proc._extract_roi(img, evt, is_independent=False)
             self.proc._extract_roi(img, evt, is_independent=False)
             self.proc._extract_roi(img, evt, is_independent=False)
@@ -263,7 +263,7 @@ class TestExtractROIWarning(unittest.TestCase):
     def test_different_events_each_warn_once(self):
         """이벤트명이 다르면 각각 1회씩 경고"""
         img = np.zeros((10, 10, 3), dtype=np.uint8)
-        with patch("keystroke_processor.logger") as mock_log:
+        with patch("app.core.processor.logger") as mock_log:
             self.proc._extract_roi(
                 img, self._out_of_bounds_evt("EvtA"), is_independent=False
             )
@@ -275,7 +275,7 @@ class TestExtractROIWarning(unittest.TestCase):
     def test_warning_message_contains_event_name_and_sizes(self):
         """경고 메시지에 이벤트명과 크기 정보가 포함됨"""
         img = np.zeros((10, 10, 3), dtype=np.uint8)
-        with patch("keystroke_processor.logger") as mock_log:
+        with patch("app.core.processor.logger") as mock_log:
             self.proc._extract_roi(
                 img, self._out_of_bounds_evt("MyEvent"), is_independent=False
             )
@@ -293,7 +293,7 @@ class TestExtractROIWarning(unittest.TestCase):
             "rel_x": 50,
             "rel_y": 50,
         }
-        with patch("keystroke_processor.logger") as mock_log:
+        with patch("app.core.processor.logger") as mock_log:
             self.proc._extract_roi(img, evt, is_independent=False)
             mock_log.warning.assert_not_called()
 

@@ -1,6 +1,6 @@
 import unittest
 
-from profile_display import (
+from app.storage.profile_display import (
     FAVORITE_PREFIX,
     QUICK_PROFILE_NAME,
     build_profile_display_values,
