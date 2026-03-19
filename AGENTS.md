@@ -5,9 +5,10 @@
 KeystrokeSimulator is a Python/Tkinter desktop automation app that watches screen pixels/regions and executes predefined keystroke sequences when conditions match. macOS (PyObjC) is the primary target; Windows is supported via win32 tooling.
 
 Primary goals for agents:
-- Keep `main.py` / `keystroke_simulator_app.py` runnable.
-- Keep the event processing pipeline in `keystroke_processor.py` correct (conditions, groups, inversion, threading).
+- Keep `main.py` / `app/ui/simulator_app.py` runnable.
+- Keep the event processing pipeline in `app/core/processor.py` correct (conditions, groups, inversion, threading).
 - Maintain backward compatibility for saved profiles (`profiles/*.json` primary; legacy `profiles/*.pkl` may exist and should migrate cleanly).
+- Prefer the package layout under `app/` for new work; root-level legacy module names now exist only as compatibility shims for older imports, tests, scripts, and pickle migration paths.
 
 ## Setup commands
 
@@ -92,12 +93,28 @@ Key entry points:
 - `main.py`: standard GUI entry point (creates `logs/` and `profiles/` if missing).
 - `main_secure.py`: GUI entry point with authentication flow (`.env`-based).
 
-Core modules:
-- `keystroke_simulator_app.py`: main Tkinter app and UI flow.
-- `keystroke_processor.py`: capture -> match -> conditions -> group priority -> keystrokes pipeline.
-- `keystroke_models.py`: dataclasses (events/profiles/settings).
-- `profile_display.py`: profile dropdown display-label helpers (favorite prefix, Quick exception).
-- `keystroke_capturer.py`: screen capture thread (mss + screeninfo).
+Current module layout:
+- `app/ui/simulator_app.py`: main Tkinter app and UI flow.
+- `app/core/processor.py`: capture -> match -> conditions -> group priority -> keystrokes pipeline.
+- `app/storage/profile_storage.py`: JSON/pickle-backed profile persistence and migration.
+- `app/utils/runtime_toggle.py`: runtime toggle normalization and validation helpers.
+- `app/utils/sounds.py`: runtime sound playback wrapper.
+- `app/core/models.py`: dataclasses (events/profiles/settings).
+- `app/core/capturer.py`: screen capture thread (mss + screeninfo).
+- `app/storage/profile_display.py`: profile dropdown display-label helpers (favorite prefix, Quick exception).
+- `app/ui/event_graph.py`: condition graph rendering and layout helpers.
+- `app/ui/event_importer.py`: event import dialog and copy helpers.
+- `app/ui/modkeys.py`: modification-keys dialog.
+- `app/ui/quick_event_editor.py`: quick-event editor dialog.
+- `app/ui/settings.py`: settings dialog and persistence UI.
+- `app/ui/sort_events.py`: event sort/reorder window.
+- `app/utils/i18n.py`: localization helpers.
+- `app/utils/system.py`: WindowUtils/KeyUtils/StateUtils/PermissionUtils and related system helpers.
+- `app/utils/sound_assets.py`: embedded runtime-toggle sound constants.
+
+Compatibility shims:
+- Root-level modules such as `keystroke_simulator_app.py`, `keystroke_profiles.py`, `keystroke_event_editor.py`, `keystroke_processor.py`, `keystroke_profile_storage.py`, `keystroke_utils.py`, `i18n.py`, and related `keystroke_*.py` files now forward to their canonical `app/` modules.
+- New code should import from `app.*`; use root-level names only when intentionally preserving external compatibility.
 
 Tests:
 - `tests/`: `unittest` suite (`test_*.py`).
@@ -111,7 +128,7 @@ Local state (gitignored; avoid relying on these being versioned):
 ## Conventions
 
 Profile persistence:
-- Profiles are persisted as JSON (`profiles/*.json`) with `schema_version` and Base64-encoded PNG images for `held_screenshot` (see `keystroke_profile_storage.py`).
+- Profiles are persisted as JSON (`profiles/*.json`) with `schema_version` and Base64-encoded PNG images for `held_screenshot` (see `app/storage/profile_storage.py`).
 - `latest_screenshot` is not persisted; the left preview in the editor is always live capture.
 - Legacy Pickle profiles (`profiles/*.pkl`) may exist; loaders should be able to read them and (when loading for real use) migrate to JSON without breaking old data.
 - New/fallback profiles should get default `modification_keys` with `alt`/`ctrl`/`shift` enabled and `Pass` mode.
@@ -129,7 +146,7 @@ Processor/auth behavior that should not regress:
 - In `main_secure.py`, keep lockout countdown single-sourced: `lock_inputs()` should only disable inputs, and `show_error_and_reactivate()` should start `start_countdown(...)` exactly once.
 
 Localization (EN/KO):
-- UI text should use `i18n.py` helpers (`txt`, `set_language`, `normalize_language`) instead of hard-coded single-language strings.
+- UI text should use `app/utils/i18n.py` helpers (`txt`, `set_language`, `normalize_language`) instead of hard-coded single-language strings.
 - Default language is English (`en`). Korean (`ko`) is supported.
 - `UserSettings.language` is persisted in `user_settings.json` and loaded by app/settings/auth UI flows.
 - For button text that can clip in different languages, use `dual_text_width(...)` instead of fixed widths where practical.
