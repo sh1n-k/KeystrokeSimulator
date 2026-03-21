@@ -71,7 +71,9 @@ _RUNTIME_TOGGLE_HANGUL_2SET_ALIASES = {
 }
 
 
-def _canonical_key_name(key_name: str | None) -> str | None:
+def _canonical_key_name(
+    key_name: str | None, os_name: str | None = None
+) -> str | None:
     if not key_name:
         return None
 
@@ -79,7 +81,7 @@ def _canonical_key_name(key_name: str | None) -> str | None:
     if not raw:
         return None
 
-    key_names = KeyUtils.get_key_name_list()
+    key_names = KeyUtils.get_key_name_list(os_name=os_name)
     if raw in key_names:
         return raw
 
@@ -94,7 +96,9 @@ def _canonical_key_name(key_name: str | None) -> str | None:
     return None
 
 
-def normalize_runtime_toggle_trigger(trigger: str | None) -> str | None:
+def normalize_runtime_toggle_trigger(
+    trigger: str | None, os_name: str | None = None
+) -> str | None:
     if not trigger:
         return None
 
@@ -106,34 +110,44 @@ def normalize_runtime_toggle_trigger(trigger: str | None) -> str | None:
     if upper in MOUSE_TRIGGER_TOKENS:
         return upper
 
-    return _canonical_key_name(raw)
+    return _canonical_key_name(raw, os_name=os_name)
 
 
-def is_supported_runtime_toggle_trigger(trigger: str | None) -> bool:
-    return normalize_runtime_toggle_trigger(trigger) is not None
+def is_supported_runtime_toggle_trigger(
+    trigger: str | None, os_name: str | None = None
+) -> bool:
+    return normalize_runtime_toggle_trigger(trigger, os_name=os_name) is not None
 
 
-def is_keyboard_runtime_toggle_trigger(trigger: str | None) -> bool:
-    normalized = normalize_runtime_toggle_trigger(trigger)
+def is_keyboard_runtime_toggle_trigger(
+    trigger: str | None, os_name: str | None = None
+) -> bool:
+    normalized = normalize_runtime_toggle_trigger(trigger, os_name=os_name)
     return bool(normalized) and normalized not in MOUSE_TRIGGER_TOKENS
 
 
-def is_wheel_runtime_toggle_trigger(trigger: str | None) -> bool:
-    return normalize_runtime_toggle_trigger(trigger) in {
+def is_wheel_runtime_toggle_trigger(
+    trigger: str | None, os_name: str | None = None
+) -> bool:
+    return normalize_runtime_toggle_trigger(trigger, os_name=os_name) in {
         WHEEL_UP_TRIGGER,
         WHEEL_DOWN_TRIGGER,
     }
 
 
-def is_mouse_button_runtime_toggle_trigger(trigger: str | None) -> bool:
-    return normalize_runtime_toggle_trigger(trigger) in {
+def is_mouse_button_runtime_toggle_trigger(
+    trigger: str | None, os_name: str | None = None
+) -> bool:
+    return normalize_runtime_toggle_trigger(trigger, os_name=os_name) in {
         MOUSE_BUTTON_3_TRIGGER,
         MOUSE_BUTTON_4_TRIGGER,
     }
 
 
-def display_runtime_toggle_trigger(trigger: str | None) -> str:
-    normalized = normalize_runtime_toggle_trigger(trigger)
+def display_runtime_toggle_trigger(
+    trigger: str | None, os_name: str | None = None
+) -> str:
+    normalized = normalize_runtime_toggle_trigger(trigger, os_name=os_name)
     if normalized == WHEEL_UP_TRIGGER:
         return txt("Mouse wheel up", "마우스 휠 위")
     if normalized == WHEEL_DOWN_TRIGGER:
@@ -162,8 +176,9 @@ def normalize_runtime_toggle_capture_key(
     keysym: str | None,
     char: str | None = None,
     keycode: int | None = None,
+    os_name: str | None = None,
 ) -> str | None:
-    keycode_name = KeyUtils.get_key_name_for_keycode(keycode)
+    keycode_name = KeyUtils.get_key_name_for_keycode(keycode, os_name=os_name)
     if keycode_name:
         return keycode_name
 
@@ -175,25 +190,27 @@ def normalize_runtime_toggle_capture_key(
             aliased = _RUNTIME_TOGGLE_CAPTURE_ALIASES.get(str(raw).strip().upper())
             if aliased:
                 return aliased
-        normalized = normalize_runtime_toggle_trigger(raw)
+        normalized = normalize_runtime_toggle_trigger(raw, os_name=os_name)
         if normalized:
             return normalized
     return None
 
 
-def normalize_runtime_toggle_listener_key(key) -> str:
+def normalize_runtime_toggle_listener_key(key, os_name: str | None = None) -> str:
     vk = getattr(key, "vk", None)
-    keycode_name = KeyUtils.get_key_name_for_keycode(vk)
+    keycode_name = KeyUtils.get_key_name_for_keycode(vk, os_name=os_name)
     if keycode_name:
         return keycode_name.upper()
 
     char = getattr(key, "char", None)
-    normalized = normalize_runtime_toggle_capture_key(None, char)
+    normalized = normalize_runtime_toggle_capture_key(None, char, os_name=os_name)
     if normalized:
         return normalized.upper()
 
     raw_name = str(key).replace("Key.", "").replace("'", "")
-    normalized = normalize_runtime_toggle_capture_key(raw_name, raw_name)
+    normalized = normalize_runtime_toggle_capture_key(
+        raw_name, raw_name, os_name=os_name
+    )
     if normalized:
         return normalized.upper()
 
@@ -233,7 +250,7 @@ def _resolve_start_stop_trigger(settings, os_name: str | None = None) -> str | N
     start_stop_key = getattr(settings, "start_stop_key", None) or ""
     if not start_stop_key or start_stop_key == "DISABLED":
         return None
-    return normalize_runtime_toggle_trigger(start_stop_key)
+    return normalize_runtime_toggle_trigger(start_stop_key, os_name=os_name)
 
 
 def collect_runtime_toggle_validation_errors(
@@ -248,7 +265,7 @@ def collect_runtime_toggle_validation_errors(
     errors: list[str] = []
     active_events = active_runtime_toggle_events(events)
     trigger_raw = (getattr(profile, "runtime_toggle_key", None) or "").strip()
-    trigger = normalize_runtime_toggle_trigger(trigger_raw)
+    trigger = normalize_runtime_toggle_trigger(trigger_raw, os_name=os_name)
 
     if not trigger_raw:
         errors.append(
@@ -283,7 +300,7 @@ def collect_runtime_toggle_validation_errors(
             txt(
                 "Runtime Event Group toggle trigger conflicts with Start/Stop: {trigger}",
                 "실행 중 추가 이벤트 묶음의 토글 트리거가 시작/중지와 충돌합니다: {trigger}",
-                trigger=display_runtime_toggle_trigger(trigger),
+                trigger=display_runtime_toggle_trigger(trigger, os_name=os_name),
             )
         )
     elif start_stop_trigger == "ALT_SHIFT_WIN" and trigger in {"Alt", "Shift"}:
@@ -291,7 +308,7 @@ def collect_runtime_toggle_validation_errors(
             txt(
                 "Runtime Event Group toggle trigger conflicts with Start/Stop: {trigger}",
                 "실행 중 추가 이벤트 묶음의 토글 트리거가 시작/중지와 충돌합니다: {trigger}",
-                trigger=display_runtime_toggle_trigger(trigger),
+                trigger=display_runtime_toggle_trigger(trigger, os_name=os_name),
             )
         )
     elif start_stop_trigger and start_stop_trigger == trigger:
@@ -299,11 +316,11 @@ def collect_runtime_toggle_validation_errors(
             txt(
                 "Runtime Event Group toggle trigger conflicts with Start/Stop: {trigger}",
                 "실행 중 추가 이벤트 묶음의 토글 트리거가 시작/중지와 충돌합니다: {trigger}",
-                trigger=display_runtime_toggle_trigger(trigger),
+                trigger=display_runtime_toggle_trigger(trigger, os_name=os_name),
             )
         )
 
-    if is_keyboard_runtime_toggle_trigger(trigger):
+    if is_keyboard_runtime_toggle_trigger(trigger, os_name=os_name):
         conflicting_events = sorted(
             {
                 (
@@ -311,7 +328,9 @@ def collect_runtime_toggle_validation_errors(
                 ).strip()
                 for evt in active_events
                 if getattr(evt, "execute_action", True)
-                and normalize_runtime_toggle_trigger(getattr(evt, "key_to_enter", None))
+                and normalize_runtime_toggle_trigger(
+                    getattr(evt, "key_to_enter", None), os_name=os_name
+                )
                 == trigger
             }
         )
@@ -320,7 +339,7 @@ def collect_runtime_toggle_validation_errors(
                 txt(
                     "Runtime Event Group toggle trigger conflicts with event input key '{trigger}'. Events: {names}",
                     "실행 중 추가 이벤트 묶음의 토글 트리거가 이벤트 입력 키 '{trigger}' 와 충돌합니다. 이벤트: {names}",
-                    trigger=display_runtime_toggle_trigger(trigger),
+                    trigger=display_runtime_toggle_trigger(trigger, os_name=os_name),
                     names=", ".join(conflicting_events),
                 )
             )

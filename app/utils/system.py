@@ -147,6 +147,7 @@ class KeyUtils:
             "8": 0x38,
             "9": 0x39,
             "0": 0x30,
+            "`": 0xC0,
             "=": 0xBB,
             "-": 0xBD,
             "[": 0xDB,
@@ -218,26 +219,41 @@ class KeyUtils:
     CURRENT_KEYS = _KEY_MAPS.get(OS_NAME, {})
 
     @classmethod
-    def get_key_list(cls):
-        return cls.CURRENT_KEYS
+    def _normalize_os_name(cls, os_name: str | None = None) -> str:
+        normalized = (os_name or OS_NAME or "").strip().lower()
+        if normalized.startswith("win"):
+            return "windows"
+        if normalized.startswith("darwin") or normalized.startswith("mac"):
+            return "darwin"
+        return normalized
 
     @classmethod
-    def get_key_name_list(cls):
-        return list(cls.CURRENT_KEYS.keys())
+    def _key_map_for_os(cls, os_name: str | None = None) -> dict[str, int]:
+        return cls._KEY_MAPS.get(cls._normalize_os_name(os_name), cls.CURRENT_KEYS)
 
     @classmethod
-    def get_key_name_for_keycode(cls, code: int | None) -> str | None:
+    def get_key_list(cls, os_name: str | None = None):
+        return cls._key_map_for_os(os_name)
+
+    @classmethod
+    def get_key_name_list(cls, os_name: str | None = None):
+        return list(cls._key_map_for_os(os_name).keys())
+
+    @classmethod
+    def get_key_name_for_keycode(
+        cls, code: int | None, os_name: str | None = None
+    ) -> str | None:
         if code is None:
             return None
 
-        for name, mapped_code in cls.CURRENT_KEYS.items():
+        for name, mapped_code in cls._key_map_for_os(os_name).items():
             if mapped_code == code:
                 return name
         return None
 
     @classmethod
-    def get_keycode(cls, char: str):
-        return cls.CURRENT_KEYS.get(char.capitalize())
+    def get_keycode(cls, char: str, os_name: str | None = None):
+        return cls._key_map_for_os(os_name).get(char.capitalize())
 
     @classmethod
     def is_extended_key(cls, key_name: str | None) -> bool:
@@ -246,15 +262,20 @@ class KeyUtils:
         return key_name in cls.WINDOWS_EXTENDED_KEY_NAMES
 
     @staticmethod
-    def mod_key_pressed(key: str) -> bool:
-        if IS_WIN:
-            code = KeyUtils.get_keycode(key)
+    def mod_key_pressed(key: str, os_name: str | None = None) -> bool:
+        normalized_os = KeyUtils._normalize_os_name(os_name)
+        if normalized_os == "windows":
+            if not IS_WIN:
+                return False
+            code = KeyUtils.get_keycode(key, os_name=normalized_os)
             return (
                 (ctypes.windll.user32.GetAsyncKeyState(code) & 0x8000 != 0)
                 if code
                 else False
             )
-        elif IS_MAC:
+        elif normalized_os == "darwin":
+            if not IS_MAC:
+                return False
             mask = {
                 "shift": kCGEventFlagMaskShift,
                 "alt": kCGEventFlagMaskAlternate,
@@ -268,17 +289,22 @@ class KeyUtils:
         return False
 
     @staticmethod
-    def key_pressed(key_name: str | None) -> bool:
+    def key_pressed(key_name: str | None, os_name: str | None = None) -> bool:
         if not key_name:
             return False
 
-        code = KeyUtils.get_keycode(key_name)
+        normalized_os = KeyUtils._normalize_os_name(os_name)
+        code = KeyUtils.get_keycode(key_name, os_name=normalized_os)
         if code is None:
             return False
 
-        if IS_WIN:
+        if normalized_os == "windows":
+            if not IS_WIN:
+                return False
             return ctypes.windll.user32.GetAsyncKeyState(code) & 0x8000 != 0
-        elif IS_MAC:
+        elif normalized_os == "darwin":
+            if not IS_MAC:
+                return False
             return bool(CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, code))
         return False
 
