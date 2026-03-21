@@ -4,6 +4,7 @@ import json
 import os
 import time
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -17,6 +18,26 @@ PROFILE_SCHEMA_VERSION = 1
 _PNG_B64_ATTR = "_ks_png_b64"
 _PNG_IDENTITY_ATTR = "_ks_png_identity"
 _PROFILE_META_CACHE: Dict[Path, tuple[tuple[int, int], bool]] = {}
+_DEFAULT_MODIFICATION_KEYS = {
+    "alt": {
+        "enabled": True,
+        "value": "Pass",
+        "pass": True,
+        "include_modifier": True,
+    },
+    "ctrl": {
+        "enabled": True,
+        "value": "Pass",
+        "pass": True,
+        "include_modifier": True,
+    },
+    "shift": {
+        "enabled": True,
+        "value": "Pass",
+        "pass": True,
+        "include_modifier": True,
+    },
+}
 
 
 def _perf_enabled() -> bool:
@@ -161,6 +182,34 @@ def _normalize_loaded_event_names(profile: ProfileModel) -> bool:
     return changed
 
 
+def default_modification_keys() -> Dict[str, Dict[str, Any]]:
+    return deepcopy(_DEFAULT_MODIFICATION_KEYS)
+
+
+def normalize_modification_keys(data: Any) -> Dict[str, Dict[str, Any]]:
+    normalized = default_modification_keys()
+    if not isinstance(data, dict):
+        return normalized
+
+    for name, defaults in normalized.items():
+        raw = data.get(name)
+        if not isinstance(raw, dict):
+            continue
+
+        value = raw.get("value", defaults["value"])
+        normalized[name] = {
+            "enabled": bool(raw.get("enabled", defaults["enabled"])),
+            "value": str(value).strip() if value is not None else defaults["value"],
+            "pass": bool(raw.get("pass", defaults["pass"])),
+            "include_modifier": bool(
+                raw.get("include_modifier", defaults["include_modifier"])
+            ),
+        }
+        if normalized[name]["pass"]:
+            normalized[name]["value"] = "Pass"
+    return normalized
+
+
 def event_to_dict(evt: EventModel) -> Dict[str, Any]:
     held_img = getattr(evt, "held_screenshot", None)
     held_payload = None
@@ -243,7 +292,9 @@ def profile_to_dict(profile: ProfileModel) -> Dict[str, Any]:
         "profile": {
             "name": getattr(profile, "name", None),
             "favorite": bool(getattr(profile, "favorite", False)),
-            "modification_keys": getattr(profile, "modification_keys", None),
+            "modification_keys": normalize_modification_keys(
+                getattr(profile, "modification_keys", None)
+            ),
             "runtime_toggle_enabled": bool(
                 getattr(profile, "runtime_toggle_enabled", False)
             ),
@@ -281,13 +332,10 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
             str(runtime_toggle_key).strip() if runtime_toggle_key else None
         )
 
-    # Ensure modification_keys default: all keys enabled with Pass mode
-    if not getattr(p, "modification_keys", None):
-        p.modification_keys = {
-            "alt": {"enabled": True, "value": "Pass", "pass": True},
-            "ctrl": {"enabled": True, "value": "Pass", "pass": True},
-            "shift": {"enabled": True, "value": "Pass", "pass": True},
-        }
+    # Ensure modification_keys default: all keys enabled with Pass mode.
+    p.modification_keys = normalize_modification_keys(
+        getattr(p, "modification_keys", None)
+    )
 
     if getattr(p, "event_list", None) is None:
         p.event_list = []
@@ -391,7 +439,6 @@ def save_profile(
 
 def delete_profile_files(profiles_dir: Path, name: str) -> None:
     _json_path(profiles_dir, name).unlink(missing_ok=True)
-    _pkl_path(profiles_dir, name).unlink(missing_ok=True)
 
 
 def copy_profile(profiles_dir: Path, src_name: str, dst_name: str) -> None:

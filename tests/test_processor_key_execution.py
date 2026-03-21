@@ -1,9 +1,9 @@
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
-from app.core.processor import KeystrokeProcessor
+from app.core.processor import KeystrokeProcessor, KeySimulator, ModificationKeyHandler
 
 
 def _make_processor_stub() -> KeystrokeProcessor:
@@ -165,6 +165,86 @@ class TestProcessorStart(unittest.TestCase):
         KeystrokeProcessor.start(proc)
 
         proc.main_thread.start.assert_called_once()
+
+    def test_notify_windows_input_fallback_reports_key_name_to_app(self):
+        proc = KeystrokeProcessor.__new__(KeystrokeProcessor)
+        proc.main_app = SimpleNamespace(notify_windows_input_fallback=MagicMock())
+
+        KeystrokeProcessor._notify_windows_input_fallback(proc, 65)
+
+        proc.main_app.notify_windows_input_fallback.assert_called_once_with("A")
+
+
+class TestKeySimulatorWindows(unittest.TestCase):
+    def test_press_uses_sendinput_when_available(self):
+        sim = KeySimulator.__new__(KeySimulator)
+        sim.os_type = "Windows"
+        sim._sendinput_enabled = True
+        sim._user32 = object()
+        sim._send_windows_input = MagicMock(return_value=True)
+
+        KeySimulator.press(sim, 65)
+
+        sim._send_windows_input.assert_called_once_with(65, key_up=False)
+
+    @patch("app.core.processor.ctypes.windll.user32.keybd_event")
+    def test_release_falls_back_to_keybd_event_when_sendinput_fails(self, mock_keybd_event):
+        sim = KeySimulator.__new__(KeySimulator)
+        sim.os_type = "Windows"
+        sim._sendinput_enabled = True
+        sim._user32 = object()
+        sim._send_windows_input = MagicMock(return_value=False)
+
+        KeySimulator.release(sim, 65)
+
+        sim._send_windows_input.assert_called_once_with(65, key_up=True)
+        mock_keybd_event.assert_called_once_with(65, 0, 2, 0)
+
+
+class TestModificationKeyHandler(unittest.IsolatedAsyncioTestCase):
+    async def test_sim_key_keeps_modifier_when_include_modifier_is_true(self):
+        handler = ModificationKeyHandler.__new__(ModificationKeyHandler)
+        handler.key_codes = {"Shift": 16, "V": 86}
+        handler.press_time = (0.0, 0.0)
+        handler.os_type = "Windows"
+        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
+
+        await handler._sim_key("shift", "V", include_modifier=True)
+
+        handler.sim.press.assert_called_once_with(86)
+        handler.sim.release.assert_called_once_with(86)
+
+    async def test_sim_key_temporarily_releases_modifier_when_include_modifier_is_false(self):
+        handler = ModificationKeyHandler.__new__(ModificationKeyHandler)
+        handler.key_codes = {"Shift": 16, "V": 86}
+        handler.press_time = (0.0, 0.0)
+        handler.os_type = "Windows"
+        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
+
+        with patch("app.core.processor.KeyUtils.mod_key_pressed", return_value=True):
+            await handler._sim_key("shift", "V", include_modifier=False)
+
+        self.assertEqual(
+            handler.sim.release.call_args_list,
+            [call(16), call(86)],
+        )
+        self.assertEqual(
+            handler.sim.press.call_args_list,
+            [call(86), call(16)],
+        )
+
+    async def test_sim_key_does_not_restore_modifier_when_user_released_it(self):
+        handler = ModificationKeyHandler.__new__(ModificationKeyHandler)
+        handler.key_codes = {"Shift": 16, "V": 86}
+        handler.press_time = (0.0, 0.0)
+        handler.os_type = "Windows"
+        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
+
+        with patch("app.core.processor.KeyUtils.mod_key_pressed", return_value=False):
+            await handler._sim_key("shift", "V", include_modifier=False)
+
+        self.assertEqual(handler.sim.release.call_args_list, [call(16), call(86)])
+        self.assertEqual(handler.sim.press.call_args_list, [call(86)])
 
 
 if __name__ == "__main__":

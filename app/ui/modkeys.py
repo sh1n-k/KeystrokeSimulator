@@ -5,7 +5,11 @@ from typing import Dict, Any
 
 from loguru import logger
 from app.utils.i18n import dual_text_width, txt
-from app.storage.profile_storage import load_profile, save_profile
+from app.storage.profile_storage import (
+    default_modification_keys,
+    load_profile,
+    save_profile,
+)
 from app.utils.system import WindowUtils
 
 
@@ -20,7 +24,7 @@ class ModificationKeysWindow(tk.Toplevel):
 
         self.valid_keys = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
         self.labels = ("Alt", "Ctrl", "Shift")
-        self.rows = []  # (chk_var, cmb_var, prev_val, pass_var, cmb_widget)
+        self.rows = []  # (chk_var, cmb_var, prev_val, pass_var, include_var, cmb_widget, include_widget)
 
         self._setup_ui()
         self._load_data()
@@ -51,7 +55,24 @@ class ModificationKeysWindow(tk.Toplevel):
                 self, variable=pas, command=lambda idx=i: self._toggle_pass(idx)
             ).grid(row=i, column=5, padx=5)
 
-            self.rows.append((chk, cmb_var, tk.StringVar(value="PressKey"), pas, cmb))
+            ttk.Label(self, text=txt("With Mod", "원본 함께")).grid(
+                row=i, column=6, padx=5
+            )
+            include_var = tk.BooleanVar(value=True)
+            include_chk = ttk.Checkbutton(self, variable=include_var)
+            include_chk.grid(row=i, column=7, padx=5)
+
+            self.rows.append(
+                (
+                    chk,
+                    cmb_var,
+                    tk.StringVar(value="PressKey"),
+                    pas,
+                    include_var,
+                    cmb,
+                    include_chk,
+                )
+            )
 
         ttk.Button(
             self,
@@ -59,7 +80,7 @@ class ModificationKeysWindow(tk.Toplevel):
             width=dual_text_width("Save (Enter)", "저장 (Enter)", padding=2, min_width=12),
             command=self.save,
         ).grid(
-            row=len(self.labels), column=0, columnspan=6, pady=10
+            row=len(self.labels), column=0, columnspan=8, pady=10
         )
 
     def _load_data(self):
@@ -72,10 +93,7 @@ class ModificationKeysWindow(tk.Toplevel):
 
             # Default initialization if missing
             if not getattr(p, "modification_keys", None):
-                p.modification_keys = {
-                    l.lower(): {"enabled": True, "value": "Pass", "pass": True}
-                    for l in self.labels
-                }
+                p.modification_keys = default_modification_keys()
                 save_profile(self.prof_dir, p, name=self.prof_name)
 
             for i, lbl in enumerate(self.labels):
@@ -85,6 +103,7 @@ class ModificationKeysWindow(tk.Toplevel):
                     r[1].set(d["value"])
                     r[2].set(d["value"])
                     r[3].set(d["pass"])
+                    r[4].set(bool(d.get("include_modifier", True)))
                     if d["pass"]:
                         self._toggle_pass(i)
             logger.info(f"Loaded keys for '{self.prof_name}'")
@@ -100,16 +119,18 @@ class ModificationKeysWindow(tk.Toplevel):
             return "break"
 
     def _toggle_pass(self, idx):
-        _, cmb_var, prev, pas, cmb = self.rows[idx]
+        _, cmb_var, prev, pas, _include_var, cmb, include_chk = self.rows[idx]
         if pas.get():
             prev.set(cmb_var.get())
             cmb_var.set("Pass")
             cmb.config(
                 state="disabled"
             )  # 'readonly'보다 'disabled'가 명확하나 원본 의도 유지시 'readonly'
+            include_chk.config(state="disabled")
         else:
             cmb_var.set(prev.get())
             cmb.config(state="normal")
+            include_chk.config(state="normal")
 
     def save(self):
         data = {
@@ -117,6 +138,7 @@ class ModificationKeysWindow(tk.Toplevel):
                 "enabled": r[0].get(),
                 "value": "Pass" if r[3].get() else r[1].get(),
                 "pass": r[3].get(),
+                "include_modifier": r[4].get(),
             }
             for lbl, r in zip(self.labels, self.rows)
         }

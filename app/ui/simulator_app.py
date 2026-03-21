@@ -419,6 +419,8 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.last_runtime_toggle_time = 0
         self.latest_runtime_scroll_time = None
         self.toggle_transition_in_progress = False
+        self.windows_input_fallback_active = False
+        self.windows_input_fallback_key = None
 
         self._create_ui()
         self._bind_selection_traces()
@@ -609,6 +611,26 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.runtime_toggle_member_count = 0
         self.latest_runtime_scroll_time = None
 
+    def _reset_windows_input_fallback_state(self):
+        self.windows_input_fallback_active = False
+        self.windows_input_fallback_key = None
+
+    def _apply_windows_input_fallback_notice(self, key_name: str | None):
+        self.windows_input_fallback_active = True
+        self.windows_input_fallback_key = key_name or None
+        self._update_main_status()
+
+    def notify_windows_input_fallback(self, key_name: str | None):
+        notice = lambda: self._apply_windows_input_fallback_notice(key_name)
+        after = getattr(self, "after", None)
+        if callable(after):
+            try:
+                after(0, notice)
+                return
+            except Exception:
+                pass
+        notice()
+
     def _runtime_toggle_conflicts_with_start_stop(self, toggle_key: str | None) -> bool:
         profile = ProfileModel(
             runtime_toggle_enabled=True,
@@ -677,6 +699,24 @@ class KeystrokeSimulatorApp(tk.Tk):
                     if self.runtime_toggle_active
                     else txt("OFF", "꺼짐"),
                 )
+            if self.windows_input_fallback_active:
+                key_label = self.windows_input_fallback_key or txt("Unknown", "알 수 없음")
+                return {
+                    "can_start": True,
+                    "badge_text": txt("Compat Mode", "호환 모드"),
+                    "title": txt(
+                        "Windows input compatibility mode is active.",
+                        "Windows 입력 호환 모드가 활성화되었습니다.",
+                    ),
+                    "detail": txt(
+                        "Advanced Windows input failed and the app switched to compatibility mode.\nLast fallback key: {key}\n{detail}",
+                        "고급 Windows 입력이 실패해 앱이 호환 모드로 전환되었습니다.\n최근 fallback 키: {key}\n{detail}",
+                        key=key_label,
+                        detail=detail,
+                    ),
+                    "bg": STATUS_BG_WARN,
+                    "fg": STATUS_FG_WARN,
+                }
             return {
                 "can_start": True,
                 "badge_text": txt("Running", "실행 중"),
@@ -1174,6 +1214,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             and self.selected_profile.get()
         ):
             return False
+        self._reset_windows_input_fallback_state()
 
         try:
             profile = load_profile(
@@ -1221,6 +1262,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.keystroke_processor = None
         self.terminate_event.set()
         self._reset_runtime_toggle_session()
+        self._reset_windows_input_fallback_state()
         if platform.system() != "Darwin" or not self.settings.toggle_start_stop_mac:
             self._setup_event_handlers()
 

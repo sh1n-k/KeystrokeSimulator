@@ -53,6 +53,18 @@ class WindowUtils:
 
 
 class KeyUtils:
+    WINDOWS_EXTENDED_KEY_NAMES = {
+        "Left",
+        "Up",
+        "Right",
+        "Down",
+        "Delete",
+        "Home",
+        "End",
+        "Pageup",
+        "Pagedown",
+        "Insert",
+    }
     _KEY_MAPS = {
         "darwin": {
             "1": 18,
@@ -174,6 +186,7 @@ class KeyUtils:
             "Space": 0x20,
             "Tab": 0x09,
             "Esc": 0x1B,
+            "Enter": 0x0D,
             "F1": 0x70,
             "F2": 0x71,
             "F3": 0x72,
@@ -225,6 +238,12 @@ class KeyUtils:
     @classmethod
     def get_keycode(cls, char: str):
         return cls.CURRENT_KEYS.get(char.capitalize())
+
+    @classmethod
+    def is_extended_key(cls, key_name: str | None) -> bool:
+        if not key_name or not IS_WIN:
+            return False
+        return key_name in cls.WINDOWS_EXTENDED_KEY_NAMES
 
     @staticmethod
     def mod_key_pressed(key: str) -> bool:

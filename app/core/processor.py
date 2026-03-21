@@ -17,7 +17,29 @@ from app.utils.system import KeyUtils, ProcessUtils
 
 # OS-specific imports
 if platform.system() == "Windows":
+    from ctypes import wintypes
+
     import win32gui, win32process
+
+    _INPUT_KEYBOARD = 1
+    _KEYEVENTF_EXTENDEDKEY = 0x0001
+    _KEYEVENTF_KEYUP = 0x0002
+
+    class _KEYBDINPUT(ctypes.Structure):
+        _fields_ = (
+            ("wVk", wintypes.WORD),
+            ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("dwExtraInfo", ctypes.c_size_t),
+        )
+
+    class _INPUTUNION(ctypes.Union):
+        _fields_ = (("ki", _KEYBDINPUT),)
+
+    class _INPUT(ctypes.Structure):
+        _anonymous_ = ("u",)
+        _fields_ = (("type", wintypes.DWORD), ("u", _INPUTUNION))
 elif platform.system() == "Darwin":
     from Quartz import CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap
 
@@ -59,30 +81,85 @@ def _normalize_key_name(
 
 
 class KeySimulator:
-    def __init__(self, os_type: str):
+    def __init__(self, os_type: str, fallback_callback=None):
         self.os_type = os_type
+        self._sendinput_enabled = os_type == "Windows"
+        self._fallback_callback = fallback_callback
         if os_type == "Windows":
-            self.press = lambda c: ctypes.windll.user32.keybd_event(c, 0, 0, 0)
-            self.release = lambda c: ctypes.windll.user32.keybd_event(c, 0, 2, 0)
+            self._user32 = ctypes.WinDLL("user32", use_last_error=True)
         elif os_type == "Darwin":
-            self.press = lambda c: CGEventPost(
-                kCGHIDEventTap, CGEventCreateKeyboardEvent(None, c, True)
-            )
-            self.release = lambda c: CGEventPost(
-                kCGHIDEventTap, CGEventCreateKeyboardEvent(None, c, False)
-            )
+            self._user32 = None
         else:
-            self.press = self.release = lambda c: None
+            self._user32 = None
+
+    def _send_windows_input(self, code: int, *, key_up: bool) -> bool:
+        if not self._sendinput_enabled or not self._user32:
+            return False
+
+        flags = _KEYEVENTF_KEYUP if key_up else 0
+        key_name = KeyUtils.get_key_name_for_keycode(code)
+        if KeyUtils.is_extended_key(key_name):
+            flags |= _KEYEVENTF_EXTENDEDKEY
+
+        scan_code = self._user32.MapVirtualKeyW(code, 0)
+        event = _INPUT(
+            type=_INPUT_KEYBOARD,
+            ki=_KEYBDINPUT(
+                wVk=code,
+                wScan=scan_code,
+                dwFlags=flags,
+                time=0,
+                dwExtraInfo=0,
+            ),
+        )
+        sent = self._user32.SendInput(
+            1, ctypes.byref(event), ctypes.sizeof(_INPUT)
+        )
+        if sent == 1:
+            return True
+
+        self._sendinput_enabled = False
+        logger.warning(
+            f"SendInput failed for VK {code}; falling back to keybd_event."
+        )
+        if callable(self._fallback_callback):
+            try:
+                self._fallback_callback(code)
+            except Exception:
+                pass
+        return False
+
+    def press(self, code: int):
+        if self.os_type == "Windows":
+            if self._send_windows_input(code, key_up=False):
+                return
+            ctypes.windll.user32.keybd_event(code, 0, 0, 0)
+            return
+
+        if self.os_type == "Darwin":
+            CGEventPost(kCGHIDEventTap, CGEventCreateKeyboardEvent(None, code, True))
+
+    def release(self, code: int):
+        if self.os_type == "Windows":
+            if self._send_windows_input(code, key_up=True):
+                return
+            ctypes.windll.user32.keybd_event(code, 0, 2, 0)
+            return
+
+        if self.os_type == "Darwin":
+            CGEventPost(kCGHIDEventTap, CGEventCreateKeyboardEvent(None, code, False))
 
 
 class ModificationKeyHandler:
-    def __init__(self, key_codes, default_press_times, mod_keys, os_type):
+    def __init__(
+        self, key_codes, default_press_times, mod_keys, os_type, fallback_callback=None
+    ):
         self.key_codes = key_codes
         # press_time: (min_sec, max_sec) 튜플
         self.press_time = default_press_times
         # 설정에서 enabled된 키만 필터링
         self.mod_keys = {k: v for k, v in mod_keys.items() if v.get("enabled")}
-        self.sim = KeySimulator(os_type)
+        self.sim = KeySimulator(os_type, fallback_callback=fallback_callback)
         self.event = threading.Event()
 
     async def check_and_process(self) -> bool:
@@ -95,7 +172,7 @@ class ModificationKeyHandler:
                 active = True
                 # 'Pass' 설정이 아닐 경우(다른 키로 매핑된 경우) 키 입력 시뮬레이션
                 if not v.get("pass") and (val := v.get("value")):
-                    tasks.append(self._sim_key(val))
+                    tasks.append(self._sim_key(k, val, bool(v.get("include_modifier", True))))
 
         # 매핑된 키 입력 병렬 실행
         if tasks:
@@ -108,12 +185,32 @@ class ModificationKeyHandler:
 
         return active
 
-    async def _sim_key(self, key_name: str):
+    async def _sim_key(
+        self, modifier_name: str, key_name: str, include_modifier: bool = True
+    ):
         norm_key = _normalize_key_name(self.key_codes, key_name)
         if norm_key and (code := self.key_codes.get(norm_key)):
-            self.sim.press(code)
-            await asyncio.sleep(random.uniform(*self.press_time))
-            self.sim.release(code)
+            modifier_code = self.key_codes.get(
+                {"alt": "Alt", "ctrl": "Ctrl", "shift": "Shift"}.get(
+                    modifier_name.lower(), ""
+                )
+            )
+            should_strip_modifier = (
+                self.os_type == "Windows"
+                and not include_modifier
+                and modifier_code is not None
+            )
+            if should_strip_modifier:
+                self.sim.release(modifier_code)
+                await asyncio.sleep(0.01)
+            try:
+                self.sim.press(code)
+                await asyncio.sleep(random.uniform(*self.press_time))
+                self.sim.release(code)
+            finally:
+                if should_strip_modifier and KeyUtils.mod_key_pressed(modifier_name):
+                    await asyncio.sleep(0.01)
+                    self.sim.press(modifier_code)
 
 
 class KeystrokeProcessor:
@@ -144,9 +241,13 @@ class KeystrokeProcessor:
         )
 
         self.key_codes = KeyUtils.get_key_list()
-        self.sim = KeySimulator(self.os_type)
+        self.sim = KeySimulator(self.os_type, fallback_callback=self._notify_windows_input_fallback)
         self.mod_handler = ModificationKeyHandler(
-            self.key_codes, self.default_press_times, mod_keys, self.os_type
+            self.key_codes,
+            self.default_press_times,
+            mod_keys,
+            self.os_type,
+            fallback_callback=self._notify_windows_input_fallback,
         )
 
         # Thread Safety & State
@@ -163,6 +264,12 @@ class KeystrokeProcessor:
 
         self.loop = asyncio.new_event_loop()
         self.main_thread = threading.Thread(target=self._run_loop, daemon=True)
+
+    def _notify_windows_input_fallback(self, code: int) -> None:
+        key_name = KeyUtils.get_key_name_for_keycode(code) or str(code)
+        callback = getattr(self.main_app, "notify_windows_input_fallback", None)
+        if callable(callback):
+            callback(key_name)
 
     def start(self):
         logger.info(f"Processor starting... PID: {self.pid}")

@@ -147,6 +147,56 @@ class TestProfileJsonStorage(unittest.TestCase):
             raw = json.loads((prof_dir / "CrossOs.json").read_text(encoding="utf-8"))
             self.assertEqual(raw["profile"]["runtime_toggle_key"], "Alt")
 
+    def test_modification_keys_include_modifier_roundtrip(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            profile = ProfileModel(
+                name="ModKeys",
+                event_list=[],
+                modification_keys={
+                    "shift": {
+                        "enabled": True,
+                        "value": "V",
+                        "pass": False,
+                        "include_modifier": False,
+                    }
+                },
+            )
+
+            save_profile(prof_dir, profile, name=profile.name)
+
+            raw = json.loads((prof_dir / "ModKeys.json").read_text(encoding="utf-8"))
+            self.assertFalse(
+                raw["profile"]["modification_keys"]["shift"]["include_modifier"]
+            )
+            loaded = load_profile(prof_dir, "ModKeys", migrate=False)
+            self.assertFalse(loaded.modification_keys["shift"]["include_modifier"])
+
+    def test_legacy_modification_keys_default_include_modifier_to_true(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            payload = {
+                "schema_version": 1,
+                "profile": {
+                    "name": "LegacyMod",
+                    "favorite": False,
+                    "modification_keys": {
+                        "shift": {"enabled": True, "value": "V", "pass": False}
+                    },
+                },
+                "events": [],
+            }
+            (prof_dir / "LegacyMod.json").write_text(
+                json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+            )
+
+            loaded = load_profile(prof_dir, "LegacyMod", migrate=False)
+
+            self.assertTrue(loaded.modification_keys["shift"]["enabled"])
+            self.assertEqual(loaded.modification_keys["shift"]["value"], "V")
+            self.assertFalse(loaded.modification_keys["shift"]["pass"])
+            self.assertTrue(loaded.modification_keys["shift"]["include_modifier"])
+
 class TestRenameProfileFiles(unittest.TestCase):
     """rename_profile_files: 프로필 파일 이름 변경"""
 

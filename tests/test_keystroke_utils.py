@@ -85,6 +85,12 @@ class TestKeyUtils(unittest.TestCase):
         code = KeyUtils.get_keycode("Q")
         self.assertEqual(KeyUtils.get_key_name_for_keycode(code), "Q")
 
+    @patch("app.utils.system.IS_WIN", True)
+    def test_windows_key_list_includes_enter(self):
+        if "windows" not in KeyUtils._KEY_MAPS:
+            self.skipTest("Windows key map unavailable")
+        self.assertEqual(KeyUtils._KEY_MAPS["windows"]["Enter"], 0x0D)
+
 
 class TestPermissionUtils(unittest.TestCase):
     @patch("app.utils.system.IS_MAC", True)

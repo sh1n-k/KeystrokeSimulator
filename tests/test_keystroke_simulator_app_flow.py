@@ -49,6 +49,8 @@ def _make_app_stub() -> KeystrokeSimulatorApp:
     app.last_runtime_toggle_time = 0
     app.latest_runtime_scroll_time = None
     app.toggle_transition_in_progress = False
+    app.windows_input_fallback_active = False
+    app.windows_input_fallback_key = None
     app.settings = type(
         "SettingsStub",
         (),
@@ -145,6 +147,28 @@ class TestStartSimulation(unittest.TestCase):
         self.assertTrue(result)
         passed_events = mock_processor_cls.call_args.args[2]
         self.assertEqual([e.event_name for e in passed_events], ["LegacyIndependent"])
+
+    @patch("app.ui.simulator_app.KeystrokeProcessor")
+    @patch("app.ui.simulator_app.load_profile")
+    def test_start_simulation_resets_windows_input_fallback_state(
+        self, mock_load_profile, mock_processor_cls
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+        app.windows_input_fallback_active = True
+        app.windows_input_fallback_key = "A"
+
+        mock_load_profile.return_value = ProfileModel(
+            name="Quick",
+            event_list=[EventModel(event_name="Action", use_event=True, key_to_enter="A")],
+            modification_keys={},
+        )
+        mock_processor_cls.return_value = MagicMock()
+
+        self.assertTrue(KeystrokeSimulatorApp._start_simulation(app))
+        self.assertFalse(app.windows_input_fallback_active)
+        self.assertIsNone(app.windows_input_fallback_key)
 
     @patch("app.ui.simulator_app.KeystrokeProcessor")
     @patch("app.ui.simulator_app.load_profile")
@@ -309,6 +333,8 @@ class TestToggleAndStopSimulation(unittest.TestCase):
         app.sound_player.play_stop_sound.assert_called_once()
         app._update_ui.assert_called_once()
         self.assertIsNone(app.keystroke_processor)
+        self.assertFalse(app.windows_input_fallback_active)
+        self.assertIsNone(app.windows_input_fallback_key)
 
     def test_stop_simulation_skips_ui_update_when_app_is_destroyed(self):
         app = _make_app_stub()
@@ -319,6 +345,17 @@ class TestToggleAndStopSimulation(unittest.TestCase):
 
         app.sound_player.play_stop_sound.assert_not_called()
         app._update_ui.assert_not_called()
+
+    def test_stop_simulation_clears_existing_windows_input_fallback_state(self):
+        app = _make_app_stub()
+        app.keystroke_processor = MagicMock()
+        app.windows_input_fallback_active = True
+        app.windows_input_fallback_key = "Enter"
+
+        KeystrokeSimulatorApp._stop_simulation(app)
+
+        self.assertFalse(app.windows_input_fallback_active)
+        self.assertIsNone(app.windows_input_fallback_key)
 
     def test_toggle_runtime_event_group_updates_processor_and_sound(self):
         app = _make_app_stub()
@@ -436,6 +473,16 @@ class TestMainUiState(unittest.TestCase):
             state="disabled",
         )
 
+    def test_notify_windows_input_fallback_uses_after_and_updates_status(self):
+        app = _make_app_stub()
+        app.after = MagicMock(side_effect=lambda _delay, cb: cb())
+
+        KeystrokeSimulatorApp.notify_windows_input_fallback(app, "Enter")
+
+        self.assertTrue(app.windows_input_fallback_active)
+        self.assertEqual(app.windows_input_fallback_key, "Enter")
+        app._update_main_status.assert_called_once()
+
     @patch("app.ui.simulator_app.load_profile")
     def test_readiness_snapshot_reports_runtime_toggle_conflict(
         self, mock_load_profile
@@ -464,6 +511,19 @@ class TestMainUiState(unittest.TestCase):
         self.assertFalse(snapshot["can_start"])
         self.assertEqual(snapshot["badge_text"], "Toggle Conflict")
         self.assertIn("conflicts with event input key", snapshot["detail"])
+
+    def test_readiness_snapshot_reports_windows_input_compat_mode_when_running(self):
+        app = _make_app_stub()
+        app.is_running.set(True)
+        app.windows_input_fallback_active = True
+        app.windows_input_fallback_key = "Enter"
+
+        snapshot = KeystrokeSimulatorApp._get_readiness_snapshot(app)
+
+        self.assertTrue(snapshot["can_start"])
+        self.assertEqual(snapshot["badge_text"], "Compat Mode")
+        self.assertIn("compatibility mode", snapshot["title"])
+        self.assertIn("Enter", snapshot["detail"])
 
 
 class TestRuntimeEditGuards(unittest.TestCase):
