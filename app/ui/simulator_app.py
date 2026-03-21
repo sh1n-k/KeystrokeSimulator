@@ -595,7 +595,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     @staticmethod
     def _listener_key_name(key) -> str:
-        return normalize_runtime_toggle_listener_key(key)
+        return normalize_runtime_toggle_listener_key(key, os_name=platform.system())
 
     def _selected_process_pid(self) -> int | None:
         pid_match = re.search(r"\((\d+)\)", self.selected_process.get())
@@ -659,8 +659,10 @@ class KeystrokeSimulatorApp(tk.Tk):
         self, profile: ProfileModel, events: list[EventModel]
     ) -> None:
         self._reset_runtime_toggle_session()
+        os_name = platform.system()
         toggle_key = normalize_runtime_toggle_trigger(
-            getattr(profile, "runtime_toggle_key", None)
+            getattr(profile, "runtime_toggle_key", None),
+            os_name=os_name,
         )
         member_count = runtime_toggle_member_count(events)
         enabled = bool(
@@ -936,13 +938,16 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         runtime_toggle_trigger = normalize_runtime_toggle_trigger(
-            self.runtime_toggle_key
+            self.runtime_toggle_key,
+            os_name=platform.system(),
         )
         use_mac_polling = platform.system() == "Darwin" and (
             self.settings.toggle_start_stop_mac
             or (
                 self.runtime_toggle_enabled
-                and is_keyboard_runtime_toggle_trigger(runtime_toggle_trigger)
+                and is_keyboard_runtime_toggle_trigger(
+                    runtime_toggle_trigger, os_name=platform.system()
+                )
             )
         )
         if use_mac_polling:
@@ -960,8 +965,12 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.start_stop_mouse_listener.start()
 
         if self.runtime_toggle_enabled and (
-            is_wheel_runtime_toggle_trigger(runtime_toggle_trigger)
-            or is_mouse_button_runtime_toggle_trigger(runtime_toggle_trigger)
+            is_wheel_runtime_toggle_trigger(
+                runtime_toggle_trigger, os_name=platform.system()
+            )
+            or is_mouse_button_runtime_toggle_trigger(
+                runtime_toggle_trigger, os_name=platform.system()
+            )
         ):
             self.runtime_toggle_mouse_listener = pynput.mouse.Listener(
                 on_scroll=self._on_runtime_toggle_mouse_scroll,
@@ -972,7 +981,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         should_listen_keyboard = (
             (
                 self.runtime_toggle_enabled
-                and is_keyboard_runtime_toggle_trigger(runtime_toggle_trigger)
+                and is_keyboard_runtime_toggle_trigger(
+                    runtime_toggle_trigger, os_name=platform.system()
+                )
             )
             or (platform.system() == "Windows" and self.settings.use_alt_shift_hotkey)
             or (key != "DISABLED" and not key.startswith("W_"))
@@ -1026,12 +1037,15 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
 
     def _should_toggle_runtime_group(self, key_str: str, current_time: float) -> bool:
-        runtime_trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
+        os_name = platform.system()
+        runtime_trigger = normalize_runtime_toggle_trigger(
+            self.runtime_toggle_key, os_name=os_name
+        )
         return (
             self.runtime_toggle_enabled
             and self.is_running.get()
             and bool(runtime_trigger)
-            and is_keyboard_runtime_toggle_trigger(runtime_trigger)
+            and is_keyboard_runtime_toggle_trigger(runtime_trigger, os_name=os_name)
             and key_str == runtime_trigger.upper()
             and current_time - self.last_runtime_toggle_time
             >= RUNTIME_TOGGLE_DEBOUNCE_SECONDS
@@ -1044,19 +1058,20 @@ class KeystrokeSimulatorApp(tk.Tk):
         idle_sleep = 0.01
         while self.ctrl_check_active:
             try:
+                os_name = platform.system()
                 curr_time = time.time()
                 if curr_time - last_time < 0.1:
                     time.sleep(idle_sleep)
                     continue
 
                 start_stop_enabled = bool(
-                    platform.system() == "Darwin"
+                    os_name == "Darwin"
                     and getattr(self.settings, "toggle_start_stop_mac", False)
                 )
                 curr_state = (
                     start_stop_enabled
-                    and KeyUtils.mod_key_pressed("alt")
-                    and KeyUtils.mod_key_pressed("shift")
+                    and KeyUtils.mod_key_pressed("alt", os_name=os_name)
+                    and KeyUtils.mod_key_pressed("shift", os_name=os_name)
                 )
                 if start_stop_enabled and curr_state and not last_state:
                     self.after(0, self.toggle_start_stop)
@@ -1068,8 +1083,10 @@ class KeystrokeSimulatorApp(tk.Tk):
                     self.runtime_toggle_enabled
                     and self.is_running.get()
                     and self._target_process_is_active()
-                    and is_keyboard_runtime_toggle_trigger(self.runtime_toggle_key)
-                    and KeyUtils.key_pressed(self.runtime_toggle_key)
+                    and is_keyboard_runtime_toggle_trigger(
+                        self.runtime_toggle_key, os_name=os_name
+                    )
+                    and KeyUtils.key_pressed(self.runtime_toggle_key, os_name=os_name)
                 )
                 if (
                     runtime_toggle_pressed
@@ -1104,14 +1121,20 @@ class KeystrokeSimulatorApp(tk.Tk):
         return (
             self.runtime_toggle_enabled
             and self.is_running.get()
-            and bool(normalize_runtime_toggle_trigger(self.runtime_toggle_key))
+            and bool(
+                normalize_runtime_toggle_trigger(
+                    self.runtime_toggle_key, os_name=platform.system()
+                )
+            )
             and current_time - self.last_runtime_toggle_time
             >= RUNTIME_TOGGLE_DEBOUNCE_SECONDS
             and self._target_process_is_active()
         )
 
     def _on_runtime_toggle_mouse_scroll(self, x, y, dx, dy):
-        trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
+        trigger = normalize_runtime_toggle_trigger(
+            self.runtime_toggle_key, os_name=platform.system()
+        )
         curr_time = time.time()
         if not self._runtime_toggle_trigger_ready(curr_time):
             return
@@ -1132,7 +1155,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         if not pressed:
             return
 
-        trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
+        trigger = normalize_runtime_toggle_trigger(
+            self.runtime_toggle_key, os_name=platform.system()
+        )
         curr_time = time.time()
         if not self._runtime_toggle_trigger_ready(curr_time):
             return

@@ -91,6 +91,14 @@ class TestKeyUtils(unittest.TestCase):
             self.skipTest("Windows key map unavailable")
         self.assertEqual(KeyUtils._KEY_MAPS["windows"]["Enter"], 0x0D)
 
+    def test_windows_keycode_supports_backtick(self):
+        self.assertEqual(KeyUtils.get_keycode("`", os_name="Windows"), 0xC0)
+
+    def test_windows_key_name_for_backtick_keycode(self):
+        self.assertEqual(
+            KeyUtils.get_key_name_for_keycode(0xC0, os_name="Windows"), "`"
+        )
+
 
 class TestPermissionUtils(unittest.TestCase):
     @patch("app.utils.system.IS_MAC", True)
@@ -126,6 +134,14 @@ class TestRuntimeToggleUtils(unittest.TestCase):
         self.assertEqual(normalize_runtime_toggle_trigger("w_up"), "W_UP")
         self.assertEqual(normalize_runtime_toggle_trigger("mb_3"), "MB_3")
 
+    def test_normalize_runtime_toggle_trigger_uses_explicit_os_context(self):
+        self.assertEqual(
+            normalize_runtime_toggle_trigger("Option", os_name="Darwin"), "Option"
+        )
+        self.assertIsNone(
+            normalize_runtime_toggle_trigger("Option", os_name="Windows")
+        )
+
     def test_normalize_runtime_toggle_capture_key_prefers_keysym_then_char(self):
         self.assertEqual(normalize_runtime_toggle_capture_key("space", " "), "Space")
         self.assertEqual(normalize_runtime_toggle_capture_key("", "a"), "A")
@@ -142,7 +158,10 @@ class TestRuntimeToggleUtils(unittest.TestCase):
         )
         self.assertEqual(
             normalize_runtime_toggle_capture_key(
-                "BackSpace", "₩", KeyUtils.get_keycode("`")
+                "BackSpace",
+                "₩",
+                KeyUtils.get_keycode("`", os_name="Windows"),
+                os_name="Windows",
             ),
             "`",
         )
@@ -159,8 +178,12 @@ class TestRuntimeToggleUtils(unittest.TestCase):
         )
 
     def test_normalize_runtime_toggle_listener_key_prefers_vk_over_char(self):
-        key = type("KeyStub", (), {"vk": KeyUtils.get_keycode("Q"), "char": "ㅂ"})()
-        self.assertEqual(normalize_runtime_toggle_listener_key(key), "Q")
+        key = type(
+            "KeyStub", (), {"vk": KeyUtils.get_keycode("Q", os_name="Windows"), "char": "ㅂ"}
+        )()
+        self.assertEqual(
+            normalize_runtime_toggle_listener_key(key, os_name="Windows"), "Q"
+        )
 
     def test_normalize_runtime_toggle_wheel_event_supports_delta_and_button_num(self):
         self.assertEqual(

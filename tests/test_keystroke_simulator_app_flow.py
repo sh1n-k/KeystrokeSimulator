@@ -262,6 +262,39 @@ class TestStartSimulation(unittest.TestCase):
         self.assertTrue(result)
         app._setup_event_handlers.assert_not_called()
 
+    @patch("app.ui.simulator_app.platform.system", return_value="Darwin")
+    @patch("app.ui.simulator_app.KeystrokeProcessor")
+    @patch("app.ui.simulator_app.load_profile")
+    def test_start_simulation_enables_darwin_runtime_toggle_option_trigger(
+        self, mock_load_profile, mock_processor_cls, _mock_system
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+
+        profile = ProfileModel(
+            name="Quick",
+            event_list=[
+                EventModel(event_name="Base", use_event=True, key_to_enter="A"),
+                EventModel(
+                    event_name="Extra",
+                    use_event=True,
+                    key_to_enter="B",
+                    runtime_toggle_member=True,
+                ),
+            ],
+            runtime_toggle_enabled=True,
+            runtime_toggle_key="Option",
+        )
+        mock_load_profile.return_value = profile
+        mock_processor_cls.return_value = MagicMock()
+
+        result = KeystrokeSimulatorApp._start_simulation(app)
+
+        self.assertTrue(result)
+        self.assertTrue(app.runtime_toggle_enabled)
+        self.assertEqual(app.runtime_toggle_key, "Option")
+
     @patch("app.ui.simulator_app.load_profile", side_effect=RuntimeError("boom"))
     def test_start_simulation_returns_false_on_profile_load_error(
         self, _mock_load_profile
@@ -747,20 +780,30 @@ class TestRuntimeToggleMouseHandlers(unittest.TestCase):
 
 
 class TestRuntimeToggleKeyHandling(unittest.TestCase):
-    def test_listener_key_name_uses_vk_for_ime_independent_letters(self):
-        key = type("KeyStub", (), {"vk": KeyUtils.get_keycode("Q"), "char": "ㅂ"})()
+    @patch("app.ui.simulator_app.platform.system", return_value="Windows")
+    def test_listener_key_name_uses_vk_for_ime_independent_letters(
+        self, _mock_system
+    ):
+        key = type(
+            "KeyStub", (), {"vk": KeyUtils.get_keycode("Q", os_name="Windows"), "char": "ㅂ"}
+        )()
 
         self.assertEqual(KeystrokeSimulatorApp._listener_key_name(key), "Q")
 
+    @patch("app.ui.simulator_app.platform.system", return_value="Windows")
     @patch("app.ui.simulator_app.time.time", return_value=100.0)
-    def test_on_key_press_matches_runtime_toggle_with_ime_text(self, _mock_time):
+    def test_on_key_press_matches_runtime_toggle_with_ime_text(
+        self, _mock_time, _mock_system
+    ):
         app = _make_app_stub()
         app.after = MagicMock()
         app.is_running.set(True)
         app.runtime_toggle_enabled = True
         app.runtime_toggle_key = "Q"
         app.settings.start_stop_key = "DISABLED"
-        key = type("KeyStub", (), {"vk": KeyUtils.get_keycode("Q"), "char": "ㅂ"})()
+        key = type(
+            "KeyStub", (), {"vk": KeyUtils.get_keycode("Q", os_name="Windows"), "char": "ㅂ"}
+        )()
 
         KeystrokeSimulatorApp._on_key_press(app, key)
 
