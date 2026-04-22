@@ -120,24 +120,6 @@ class EventImporter:
             self.cb_prof.current(0)
             self.load_events()
 
-    def _ensure_event_defaults(self, event_list):
-        """이벤트 목록의 하위 호환성 보장"""
-        for e in event_list:
-            if not hasattr(e, "match_mode"):
-                e.match_mode = "pixel"
-            if not hasattr(e, "invert_match"):
-                e.invert_match = False
-            if not hasattr(e, "execute_action"):
-                e.execute_action = True
-            if not hasattr(e, "group_id"):
-                e.group_id = None
-            if not hasattr(e, "priority"):
-                e.priority = 0
-            if not hasattr(e, "conditions"):
-                e.conditions = {}
-            if not hasattr(e, "independent_thread"):
-                e.independent_thread = False
-
     def load_events(self, event=None):
         prof_name = self.cb_prof.get()
         if not prof_name:
@@ -153,8 +135,6 @@ class EventImporter:
             self.current_profile_data = load_profile(
                 self.profile_dir, prof_name, migrate=True
             )
-            if self.current_profile_data and self.current_profile_data.event_list:
-                self._ensure_event_defaults(self.current_profile_data.event_list)
         except Exception as e:
             logger.error(f"Failed to load profile {prof_name}: {e}")
             self.current_profile_data = None

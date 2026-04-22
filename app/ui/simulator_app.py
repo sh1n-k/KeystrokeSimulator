@@ -16,10 +16,7 @@ import pynput.keyboard
 import pynput.mouse
 from app.utils.i18n import dual_text_width, normalize_language, set_language, txt
 
-from app.core.validation import (
-    find_duplicate_event_names,
-    runtime_toggle_validation_errors,
-)
+from app.core.validation import find_duplicate_event_names
 from app.core.models import ProfileModel, EventModel, UserSettings
 from app.ui.modkeys import ModificationKeysWindow
 from app.storage.profile_storage import (
@@ -50,6 +47,7 @@ from app.utils.runtime_toggle import (
     is_mouse_button_runtime_toggle_trigger,
     is_supported_runtime_toggle_trigger,
     is_wheel_runtime_toggle_trigger,
+    collect_runtime_toggle_validation_errors,
     normalize_runtime_toggle_listener_key,
     normalize_runtime_toggle_trigger,
     runtime_toggle_member_count,
@@ -126,7 +124,6 @@ class ProfileFrame(tk.Frame):
         self.profile_names = []
         self.name_to_index = {}
         self.favorite_names = set()
-        self._profile_favorite_cache = {}
 
         self._normal_font = tkfont.nametofont("TkTextFont").copy()
         self._bold_font = tkfont.nametofont("TkTextFont").copy()
@@ -618,22 +615,12 @@ class KeystrokeSimulatorApp(tk.Tk):
             runtime_toggle_key=toggle_key,
         )
         return bool(
-            runtime_toggle_validation_errors(
+            collect_runtime_toggle_validation_errors(
                 profile,
                 [],
                 settings=getattr(self, "settings", None),
                 os_name=platform.system(),
             )
-        )
-
-    def _runtime_toggle_validation_errors(
-        self, profile: ProfileModel, events: list[EventModel]
-    ) -> list[str]:
-        return runtime_toggle_validation_errors(
-            profile,
-            events,
-            settings=getattr(self, "settings", None),
-            os_name=platform.system(),
         )
 
     def _configure_runtime_toggle_session(
@@ -648,15 +635,16 @@ class KeystrokeSimulatorApp(tk.Tk):
             getattr(profile, "runtime_toggle_enabled", False)
             and toggle_key
             and member_count > 0
-            and not self._runtime_toggle_validation_errors(profile, events)
+            and not collect_runtime_toggle_validation_errors(
+                profile,
+                events,
+                settings=getattr(self, "settings", None),
+                os_name=platform.system(),
+            )
         )
         self.runtime_toggle_enabled = enabled
         self.runtime_toggle_key = toggle_key
         self.runtime_toggle_member_count = member_count
-
-    @staticmethod
-    def _find_duplicate_event_names(events: list[EventModel]) -> list[str]:
-        return find_duplicate_event_names(events)
 
     @staticmethod
     def _runnable_events(events: list[EventModel]) -> list[EventModel]:
@@ -753,7 +741,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         events = list(profile.event_list or [])
         runnable_events = self._runnable_events(events)
-        duplicate_names = self._find_duplicate_event_names(events)
+        duplicate_names = find_duplicate_event_names(events)
         if duplicate_names:
             dup_text = ", ".join(duplicate_names)
             return {
@@ -822,8 +810,11 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "fg": STATUS_FG_WARN,
             }
 
-        toggle_validation_errors = self._runtime_toggle_validation_errors(
-            profile, events
+        toggle_validation_errors = collect_runtime_toggle_validation_errors(
+            profile,
+            events,
+            settings=getattr(self, "settings", None),
+            os_name=platform.system(),
         )
         if toggle_validation_errors:
             return {
@@ -1185,9 +1176,14 @@ class KeystrokeSimulatorApp(tk.Tk):
             profile = ProfileModel()
 
         profile_events = list(profile.event_list or [])
-        if self._find_duplicate_event_names(profile_events):
+        if find_duplicate_event_names(profile_events):
             return False
-        if self._runtime_toggle_validation_errors(profile, profile_events):
+        if collect_runtime_toggle_validation_errors(
+            profile,
+            profile_events,
+            settings=getattr(self, "settings", None),
+            os_name=platform.system(),
+        ):
             return False
         events = self._runnable_events(profile_events)
         if not events:

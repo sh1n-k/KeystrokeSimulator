@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from helpers import make_processor_stub
+from helpers import evaluate_processor_events, make_processor_stub
 from app.core.processor import _normalize_key_name
 
 
@@ -31,15 +31,6 @@ class TestConditionFiltering(unittest.TestCase):
         selected_names = {evt["name"] for evt in selected}
 
         self.assertEqual(selected_names, {"Alpha", "Solo"})
-
-    def test_check_conditions_from_current_states(self):
-        proc = make_processor_stub()
-        proc.current_states = {"A": True, "B": False}
-
-        self.assertTrue(proc._check_conditions({"conds": {"A": True, "B": False}}))
-        self.assertFalse(proc._check_conditions({"conds": {"A": True, "B": True}}))
-        self.assertFalse(proc._check_conditions({"conds": {"MISSING": True}}))
-
 
 class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
     async def test_evaluate_and_execute_applies_condition_then_group(self):
@@ -80,7 +71,7 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertEqual(pressed, ["C"])
         self.assertEqual(
@@ -118,7 +109,7 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertEqual(pressed, ["ACTION"])
         self.assertEqual(proc.current_states, {"COND": True, "ACTION": True})
@@ -156,7 +147,7 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertEqual(pressed, [])
         self.assertEqual(proc.current_states, {"A": False, "B": False, "C": False})
@@ -209,7 +200,7 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertEqual(pressed, ["A1"])
 
@@ -268,7 +259,7 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertEqual(pressed, ["A1", "A2"])
 
@@ -306,13 +297,13 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertEqual(pressed, ["Base"])
         self.assertEqual(proc.current_states, {"Base": True, "Extra": False})
 
         proc.set_runtime_toggle_active(True)
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertEqual(pressed[-2:], ["Base", "Extra"])
         self.assertEqual(proc.current_states, {"Base": True, "Extra": True})

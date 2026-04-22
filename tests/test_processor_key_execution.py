@@ -160,7 +160,6 @@ class TestProcessorStart(unittest.TestCase):
         proc = KeystrokeProcessor.__new__(KeystrokeProcessor)
         proc.pid = None
         proc.main_thread = MagicMock()
-        proc.independent_events = [{"name": "A"}, {"name": "B"}]
 
         KeystrokeProcessor.start(proc)
 

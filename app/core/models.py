@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 from PIL import Image
 
@@ -14,9 +14,6 @@ class UserSettings:
     max_key_count: int | None = 10
     toggle_start_stop_mac: bool = True
     use_alt_shift_hotkey: bool = False
-
-    def is_start_stop_key_enabled(self) -> bool:
-        return self.start_stop_key != "DISABLED"
 
 
 @dataclass
@@ -52,9 +49,6 @@ class EventModel:
     # 실행 중 토글되는 추가 이벤트 묶음에 포함되는지 여부
     runtime_toggle_member: bool = False
 
-    def __iter__(self):
-        return ((f, getattr(self, f.name)) for f in fields(self))
-
 
 @dataclass
 class ProfileModel:
@@ -64,6 +58,3 @@ class ProfileModel:
     favorite: bool = False
     runtime_toggle_enabled: bool = False
     runtime_toggle_key: str | None = None
-
-    def __iter__(self):
-        return iter(self.event_list)

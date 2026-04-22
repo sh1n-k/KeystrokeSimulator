@@ -158,7 +158,7 @@ class KeystrokeProcessor:
         self.runtime_toggle_active = False
         self._roi_warn_logged: Set[str] = set()
 
-        self.event_data_list, self.independent_events, self.mega_rect = self._init_event_data(events)
+        self.event_data_list = self._init_event_data(events)
         self.main_capture_groups = self._build_capture_groups(self.event_data_list)
 
         self.loop = asyncio.new_event_loop()
@@ -175,11 +175,8 @@ class KeystrokeProcessor:
         if self.main_thread.is_alive():
             self.main_thread.join(timeout=1.0)
 
-    def _init_event_data(
-        self, raw_events: List[EventModel]
-    ) -> Tuple[List[Dict], List[Dict], Optional[Dict]]:
+    def _init_event_data(self, raw_events: List[EventModel]) -> List[Dict]:
         events_data = []
-        all_coords = []
 
         for e in raw_events:
             if not e.use_event:
@@ -262,33 +259,8 @@ class KeystrokeProcessor:
                 evt_data["ref_bgr"] = np.array(ref_rgb[::-1], dtype=np.uint8)
 
             events_data.append(evt_data)
-            if evt_data["mode"] == "region":
-                w, h = evt_data["region_w"], evt_data["region_h"]
-                all_coords.extend(
-                    [
-                        (center_x - w // 2, center_y - h // 2),
-                        (center_x + w // 2, center_y + h // 2),
-                    ]
-                )
-            else:
-                all_coords.append((center_x, center_y))
 
-        mega_rect = None
-        if events_data and all_coords:
-            coords = np.array(all_coords)
-            x_min, y_min = coords.min(axis=0)
-            x_max, y_max = coords.max(axis=0)
-            mega_rect = {
-                "left": int(x_min),
-                "top": int(y_min),
-                "width": int(x_max - x_min + 1),
-                "height": int(y_max - y_min + 1),
-            }
-            for evt in events_data:
-                evt["rel_x"] = evt["center_x"] - mega_rect["left"]
-                evt["rel_y"] = evt["center_y"] - mega_rect["top"]
-
-        return events_data, [], mega_rect
+        return events_data
 
     def _run_loop(self):
         asyncio.set_event_loop(self.loop)
@@ -592,11 +564,6 @@ class KeystrokeProcessor:
         if tasks:
             await asyncio.gather(*tasks)
 
-    async def _evaluate_and_execute_main(self, img: np.ndarray):
-        await self._apply_local_match_states(
-            self._evaluate_capture_group(img, self.event_data_list)
-        )
-
     def _build_capture_rect(self, evt: Dict) -> Dict[str, int]:
         """이벤트에 대한 캡처 영역 생성"""
         cx, cy = evt["center_x"], evt["center_y"]
@@ -604,17 +571,6 @@ class KeystrokeProcessor:
             w, h = evt["region_w"], evt["region_h"]
             return {"top": cy - h // 2, "left": cx - w // 2, "width": w, "height": h}
         return {"top": cy, "left": cx, "width": 1, "height": 1}
-
-    def _check_conditions(self, evt: Dict) -> bool:
-        """이벤트 조건 검사"""
-        if not evt["conds"]:
-            return True
-
-        with self.state_lock:
-            return all(
-                self.current_states.get(cond_name, False) == expected
-                for cond_name, expected in evt["conds"].items()
-            )
 
     def _extract_roi(
         self, img: np.ndarray, evt: Dict, is_independent: bool

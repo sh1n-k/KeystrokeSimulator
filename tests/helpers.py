@@ -13,3 +13,9 @@ def make_processor_stub(event_data_list=None) -> KeystrokeProcessor:
     proc.event_data_list = event_data_list or []
     proc.runtime_toggle_active = False
     return proc
+
+
+async def evaluate_processor_events(proc: KeystrokeProcessor, img=None) -> None:
+    await proc._apply_local_match_states(
+        proc._evaluate_capture_group(img, proc.event_data_list)
+    )

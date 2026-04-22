@@ -1,6 +1,6 @@
 import unittest
 
-from helpers import make_processor_stub
+from helpers import evaluate_processor_events, make_processor_stub
 
 
 class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
@@ -44,7 +44,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertIn("Child", pressed)
         self.assertTrue(proc.current_states["Parent"])
@@ -87,7 +87,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertEqual(pressed, [])
         self.assertFalse(proc.current_states["Parent"])
@@ -130,7 +130,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertIn("Child", pressed)
         self.assertTrue(proc.current_states["Parent"])
@@ -174,7 +174,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertIn("Child", pressed)
         self.assertFalse(proc.current_states["Parent"])
@@ -219,7 +219,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertEqual(pressed, ["G1_HIGH"])
 
@@ -270,7 +270,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertIn("C", pressed)
         self.assertTrue(proc.current_states["A"])
@@ -324,7 +324,7 @@ class TestInvertWithConditionChain(unittest.IsolatedAsyncioTestCase):
 
         proc._press_key_async = fake_press
 
-        await proc._evaluate_and_execute_main(img=None)
+        await evaluate_processor_events(proc)
 
         self.assertEqual(pressed, [])
         self.assertTrue(proc.current_states["A"])

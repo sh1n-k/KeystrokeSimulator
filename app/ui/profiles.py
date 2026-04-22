@@ -13,14 +13,11 @@ from app.ui.event_graph import ensure_profile_graph_image
 from app.ui.event_editor import KeystrokeEventEditor
 from app.ui.event_importer import EventImporter
 from app.core.models import ProfileModel, EventModel
-from app.core.validation import (
-    find_duplicate_event_names,
-    normalized_event_name,
-    runtime_toggle_validation_errors,
-)
+from app.core.validation import find_duplicate_event_names, normalized_event_name
 from app.storage.profile_storage import load_profile, rename_profile_files, save_profile
 from app.utils.system import WindowUtils, StateUtils, KeyUtils
 from app.utils.runtime_toggle import (
+    collect_runtime_toggle_validation_errors,
     display_runtime_toggle_trigger,
     normalize_runtime_toggle_trigger,
     normalize_runtime_toggle_capture_key,
@@ -84,22 +81,6 @@ def _profile_fingerprint(profile: ProfileModel, profile_name: str, favorite: boo
         getattr(profile, "runtime_toggle_key", None),
         tuple(_event_fingerprint(evt) for evt in (profile.event_list or [])),
     )
-
-
-def _normalized_event_name(name: str | None) -> str:
-    return normalized_event_name(name)
-
-
-def _profile_runtime_toggle_validation_errors(
-    profile: ProfileModel,
-    events: list[EventModel],
-    settings=None,
-) -> list[str]:
-    return runtime_toggle_validation_errors(profile, events, settings=settings)
-
-
-def _find_duplicate_event_names(events: List[EventModel]) -> List[str]:
-    return find_duplicate_event_names(events)
 
 
 class ToolTip:
@@ -1518,13 +1499,13 @@ class EventListFrame(ttk.Frame):
     def _is_duplicate_event_name(
         self, name: str, ignore_index: int | None = None
     ) -> bool:
-        target = _normalized_event_name(name)
+        target = normalized_event_name(name)
         if not target:
             return False
         for idx, evt in enumerate(self.profile.event_list):
             if ignore_index is not None and idx == ignore_index:
                 continue
-            if _normalized_event_name(getattr(evt, "event_name", None)) == target:
+            if normalized_event_name(getattr(evt, "event_name", None)) == target:
                 return True
         return False
 
@@ -1807,7 +1788,7 @@ class KeystrokeProfiles:
             return ProfileModel(name=self.prof_name, event_list=[], favorite=False)
 
     def _ensure_unique_event_names(self):
-        duplicates = _find_duplicate_event_names(self.profile.event_list or [])
+        duplicates = find_duplicate_event_names(self.profile.event_list or [])
         if duplicates:
             dup_text = ", ".join(duplicates)
             raise ValueError(
@@ -1861,7 +1842,7 @@ class KeystrokeProfiles:
             self.e_frame.update_events()
             self.e_frame.save_names()
         self._ensure_unique_event_names()
-        validation_errors = _profile_runtime_toggle_validation_errors(
+        validation_errors = collect_runtime_toggle_validation_errors(
             self.profile,
             list(self.profile.event_list or []),
             settings=getattr(getattr(self, "main_win", None), "settings", None),
@@ -1903,7 +1884,7 @@ class KeystrokeProfiles:
             if getattr(e, "execute_action", True) and not (e.key_to_enter or "").strip()
         )
         toggle_member_count = runtime_toggle_member_count(events)
-        validation_errors = _profile_runtime_toggle_validation_errors(
+        validation_errors = collect_runtime_toggle_validation_errors(
             self.profile,
             events,
             settings=getattr(getattr(self, "main_win", None), "settings", None),
