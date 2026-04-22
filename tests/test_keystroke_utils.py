@@ -58,6 +58,26 @@ class TestStateUtils(unittest.TestCase):
         tmp_path = StateUtils.path.with_suffix(".tmp")
         self.assertFalse(tmp_path.exists())
 
+    def test_save_preserves_falsy_values_except_none(self):
+        StateUtils.save_main_app_state(empty="", zero=0, disabled=False, missing=None)
+        data = StateUtils.load_main_app_state()
+        self.assertEqual(data["empty"], "")
+        self.assertEqual(data["zero"], 0)
+        self.assertFalse(data["disabled"])
+        self.assertNotIn("missing", data)
+
+    def test_parse_position_tuple_supports_string_tuple(self):
+        self.assertEqual(StateUtils.parse_position_tuple("(10, 20)"), (10, 20))
+        self.assertEqual(StateUtils.parse_position_tuple([30, 40]), (30, 40))
+        self.assertIsNone(StateUtils.parse_position_tuple("__import__('os').system('x')"))
+        self.assertIsNone(StateUtils.parse_position_tuple("(1e309, 0)"))
+
+    def test_parse_slash_int_pair_supports_valid_and_invalid_inputs(self):
+        self.assertEqual(StateUtils.parse_slash_int_pair("10/20"), (10, 20))
+        self.assertEqual(StateUtils.parse_slash_int_pair([30, 40]), (30, 40))
+        self.assertIsNone(StateUtils.parse_slash_int_pair("bad"))
+        self.assertIsNone(StateUtils.parse_slash_int_pair("1e309/0"))
+
 
 class TestKeyUtils(unittest.TestCase):
     """KeyUtils: 키코드 매핑"""
@@ -285,6 +305,40 @@ class TestRuntimeToggleUtils(unittest.TestCase):
 
         self.assertEqual(len(errors), 1)
         self.assertIn("conflicts with Start/Stop", errors[0])
+
+    def test_collect_validation_errors_for_runtime_toggle_member_missing_key(self):
+        profile = ProfileModel(
+            name="P1",
+            runtime_toggle_enabled=True,
+            runtime_toggle_key="F6",
+            event_list=[
+                EventModel(
+                    event_name="Extra",
+                    use_event=True,
+                    key_to_enter=None,
+                    execute_action=True,
+                    runtime_toggle_member=True,
+                )
+            ],
+        )
+
+        errors = collect_runtime_toggle_validation_errors(
+            profile,
+            profile.event_list,
+            settings=type(
+                "SettingsStub",
+                (),
+                {
+                    "toggle_start_stop_mac": False,
+                    "use_alt_shift_hotkey": False,
+                    "start_stop_key": "DISABLED",
+                },
+            )(),
+            os_name="Darwin",
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("missing an input key", errors[0])
 
 
 if __name__ == "__main__":

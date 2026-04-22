@@ -434,12 +434,14 @@ class KeystrokeQuickEventEditor:
 
     def _load_pos(self):
         s = StateUtils.load_main_app_state()
-        if s and (p := s.get("quick_pos")):
-            self.win.geometry(f"+{p.split('/')[0]}+{p.split('/')[1]}")
+        pos = StateUtils.parse_slash_int_pair(s.get("quick_pos")) if s else None
+        if pos is not None:
+            self.win.geometry(f"+{pos[0]}+{pos[1]}")
         else:
             WindowUtils.center_window(self.win)
         if s and (ptr := s.get("quick_ptr")):
-            pt = eval(ptr)
-            self._set_entries(self.entries[:2], *pt)
-            self.capturer.set_current_mouse_position(pt)
+            pt = StateUtils.parse_position_tuple(ptr)
+            if pt is not None:
+                self._set_entries(self.entries[:2], *pt)
+                self.capturer.set_current_mouse_position(pt)
         self._refresh_status_text()

@@ -425,9 +425,9 @@ class KeystrokeSortEvents(tk.Toplevel):
 
     def _load_state(self):
         s = StateUtils.load_main_app_state()
-        if s and (p := s.get("org_pos")) and (sz := s.get("org_size")):
-            self.geometry(
-                f"{sz.split('/')[0]}x{sz.split('/')[1]}+{p.split('/')[0]}+{p.split('/')[1]}"
-            )
+        pos = StateUtils.parse_slash_int_pair(s.get("org_pos")) if s else None
+        size = StateUtils.parse_slash_int_pair(s.get("org_size")) if s else None
+        if pos is not None and size is not None:
+            self.geometry(f"{size[0]}x{size[1]}+{pos[0]}+{pos[1]}")
         else:
             WindowUtils.center_window(self)

@@ -12,7 +12,7 @@ from loguru import logger
 from app.utils.i18n import txt, dual_text_width
 from app.core.capturer import ScreenshotCapturer
 from app.core.models import EventModel
-from app.utils.system import KeyUtils, PermissionUtils, StateUtils
+from app.utils.system import KeyUtils, PermissionUtils, StateUtils, WindowUtils
 
 
 class KeystrokeEventEditor:
@@ -1153,10 +1153,15 @@ class KeystrokeEventEditor:
 
     def load_latest_position(self):
         state = StateUtils.load_main_app_state() or {}
-        if pos := state.get("event_position"):
-            self.win.geometry(f"+{pos.split('/')[0]}+{pos.split('/')[1]}")
+        pos = StateUtils.parse_slash_int_pair(state.get("event_position"))
+        if pos is not None:
+            self.win.geometry(f"+{pos[0]}+{pos[1]}")
+        else:
+            WindowUtils.center_window(self.win)
         if not self.is_edit and (ptr := state.get("event_pointer")):
-            self.capturer.set_current_mouse_position(eval(ptr))
+            point = StateUtils.parse_position_tuple(ptr)
+            if point is not None:
+                self.capturer.set_current_mouse_position(point)
 
     def update_position_from_entries(self, event=None):
         try:

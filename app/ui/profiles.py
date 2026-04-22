@@ -13,10 +13,14 @@ from app.ui.event_graph import ensure_profile_graph_image
 from app.ui.event_editor import KeystrokeEventEditor
 from app.ui.event_importer import EventImporter
 from app.core.models import ProfileModel, EventModel
+from app.core.validation import (
+    find_duplicate_event_names,
+    normalized_event_name,
+    runtime_toggle_validation_errors,
+)
 from app.storage.profile_storage import load_profile, rename_profile_files, save_profile
 from app.utils.system import WindowUtils, StateUtils, KeyUtils
 from app.utils.runtime_toggle import (
-    collect_runtime_toggle_validation_errors,
     display_runtime_toggle_trigger,
     normalize_runtime_toggle_trigger,
     normalize_runtime_toggle_capture_key,
@@ -83,7 +87,7 @@ def _profile_fingerprint(profile: ProfileModel, profile_name: str, favorite: boo
 
 
 def _normalized_event_name(name: str | None) -> str:
-    return (name or "").strip()
+    return normalized_event_name(name)
 
 
 def _profile_runtime_toggle_validation_errors(
@@ -91,17 +95,11 @@ def _profile_runtime_toggle_validation_errors(
     events: list[EventModel],
     settings=None,
 ) -> list[str]:
-    return collect_runtime_toggle_validation_errors(profile, events, settings=settings)
+    return runtime_toggle_validation_errors(profile, events, settings=settings)
 
 
 def _find_duplicate_event_names(events: List[EventModel]) -> List[str]:
-    counts: dict[str, int] = {}
-    for evt in events:
-        name = _normalized_event_name(getattr(evt, "event_name", None))
-        if not name:
-            continue
-        counts[name] = counts.get(name, 0) + 1
-    return sorted(name for name, count in counts.items() if count > 1)
+    return find_duplicate_event_names(events)
 
 
 class ToolTip:
@@ -2072,15 +2070,12 @@ class KeystrokeProfiles:
             self.ext_save_cb(self.prof_name)
         self.win.destroy()
 
-    def _parse_position(self, pos_str: str) -> tuple[str, str]:
-        """위치 문자열을 x, y 좌표로 파싱"""
-        parts = pos_str.split("/")
-        return parts[0], parts[1]
-
     def _load_pos(self):
-        if pos := StateUtils.load_main_app_state().get("prof_pos"):
-            x, y = self._parse_position(pos)
-            self.win.geometry(f"+{x}+{y}")
+        pos = StateUtils.parse_slash_int_pair(
+            StateUtils.load_main_app_state().get("prof_pos")
+        )
+        if pos is not None:
+            self.win.geometry(f"+{pos[0]}+{pos[1]}")
         else:
             WindowUtils.center_window(self.win)
 

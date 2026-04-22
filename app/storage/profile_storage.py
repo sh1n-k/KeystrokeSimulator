@@ -390,8 +390,9 @@ def save_profile(
 
 
 def delete_profile_files(profiles_dir: Path, name: str) -> None:
-    _json_path(profiles_dir, name).unlink(missing_ok=True)
-    _pkl_path(profiles_dir, name).unlink(missing_ok=True)
+    path = _json_path(profiles_dir, name)
+    path.unlink(missing_ok=True)
+    _PROFILE_META_CACHE.pop(path, None)
 
 
 def copy_profile(profiles_dir: Path, src_name: str, dst_name: str) -> None:

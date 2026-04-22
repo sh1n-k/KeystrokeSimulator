@@ -41,13 +41,12 @@ class KeystrokeSettings(tk.Toplevel):
 
     def _restore_window_position(self):
         state = StateUtils.load_main_app_state() or {}
-        pos = state.get("settings_position")
-        if pos:
+        pos = StateUtils.parse_slash_int_pair(state.get("settings_position"))
+        if pos is not None:
             try:
-                x_str, y_str = pos.split("/", 1)
-                self.geometry(f"+{int(x_str)}+{int(y_str)}")
+                self.geometry(f"+{pos[0]}+{pos[1]}")
                 return
-            except (ValueError, TypeError, tk.TclError):
+            except tk.TclError:
                 pass
         WindowUtils.center_window(self)
 

@@ -241,11 +241,10 @@ class EventImporter:
         self.win.destroy()
 
     def load_pos(self):
-        if pos := StateUtils.load_main_app_state().get("importer_pos"):
-            try:
-                x, y = pos.split("/")
-                self.win.geometry(f"500x600+{x}+{y}")  # 기본 크기 적용
-            except:
-                self.win.geometry("500x600")
+        pos = StateUtils.parse_slash_int_pair(
+            StateUtils.load_main_app_state().get("importer_pos")
+        )
+        if pos is not None:
+            self.win.geometry(f"500x600+{pos[0]}+{pos[1]}")  # 기본 크기 적용
         else:
             self.win.geometry("500x600")

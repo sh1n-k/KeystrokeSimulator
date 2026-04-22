@@ -274,6 +274,24 @@ def collect_runtime_toggle_validation_errors(
             )
         )
 
+    invalid_member_events = sorted(
+        {
+            (getattr(evt, "event_name", None) or txt("Unnamed", "이름 없음")).strip()
+            for evt in active_events
+            if getattr(evt, "runtime_toggle_member", False)
+            and getattr(evt, "execute_action", True)
+            and not (getattr(evt, "key_to_enter", None) or "").strip()
+        }
+    )
+    if invalid_member_events:
+        errors.append(
+            txt(
+                "Runtime Event Group member is missing an input key. Events: {names}",
+                "실행 중 추가 이벤트 묶음 멤버에 입력 키가 없습니다. 이벤트: {names}",
+                names=", ".join(invalid_member_events),
+            )
+        )
+
     if not trigger:
         return errors
 

@@ -16,6 +16,10 @@ import pynput.keyboard
 import pynput.mouse
 from app.utils.i18n import dual_text_width, normalize_language, set_language, txt
 
+from app.core.validation import (
+    find_duplicate_event_names,
+    runtime_toggle_validation_errors,
+)
 from app.core.models import ProfileModel, EventModel, UserSettings
 from app.ui.modkeys import ModificationKeysWindow
 from app.storage.profile_storage import (
@@ -41,7 +45,6 @@ from app.utils.runtime_toggle import (
     RUNTIME_TOGGLE_SCROLL_GESTURE_SECONDS,
     WHEEL_DOWN_TRIGGER,
     WHEEL_UP_TRIGGER,
-    collect_runtime_toggle_validation_errors,
     display_runtime_toggle_trigger,
     is_keyboard_runtime_toggle_trigger,
     is_mouse_button_runtime_toggle_trigger,
@@ -615,7 +618,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             runtime_toggle_key=toggle_key,
         )
         return bool(
-            collect_runtime_toggle_validation_errors(
+            runtime_toggle_validation_errors(
                 profile,
                 [],
                 settings=getattr(self, "settings", None),
@@ -626,7 +629,7 @@ class KeystrokeSimulatorApp(tk.Tk):
     def _runtime_toggle_validation_errors(
         self, profile: ProfileModel, events: list[EventModel]
     ) -> list[str]:
-        return collect_runtime_toggle_validation_errors(
+        return runtime_toggle_validation_errors(
             profile,
             events,
             settings=getattr(self, "settings", None),
@@ -653,13 +656,19 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     @staticmethod
     def _find_duplicate_event_names(events: list[EventModel]) -> list[str]:
-        counts: dict[str, int] = {}
-        for evt in events:
-            name = (getattr(evt, "event_name", None) or "").strip()
-            if not name:
-                continue
-            counts[name] = counts.get(name, 0) + 1
-        return sorted(name for name, count in counts.items() if count > 1)
+        return find_duplicate_event_names(events)
+
+    @staticmethod
+    def _runnable_events(events: list[EventModel]) -> list[EventModel]:
+        return [
+            evt
+            for evt in events
+            if getattr(evt, "use_event", True)
+            and (
+                getattr(evt, "key_to_enter", None)
+                or not getattr(evt, "execute_action", True)
+            )
+        ]
 
     def _get_readiness_snapshot(self) -> dict[str, object]:
         if self.is_running.get():
@@ -687,30 +696,6 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "detail": detail,
                 "bg": STATUS_BG_OK,
                 "fg": STATUS_FG_OK,
-            }
-
-        missing_permissions = PermissionUtils.missing_macos_permissions()
-        if missing_permissions:
-            missing_labels = []
-            if "screen" in missing_permissions:
-                missing_labels.append(txt("Screen Recording", "화면 기록"))
-            if "accessibility" in missing_permissions:
-                missing_labels.append(txt("Accessibility", "손쉬운 사용"))
-            return {
-                "can_start": False,
-                "badge_text": txt("Permissions", "권한 필요"),
-                "title": txt(
-                    "macOS permissions are blocking capture or key control.",
-                    "macOS 권한 부족으로 캡처 또는 키 제어가 차단되고 있습니다.",
-                ),
-                "detail": txt(
-                    "Grant {missing} to this executable, then restart the app.\nExecutable: {path}",
-                    "이 실행 파일에 {missing} 권한을 부여한 뒤 앱을 다시 실행하세요.\n실행 파일: {path}",
-                    missing=", ".join(missing_labels),
-                    path=sys.executable,
-                ),
-                "bg": STATUS_BG_ERR,
-                "fg": STATUS_FG_ERR,
             }
 
         if not self.selected_process.get() or "(" not in self.selected_process.get():
@@ -747,7 +732,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         try:
             profile = load_profile(
-                Path(self.profiles_dir), self.selected_profile.get(), migrate=True
+                Path(self.profiles_dir), self.selected_profile.get(), migrate=False
             )
         except Exception as exc:
             return {
@@ -767,6 +752,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             }
 
         events = list(profile.event_list or [])
+        runnable_events = self._runnable_events(events)
         duplicate_names = self._find_duplicate_event_names(events)
         if duplicate_names:
             dup_text = ", ".join(duplicate_names)
@@ -786,15 +772,7 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "fg": STATUS_FG_ERR,
             }
         enabled_count = sum(1 for evt in events if getattr(evt, "use_event", True))
-        runnable_count = sum(
-            1
-            for evt in events
-            if getattr(evt, "use_event", True)
-            and (
-                getattr(evt, "key_to_enter", None)
-                or not getattr(evt, "execute_action", True)
-            )
-        )
+        runnable_count = len(runnable_events)
 
         if not events:
             return {
@@ -856,6 +834,30 @@ class KeystrokeSimulatorApp(tk.Tk):
                     "실행 중 추가 이벤트 묶음의 트리거 설정을 확인해야 합니다.",
                 ),
                 "detail": toggle_validation_errors[0],
+                "bg": STATUS_BG_ERR,
+                "fg": STATUS_FG_ERR,
+            }
+
+        missing_permissions = PermissionUtils.missing_macos_permissions()
+        if missing_permissions:
+            missing_labels = []
+            if "screen" in missing_permissions:
+                missing_labels.append(txt("Screen Recording", "화면 기록"))
+            if "accessibility" in missing_permissions:
+                missing_labels.append(txt("Accessibility", "손쉬운 사용"))
+            return {
+                "can_start": False,
+                "badge_text": txt("Permissions", "권한 필요"),
+                "title": txt(
+                    "macOS permissions are blocking capture or key control.",
+                    "macOS 권한 부족으로 캡처 또는 키 제어가 차단되고 있습니다.",
+                ),
+                "detail": txt(
+                    "Grant {missing} to this executable, then restart the app.\nExecutable: {path}",
+                    "이 실행 파일에 {missing} 권한을 부여한 뒤 앱을 다시 실행하세요.\n실행 파일: {path}",
+                    missing=", ".join(missing_labels),
+                    path=sys.executable,
+                ),
                 "bg": STATUS_BG_ERR,
                 "fg": STATUS_FG_ERR,
             }
@@ -1182,18 +1184,13 @@ class KeystrokeSimulatorApp(tk.Tk):
         except Exception:
             profile = ProfileModel()
 
-        # include condition-only events even if they have no key
-        events = [
-            p
-            for p in profile.event_list
-            if p.use_event
-            and (p.key_to_enter or not getattr(p, "execute_action", True))
-        ]
-        if self._find_duplicate_event_names(list(profile.event_list or [])):
+        profile_events = list(profile.event_list or [])
+        if self._find_duplicate_event_names(profile_events):
             return False
+        if self._runtime_toggle_validation_errors(profile, profile_events):
+            return False
+        events = self._runnable_events(profile_events)
         if not events:
-            return False
-        if self._runtime_toggle_validation_errors(profile, events):
             return False
         self._configure_runtime_toggle_session(profile, events)
         # Keep the mac polling thread alive while Option+Shift is still held.

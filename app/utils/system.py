@@ -4,6 +4,7 @@ import sys
 import platform
 import subprocess
 import threading
+import ast
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -271,7 +272,7 @@ class StateUtils:
     def save_main_app_state(cls, **kwargs):
         try:
             data = cls.load_main_app_state()
-            data.update({k: v for k, v in kwargs.items() if v})
+            data.update({k: v for k, v in kwargs.items() if v is not None})
             tmp = cls.path.with_suffix(".tmp")
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
@@ -288,6 +289,47 @@ class StateUtils:
         except Exception as e:
             logger.error(f"Load state failed: {e}")
             return {}
+
+    @staticmethod
+    def parse_slash_int_pair(raw) -> Optional[tuple[int, int]]:
+        if raw is None:
+            return None
+        if isinstance(raw, (list, tuple)) and len(raw) >= 2:
+            try:
+                return (int(raw[0]), int(raw[1]))
+            except (TypeError, ValueError, OverflowError):
+                return None
+        if not isinstance(raw, str):
+            return None
+        parts = raw.split("/", 1)
+        if len(parts) != 2:
+            return None
+        try:
+            return (int(parts[0]), int(parts[1]))
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    @staticmethod
+    def parse_position_tuple(raw) -> Optional[tuple[int, int]]:
+        if raw is None:
+            return None
+        if isinstance(raw, (list, tuple)) and len(raw) >= 2:
+            try:
+                return (int(raw[0]), int(raw[1]))
+            except (TypeError, ValueError, OverflowError):
+                return None
+        if not isinstance(raw, str):
+            return None
+        try:
+            parsed = ast.literal_eval(raw)
+        except (SyntaxError, ValueError):
+            return None
+        if not isinstance(parsed, (list, tuple)) or len(parsed) < 2:
+            return None
+        try:
+            return (int(parsed[0]), int(parsed[1]))
+        except (TypeError, ValueError, OverflowError):
+            return None
 
 
 class PermissionUtils:

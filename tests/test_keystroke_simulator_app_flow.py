@@ -1,4 +1,7 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.core.models import EventModel, ProfileModel
@@ -210,6 +213,42 @@ class TestStartSimulation(unittest.TestCase):
 
         result = KeystrokeSimulatorApp._start_simulation(app)
 
+        self.assertFalse(result)
+        mock_processor_cls.assert_not_called()
+
+    @patch("app.ui.simulator_app.KeystrokeProcessor")
+    @patch("app.ui.simulator_app.PermissionUtils.missing_macos_permissions", return_value=[])
+    @patch("app.ui.simulator_app.load_profile")
+    def test_readiness_and_start_both_block_runtime_toggle_member_missing_key(
+        self, mock_load_profile, _mock_permissions, mock_processor_cls
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+
+        profile = ProfileModel(
+            name="Quick",
+            event_list=[
+                EventModel(event_name="Base", use_event=True, key_to_enter="A"),
+                EventModel(
+                    event_name="Extra",
+                    use_event=True,
+                    key_to_enter=None,
+                    execute_action=True,
+                    runtime_toggle_member=True,
+                ),
+            ],
+            runtime_toggle_enabled=True,
+            runtime_toggle_key="F6",
+        )
+        mock_load_profile.return_value = profile
+
+        snapshot = KeystrokeSimulatorApp._get_readiness_snapshot(app)
+        result = KeystrokeSimulatorApp._start_simulation(app)
+
+        self.assertFalse(snapshot["can_start"])
+        self.assertEqual(snapshot["badge_text"], "Toggle Conflict")
+        self.assertIn("missing an input key", snapshot["detail"])
         self.assertFalse(result)
         mock_processor_cls.assert_not_called()
 
@@ -484,6 +523,39 @@ class TestRuntimeEditGuards(unittest.TestCase):
         KeystrokeSimulatorApp.open_quick_events(app)
 
         mock_editor.assert_called_once_with(app)
+
+
+class TestReadinessSnapshotSideEffects(unittest.TestCase):
+    @patch("app.ui.simulator_app.PermissionUtils.missing_macos_permissions", return_value=["screen"])
+    def test_readiness_snapshot_does_not_modify_profile_file_on_permission_error(
+        self, _mock_permissions
+    ):
+        app = _make_app_stub()
+
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            app.profiles_dir = str(prof_dir)
+            app.selected_process.set("Dummy Process (1234)")
+            app.selected_profile.set("Quick")
+            payload = {
+                "schema_version": 1,
+                "profile": {
+                    "name": "Quick",
+                    "favorite": False,
+                    "modification_keys": None,
+                },
+                "events": [
+                    {"event_name": "  ", "key_to_enter": "X"},
+                ],
+            }
+            path = prof_dir / "Quick.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            before = path.read_text(encoding="utf-8")
+
+            snapshot = KeystrokeSimulatorApp._get_readiness_snapshot(app)
+
+            self.assertEqual(snapshot["badge_text"], "Permissions")
+            self.assertEqual(path.read_text(encoding="utf-8"), before)
 
     @patch("app.ui.simulator_app.ModificationKeysWindow")
     def test_open_modkeys_noop_when_running(self, mock_modkeys):
