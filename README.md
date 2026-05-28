@@ -49,7 +49,7 @@ uv run -m app.secure
 ### 테스트
 
 ```bash
-uv run -m unittest discover -s tests -p "test_*.py"
+uv run -m unittest discover -s tests -p "test_*.py" -q
 ```
 
 ### 빌드
@@ -108,7 +108,7 @@ uv run -m app.secure
 ### Testing
 
 ```bash
-uv run -m unittest discover -s tests -p "test_*.py"
+uv run -m unittest discover -s tests -p "test_*.py" -q
 ```
 
 ### Build

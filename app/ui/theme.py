@@ -3,7 +3,7 @@
 Single source of truth for colors, typography, spacing and icon vocabulary.
 All UI modules should import tokens from here instead of redefining hex values.
 
-See docs/ui-redesign-proposal.md for the design rationale.
+See docs/maintainer-reference.md for the design rationale.
 """
 
 from __future__ import annotations
