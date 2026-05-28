@@ -2,13 +2,10 @@ import json
 import os
 import sys
 import platform
-import subprocess
-import threading
 import ast
 from pathlib import Path
 from typing import Optional, Dict
 
-import pygame
 from loguru import logger
 
 # OS-specific imports & Constants
@@ -377,33 +374,6 @@ class PermissionUtils:
         if not PermissionUtils.has_accessibility_access():
             missing.append("accessibility")
         return missing
-
-
-class SoundUtils:
-    _sounds = {}
-    _inited = False
-
-    @classmethod
-    def initialize(cls):
-        if not IS_MAC:
-            pygame.mixer.init()
-        cls._inited = True
-
-    @classmethod
-    def play_sound(cls, file):
-        if not cls._inited:
-            raise RuntimeError("SoundUtils not initialized")
-        if IS_MAC:
-            threading.Thread(
-                target=lambda: subprocess.run(
-                    ["afplay", file], stderr=subprocess.DEVNULL
-                ),
-                daemon=True,
-            ).start()
-        else:
-            if file not in cls._sounds:
-                cls._sounds[file] = pygame.mixer.Sound(file)
-            cls._sounds[file].play()
 
 
 class ProcessCollector:
