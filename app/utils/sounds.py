@@ -1,12 +1,35 @@
+from __future__ import annotations
+
+import atexit
+import array
 import base64
-import io
-import pygame
+import threading
 from typing import Optional
+
+import miniaudio
 
 from app.utils.sound_assets import (
     RUNTIME_TOGGLE_OFF_SOUND,
     RUNTIME_TOGGLE_ON_SOUND,
 )
+
+
+_CHANNELS = 2
+_SAMPLE_RATE = 44100
+_SAMPLE_FORMAT = miniaudio.SampleFormat.SIGNED16
+_SAMPLE_WIDTH = miniaudio.width_from_format(_SAMPLE_FORMAT)
+_BUFFER_MSEC = 20
+_SAMPLE_MIN = -32768
+_SAMPLE_MAX = 32767
+
+
+class _SoundHandle:
+    def __init__(self, player: "SoundPlayer", samples: array.array):
+        self._player = player
+        self._samples = samples
+
+    def play(self):
+        self._player._queue_samples(self._samples)
 
 
 class SoundPlayer:
@@ -15,24 +38,109 @@ class SoundPlayer:
         self.stop_sound = None
         self.runtime_toggle_on_sound = None
         self.runtime_toggle_off_sound = None
+        self._active_sounds = []
+        self._lock = threading.Lock()
+        self._device = None
+        self._stream = None
         try:
-            pygame.mixer.init()
             self.start_sound = self._load_sound(START_SOUND)
             self.stop_sound = self._load_sound(STOP_SOUND)
             self.runtime_toggle_on_sound = self._load_sound(RUNTIME_TOGGLE_ON_SOUND)
             self.runtime_toggle_off_sound = self._load_sound(RUNTIME_TOGGLE_OFF_SOUND)
+            self._start_device()
+            atexit.register(self.close)
         except Exception as e:
+            self._disable()
             print(f"Sound init error: {e}")
 
-    def _load_sound(self, b64_data: str) -> Optional[pygame.mixer.Sound]:
-        """Base64 디코딩 및 Sound 객체 생성 (실패 시 None 반환)"""
+    def _load_sound(self, b64_data: str) -> Optional[_SoundHandle]:
+        """Decode base64 audio once so trigger-time playback stays lightweight."""
         if not b64_data:
             return None
         try:
-            return pygame.mixer.Sound(io.BytesIO(base64.b64decode(b64_data)))
+            decoded = miniaudio.decode(
+                base64.b64decode(b64_data),
+                output_format=_SAMPLE_FORMAT,
+                nchannels=_CHANNELS,
+                sample_rate=_SAMPLE_RATE,
+            )
+            return _SoundHandle(self, decoded.samples)
         except Exception as e:
             print(f"Sound load error: {e}")
             return None
+
+    def _start_device(self):
+        self._stream = self._mix_stream()
+        next(self._stream)
+        self._device = miniaudio.PlaybackDevice(
+            output_format=_SAMPLE_FORMAT,
+            nchannels=_CHANNELS,
+            sample_rate=_SAMPLE_RATE,
+            buffersize_msec=_BUFFER_MSEC,
+        )
+        self._device.start(self._stream)
+
+    def close(self):
+        with self._lock:
+            device = self._device
+            self._device = None
+            self._stream = None
+            self._active_sounds.clear()
+        if device is not None:
+            try:
+                device.close()
+            except Exception:
+                pass
+
+    def _disable(self):
+        self.start_sound = None
+        self.stop_sound = None
+        self.runtime_toggle_on_sound = None
+        self.runtime_toggle_off_sound = None
+        self.close()
+
+    def __del__(self):
+        self.close()
+
+    def _queue_samples(self, samples: array.array):
+        with self._lock:
+            if self._device is None:
+                return
+            self._active_sounds.append([samples, 0])
+
+    def _mix_stream(self):
+        required_frames = yield b""
+        while True:
+            sample_count = int(required_frames) * _CHANNELS
+            with self._lock:
+                active_sounds = self._active_sounds
+                self._active_sounds = []
+            if not active_sounds:
+                mixed = None
+            else:
+                mixed = array.array("h", [0]) * sample_count
+                remaining = []
+                for sound in active_sounds:
+                    samples, position = sound
+                    end = min(position + sample_count, len(samples))
+                    for index, sample in enumerate(samples[position:end]):
+                        value = mixed[index] + sample
+                        if value > _SAMPLE_MAX:
+                            value = _SAMPLE_MAX
+                        elif value < _SAMPLE_MIN:
+                            value = _SAMPLE_MIN
+                        mixed[index] = value
+                    if end < len(samples):
+                        sound[1] = end
+                        remaining.append(sound)
+                if remaining:
+                    with self._lock:
+                        if self._device is not None:
+                            self._active_sounds = remaining + self._active_sounds
+            if mixed is None:
+                required_frames = yield b"\x00" * (sample_count * _SAMPLE_WIDTH)
+            else:
+                required_frames = yield mixed
 
     def play_start_sound(self):
         if self.start_sound:

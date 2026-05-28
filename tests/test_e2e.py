@@ -6,8 +6,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
-
 # Headless CI guard: skip when RUN_GUI_TESTS is not set
 _RUN_GUI_TESTS = os.environ.get("RUN_GUI_TESTS", "0") == "1"
 

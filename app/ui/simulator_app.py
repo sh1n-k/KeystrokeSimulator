@@ -1701,6 +1701,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         safe_call(self._stop_simulation)
         safe_call(self._save_latest_state)
         safe_call(self.unbind_events)
+        sound_player = getattr(self, "sound_player", None)
+        if sound_player is not None:
+            safe_call(getattr(sound_player, "close", lambda: None))
         safe_call(self.destroy)
         safe_call(self.quit)
 
