@@ -191,7 +191,7 @@ graph LR
 
 *   macOS 또는 Windows 실사용 환경
 *   `uv sync` 완료
-*   GUI 실행 가능 (`uv run python main.py` 또는 `uv run python main_secure.py`)
+*   GUI 실행 가능 (`uv run -m app` 또는 `uv run -m app.secure`)
 *   macOS라면 Accessibility / Screen Recording 권한 허용
 
 권장 테스트 데이터:
@@ -211,7 +211,7 @@ graph LR
 
 목적: 메인 진입점과 초기 UI가 정상 동작하는지 확인
 
-1. `uv run python main.py` 실행
+1. `uv run -m app` 실행
 2. 메인 창이 열리는지 확인
 3. Process / Profile / Start/Stop / Quick Events / Settings / ModKeys / Edit Profile / Graph 버튼이 보이는지 확인
 4. 프로필 목록에 `Quick`가 존재하는지 확인
@@ -378,9 +378,9 @@ graph LR
 
 ### 시나리오 J — 인증 진입점 (선택)
 
-목적: `main_secure.py` 흐름이 살아있는지 확인
+목적: `app.secure` 흐름이 살아있는지 확인
 
-1. `uv run python main_secure.py` 실행
+1. `uv run -m app.secure` 실행
 2. 로그인/인증 UI가 열리는지 확인
 3. 테스트 서버 또는 준비된 인증 환경으로 정상 인증 1회 수행
 4. 인증 후 메인 앱으로 전환되는지 확인
@@ -402,7 +402,7 @@ graph LR
 *   프로필 복사/삭제 후 선택 상태가 깨지지 않는지
 *   자동 저장 후 재시작해도 이벤트와 설정이 유지되는지
 *   Start/Stop을 여러 번 반복해도 중복 실행 증상이 없는지
-*   `main.py`와 `main_secure.py` 두 진입점 모두 열리는지
+*   `app`와 `app.secure` 두 진입점 모두 열리는지
 *   오류 발생 시 앱이 조용히 죽지 않고 사용자에게 피드백을 주는지
 
 ---

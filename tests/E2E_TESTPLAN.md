@@ -13,8 +13,8 @@ Suggested scenarios:
 3. Favorite display label (`⭐`) does not break canonical profile operations.
 4. Start/Stop toggle updates UI and calls `KeystrokeProcessor.start/stop` exactly once.
 5. Empty/invalid profile cannot start simulation.
-6. `main_secure` successful auth transitions to main app.
-7. `main_secure` invalid session forces app close.
+6. `app.secure` successful auth transitions to main app.
+7. `app.secure` invalid session forces app close.
 8. Lockout countdown starts once on the 3rd failed auth attempt.
 
 ## Track B: Real environment E2E (manual or self-hosted runner)

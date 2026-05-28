@@ -1,15 +1,15 @@
 import signal
-import sys
 from pathlib import Path
 
 from loguru import logger
 
 from app.ui.simulator_app import KeystrokeSimulatorApp
 
+
 def main():
     log_path = Path("logs")
     log_path.mkdir(exist_ok=True)
-    
+
     log_handler_id = logger.add(
         log_path / "keysym.log",
         rotation="1 MB",
@@ -38,6 +38,7 @@ def main():
     finally:
         logger.info("Application terminated.")
         logger.remove(log_handler_id)
+
 
 if __name__ == "__main__":
     main()

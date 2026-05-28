@@ -2,9 +2,9 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch, call
 
-# main_secure imports Tkinter and requests at module level; patch heavy deps before import
-import main_secure  # noqa: E402 — must come after sys.modules patching
-from main_secure import Application, AuthService, AuthUI, Config
+# app.secure imports Tkinter and requests at module level; patch heavy deps before import
+import app.secure  # noqa: E402 - must come after sys.modules patching
+from app.secure import Application, AuthService, AuthUI, Config
 
 
 # ---------------------------------------------------------------------------
@@ -13,8 +13,8 @@ from main_secure import Application, AuthService, AuthUI, Config
 
 def _make_application() -> Application:
     """Create Application without starting Tk or showing any window."""
-    with patch("main_secure.tk.Tk"), patch("main_secure.AuthUI"), patch(
-        "main_secure.WindowUtils"
+    with patch("app.secure.tk.Tk"), patch("app.secure.AuthUI"), patch(
+        "app.secure.WindowUtils"
     ):
         app = Application.__new__(Application)
         app.root = MagicMock()
@@ -33,7 +33,7 @@ def _make_application() -> Application:
 class TestCheckSessionStartsDaemonThread(unittest.TestCase):
     def test_check_session_starts_daemon_thread(self):
         app = _make_application()
-        with patch("main_secure.threading.Thread") as mock_thread_cls:
+        with patch("app.secure.threading.Thread") as mock_thread_cls:
             mock_thread = MagicMock()
             mock_thread_cls.return_value = mock_thread
 
@@ -120,7 +120,7 @@ class TestAuthServiceRequestAuthentication(unittest.TestCase):
     def test_auth_service_request_success(self):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"sessionToken": "tok123"}
-        with patch("main_secure.requests.post", return_value=mock_resp):
+        with patch("app.secure.requests.post", return_value=mock_resp):
             result = self.svc.request_authentication("user1")
         self.assertEqual(result["sessionToken"], "tok123")
 
@@ -133,14 +133,14 @@ class TestAuthServiceRequestAuthentication(unittest.TestCase):
         mock_resp = MagicMock()
         mock_resp.raise_for_status.side_effect = http_err
 
-        with patch("main_secure.requests.post", return_value=mock_resp):
+        with patch("app.secure.requests.post", return_value=mock_resp):
             with self.assertRaises(Exception) as ctx:
                 self.svc.request_authentication("user1")
         self.assertIn("Forbidden", str(ctx.exception))
 
     def test_auth_service_network_error(self):
         with patch(
-            "main_secure.requests.post",
+            "app.secure.requests.post",
             side_effect=requests.RequestException("timeout"),
         ):
             with self.assertRaises(Exception) as ctx:
@@ -159,7 +159,7 @@ class TestValidateSessionToken(unittest.TestCase):
 
     def test_validate_session_true_on_success(self):
         mock_resp = MagicMock()
-        with patch("main_secure.requests.post", return_value=mock_resp):
+        with patch("app.secure.requests.post", return_value=mock_resp):
             result = self.svc.validate_session_token("user1")
         self.assertTrue(result)
 
@@ -171,7 +171,7 @@ class TestValidateSessionToken(unittest.TestCase):
         mock_resp = MagicMock()
         mock_resp.raise_for_status.side_effect = http_err
 
-        with patch("main_secure.requests.post", return_value=mock_resp):
+        with patch("app.secure.requests.post", return_value=mock_resp):
             result = self.svc.validate_session_token("user1")
         self.assertFalse(result)
 

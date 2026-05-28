@@ -30,17 +30,14 @@ git clone https://github.com/sh1n-k/KeystrokeSimulator.git
 cd KeystrokeSimulator
 uv python install 3.13
 uv sync
-uv run python main.py
+uv run -m app
 ```
 
-### 실행 스크립트
+인증 포함 실행:
 
 ```bash
-run_main.cmd         # Windows
-./run_main.command   # macOS
+uv run -m app.secure
 ```
-
-검증만 하려면 `--check` 옵션을 사용할 수 있습니다.
 
 ### 요구사항
 
@@ -52,17 +49,15 @@ run_main.cmd         # Windows
 ### 테스트
 
 ```bash
-uv run python run_tests.py
+uv run -m unittest discover -s tests -p "test_*.py"
 ```
 
 ### 빌드
 
 ```bash
 uv sync --group build
-uv run python scripts/build_secure.py    # PyInstaller 단일 실행 파일
-
-./build_secure.command   # macOS wrapper
-build_secure.cmd         # Windows wrapper
+uv run --group build -m scripts.build_secure    # PyInstaller 단일 실행 파일
+uv run --group build -m scripts.build_secure --check
 ```
 
 ### 라이선스
@@ -94,17 +89,14 @@ git clone https://github.com/sh1n-k/KeystrokeSimulator.git
 cd KeystrokeSimulator
 uv python install 3.13
 uv sync
-uv run python main.py
+uv run -m app
 ```
 
-### Launch Scripts
+Secure launch:
 
 ```bash
-run_main.cmd         # Windows
-./run_main.command   # macOS
+uv run -m app.secure
 ```
-
-Use `--check` to verify the environment without opening the GUI.
 
 ### Requirements
 
@@ -116,17 +108,15 @@ Use `--check` to verify the environment without opening the GUI.
 ### Testing
 
 ```bash
-uv run python run_tests.py
+uv run -m unittest discover -s tests -p "test_*.py"
 ```
 
 ### Build
 
 ```bash
 uv sync --group build
-uv run python scripts/build_secure.py    # PyInstaller single executable
-
-./build_secure.command   # macOS wrapper
-build_secure.cmd         # Windows wrapper
+uv run --group build -m scripts.build_secure    # PyInstaller single executable
+uv run --group build -m scripts.build_secure --check
 ```
 
 ### License

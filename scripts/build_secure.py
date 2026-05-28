@@ -9,12 +9,13 @@ from dotenv import load_dotenv
 
 VERSION = "3.0"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ENTRY_SCRIPT = PROJECT_ROOT / "main_secure.py"
+ENTRY_SCRIPT = PROJECT_ROOT / "app" / "secure.py"
 DIST_ROOT = PROJECT_ROOT / "dist" / "secure"
 WORK_ROOT = PROJECT_ROOT / "build" / "pyinstaller"
 REQUIRED_ENV_VARS = ("AUTH_URL", "VALIDATE_URL")
 GETENV_PATTERN = re.compile(r'os\.getenv\(\s*(["\'])([A-Z0-9_]+)\1\s*\)')
 HIDDEN_IMPORTS = [
+    "app.secure",
     "app.core.models",
     "app.core.capturer",
     "app.core.processor",

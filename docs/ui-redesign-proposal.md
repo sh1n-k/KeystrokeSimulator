@@ -596,7 +596,7 @@ LabelFrame 스택: 프로필 이름 → Runtime Toggle → 저장 상태 → 이
 
 ## 7. 단계별 로드맵
 
-각 Phase는 독립 PR로 머지 가능. 각 단계 끝에는 GUI 수동 확인 + `uv run python run_tests.py -q`.
+각 Phase는 독립 PR로 머지 가능. 각 단계 끝에는 GUI 수동 확인 + `uv run -m unittest discover -s tests -p "test_*.py" -q`.
 
 ### Phase 1 — 디자인 시스템 기반 (1~2 PR)
 1. `app/ui/theme.py` 신규: 색상·폰트·공간 토큰 정의, 폰트 객체 캐싱.
@@ -646,7 +646,7 @@ LabelFrame 스택: 프로필 이름 → Runtime Toggle → 저장 상태 → 이
 - `app/utils/runtime_toggle.py`의 정규화/검증.
 - 다이얼로그 호출 시그니처(`open_profile`, `open_settings`, `open_modkeys`, `open_quick_events`, `sort_profile_events`, Event Editor / Importer / Sort / GroupSelector 인스턴스화).
 - 단축키 바인딩(Alt+Shift, Option+Shift, ALT/CTRL 캡처, W_UP/W_DN).
-- `scripts/build_secure.py` hidden import, `main_secure.py` 인증 흐름.
+- `scripts/build_secure.py` hidden import, `app.secure` 인증 흐름.
 - 자동 저장 디바운스 250ms, `_profile_fingerprint`.
 
 ### 8.2 위젯 트리 변경의 범위
@@ -670,7 +670,7 @@ LabelFrame 스택: 프로필 이름 → Runtime Toggle → 저장 상태 → 이
 - 기존 위젯 변수명은 가능한 한 유지(GUI 테스트 잠재 결합).
 
 ### 8.6 테스트 영향
-- `uv run python run_tests.py -q` (단위/통합)는 기능 비변경이므로 그대로 통과해야 함.
+- `uv run -m unittest discover -s tests -p "test_*.py" -q` (단위/통합)는 기능 비변경이므로 그대로 통과해야 함.
 - `tests/test_import_conventions.py`는 루트 레거시 모듈명 회귀를 감지 — 신규 모듈은 `app.*` 하위에 둘 것.
 - GUI 테스트는 `RUN_GUI_TESTS=1`로 수동 확인.
 
@@ -736,4 +736,4 @@ Event Editor 모달 (Notebook):             Event Editor (Stepper):
 
 ---
 
-*문서 작성: UI **전면 개편** (기능·라우팅·데이터 비변경). 본 문서는 시각 정체성·정보 아키텍처·컴포넌트 어휘의 전환을 제시한다. 실제 적용은 Phase 단위 PR로 진행하고 각 단계마다 GUI 수동 검증 + `uv run python run_tests.py -q`로 회귀를 확인한다.*
+*문서 작성: UI **전면 개편** (기능·라우팅·데이터 비변경). 본 문서는 시각 정체성·정보 아키텍처·컴포넌트 어휘의 전환을 제시한다. 실제 적용은 Phase 단위 PR로 진행하고 각 단계마다 GUI 수동 검증 + `uv run -m unittest discover -s tests -p "test_*.py" -q`로 회귀를 확인한다.*

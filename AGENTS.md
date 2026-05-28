@@ -1,12 +1,12 @@
 # AGENTS.md
 
-KeystrokeSimulator는 화면 픽셀/영역을 감시해 키 입력을 실행하는 Python/Tkinter 앱이다. 기본 작업 기준은 `main.py`와 `app/ui/simulator_app.py`를 실행 가능하게 유지하고, `app/core/processor.py`의 조건/그룹/토글 처리와 `profiles/*.json` 기반 저장소를 깨뜨리지 않는 것이다.
+KeystrokeSimulator는 화면 픽셀/영역을 감시해 키 입력을 실행하는 Python/Tkinter 앱이다. 기본 작업 기준은 `app/__main__.py`와 `app/ui/simulator_app.py`를 실행 가능하게 유지하고, `app/core/processor.py`의 조건/그룹/토글 처리와 `profiles/*.json` 기반 저장소를 깨뜨리지 않는 것이다.
 
 상세 구조, 주요 모듈 역할, 작업 체크리스트는 [docs/maintainer-reference.md](/Users/shin/PersonalProjects/KeystrokeSimulator/docs/maintainer-reference.md)를 본다.
 
 핵심 규칙:
 - 구현의 canonical 경로는 `app/*`뿐이다.
-- 제거된 루트 레거시 모듈명(`keystroke_*`, `i18n`, `profile_display`, `runtime_toggle_*`)은 다시 만들거나 import하지 않는다.
+- 제거된 루트 레거시 모듈명(`main`, `main_secure`, `keystroke_*`, `i18n`, `profile_display`, `runtime_toggle_*`)은 다시 만들거나 import하지 않는다.
 - 모듈 이동이나 이름 변경이 생기면 `scripts/build_secure.py`와 관련 import 경로를 함께 갱신한다.
 
 Git / 변경 안전장치:
@@ -15,6 +15,6 @@ Git / 변경 안전장치:
 - 대규모 rename/migration, formatter 전면 적용, 바이너리 변경, 대량 의존성 업데이트, 삭제 위험 작업은 실행 전에 확인한다.
 
 검증:
-- 기본 검증은 `uv run python run_tests.py -q`를 우선한다.
+- 기본 검증은 `uv run -m unittest discover -s tests -p "test_*.py" -q`를 우선한다.
 - UI/IPC/DB migration/사용자 플로우에 영향이 있을 때만 필요한 범위의 GUI/E2E 검증을 추가한다.
 - 검증을 못 했거나 일부만 했으면 이유와 재현 command를 남긴다.
