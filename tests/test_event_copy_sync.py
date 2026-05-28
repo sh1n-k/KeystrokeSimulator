@@ -6,11 +6,31 @@ from PIL import Image
 
 from app.ui.event_importer import EventImporter
 from app.core.models import EventModel
+from app.utils.i18n import set_language
 
 
 def _make_importer_stub() -> EventImporter:
     """GUI 없이 _copy_event만 테스트하기 위한 stub"""
     return EventImporter.__new__(EventImporter)
+
+
+class FakeWidget:
+    def __init__(self):
+        self.state = {}
+
+    def config(self, **kwargs):
+        self.state.update(kwargs)
+
+    def cget(self, key):
+        return self.state.get(key)
+
+
+class FakeVar:
+    def __init__(self, value):
+        self.value = value
+
+    def get(self):
+        return self.value
 
 
 class TestEventCopySync(unittest.TestCase):
@@ -90,6 +110,35 @@ class TestEventCopySync(unittest.TestCase):
         evt.use_event = False
         copied = stub._copy_event(evt)
         self.assertFalse(copied.use_event)
+
+
+class TestImporterSelectionSummary(unittest.TestCase):
+    def setUp(self):
+        set_language("en")
+
+    def test_selection_summary_disables_import_when_empty(self):
+        stub = _make_importer_stub()
+        stub.checkboxes = [FakeVar(0), FakeVar(0)]
+        stub.lbl_selection_count = FakeWidget()
+        stub.btn_ok = FakeWidget()
+
+        stub._refresh_selection_summary()
+
+        self.assertEqual(stub.lbl_selection_count.cget("text"), "0 selected")
+        self.assertEqual(stub.btn_ok.cget("text"), "Import")
+        self.assertEqual(stub.btn_ok.cget("state"), "disabled")
+
+    def test_selection_summary_counts_selected_events(self):
+        stub = _make_importer_stub()
+        stub.checkboxes = [FakeVar(1), FakeVar(0), FakeVar(1)]
+        stub.lbl_selection_count = FakeWidget()
+        stub.btn_ok = FakeWidget()
+
+        stub._refresh_selection_summary()
+
+        self.assertEqual(stub.lbl_selection_count.cget("text"), "2 selected")
+        self.assertEqual(stub.btn_ok.cget("text"), "Import (2)")
+        self.assertEqual(stub.btn_ok.cget("state"), "normal")
 
 
 if __name__ == "__main__":

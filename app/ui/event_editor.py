@@ -110,8 +110,7 @@ class KeystrokeEventEditor:
         theme.install_styles(self.win)
         f = theme.fonts()
 
-        # Stepper header — always visible above the Notebook so users see
-        # "Step 1/3 · Basic" no matter which tab is open.
+        # Stepper header — always visible above the workspace.
         self.stepper_bar = tk.Frame(
             self.win,
             bg=theme.SURFACE_PANEL,
@@ -144,28 +143,99 @@ class KeystrokeEventEditor:
             fill="x", side="top"
         )
 
-        self.notebook = ttk.Notebook(self.win)
-        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
+        # Two-pane workspace: left rail + right step content.
+        self.workspace = tk.Frame(self.win, bg=theme.SURFACE_PAPER)
+        self.workspace.pack(fill="both", expand=True)
 
-        self.tab_basic = ttk.Frame(self.notebook)
-        self.tab_detail = ttk.Frame(self.notebook)
-        self.tab_logic = ttk.Frame(self.notebook)
-
-        self.notebook.add(self.tab_basic, text=txt("① Basic", "① 기본"))
-        self.notebook.add(self.tab_detail, text=txt("② Advanced", "② 상세 설정"))
-        self.notebook.add(
-            self.tab_logic, text=txt("③ Conditions / Group", "③ 조건 / 그룹")
+        self.step_rail = tk.Frame(
+            self.workspace,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_3,
         )
+        self.step_rail.pack(side=tk.LEFT, fill="y")
+        tk.Frame(self.workspace, bg=theme.SURFACE_DIVIDER, width=1).pack(
+            side=tk.LEFT, fill="y"
+        )
+        self.step_content = tk.Frame(self.workspace, bg=theme.SURFACE_PAPER)
+        self.step_content.pack(side=tk.LEFT, fill="both", expand=True)
 
-        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+        # Step frames replace the old Notebook tabs. The attribute names are
+        # kept (tab_basic/tab_detail/tab_logic) because the per-tab setup
+        # methods reference them directly.
+        self.tab_basic = ttk.Frame(self.step_content)
+        self.tab_detail = ttk.Frame(self.step_content)
+        self.tab_logic = ttk.Frame(self.step_content)
+        self._step_frames = (self.tab_basic, self.tab_detail, self.tab_logic)
+
+        # Rail labels — clickable indicators for each step.
+        self._step_indicators: list[tk.Label] = []
+        self._step_indicator_titles: list[str] = []
+        for i, (en, ko) in enumerate(
+            [("Basic", "기본"), ("Advanced", "상세 설정"), ("Conditions / Group", "조건 / 그룹")]
+        ):
+            title = txt(en, ko)
+            self._step_indicator_titles.append(title)
+            ind = tk.Label(
+                self.step_rail,
+                text=f"○ {title}",
+                bg=theme.SURFACE_PANEL,
+                fg=theme.INK_SECONDARY,
+                font=f["body"],
+                anchor="w",
+                padx=theme.SPACE_2,
+                pady=theme.SPACE_2,
+                cursor="hand2",
+            )
+            ind.pack(fill="x", anchor="w", pady=(0, theme.SPACE_1))
+            ind.bind("<Button-1>", lambda _e, idx=i: self._goto_step(idx))
+            self._step_indicators.append(ind)
+
+        # Rail footer — meta chips reflecting current event state. Keeps
+        # context (Standalone/Inverted/Cond-only) visible from any step.
+        tk.Frame(self.step_rail, bg=theme.SURFACE_PANEL, height=theme.SPACE_3).pack(
+            fill="x"
+        )
+        tk.Label(
+            self.step_rail,
+            text=txt("STATE", "상태"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+            anchor="w",
+        ).pack(fill="x", anchor="w", padx=theme.SPACE_2)
+        self._meta_chips: dict[str, tk.Label] = {}
+        for key, glyph, en, ko in (
+            ("standalone", theme.ICON_STANDALONE, "Standalone", "독립"),
+            ("inverted", theme.ICON_INVERTED, "Inverted", "반전"),
+            ("cond_only", theme.ICON_CONDITION, "Cond-only", "조건 전용"),
+        ):
+            chip = tk.Label(
+                self.step_rail,
+                text=f"{glyph} {txt(en, ko)}",
+                bg=theme.SURFACE_PANEL,
+                fg=theme.INK_MUTED,
+                font=f["caption"],
+                anchor="w",
+                padx=theme.SPACE_2,
+                pady=theme.SPACE_1,
+            )
+            chip.pack(fill="x", anchor="w", padx=theme.SPACE_2, pady=(theme.SPACE_1, 0))
+            self._meta_chips[key] = chip
+
+        self.step_index = 0
         self._setup_basic_tab()
         self._setup_detail_tab()
         self._setup_logic_tab()
         self._setup_bottom_buttons()
-        self._refresh_stepper_title()
+        self._goto_step(0)
+        # Sync meta chips with current state and hook variable traces.
+        self.invert_match_var.trace_add("write", self._refresh_meta_chips)
+        self.execute_action_var.trace_add("write", self._refresh_meta_chips)
+        self._refresh_meta_chips()
 
     # ------------------------------------------------------------------
-    # Stepper header helpers
+    # Stepper helpers — replace the legacy Notebook navigation.
     # ------------------------------------------------------------------
     _STEP_TITLES = [
         ("Step 1 of 3 · Basic", "단계 1 / 3 · 기본"),
@@ -173,38 +243,107 @@ class KeystrokeEventEditor:
         ("Step 3 of 3 · Conditions / Group", "단계 3 / 3 · 조건 / 그룹"),
     ]
 
+    def _goto_step(self, idx: int) -> None:
+        if not hasattr(self, "_step_frames"):
+            return
+        idx = max(0, min(idx, len(self._step_frames) - 1))
+        self.step_index = idx
+        for frame in self._step_frames:
+            frame.pack_forget()
+        self._step_frames[idx].pack(fill="both", expand=True, padx=8, pady=8)
+        self._refresh_step_indicators()
+        self._refresh_stepper_title()
+
+    def _refresh_step_indicators(self) -> None:
+        if not hasattr(self, "_step_indicators"):
+            return
+        f = theme.fonts()
+        for i, ind in enumerate(self._step_indicators):
+            title = self._step_indicator_titles[i]
+            if i == self.step_index:
+                ind.config(
+                    text=f"● {title}",
+                    bg=theme.SURFACE_CANVAS,
+                    fg=theme.SIGNAL_BASE,
+                    font=f["body_bold"],
+                )
+            else:
+                glyph = "✓" if i < self.step_index else "○"
+                ind.config(
+                    text=f"{glyph} {title}",
+                    bg=theme.SURFACE_PANEL,
+                    fg=theme.INK_SECONDARY,
+                    font=f["body"],
+                )
+        if hasattr(self, "btn_step_back"):
+            self.btn_step_back.config(state="disabled" if self.step_index == 0 else "normal")
+        if hasattr(self, "btn_step_next"):
+            last_idx = len(self._step_indicators) - 1
+            self.btn_step_next.config(
+                state="disabled" if self.step_index >= last_idx else "normal"
+            )
+
     def _refresh_stepper_title(self) -> None:
         if not hasattr(self, "lbl_stepper_title"):
             return
-        try:
-            idx = self.notebook.index(self.notebook.select())
-        except (tk.TclError, AttributeError):
-            idx = 0
-        idx = max(0, min(idx, len(self._STEP_TITLES) - 1))
+        idx = max(0, min(self.step_index, len(self._STEP_TITLES) - 1))
         en, ko = self._STEP_TITLES[idx]
         self.lbl_stepper_title.config(text=txt(en, ko))
 
-    def _on_tab_changed(self, _event=None) -> None:
-        self._refresh_stepper_title()
+    def _refresh_meta_chips(self, *_args) -> None:
+        """Rail-footer chips reflect the current event flags at all times."""
+        chips = getattr(self, "_meta_chips", None)
+        if not chips:
+            return
+        active_bg = theme.SIGNAL_TINT
+        active_fg = theme.SIGNAL_BASE
+        idle_bg = theme.SURFACE_PANEL
+        idle_fg = theme.INK_MUTED
+
+        def _paint(key: str, on: bool) -> None:
+            chip = chips.get(key)
+            if chip is None:
+                return
+            try:
+                chip.config(
+                    bg=active_bg if on else idle_bg,
+                    fg=active_fg if on else idle_fg,
+                )
+            except tk.TclError:
+                pass
+
+        # `standalone` (independent_thread) is not exposed in the form yet —
+        # leave it idle but keep the chip for parity with SOT vocabulary.
+        _paint("standalone", False)
+        try:
+            invert_on = bool(self.invert_match_var.get())
+        except tk.TclError:
+            invert_on = False
+        _paint("inverted", invert_on)
+        try:
+            cond_only = not bool(self.execute_action_var.get())
+        except tk.TclError:
+            cond_only = False
+        _paint("cond_only", cond_only)
 
     def _setup_basic_tab(self):
-        f_name = tk.Frame(self.tab_basic)
-        f_name.pack(pady=5, fill="x", padx=10)
-        tk.Label(f_name, text=txt("Event Name:", "이벤트 이름:")).pack(side="left")
-        self.entry_name = tk.Entry(f_name)
-        self.entry_name.pack(side="left", fill="x", expand=True, padx=5)
+        # Two-pane layout: left = visual references, right = form inputs.
+        self.tab_basic.grid_columnconfigure(0, weight=0)
+        self.tab_basic.grid_columnconfigure(1, weight=1)
+        self.tab_basic.grid_rowconfigure(0, weight=1)
 
-        f_img = tk.Frame(self.tab_basic)
-        f_img.pack(pady=theme.SPACE_2)
-        # Labels above each preview so users know which is live vs captured.
+        # ---------------- Left: live/captured previews + ref pixel --------
+        left = ttk.Frame(self.tab_basic)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, theme.SPACE_3))
+
         ttk.Label(
-            f_img, text=txt("Live View", "실시간 화면"), foreground=theme.INK_MUTED
-        ).grid(row=0, column=0, padx=theme.SPACE_2)
+            left, text=txt("Live View", "실시간 화면"), foreground=theme.INK_MUTED
+        ).grid(row=0, column=0, padx=theme.SPACE_2, sticky="w")
         ttk.Label(
-            f_img, text=txt("Captured", "캡처본"), foreground=theme.INK_MUTED
-        ).grid(row=0, column=1, padx=theme.SPACE_2)
+            left, text=txt("Captured", "캡처본"), foreground=theme.INK_MUTED
+        ).grid(row=0, column=1, padx=theme.SPACE_2, sticky="w")
         self.lbl_img1 = tk.Label(
-            f_img,
+            left,
             width=18,
             height=9,
             bg=theme.SURFACE_SUNKEN,
@@ -213,7 +352,7 @@ class KeystrokeEventEditor:
         )
         self.lbl_img1.grid(row=1, column=0, padx=theme.SPACE_2)
         self.lbl_img2 = tk.Label(
-            f_img,
+            left,
             width=18,
             height=9,
             bg=theme.SURFACE_SUNKEN,
@@ -224,8 +363,8 @@ class KeystrokeEventEditor:
         for seq in ("<Button-1>", "<B1-Motion>"):
             self.lbl_img2.bind(seq, self.get_coordinates_of_held_image)
 
-        f_ref = tk.Frame(self.tab_basic)
-        f_ref.pack(pady=theme.SPACE_1)
+        f_ref = ttk.Frame(left)
+        f_ref.grid(row=2, column=0, columnspan=2, pady=(theme.SPACE_2, 0))
         ttk.Label(
             f_ref,
             text=txt("Reference pixel:", "기준 픽셀:"),
@@ -241,8 +380,19 @@ class KeystrokeEventEditor:
         )
         self.lbl_ref.grid(row=0, column=1, padx=theme.SPACE_1)
 
+        # ---------------- Right: name / coords / key / capture size -------
+        right = ttk.Frame(self.tab_basic)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.grid_columnconfigure(0, weight=1)
+
+        f_name = ttk.Frame(right)
+        f_name.grid(row=0, column=0, sticky="we", pady=(0, theme.SPACE_2))
+        ttk.Label(f_name, text=txt("Event Name:", "이벤트 이름:")).pack(side="left")
+        self.entry_name = ttk.Entry(f_name)
+        self.entry_name.pack(side="left", fill="x", expand=True, padx=theme.SPACE_2)
+
         self.coord_entries = self.create_coord_entries(
-            tk.Frame(self.tab_basic),
+            ttk.Frame(right),
             [
                 txt("Area X:", "영역 X:"),
                 txt("Area Y:", "영역 Y:"),
@@ -250,20 +400,24 @@ class KeystrokeEventEditor:
                 txt("Pixel Y:", "픽셀 Y:"),
             ],
         )
-        self.coord_entries[0].master.pack()
+        self.coord_entries[0].master.grid(
+            row=1, column=0, sticky="we", pady=(0, theme.SPACE_2)
+        )
 
-        f_key = tk.Frame(self.tab_basic)
-        f_key.pack(pady=5)
-        tk.Label(f_key, text=txt("Key:", "키:"), anchor="w").grid(row=0, column=0)
+        f_key = ttk.Frame(right)
+        f_key.grid(row=2, column=0, sticky="we", pady=(0, theme.SPACE_2))
+        ttk.Label(f_key, text=txt("Key:", "키:"), anchor="w").pack(
+            side="left", padx=(0, theme.SPACE_2)
+        )
         self.key_combobox = ttk.Combobox(
             f_key, state="readonly", values=KeyUtils.get_key_name_list()
         )
-        self.key_combobox.grid(row=0, column=1)
+        self.key_combobox.pack(side="left", fill="x", expand=True)
 
-        f_cap = ttk.LabelFrame(self.tab_basic, text=txt("Capture Size", "캡처 크기"))
-        f_cap.pack(pady=5, padx=10, fill="x")
-        f_cap_row = tk.Frame(f_cap)
-        f_cap_row.pack(pady=3)
+        f_cap = ttk.LabelFrame(right, text=txt("Capture Size", "캡처 크기"))
+        f_cap.grid(row=3, column=0, sticky="we", pady=(0, theme.SPACE_2))
+        f_cap_row = ttk.Frame(f_cap)
+        f_cap_row.pack(pady=theme.SPACE_1, padx=theme.SPACE_2)
         ttk.Label(f_cap_row, text=txt("Width:", "너비:")).pack(side="left", padx=5)
         self.entry_capture_w = ttk.Spinbox(
             f_cap_row, textvariable=self.capture_w_var, from_=50, to=1000, width=5
@@ -279,22 +433,14 @@ class KeystrokeEventEditor:
         for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
             self.entry_capture_h.bind(seq, self._on_capture_size_change)
 
-        tk.Label(
-            self.tab_basic,
-            text=txt(
-                "ALT: Select region | CTRL: Capture image\nClick the right image to set target",
-                "ALT: 영역 선택 | CTRL: 이미지 캡처\n오른쪽 이미지를 클릭하여 대상 설정",
-            ),
-            fg="gray",
-        ).pack(pady=5)
         self.lbl_basic_step = ttk.Label(
-            self.tab_basic,
+            right,
             text="",
-            foreground="#1e3a8a",
+            foreground=theme.SIGNAL_BASE,
             wraplength=420,
             justify="left",
         )
-        self.lbl_basic_step.pack(anchor="w", padx=10, pady=(0, 6))
+        self.lbl_basic_step.grid(row=4, column=0, sticky="w", pady=(0, theme.SPACE_2))
 
     def _create_numeric_validator(self):
         """숫자 입력 검증 함수 생성 (재사용)"""
@@ -306,37 +452,57 @@ class KeystrokeEventEditor:
 
         vcmd = self._create_numeric_validator()
 
+        # ── Match Mode card (radios + invert chip on a separate row) ──
         gb_mode = ttk.LabelFrame(f_main, text=txt("Match Mode", "매칭 모드"))
         gb_mode.pack(fill="x", pady=5)
+        f_mode_radios = ttk.Frame(gb_mode)
+        f_mode_radios.pack(fill="x", padx=theme.SPACE_2, pady=(theme.SPACE_2, 0))
         ttk.Radiobutton(
-            gb_mode,
+            f_mode_radios,
             text=txt("Pixel (1px)", "픽셀 (1px)"),
             variable=self.match_mode_var,
             value="pixel",
-        ).pack(side="left", padx=10)
+        ).pack(side="left", padx=(0, theme.SPACE_3))
         ttk.Radiobutton(
-            gb_mode,
+            f_mode_radios,
             text=txt("Region (Area)", "영역 (Area)"),
             variable=self.match_mode_var,
             value="region",
-        ).pack(side="left", padx=10)
+        ).pack(side="left")
+
+        f_invert = ttk.Frame(gb_mode)
+        f_invert.pack(fill="x", padx=theme.SPACE_2, pady=(theme.SPACE_1, theme.SPACE_2))
         ttk.Checkbutton(
-            gb_mode,
+            f_invert,
             text=txt(
                 "Invert match (trigger on mismatch)", "반전 매칭 (불일치 시 트리거)"
             ),
             variable=self.invert_match_var,
-        ).pack(side="left", padx=10)
+        ).pack(side="left")
+        # Chip stays in sync with the invert toggle so users see the state
+        # next to the editor without needing to scan the Stepper rail.
+        self.lbl_invert_chip = tk.Label(
+            f_invert,
+            text=f"{theme.ICON_INVERTED} Inverted",
+            bg=theme.SURFACE_SUNKEN,
+            fg=theme.INK_MUTED,
+            font=theme.fonts()["caption"],
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_1,
+        )
+        self.lbl_invert_chip.pack(side="left", padx=(theme.SPACE_2, 0))
+        self.invert_match_var.trace_add("write", self._on_invert_match_change)
 
-        gb_size = ttk.LabelFrame(
+        # ── Region Size card (visually disabled outside Region mode) ──
+        self.gb_size = ttk.LabelFrame(
             f_main,
             text=txt("Region Size (Region mode only)", "영역 크기 (영역 모드 전용)"),
         )
-        gb_size.pack(fill="x", pady=5)
+        self.gb_size.pack(fill="x", pady=5)
 
-        ttk.Label(gb_size, text=txt("Width:", "너비:")).pack(side="left", padx=5)
+        ttk.Label(self.gb_size, text=txt("Width:", "너비:")).pack(side="left", padx=5)
         self.entry_region_w = ttk.Spinbox(
-            gb_size,
+            self.gb_size,
             textvariable=self.region_w_var,
             from_=20,
             to=1000,
@@ -346,9 +512,9 @@ class KeystrokeEventEditor:
         for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>"):
             self.entry_region_w.bind(seq, self._on_region_size_change)
 
-        ttk.Label(gb_size, text=txt("Height:", "높이:")).pack(side="left", padx=5)
+        ttk.Label(self.gb_size, text=txt("Height:", "높이:")).pack(side="left", padx=5)
         self.entry_region_h = ttk.Spinbox(
-            gb_size,
+            self.gb_size,
             textvariable=self.region_h_var,
             from_=20,
             to=1000,
@@ -358,6 +524,7 @@ class KeystrokeEventEditor:
         for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>"):
             self.entry_region_h.bind(seq, self._on_region_size_change)
 
+        # ── Timing card with permanent hint about global defaults ──
         gb_time = ttk.LabelFrame(
             f_main,
             text=txt(
@@ -382,12 +549,35 @@ class KeystrokeEventEditor:
         )
         self.entry_rand.grid(row=1, column=1, padx=5, pady=2)
 
-        # 초기 region 필드 상태 설정
+        ttk.Label(
+            gb_time,
+            text=txt(
+                "Leave blank to use global timing settings.",
+                "비워두면 전역 타이밍 설정을 사용합니다.",
+            ),
+            foreground=theme.INK_MUTED,
+        ).grid(row=2, column=0, columnspan=2, padx=5, pady=(theme.SPACE_1, 2), sticky="w")
+
+        # 초기 region 필드 상태 + invert chip 색상 동기화
         self._on_match_mode_change()
+        self._on_invert_match_change()
 
     def _on_match_mode_change(self, *args):
         """매칭 모드 변경 시 영역 크기 필드 활성/비활성"""
         self._sync_region_constraints()
+
+    def _on_invert_match_change(self, *args):
+        """반전 매칭 토글 시 칩 톤 갱신 (체크 시 강조, 해제 시 muted)."""
+        chip = getattr(self, "lbl_invert_chip", None)
+        if not chip:
+            return
+        try:
+            if self.invert_match_var.get():
+                chip.config(bg=theme.SIGNAL_TINT, fg=theme.SIGNAL_BASE)
+            else:
+                chip.config(bg=theme.SURFACE_SUNKEN, fg=theme.INK_MUTED)
+        except tk.TclError:
+            return
 
     def _on_capture_size_change(self, *args):
         """캡처 크기 변경 시 capturer 동기화"""
@@ -446,7 +636,8 @@ class KeystrokeEventEditor:
     def _sync_region_constraints(self):
         limits = self._get_region_limits()
         max_w, max_h = limits if limits else (1000, 1000)
-        can_edit = self.match_mode_var.get() == "region" and (
+        is_region = self.match_mode_var.get() == "region"
+        can_edit = is_region and (
             not limits or (max_w >= 20 and max_h >= 20)
         )
         state = "normal" if can_edit else "disabled"
@@ -454,6 +645,20 @@ class KeystrokeEventEditor:
             self.entry_region_w.config(to=max(20, max_w), state=state)
         if self.entry_region_h:
             self.entry_region_h.config(to=max(20, max_h), state=state)
+        # Mute the region-size card title when not active so the pixel-mode
+        # state reads as a single grayed-out block.
+        gb_size = getattr(self, "gb_size", None)
+        if gb_size is not None:
+            base = txt(
+                "Region Size (Region mode only)",
+                "영역 크기 (영역 모드 전용)",
+            )
+            try:
+                gb_size.configure(
+                    text=base if is_region else f"{base}  ·  pixel mode",
+                )
+            except tk.TclError:
+                pass
 
     def _validate_region_bounds(self, rw: int, rh: int) -> bool:
         if self.match_mode_var.get() != "region":
@@ -506,14 +711,21 @@ class KeystrokeEventEditor:
         )
 
     def _setup_logic_tab(self):
+        # Two-pane workspace: left = settings, right = condition tree.
         f_main = ttk.Frame(self.tab_logic)
         f_main.pack(fill="both", expand=True, padx=10, pady=10)
+        f_main.grid_columnconfigure(0, weight=0)
+        f_main.grid_columnconfigure(1, weight=1)
+        f_main.grid_rowconfigure(0, weight=1)
 
         vcmd = self._create_numeric_validator()
 
-        # --- 실행 유형 ---
-        gb_exec = ttk.LabelFrame(f_main, text=txt("Execution Type", "실행 유형"))
-        gb_exec.pack(fill="x", pady=5)
+        # ---------------- Left: execution type + group/priority ----------
+        left = ttk.Frame(f_main)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, theme.SPACE_3))
+
+        gb_exec = ttk.LabelFrame(left, text=txt("Execution Type", "실행 유형"))
+        gb_exec.pack(fill="x", pady=(0, theme.SPACE_2))
         ttk.Checkbutton(
             gb_exec,
             text=txt(
@@ -529,25 +741,25 @@ class KeystrokeEventEditor:
                 "해제하면 키를 누르지 않고, 다른 이벤트의 조건으로만 사용됩니다.",
             ),
             foreground="gray",
-        ).pack(padx=25, anchor="w")
+            wraplength=240,
+            justify="left",
+        ).pack(padx=25, pady=(0, theme.SPACE_1), anchor="w")
 
-        # --- 그룹 및 우선순위 ---
         gb_grp = ttk.LabelFrame(
-            f_main, text=txt("Group and Priority", "그룹 및 우선순위")
+            left, text=txt("Group and Priority", "그룹 및 우선순위")
         )
-        gb_grp.pack(fill="x", pady=5)
+        gb_grp.pack(fill="x", pady=(0, theme.SPACE_2))
 
         ttk.Label(gb_grp, text=txt("Group ID:", "그룹 ID:")).grid(
-            row=0, column=0, padx=5, pady=5
+            row=0, column=0, padx=5, pady=5, sticky="w"
         )
-
         self.cmb_group = ttk.Combobox(gb_grp, textvariable=self.group_id_var, width=15)
-        self.cmb_group.grid(row=0, column=1, padx=5, pady=5)
+        self.cmb_group.grid(row=0, column=1, padx=5, pady=5, sticky="we")
         self.cmb_group["values"] = self._get_existing_groups()
 
         ttk.Label(
             gb_grp, text=txt("Priority (0 is highest):", "우선순위 (0이 가장 높음):")
-        ).grid(row=0, column=2, padx=5, pady=5)
+        ).grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.entry_priority = ttk.Entry(
             gb_grp,
             textvariable=self.priority_var,
@@ -555,7 +767,7 @@ class KeystrokeEventEditor:
             validate="key",
             validatecommand=vcmd,
         )
-        self.entry_priority.grid(row=0, column=3, padx=5, pady=5)
+        self.entry_priority.grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
         self.lbl_group_hint = ttk.Label(
             gb_grp,
@@ -564,29 +776,58 @@ class KeystrokeEventEditor:
                 "기존 그룹 선택 또는 새 이름 입력. 같은 그룹에서는 한 번에 실행 이벤트 1개만 동작합니다.",
             ),
             foreground="gray",
+            wraplength=240,
+            justify="left",
         )
         self.lbl_group_hint.grid(
-            row=1, column=0, columnspan=4, padx=5, pady=(0, 5), sticky="w"
+            row=2, column=0, columnspan=2, padx=5, pady=(0, 5), sticky="w"
         )
 
-        # --- 조건 설정 ---
+        # ---------------- Right: condition tree + footer -----------------
+        right = ttk.Frame(f_main)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.grid_rowconfigure(0, weight=1)
+        right.grid_columnconfigure(0, weight=1)
+
+        # Counter + legend live above the tree so the reader sees scope first.
+        cond_header = ttk.Frame(right)
+        cond_header.grid(row=0, column=0, sticky="we", pady=(0, theme.SPACE_1))
+        self.lbl_condition_summary = ttk.Label(
+            cond_header, text="", foreground=theme.INK_SECONDARY
+        )
+        self.lbl_condition_summary.pack(side="left", padx=(theme.SPACE_1, theme.SPACE_3))
+        self.lbl_condition_hint = ttk.Label(
+            cond_header,
+            text=txt(
+                "● Active required   ○ Inactive required   – Ignore",
+                "● 활성 필요   ○ 비활성 필요   – 무시",
+            ),
+            foreground=theme.INK_MUTED,
+        )
+        self.lbl_condition_hint.pack(side="left")
+
         gb_cond = ttk.LabelFrame(
-            f_main,
+            right,
             text=txt(
                 "Condition Settings (Click to cycle state)",
                 "조건 설정 (클릭으로 상태 전환)",
             ),
         )
-        gb_cond.pack(fill="both", expand=True, pady=5)
+        gb_cond.grid(row=1, column=0, sticky="nsew", pady=(0, theme.SPACE_1))
+        right.grid_rowconfigure(1, weight=1)
 
-        cols = ("event", "state")
-        self.tree_cond = ttk.Treeview(gb_cond, columns=cols, show="headings", height=8)
+        cols = ("indicator", "event", "state")
+        self.tree_cond = ttk.Treeview(
+            gb_cond, columns=cols, show="headings", height=10
+        )
+        self.tree_cond.heading("indicator", text="")
         self.tree_cond.heading("event", text=txt("Event Name", "이벤트 이름"))
         self.tree_cond.heading("state", text=txt("Required State", "필요 상태"))
+        self.tree_cond.column("indicator", width=32, anchor="center", stretch=False)
         self.tree_cond.column("event", width=180)
         self.tree_cond.column("state", width=140)
 
-        # 색상 태그 (theme tokens: color + icon + label = 3-axis cues)
+        # 3-axis cues: glyph in first column + foreground + background tag.
         self.tree_cond.tag_configure(
             "active",
             background=theme.COND_ACTIVE_BG,
@@ -603,65 +844,90 @@ class KeystrokeEventEditor:
 
         sb = ttk.Scrollbar(gb_cond, orient="vertical", command=self.tree_cond.yview)
         self.tree_cond.configure(yscrollcommand=sb.set)
-
         self.tree_cond.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-
         self.tree_cond.bind("<Button-1>", self._on_tree_click)
 
-        # --- 조건 하단 UI ---
-        f_cond_footer = ttk.Frame(f_main)
-        f_cond_footer.pack(fill="x", pady=(0, 2))
-
-        self.lbl_condition_hint = ttk.Label(
-            f_cond_footer,
-            text=txt(
-                "💡 Click to cycle state: Ignore → Active Required → Inactive Required",
-                "💡 클릭으로 상태 순환: 무시 → 활성 필요 → 비활성 필요",
-            ),
-            foreground="gray",
-        )
-        self.lbl_condition_hint.pack(side="left", padx=5)
-
-        self.btn_reset_conditions = ttk.Button(
+        # Footer keeps a single affordance: Reset All as an underlined text
+        # link so the heavy ttk.Button no longer competes with the counter.
+        f_cond_footer = ttk.Frame(right)
+        f_cond_footer.grid(row=2, column=0, sticky="we")
+        f = theme.fonts()
+        self.btn_reset_conditions = tk.Label(
             f_cond_footer,
             text=txt("Reset All", "전체 초기화"),
-            command=self._reset_all_conditions,
-            width=dual_text_width("Reset All", "전체 초기화", min_width=10),
+            fg=theme.SIGNAL_BASE,
+            bg=theme.SURFACE_PAPER,
+            cursor="hand2",
+            font=(f["caption"].cget("family"), f["caption"].cget("size"), "underline"),
         )
         self.btn_reset_conditions.pack(side="right", padx=5)
-
-        self.lbl_condition_summary = ttk.Label(
-            f_cond_footer, text="", foreground="gray"
+        self.btn_reset_conditions.bind(
+            "<Button-1>", lambda _e: self._reset_all_conditions()
         )
-        self.lbl_condition_summary.pack(side="right", padx=5)
 
-        self.lbl_hidden_notice = ttk.Label(f_main, text="", foreground="#b37400")
-        self.lbl_hidden_notice.pack(fill="x", padx=5)
+        # Hidden-event notice rendered as a STATUS_WARN toast band rather
+        # than a bare line of red text. Toggled via _set_hidden_notice.
+        self.lbl_hidden_notice = tk.Label(
+            right,
+            text="",
+            bg=theme.SURFACE_PAPER,
+            fg=theme.STATUS_WARN_FG,
+            anchor="w",
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_1,
+        )
+        self.lbl_hidden_notice.grid(
+            row=3, column=0, sticky="we", padx=5, pady=(theme.SPACE_1, 0)
+        )
 
     def _setup_bottom_buttons(self):
-        f_btn = tk.Frame(self.win)
-        f_btn.pack(pady=10, fill="x")
+        # Bottom RunDock — divider + panel-tone strip with hint, capture,
+        # save, cancel. Uses theme accent/outline styles for hierarchy.
+        tk.Frame(self.win, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x")
+        f_btn = tk.Frame(self.win, bg=theme.SURFACE_PANEL)
+        f_btn.pack(fill="x", ipady=theme.SPACE_2)
 
-        self.lbl_bottom_hint = ttk.Label(
+        self.lbl_bottom_hint = tk.Label(
             f_btn,
             text="",
-            foreground="#555555",
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_SECONDARY,
         )
-        self.lbl_bottom_hint.pack(side="left", padx=10)
+        self.lbl_bottom_hint.pack(side="left", padx=theme.SPACE_3)
 
-        tk.Button(
-            f_btn, text=txt("Capture (Ctrl)", "캡처 (Ctrl)"), command=self.hold_image
-        ).pack(side="left", padx=20)
-        tk.Button(
-            f_btn, text=txt("Cancel (ESC)", "취소 (ESC)"), command=self.close_window
-        ).pack(side="right", padx=20)
-        tk.Button(
+        ttk.Button(
+            f_btn,
+            text=txt("Capture (Ctrl)", "캡처 (Ctrl)"),
+            command=self.hold_image,
+            style="Outline.TButton",
+        ).pack(side="left", padx=theme.SPACE_3)
+        self.btn_step_back = ttk.Button(
+            f_btn,
+            text=txt("← Back", "← 이전"),
+            command=lambda: self._goto_step(self.step_index - 1),
+            style="Outline.TButton",
+        )
+        self.btn_step_back.pack(side="left", padx=(0, theme.SPACE_1))
+        self.btn_step_next = ttk.Button(
+            f_btn,
+            text=txt("Next →", "다음 →"),
+            command=lambda: self._goto_step(self.step_index + 1),
+            style="Outline.TButton",
+        )
+        self.btn_step_next.pack(side="left", padx=(0, theme.SPACE_3))
+        ttk.Button(
+            f_btn,
+            text=txt("Cancel (ESC)", "취소 (ESC)"),
+            command=self.close_window,
+            style="Outline.TButton",
+        ).pack(side="right", padx=theme.SPACE_3)
+        ttk.Button(
             f_btn,
             text=txt("Save (Enter)", "저장 (Enter)"),
             command=self.save_event,
-            bg="#dddddd",
-        ).pack(side="right", padx=5)
+            style="Accent.TButton",
+        ).pack(side="right", padx=theme.SPACE_1)
 
     def _reset_all_conditions(self):
         """모든 조건을 무시 상태로 초기화"""
@@ -983,11 +1249,12 @@ class KeystrokeEventEditor:
             state_val = self.temp_conditions.get(evt.event_name, None)
             display = self._get_condition_display(state_val)
             tag = self._get_condition_tag(state_val)
+            indicator = self._get_condition_indicator(state_val)
             self.tree_cond.insert(
-                "", "end", values=(evt.event_name, display), tags=(tag,)
+                "", "end", values=(indicator, evt.event_name, display), tags=(tag,)
             )
 
-        # 숨겨진 이벤트 안내
+        # 숨겨진 이벤트 안내 — toast band on warning tone, blank otherwise.
         if self.lbl_hidden_notice:
             if hidden_count > 0:
                 self.lbl_hidden_notice.config(
@@ -995,13 +1262,25 @@ class KeystrokeEventEditor:
                         "{count} events were hidden to prevent circular references",
                         "{count}개 이벤트가 순환 방지를 위해 숨겨졌습니다",
                         count=hidden_count,
-                    )
+                    ),
+                    bg=theme.STATUS_WARN_BG,
+                    fg=theme.STATUS_WARN_FG,
                 )
             else:
-                self.lbl_hidden_notice.config(text="")
+                self.lbl_hidden_notice.config(
+                    text="", bg=theme.SURFACE_PAPER, fg=theme.STATUS_WARN_FG
+                )
 
         # 요약 카운터 갱신
         self._update_condition_summary()
+
+    @staticmethod
+    def _get_condition_indicator(state_val) -> str:
+        if state_val is True:
+            return "●"
+        if state_val is False:
+            return "○"
+        return "–"
 
     def _cycle_condition_state(self, current_state: str) -> tuple[str, Optional[bool]]:
         """조건 상태 순환: 무시 -> 활성 필요 -> 비활성 필요 -> 무시"""
@@ -1025,11 +1304,15 @@ class KeystrokeEventEditor:
             return
 
         vals = self.tree_cond.item(item_id, "values")
-        evt_name, curr_state = vals[0], vals[1]
+        # values are now (indicator, event_name, state_display).
+        evt_name, curr_state = vals[1], vals[2]
 
         new_state_disp, new_val = self._cycle_condition_state(curr_state)
         tag = self._get_condition_tag(new_val)
-        self.tree_cond.item(item_id, values=(evt_name, new_state_disp), tags=(tag,))
+        indicator = self._get_condition_indicator(new_val)
+        self.tree_cond.item(
+            item_id, values=(indicator, evt_name, new_state_disp), tags=(tag,)
+        )
 
         if new_val is None:
             self.temp_conditions.pop(evt_name, None)

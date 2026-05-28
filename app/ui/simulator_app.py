@@ -324,7 +324,7 @@ class ProfileFrame(tk.Frame):
 
 
 class ButtonFrame(tk.Frame):
-    """4-column grid keeps tools row aligned with the row beneath it."""
+    """Tool buttons; the app remaps the visible tools to a 3-column row."""
 
     _BTN_KEYS = (
         ("start", ("Start", "시작")),
@@ -346,7 +346,7 @@ class ButtonFrame(tk.Frame):
         self.btns: dict[str, tk.Button] = {}
         for col, (key, label_pair) in enumerate(self._BTN_KEYS):
             btn = tk.Button(self, text=txt(*label_pair), height=1, command=commands[key])
-            btn.grid(row=0, column=col, sticky="we", padx=(0, 6) if col < 3 else (0, 0))
+            btn.grid(row=0, column=col, sticky="we", padx=theme.SPACE_1)
             self.btns[key] = btn
         self.start_stop_button = self.btns["start"]
         self.quick_events_button = self.btns["quick_events"]
@@ -359,7 +359,7 @@ class ButtonFrame(tk.Frame):
 
 
 class ProfileButtonFrame(tk.Frame):
-    """Same 4-column grid; the empty fourth cell preserves alignment."""
+    """Profile tools share the same 3-column rhythm as the main tools."""
 
     _BTN_KEYS = (
         ("modkeys", ("ModKeys", "수정키")),
@@ -369,7 +369,7 @@ class ProfileButtonFrame(tk.Frame):
 
     def __init__(self, master, mod_cb, edit_cb, sort_cb, **kwargs):
         super().__init__(master, **kwargs)
-        for col in range(4):
+        for col in range(3):
             self.grid_columnconfigure(col, weight=1, uniform="tools")
         commands = {
             "modkeys": mod_cb,
@@ -379,7 +379,7 @@ class ProfileButtonFrame(tk.Frame):
         self.btns: dict[str, tk.Button] = {}
         for col, (key, label_pair) in enumerate(self._BTN_KEYS):
             btn = tk.Button(self, text=txt(*label_pair), height=1, command=commands[key])
-            btn.grid(row=0, column=col, sticky="we", padx=(0, 6))
+            btn.grid(row=0, column=col, sticky="we", padx=theme.SPACE_1)
             self.btns[key] = btn
         self.settings_button = self.btns["edit_profile"]
         self.modkeys_button = self.btns["modkeys"]
@@ -482,10 +482,14 @@ class KeystrokeSimulatorApp(tk.Tk):
             pady=theme.SPACE_3,
         )
         self.body.pack(fill="both", expand=True, side="top")
+        self.nav_rail = self._build_main_nav_rail(self.body)
+        self.nav_rail.pack(side=tk.LEFT, fill="y", padx=(0, theme.SPACE_3))
+        self.workspace = tk.Frame(self.body, bg=theme.SURFACE_PAPER)
+        self.workspace.pack(side=tk.LEFT, fill="both", expand=True)
 
         # TARGET card -----------------------------------------------------
         self.target_card, target_body = self._make_card(
-            self.body, txt("Target", "대상")
+            self.workspace, txt("Target", "대상")
         )
         self.target_card.pack(fill="x", pady=(0, theme.SPACE_3))
         self.process_frame = ProcessFrame(target_body, self.selected_process)
@@ -499,7 +503,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         # STATE card ------------------------------------------------------
         self.status_frame, status_body = self._make_card(
-            self.body, txt("State", "상태")
+            self.workspace, txt("State", "상태")
         )
         self.status_frame.pack(fill="x", pady=(0, theme.SPACE_3))
         # Color-bar on the left + content stack on the right.
@@ -552,7 +556,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         # TOOLS card ------------------------------------------------------
         self.tools_card, tools_body = self._make_card(
-            self.body, txt("Tools", "도구")
+            self.workspace, txt("Tools", "도구")
         )
         self.tools_card.pack(fill="x")
         self.button_frame = ButtonFrame(
@@ -573,9 +577,25 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_button_frame.configure(bg=theme.SURFACE_CANVAS)
         self.profile_button_frame.pack(fill="x")
 
-        # The Start button sits inside ButtonFrame; restyle it as the
-        # single accent action while keeping its variable reference.
+        # Keep the legacy start button reference for tests/callers, but make
+        # the visible primary action live in the RunDock per the SOT.
         self._apply_accent_button(self.button_frame.start_stop_button)
+        self.button_frame.start_stop_button.grid_remove()
+        for col in range(4):
+            self.button_frame.grid_columnconfigure(
+                col,
+                weight=1 if col < 3 else 0,
+                minsize=0,
+                uniform="tools" if col < 3 else "",
+            )
+        for col, btn in enumerate(
+            (
+                self.button_frame.quick_events_button,
+                self.button_frame.settings_button,
+                self.button_frame.clear_logs_button,
+            )
+        ):
+            btn.grid_configure(column=col, padx=theme.SPACE_1, sticky="we")
         # Mute the remaining tk.Button widgets to the outline look.
         for sec in (
             self.button_frame.quick_events_button,
@@ -607,6 +627,13 @@ class KeystrokeSimulatorApp(tk.Tk):
             anchor="w",
         )
         self.lbl_run_status.pack(side=tk.LEFT)
+        self.run_start_button = tk.Button(
+            self.run_dock,
+            text=txt("Start", "시작"),
+            command=self.toggle_start_stop,
+        )
+        self._apply_accent_button(self.run_start_button)
+        self.run_start_button.pack(side=tk.RIGHT)
 
         style = ttk.Style(self)
         style.configure("TEntry", fieldbackground=theme.SURFACE_CANVAS)
@@ -616,6 +643,64 @@ class KeystrokeSimulatorApp(tk.Tk):
     # ---------------------------------------------------------------
     # Helpers used by _create_ui
     # ---------------------------------------------------------------
+    def _build_main_nav_rail(self, parent: tk.Misc) -> tk.Frame:
+        f = theme.fonts()
+        rail = tk.Frame(
+            parent,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_3,
+            width=88,
+        )
+        rail.pack_propagate(False)
+
+        def make_item(icon: str, en: str, ko: str, command) -> None:
+            item = tk.Label(
+                rail,
+                text=f"{icon}\n{txt(en, ko)}",
+                bg=theme.SURFACE_PANEL,
+                fg=theme.INK_SECONDARY,
+                font=f["caption"],
+                justify="center",
+                cursor="hand2",
+                padx=theme.SPACE_1,
+                pady=theme.SPACE_2,
+            )
+            item.pack(fill="x", pady=(0, theme.SPACE_2))
+            item.bind("<Button-1>", lambda _e: command())
+
+        make_item("▣", "Process", "프로세스", self._focus_process_selector)
+        make_item("◇", "Profile", "프로필", self._focus_profile_selector)
+        make_item("▤", "Tools", "도구", self._focus_tools_section)
+        return rail
+
+    def _focus_process_selector(self) -> None:
+        widget = getattr(getattr(self, "process_frame", None), "process_combobox", None)
+        self._focus_combobox(widget)
+
+    def _focus_profile_selector(self) -> None:
+        widget = getattr(getattr(self, "profile_frame", None), "profile_combobox", None)
+        if widget is not None:
+            self._focus_combobox(widget)
+
+    @staticmethod
+    def _focus_combobox(widget) -> None:
+        if widget is None:
+            return
+        widget.focus_set()
+        try:
+            widget.tk.call("ttk::combobox::Post", widget)
+        except (AttributeError, tk.TclError):
+            try:
+                widget.event_generate("<Button-1>")
+            except (AttributeError, tk.TclError):
+                pass
+
+    def _focus_tools_section(self) -> None:
+        widget = getattr(getattr(self, "button_frame", None), "quick_events_button", None)
+        if widget is not None:
+            widget.focus_set()
+
     def _make_card(self, parent: tk.Misc, title: str) -> tuple[tk.Frame, tk.Frame]:
         """Create a workstation-style card with a thin divider title."""
         f = theme.fonts()
@@ -742,6 +827,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         if hasattr(self, "button_frame"):
             self.button_frame.refresh_texts()
             self._apply_accent_button(self.button_frame.start_stop_button)
+        run_start_button = self.__dict__.get("run_start_button")
+        if run_start_button is not None:
+            self._apply_accent_button(run_start_button)
         if hasattr(self, "profile_button_frame"):
             self.profile_button_frame.refresh_texts()
         if hasattr(self, "lbl_hotkey_hint"):
@@ -1498,25 +1586,29 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_frame.copy_button.config(state=state)
         self.profile_frame.del_button.config(state=state)
 
-        start_btn = self.button_frame.start_stop_button
-        start_btn.config(
-            text=txt("Stop", "중지") if running else txt("Start", "시작"),
-            state="normal" if running or readiness["can_start"] else "disabled",
-        )
-        if running:
-            start_btn.configure(
-                bg=theme.STATUS_RUNNING_FG,
-                fg=theme.INK_INVERSE,
-                activebackground=theme.STATUS_ERROR_FG,
-                activeforeground=theme.INK_INVERSE,
+        start_buttons = [self.button_frame.start_stop_button]
+        run_start_button = self.__dict__.get("run_start_button")
+        if run_start_button is not None:
+            start_buttons.append(run_start_button)
+        for start_btn in start_buttons:
+            start_btn.config(
+                text=txt("Stop", "중지") if running else txt("Start", "시작"),
+                state="normal" if running or readiness["can_start"] else "disabled",
             )
-        else:
-            start_btn.configure(
-                bg=theme.SIGNAL_BASE,
-                fg=theme.INK_INVERSE,
-                activebackground=theme.SIGNAL_HOVER,
-                activeforeground=theme.INK_INVERSE,
-            )
+            if running:
+                start_btn.configure(
+                    bg=theme.STATUS_RUNNING_FG,
+                    fg=theme.INK_INVERSE,
+                    activebackground=theme.STATUS_ERROR_FG,
+                    activeforeground=theme.INK_INVERSE,
+                )
+            else:
+                start_btn.configure(
+                    bg=theme.SIGNAL_BASE,
+                    fg=theme.INK_INVERSE,
+                    activebackground=theme.SIGNAL_HOVER,
+                    activeforeground=theme.INK_INVERSE,
+                )
         self.button_frame.quick_events_button.config(state=state)
         self.button_frame.settings_button.config(state=state)
         self.button_frame.clear_logs_button.config(state=state)

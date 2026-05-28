@@ -29,6 +29,8 @@ from app.ui import theme
 UI_PAD_XS = theme.SPACE_1
 UI_PAD_SM = theme.SPACE_1
 UI_PAD_MD = theme.SPACE_2
+PROFILE_WINDOW_DEFAULT_GEOMETRY = "1280x720"
+PROFILE_WINDOW_MIN_SIZE = (1120, 680)
 
 BADGE_BG_INFO = theme.STATUS_INFO_BG
 BADGE_FG_INFO = theme.STATUS_INFO_FG
@@ -768,6 +770,9 @@ class EventRow(ttk.Frame):
         self.entry.bind("<Button-3>", lambda e: self.cbs["menu"](e, self.row_num))
         self.entry.bind("<KeyRelease>", self._on_name_changed)
         self.entry.bind("<FocusOut>", self._on_name_changed)
+        self.entry.bind("<FocusIn>", self._on_select)
+        for widget in (self, self.color_bar, cell_body, header, meta, self.lbl_cond):
+            widget.bind("<Button-1>", self._on_select, add="+")
 
         # Initial Display
         self.update_display()
@@ -813,10 +818,9 @@ class EventRow(ttk.Frame):
             self._last_saved_name = event_name
         self._bound_event_id = id(self.event)
 
-        # Condition Only — keep the magnifier glyph and the legacy gray/black
-        # foregrounds so regression assertions on entry color remain valid.
+        # Condition Only — SOT icon vocabulary (◐ for conditions).
         is_cond = not getattr(self.event, "execute_action", True)
-        self.lbl_cond.config(text=txt("🔎 Cond", "🔎 조건") if is_cond else "")
+        self.lbl_cond.config(text=txt("◐ Cond", "◐ 조건") if is_cond else "")
         self.entry.config(foreground="gray" if is_cond else "black")
         self._tip_cond.update_text(
             txt(
@@ -830,11 +834,10 @@ class EventRow(ttk.Frame):
             )
         )
 
-        # Group — keep the raw group id text (the regression suite checks
-        # `lbl_grp.cget('text')` against the bare value). The visual emphasis
-        # comes from the surrounding chip styling, not from icon prefixes.
+        # Group — SOT icon vocabulary prefixes the group glyph (▣).
         grp = self.event.group_id or ""
-        self.lbl_grp.config(text=grp if grp else txt("No Group", "그룹 없음"))
+        grp_text = grp if grp else txt("No Group", "그룹 없음")
+        self.lbl_grp.config(text=f"▣ {grp_text}")
         self._tip_grp.update_text(
             txt(
                 f"Current group: {grp}. Click to change it.",
@@ -847,17 +850,17 @@ class EventRow(ttk.Frame):
             )
         )
 
-        # Key — preserve the legacy glyph format that the regression suite
-        # asserts (🔎 / ⌨️ / 🔁 prefixes). The chip styling now relies on
-        # surrounding padding and color cues rather than icon swaps.
+        # Key — SOT icon vocabulary (⌨ for key, ◐ for condition-only,
+        # ⇄ prefix for inverted match).
         key = self.event.key_to_enter or ""
         invert = getattr(self.event, "invert_match", False)
         if is_cond:
-            display = txt("🔎 Condition", "🔎 조건용")
+            display = txt("◐ Condition", "◐ 조건용")
         else:
-            display = key if key else txt("⌨️ None", "⌨️ 없음")
+            key_text = key if key else txt("None", "없음")
+            display = f"⌨ {key_text}"
         if invert:
-            display = f"🔁 {display}"
+            display = f"⇄ {display}"
         self.lbl_key.config(text=display)
 
         # Left color bar reflects the row's overall liveness.
@@ -918,6 +921,10 @@ class EventRow(ttk.Frame):
             if "save" in self.cbs:
                 self.cbs["save"]()
 
+    def _on_select(self, event=None):
+        if self.event and "select" in self.cbs:
+            self.cbs["select"](self.event)
+
     def _on_click(self, key):
         if key == "open":
             self.cbs["open"](self.row_num, self.event)
@@ -965,6 +972,7 @@ class EventListFrame(ttk.Frame):
         save_cb: Callable,
         name_getter: Optional[Callable[[], str]] = None,
         status_cb: Optional[Callable[[str], None]] = None,
+        select_cb: Optional[Callable[[EventModel], None]] = None,
     ):
         super().__init__(win)
         self.win, self.profile, self.save_cb = win, profile, save_cb
@@ -972,6 +980,7 @@ class EventListFrame(ttk.Frame):
         self.ctx_row = None
         self.profile_name_getter = name_getter
         self.status_cb = status_cb
+        self.select_cb = select_cb
         self.graph_viewer = None
         self.empty_state_frame: Optional[ttk.LabelFrame] = None
         self.add_event_label = txt("➕ Add Event", "➕ 이벤트 추가")
@@ -1467,6 +1476,7 @@ class EventListFrame(ttk.Frame):
                 self.empty_state_frame,
                 text=txt("➕ Add First Event", "➕ 첫 이벤트 추가"),
                 command=self._add_event,
+                style="Accent.TButton",
             ).pack(anchor="e", padx=10, pady=(6, 8))
         else:
             self.empty_state_frame.grid()
@@ -1492,6 +1502,7 @@ class EventListFrame(ttk.Frame):
             "menu": self._show_menu,
             "group_select": self._on_group_select,  # NEW
             "save": lambda: self.save_cb(check_name=False),  # 추가
+            "select": self._select_event,
         }
         row = EventRow(self, idx, event, cbs)
         row.grid(
@@ -1503,6 +1514,10 @@ class EventListFrame(ttk.Frame):
             sticky="ew",
         )
         self.rows.append(row)
+
+    def _select_event(self, event: EventModel) -> None:
+        if self.select_cb:
+            self.select_cb(event)
 
     def _open_editor(self, row, evt):
         KeystrokeEventEditor(
@@ -1717,9 +1732,12 @@ class KeystrokeProfiles:
         self._autosave_after_id = None
         self._last_saved_fingerprint = None
         self._overview_status_text = ""
+        self._inspector_event = None
 
         self.win = tk.Toplevel(main_win)
         self.win.title(f"{txt('Profile Manager', '프로필 관리자')} - {self.prof_name}")
+        self.win.geometry(PROFILE_WINDOW_DEFAULT_GEOMETRY)
+        self.win.minsize(*PROFILE_WINDOW_MIN_SIZE)
         self.win.transient(main_win)
         self.win.grab_set()
         self.win.bind("<Escape>", self._close)
@@ -1747,12 +1765,18 @@ class KeystrokeProfiles:
         )
         self.runtime_toggle_frame.pack(fill="x", padx=UI_PAD_MD, pady=(0, UI_PAD_SM))
 
-        f_status = ttk.Frame(self.win)
-        f_status.pack(fill="x", padx=UI_PAD_MD, pady=(0, UI_PAD_SM))
-        ttk.Label(
+        tk.Frame(self.win, bg=theme.SURFACE_DIVIDER, height=1).pack(
+            side="bottom", fill="x"
+        )
+        f_status = tk.Frame(self.win, bg=theme.SURFACE_PANEL)
+        f_status.pack(
+            side="bottom", fill="x", padx=UI_PAD_MD, pady=(UI_PAD_SM, UI_PAD_MD)
+        )
+        tk.Label(
             f_status,
             text=txt("Save:", "저장:"),
-            foreground=theme.INK_MUTED,
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
         ).pack(side=tk.LEFT)
         self.lbl_save_badge = tk.Label(
             f_status,
@@ -1766,13 +1790,19 @@ class KeystrokeProfiles:
             highlightbackground=theme.SURFACE_DIVIDER,
         )
         self.lbl_save_badge.pack(side=tk.LEFT, padx=UI_PAD_SM)
-        self.lbl_status = ttk.Label(
-            f_status, text="", foreground=theme.INK_MUTED
+        self.lbl_status = tk.Label(
+            f_status,
+            text="",
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
         )
         self.lbl_status.pack(side=tk.LEFT, padx=UI_PAD_MD)
 
-        f_summary = ttk.Frame(f_status)
+        f_summary = tk.Frame(f_status, bg=theme.SURFACE_PANEL)
         f_summary.pack(side=tk.RIGHT)
+        ttk.Button(f_summary, text=txt("Close", "닫기"), command=self._close).pack(
+            side=tk.RIGHT, padx=(UI_PAD_SM, 0)
+        )
         self.lbl_events_badge = self._make_chip(f_summary)
         self.lbl_events_badge.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
         self.lbl_groups_badge = self._make_chip(f_summary)
@@ -1780,20 +1810,27 @@ class KeystrokeProfiles:
         self.lbl_attention_badge = self._make_chip(f_summary)
         self.lbl_attention_badge.pack(side=tk.LEFT)
 
+        # Workspace: left NavRail + right event list (+ inspector later).
+        self.workspace = ttk.Frame(self.win)
+        self.workspace.pack(
+            fill="both", expand=True, padx=UI_PAD_MD, pady=(0, UI_PAD_SM)
+        )
+        self.nav_rail = self._build_nav_rail(self.workspace)
+        self.nav_rail.pack(side=tk.LEFT, fill="y", padx=(0, UI_PAD_MD))
+
         self.e_frame = EventListFrame(
-            self.win,
+            self.workspace,
             self.profile,
             self._on_changed,
             name_getter=lambda: self.prof_name,
             status_cb=self._show_temp_status,
+            select_cb=self._set_inspector_event,
         )
-        self.e_frame.pack(fill="both", expand=True, padx=0, pady=(0, UI_PAD_SM))
+        self.e_frame.pack(side=tk.LEFT, fill="both", expand=True)
 
-        f_btn = ttk.Frame(self.win, style="success.TFrame")
-        f_btn.pack(side="bottom", fill="x", padx=UI_PAD_MD, pady=(UI_PAD_SM, UI_PAD_MD))
-        ttk.Button(f_btn, text=txt("Close", "닫기"), command=self._close).pack(
-            side=tk.RIGHT, anchor="center"
-        )
+        # Right-side Inspector — read-only preview / profile summary.
+        self.inspector_panel = self._build_inspector(self.workspace)
+        self.inspector_panel.pack(side=tk.LEFT, fill="y", padx=(UI_PAD_MD, 0))
 
         self._load_pos()
         self._refresh_profile_overview()
@@ -1815,6 +1852,311 @@ class KeystrokeProfiles:
             highlightthickness=1,
             highlightbackground=theme.SURFACE_DIVIDER,
         )
+
+    def _build_nav_rail(self, parent: tk.Misc) -> tk.Frame:
+        """좌측 NavRail: FILTER / GROUPS / ACTIONS.
+
+        Filter checkboxes are disabled placeholders in this milestone, matching
+        the SOT's visual slot without adding filter semantics. ACTIONS reuse the
+        existing EventListFrame command callbacks so behaviour stays intact.
+        """
+        f = theme.fonts()
+        rail = tk.Frame(
+            parent,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_3,
+            width=180,
+        )
+        rail.pack_propagate(False)
+
+        def _section_label(text: str) -> None:
+            tk.Label(
+                rail,
+                text=text,
+                bg=theme.SURFACE_PANEL,
+                fg=theme.INK_MUTED,
+                font=f["caption"],
+                anchor="w",
+            ).pack(fill="x", pady=(theme.SPACE_2, theme.SPACE_1))
+
+        # --- FILTER (visual placeholder) -------------------------------
+        _section_label(txt("FILTER", "필터"))
+        self.nav_filter_vars: dict[str, tk.BooleanVar] = {}
+        for key, en, ko in [
+            ("active", "Active", "활성"),
+            ("grouped", "Grouped", "그룹화"),
+            ("cond", "Condition only", "조건 전용"),
+        ]:
+            var = tk.BooleanVar(value=False)
+            self.nav_filter_vars[key] = var
+            cb = ttk.Checkbutton(
+                rail,
+                text=txt(en, ko),
+                variable=var,
+                state="disabled",
+            )
+            cb.pack(anchor="w")
+
+        # --- GROUPS (read-only) ----------------------------------------
+        _section_label(txt("GROUPS", "그룹"))
+        self.nav_groups_frame = tk.Frame(rail, bg=theme.SURFACE_PANEL)
+        self.nav_groups_frame.pack(fill="x")
+
+        # --- ACTIONS ---------------------------------------------------
+        _section_label(txt("ACTIONS", "액션"))
+        for en, ko, callback in [
+            ("＋ Add", "＋ 추가", self._nav_action_add),
+            ("Import", "가져오기", self._nav_action_import),
+            ("Sort", "정렬", self._nav_action_sort),
+            ("Graph", "그래프", self._nav_action_graph),
+        ]:
+            btn = ttk.Button(
+                rail,
+                text=txt(en, ko),
+                command=callback,
+            )
+            btn.pack(fill="x", pady=(0, theme.SPACE_1))
+
+        return rail
+
+    def _refresh_nav_groups(self) -> None:
+        if not getattr(self, "nav_groups_frame", None):
+            return
+        for child in self.nav_groups_frame.winfo_children():
+            child.destroy()
+        events = list(self.profile.event_list or [])
+        groups = sorted({e.group_id for e in events if e.group_id})
+        f = theme.fonts()
+        if not groups:
+            tk.Label(
+                self.nav_groups_frame,
+                text=txt("(none)", "(없음)"),
+                bg=theme.SURFACE_PANEL,
+                fg=theme.INK_MUTED,
+                font=f["caption"],
+                anchor="w",
+            ).pack(fill="x")
+            return
+        for grp in groups:
+            tk.Label(
+                self.nav_groups_frame,
+                text=f"▣ {grp}",
+                bg=theme.SURFACE_PANEL,
+                fg=theme.INK_PRIMARY,
+                font=f["caption"],
+                anchor="w",
+            ).pack(fill="x")
+
+    # --- NavRail action forwards (preserve existing call sites) -------
+    def _nav_action_add(self) -> None:
+        if getattr(self, "e_frame", None):
+            self.e_frame._add_event()
+
+    def _nav_action_import(self) -> None:
+        # Mirror the call site already used by EventListFrame's import button.
+        if getattr(self, "e_frame", None):
+            EventImporter(self.win, self.e_frame._import)
+
+    def _nav_action_sort(self) -> None:
+        if getattr(self, "e_frame", None):
+            self.e_frame._sort_events_by_name()
+
+    def _nav_action_graph(self) -> None:
+        if getattr(self, "e_frame", None):
+            self.e_frame._open_graph()
+
+    # ------------------------------------------------------------------
+    # Right-side Inspector
+    # ------------------------------------------------------------------
+    def _build_inspector(self, parent: tk.Misc) -> tk.Frame:
+        f = theme.fonts()
+        panel = tk.Frame(
+            parent,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_3,
+            width=240,
+        )
+        panel.pack_propagate(False)
+        tk.Label(
+            panel,
+            text=txt("DETAILS", "상세"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+            anchor="w",
+        ).pack(fill="x", pady=(0, theme.SPACE_2))
+
+        # Accordion sections — each header toggles its body via _toggle_section.
+        self._inspector_sections: dict[str, dict] = {}
+
+        summary_body = self._make_accordion_section(
+            panel, "summary", txt("Summary", "요약"), expanded=True
+        )
+        self.lbl_inspector_title = tk.Label(
+            summary_body,
+            text="",
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_PRIMARY,
+            font=f["body_bold"],
+            anchor="w",
+            wraplength=200,
+            justify="left",
+        )
+        self.lbl_inspector_title.pack(fill="x", pady=(0, theme.SPACE_1))
+        self.lbl_inspector_meta = tk.Label(
+            summary_body,
+            text="",
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_SECONDARY,
+            font=f["caption"],
+            anchor="w",
+            justify="left",
+            wraplength=200,
+        )
+        self.lbl_inspector_meta.pack(fill="x")
+
+        hint_body = self._make_accordion_section(
+            panel, "activity", txt("Activity", "사용"), expanded=True
+        )
+        self.lbl_inspector_hint = tk.Label(
+            hint_body,
+            text=txt(
+                "Use the rail on the left to review groups or run an action.\n\nClick a row's Edit button to open the full editor.",
+                "왼쪽 네비로 그룹을 확인하거나 액션을 실행하고, 각 행의 편집 버튼으로 전체 편집기를 엽니다.",
+            ),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+            anchor="w",
+            justify="left",
+            wraplength=200,
+        )
+        self.lbl_inspector_hint.pack(fill="x")
+        return panel
+
+    def _make_accordion_section(
+        self, parent: tk.Misc, key: str, title: str, expanded: bool = True
+    ) -> tk.Frame:
+        """Build an expandable/collapsible Inspector section. Returns the
+        body frame so callers can mount their content inside it."""
+        f = theme.fonts()
+        wrapper = tk.Frame(parent, bg=theme.SURFACE_PANEL)
+        wrapper.pack(fill="x", pady=(0, theme.SPACE_2))
+
+        header = tk.Frame(wrapper, bg=theme.SURFACE_PANEL, cursor="hand2")
+        header.pack(fill="x")
+        glyph = tk.Label(
+            header,
+            text="▾" if expanded else "▸",
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+        )
+        glyph.pack(side="left", padx=(0, theme.SPACE_1))
+        label = tk.Label(
+            header,
+            text=title,
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+            anchor="w",
+        )
+        label.pack(side="left", fill="x", expand=True)
+
+        body = tk.Frame(wrapper, bg=theme.SURFACE_PANEL)
+        if expanded:
+            body.pack(fill="x", pady=(theme.SPACE_1, 0))
+
+        section = {
+            "wrapper": wrapper,
+            "header": header,
+            "glyph": glyph,
+            "body": body,
+            "expanded": expanded,
+        }
+        self._inspector_sections[key] = section
+
+        def _toggle(_e=None, _key=key):
+            self._toggle_accordion_section(_key)
+
+        header.bind("<Button-1>", _toggle)
+        glyph.bind("<Button-1>", _toggle)
+        label.bind("<Button-1>", _toggle)
+        return body
+
+    def _toggle_accordion_section(self, key: str) -> None:
+        section = self._inspector_sections.get(key)
+        if not section:
+            return
+        section["expanded"] = not section["expanded"]
+        if section["expanded"]:
+            section["body"].pack(fill="x", pady=(theme.SPACE_1, 0))
+            section["glyph"].config(text="▾")
+        else:
+            section["body"].pack_forget()
+            section["glyph"].config(text="▸")
+
+    def _refresh_inspector(self) -> None:
+        if not hasattr(self, "lbl_inspector_title"):
+            return
+        events = list(self.profile.event_list or [])
+        event_count = len(events)
+        group_count = len({e.group_id for e in events if e.group_id})
+        runtime_members = runtime_toggle_member_count(events)
+        selected = getattr(self, "_inspector_event", None)
+        selected = selected if any(evt is selected for evt in events) else None
+        if selected is None:
+            self._inspector_event = None
+        else:
+            key = (selected.key_to_enter or "").strip()
+            group = selected.group_id or txt("No Group", "그룹 없음")
+            cond_count = len(getattr(selected, "conditions", {}) or {})
+            mode = txt("Condition only", "조건 전용") if not getattr(
+                selected, "execute_action", True
+            ) else txt("Action", "실행")
+            self.lbl_inspector_title.config(text=selected.event_name or txt("(Unnamed)", "(이름 없음)"))
+            self.lbl_inspector_meta.config(
+                text="\n".join(
+                    [
+                        txt(
+                            f"{mode} · Group {group}",
+                            f"{mode} · 그룹 {group}",
+                        ),
+                        txt(
+                            f"Key: {key if key else 'None'} · Priority {selected.priority}",
+                            f"키: {key if key else '없음'} · 우선순위 {selected.priority}",
+                        ),
+                        txt(
+                            f"Conditions: {cond_count}",
+                            f"조건: {cond_count}개",
+                        ),
+                    ]
+                )
+            )
+            return
+
+        favorite_glyph = "★ " if self.profile.favorite else ""
+        self.lbl_inspector_title.config(text=f"{favorite_glyph}{self.prof_name}")
+        meta_lines = [
+            txt(
+                f"{event_count} events · {group_count} groups",
+                f"이벤트 {event_count}개 · 그룹 {group_count}개",
+            ),
+        ]
+        if runtime_members:
+            meta_lines.append(
+                txt(
+                    f"Runtime extra: {runtime_members}",
+                    f"실행 중 추가: {runtime_members}개",
+                )
+            )
+        self.lbl_inspector_meta.config(text="\n".join(meta_lines))
+
+    def _set_inspector_event(self, event: EventModel) -> None:
+        self._inspector_event = event
+        self._refresh_inspector()
 
     def _load(self):
         try:
@@ -1906,7 +2248,20 @@ class KeystrokeProfiles:
             duration_ms, lambda: self.lbl_status.config(text="", foreground="gray")
         )
 
+    def _set_save_badge_bg(self, bg: str) -> None:
+        badge = getattr(self, "lbl_save_badge", None)
+        if badge is None:
+            return
+        try:
+            if hasattr(badge, "winfo_exists") and not badge.winfo_exists():
+                return
+            badge.config(bg=bg)
+        except (tk.TclError, AttributeError):
+            return
+
     def _refresh_profile_overview(self):
+        self._refresh_nav_groups()
+        self._refresh_inspector()
         events = list(self.profile.event_list or [])
         event_count = len(events)
         group_count = len({e.group_id for e in events if e.group_id})
@@ -2007,6 +2362,18 @@ class KeystrokeProfiles:
                 bg=BADGE_BG_OK,
                 fg=BADGE_FG_OK,
             )
+            # Soft flash to communicate the "just saved" moment. Guarded so
+            # headless tests that stub the class without a window don't crash.
+            win = getattr(self, "win", None)
+            if win is not None:
+                win.after(
+                    150,
+                    lambda: self._set_save_badge_bg(theme.SIGNAL_TINT),
+                )
+                win.after(
+                    900,
+                    lambda: self._set_save_badge_bg(BADGE_BG_OK),
+                )
             self.lbl_status.config(
                 text=detail if detail else self._overview_status_text,
                 foreground="gray",

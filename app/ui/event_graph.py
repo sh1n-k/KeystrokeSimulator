@@ -9,16 +9,26 @@ from typing import Dict, List, Tuple
 from PIL import Image, ImageDraw, ImageFont
 
 from app.core.models import ProfileModel
+from app.ui import theme
 
 
-BACKGROUND = (248, 247, 242)
-TEXT_COLOR = (30, 30, 30)
-TEXT_COLOR_FADE = (120, 120, 120)
-EDGE_TRUE = (80, 160, 90)
-EDGE_FALSE = (190, 80, 80)
-EDGE_UNKNOWN = (120, 120, 120)
-BORDER_COLOR = (60, 60, 60)
-MISSING_FILL = (230, 230, 230)
+def _rgb(hex_color: str) -> tuple[int, int, int]:
+    value = hex_color.lstrip("#")
+    return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
+
+
+# Workstation palette in RGB form, derived from app/ui/theme.py tokens.
+BACKGROUND = _rgb(theme.SURFACE_PAPER)
+PANEL_BG = _rgb(theme.SURFACE_PANEL)
+SUNKEN_BG = _rgb(theme.SURFACE_SUNKEN)
+TEXT_COLOR = _rgb(theme.INK_PRIMARY)
+TEXT_COLOR_FADE = _rgb(theme.INK_MUTED)
+EDGE_TRUE = _rgb(theme.SIGNAL_BASE)
+EDGE_FALSE = _rgb(theme.COND_INACTIVE_FG)
+EDGE_UNKNOWN = _rgb(theme.INK_MUTED)
+BORDER_COLOR = _rgb(theme.INK_SECONDARY)
+DIVIDER_COLOR = _rgb(theme.SURFACE_DIVIDER)
+MISSING_FILL = _rgb(theme.SURFACE_SUNKEN)
 
 NODE_W = 200
 NODE_H = 60
@@ -141,7 +151,20 @@ def render_profile_graph(profile: ProfileModel, profile_name: str) -> Image.Imag
 
     draw = ImageDraw.Draw(img)
 
+    # Title gets a calmer panel-tone background pill so it reads as the
+    # graph header rather than floating ink on the canvas.
     title = f"Profile: {profile_name} ({len(profile.event_list)} events)"
+    t_bbox = draw.textbbox((0, 0), title, font=font)
+    tw = t_bbox[2] - t_bbox[0]
+    th = t_bbox[3] - t_bbox[1]
+    pad_x, pad_y = 10, 6
+    draw.rounded_rectangle(
+        [MARGIN - pad_x, MARGIN - pad_y - 8, MARGIN + tw + pad_x, MARGIN + th + pad_y - 8],
+        radius=8,
+        fill=PANEL_BG,
+        outline=DIVIDER_COLOR,
+        width=1,
+    )
     draw.text((MARGIN, MARGIN - 8), title, fill=TEXT_COLOR, font=font)
 
     # Z2: Edges (bezier curves)
@@ -1026,10 +1049,18 @@ def _sanitize_filename(name: str) -> str:
     return safe.strip("_")
 
 
+# Bumping this string invalidates previously cached graph PNGs so changes
+# to the rendering palette take effect on the next render.
+RENDER_VERSION = "ws-v2"
+
+
 def _profile_hash(profile: ProfileModel) -> str:
-    payload = []
+    payload = {
+        "render_version": RENDER_VERSION,
+        "events": [],
+    }
     for idx, evt in enumerate(profile.event_list):
-        payload.append(
+        payload["events"].append(
             {
                 "idx": idx,
                 "name": evt.event_name,
@@ -1069,9 +1100,20 @@ def _draw_legend(
     font: ImageFont.ImageFont,
     font_legend: ImageFont.ImageFont,
 ) -> None:
-    draw.line(
-        [(MARGIN, legend_y), (canvas_width - MARGIN, legend_y)],
-        fill=(200, 200, 200),
+    # Card-style legend on the workstation panel tone — matches Settings /
+    # Editor cards instead of the previous bare horizontal divider.
+    card_pad = 14
+    card_h = _calc_legend_height(nodes) - MARGIN
+    draw.rounded_rectangle(
+        [
+            MARGIN - card_pad,
+            legend_y - card_pad // 2,
+            canvas_width - MARGIN + card_pad,
+            legend_y + card_h,
+        ],
+        radius=10,
+        fill=PANEL_BG,
+        outline=DIVIDER_COLOR,
         width=1,
     )
     draw.text((MARGIN, legend_y + 6), "Legend", fill=TEXT_COLOR, font=font)

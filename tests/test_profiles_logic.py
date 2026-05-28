@@ -468,9 +468,9 @@ class TestEventRowBadges(unittest.TestCase):
 
         row.update_display()
 
-        self.assertEqual(row.lbl_cond.cget("text"), "🔎 Cond")
-        self.assertEqual(row.lbl_grp.cget("text"), "G1")
-        self.assertEqual(row.lbl_key.cget("text"), "🔎 Condition")
+        self.assertEqual(row.lbl_cond.cget("text"), "◐ Cond")
+        self.assertEqual(row.lbl_grp.cget("text"), "▣ G1")
+        self.assertEqual(row.lbl_key.cget("text"), "◐ Condition")
         self.assertEqual(row.entry.cget("foreground"), "gray")
 
     def test_row_displays_invert_and_missing_key_badges(self):
@@ -484,7 +484,7 @@ class TestEventRowBadges(unittest.TestCase):
 
         row.update_display()
 
-        self.assertEqual(row.lbl_key.cget("text"), "🔁 ⌨️ None")
+        self.assertEqual(row.lbl_key.cget("text"), "⇄ ⌨ None")
         self.assertIn("Invert match", row._tip_key.text)
 
 
@@ -600,6 +600,27 @@ class TestProfileOverviewBadges(unittest.TestCase):
             stub.lbl_status.cget("text"),
             "All events are ready for autosave and run checks.",
         )
+
+    def test_save_badge_flash_skips_destroyed_widget(self):
+        stub = KeystrokeProfiles.__new__(KeystrokeProfiles)
+        stub.lbl_save_badge = MagicMock()
+        stub.lbl_save_badge.winfo_exists.return_value = False
+
+        stub._set_save_badge_bg("#fff")
+
+        stub.lbl_save_badge.config.assert_not_called()
+
+
+class TestProfileNavRailActions(unittest.TestCase):
+    def test_nav_import_uses_event_list_import_callback(self):
+        stub = KeystrokeProfiles.__new__(KeystrokeProfiles)
+        stub.win = object()
+        stub.e_frame = MagicMock()
+
+        with patch("app.ui.profiles.EventImporter") as importer:
+            stub._nav_action_import()
+
+        importer.assert_called_once_with(stub.win, stub.e_frame._import)
 
 
 class TestProfileSaveValidation(unittest.TestCase):

@@ -102,6 +102,17 @@ class KeystrokeQuickEventEditor:
             wraplength=420,
             foreground=theme.INK_SECONDARY,
         ).pack(anchor="w", padx=8, pady=(4, 2))
+        # Stepper gauge — dots for steps, dashes for connectors, recolored
+        # by _refresh_status_text as the user progresses through the flow.
+        self.lbl_gauge = ttk.Label(
+            f_intro,
+            text="",
+            font=theme.fonts()["mono"],
+            foreground=theme.INK_MUTED,
+            anchor="w",
+            justify="left",
+        )
+        self.lbl_gauge.pack(anchor="w", padx=8, pady=(0, 4))
         self.lbl_step = ttk.Label(f_intro, text="", foreground=theme.SIGNAL_BASE)
         self.lbl_step.pack(anchor="w", padx=8, pady=(0, 6))
 
@@ -163,23 +174,26 @@ class KeystrokeQuickEventEditor:
         for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
             self.spn_capture_h.bind(seq, self._on_capture_size_change)
 
-        # Buttons
-        f_btn = tk.Frame(self.win)
-        f_btn.pack(pady=5)
-        tk.Button(
+        # RunDock buttons
+        tk.Frame(self.win, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x")
+        f_btn = tk.Frame(self.win, bg=theme.SURFACE_PANEL)
+        f_btn.pack(fill="x", ipady=theme.SPACE_2)
+        ttk.Button(
             f_btn,
             text=txt("Grab (Ctrl)", "캡처 (Ctrl)"),
             width=dual_text_width(
                 "Grab (Ctrl)", "캡처 (Ctrl)", padding=2, min_width=11
             ),
             command=self.hold_image,
-        ).pack(side=tk.LEFT, padx=5)
-        tk.Button(
+            style="Accent.TButton",
+        ).pack(side=tk.LEFT, padx=theme.SPACE_3)
+        ttk.Button(
             f_btn,
             text=txt("Close (ESC)", "닫기 (ESC)"),
             width=dual_text_width("Close (ESC)", "닫기 (ESC)", padding=2, min_width=11),
             command=self.close,
-        ).pack(side=tk.LEFT, padx=5)
+            style="Outline.TButton",
+        ).pack(side=tk.LEFT, padx=(0, theme.SPACE_3))
 
         self.lbl_feedback = ttk.Label(
             self.win,
@@ -385,6 +399,7 @@ class KeystrokeQuickEventEditor:
                     count=self.saved_count,
                 )
             )
+        self._refresh_gauge()
         if not self.lbl_step:
             return
         if not self.latest_img:
@@ -417,6 +432,38 @@ class KeystrokeQuickEventEditor:
                 "현재 단계: 이 Quick 이벤트를 저장하려면 CTRL을 다시 누르세요.",
             )
         )
+
+    def _current_step_index(self) -> int:
+        """0=POINT, 1=CAPTURE, 2=PICK, 3=SAVE."""
+        if not self.latest_img:
+            return 0
+        if not self.held_img:
+            return 1
+        if not self.clicked_pos:
+            return 2
+        return 3
+
+    def _refresh_gauge(self) -> None:
+        if not getattr(self, "lbl_gauge", None):
+            return
+        idx = self._current_step_index()
+        glyphs = []
+        for i in range(4):
+            glyphs.append("●" if i <= idx else "○")
+        gauge = "  ━━  ".join(glyphs)
+        labels = [
+            txt("POINT", "포인트"),
+            txt("CAPTURE", "캡처"),
+            txt("PICK", "지정"),
+            txt("SAVE", "저장"),
+        ]
+        # Render in a single line: ● POINT  ━━  ● CAPTURE  ━━  ○ PICK  ━━  ○ SAVE
+        parts = []
+        for i, label in enumerate(labels):
+            mark = "●" if i <= idx else "○"
+            parts.append(f"{mark} {label}")
+        text = "  ━━  ".join(parts)
+        self.lbl_gauge.config(text=text)
 
     def save_event(self):
         if all(

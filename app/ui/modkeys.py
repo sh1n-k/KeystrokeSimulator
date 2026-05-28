@@ -26,7 +26,7 @@ class ModificationKeysWindow(tk.Toplevel):
 
         self.valid_keys = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
         self.labels = ("Alt", "Ctrl", "Shift")
-        self.rows = []  # (chk_var, cmb_var, prev_val, pass_var, cmb_widget)
+        self.rows = []  # (chk_var, cmb_var, prev_val, pass_var, cmb_widget, card, lbl_cap, lbl_name, chip)
 
         self._setup_ui()
         self._load_data()
@@ -36,8 +36,43 @@ class ModificationKeysWindow(tk.Toplevel):
         self.focus_force()
         WindowUtils.center_window(self)
 
+    # SOT icon vocabulary for modifier keycaps.
+    _KEYCAPS = {"Alt": "⎇", "Ctrl": "⌃", "Shift": "⇧"}
+
+    def _build_context_bar(self) -> tk.Frame:
+        f = theme.fonts()
+        bar = tk.Frame(
+            self,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_2,
+        )
+        tk.Label(
+            bar,
+            text=txt("Modifier Keys", "수정 키"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_PRIMARY,
+            font=f["heading"],
+        ).pack(side="left")
+        tk.Label(
+            bar,
+            text=self.prof_name,
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+        ).pack(side="left", padx=(theme.SPACE_3, 0))
+        return bar
+
     def _setup_ui(self):
-        # Each modifier becomes its own card.
+        # Top ContextBar — keeps profile context visible across the dialog.
+        bar = self._build_context_bar()
+        bar.grid(row=0, column=0, columnspan=7, sticky="we")
+        tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).grid(
+            row=1, column=0, columnspan=7, sticky="we"
+        )
+
+        # Each modifier becomes its own card with a keycap glyph on the left.
+        f = theme.fonts()
         for i, lbl in enumerate(self.labels):
             card = tk.Frame(
                 self,
@@ -46,32 +81,46 @@ class ModificationKeysWindow(tk.Toplevel):
                 highlightbackground=theme.SURFACE_DIVIDER,
             )
             card.grid(
-                row=i,
+                row=i + 2,
                 column=0,
                 columnspan=6,
                 padx=theme.SPACE_3,
                 pady=theme.SPACE_1,
                 sticky="we",
             )
-            tk.Label(
+            keycap = self._KEYCAPS.get(lbl, "")
+            # Big monospace keycap glyph
+            lbl_cap = tk.Label(
+                card,
+                text=keycap,
+                width=2,
+                bg=theme.SURFACE_SUNKEN,
+                fg=theme.INK_PRIMARY,
+                font=f["display"],
+                padx=theme.SPACE_2,
+                pady=theme.SPACE_1,
+            )
+            lbl_cap.grid(row=0, column=0, padx=(theme.SPACE_2, theme.SPACE_1), pady=theme.SPACE_2)
+            lbl_name = tk.Label(
                 card,
                 text=lbl,
                 width=8,
                 bg=theme.SURFACE_CANVAS,
                 fg=theme.INK_PRIMARY,
-                font=theme.fonts()["body_bold"],
-            ).grid(row=0, column=0, padx=theme.SPACE_2, pady=theme.SPACE_2)
+                font=f["body_bold"],
+            )
+            lbl_name.grid(row=0, column=1, padx=theme.SPACE_1, pady=theme.SPACE_2)
 
             chk = tk.BooleanVar()
             ttk.Checkbutton(card, variable=chk).grid(
-                row=0, column=1, padx=theme.SPACE_1
+                row=0, column=2, padx=theme.SPACE_1
             )
 
             cmb_var = tk.StringVar(value="PressKey")
             cmb = ttk.Combobox(
                 card, textvariable=cmb_var, values=["PressKey"], width=10
             )
-            cmb.grid(row=0, column=2, padx=theme.SPACE_1)
+            cmb.grid(row=0, column=3, padx=theme.SPACE_1)
             cmb.bind(
                 "<KeyPress>", lambda e, v=cmb_var, idx=i: self._on_key(e, v, idx)
             )
@@ -81,30 +130,70 @@ class ModificationKeysWindow(tk.Toplevel):
                 text=txt("Pass through", "패스"),
                 bg=theme.SURFACE_CANVAS,
                 fg=theme.INK_MUTED,
-                font=theme.fonts()["caption"],
-            ).grid(row=0, column=3, padx=(theme.SPACE_3, theme.SPACE_1))
+                font=f["caption"],
+            ).grid(row=0, column=4, padx=(theme.SPACE_3, theme.SPACE_1))
 
             pas = tk.BooleanVar(value=False)
             ttk.Checkbutton(
                 card, variable=pas, command=lambda idx=i: self._toggle_pass(idx)
-            ).grid(row=0, column=4, padx=theme.SPACE_1)
+            ).grid(row=0, column=5, padx=theme.SPACE_1)
 
-            self.rows.append((chk, cmb_var, tk.StringVar(value="PressKey"), pas, cmb))
+            # "PASS" chip surfaces alongside the keycap when Pass mode is on
+            # so users can tell at a glance which keys are pass-through.
+            chip = tk.Label(
+                card,
+                text=txt("PASS", "패스"),
+                bg=theme.SURFACE_CANVAS,
+                fg=theme.SURFACE_CANVAS,
+                font=f["caption"],
+                padx=theme.SPACE_2,
+                pady=0,
+            )
+            chip.grid(row=0, column=6, padx=(theme.SPACE_2, theme.SPACE_3))
 
-        ttk.Button(
+            self.rows.append(
+                (
+                    chk,
+                    cmb_var,
+                    tk.StringVar(value="PressKey"),
+                    pas,
+                    cmb,
+                    card,
+                    lbl_cap,
+                    lbl_name,
+                    chip,
+                )
+            )
+
+        # Bottom RunDock — separator + panel-tone band hosting Save.
+        tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).grid(
+            row=len(self.labels) + 2,
+            column=0,
+            columnspan=7,
+            sticky="we",
+            pady=(theme.SPACE_2, 0),
+        )
+        dock = tk.Frame(
             self,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_2,
+        )
+        dock.grid(
+            row=len(self.labels) + 3,
+            column=0,
+            columnspan=7,
+            sticky="we",
+        )
+        ttk.Button(
+            dock,
             text=txt("Save (Enter)", "저장 (Enter)"),
             width=dual_text_width(
                 "Save (Enter)", "저장 (Enter)", padding=2, min_width=12
             ),
             command=self.save,
             style="Accent.TButton",
-        ).grid(
-            row=len(self.labels),
-            column=0,
-            columnspan=6,
-            pady=theme.SPACE_3,
-        )
+        ).pack(side="right")
 
     def _load_data(self):
         if not (self.prof_dir / f"{self.prof_name}.json").exists():
@@ -144,16 +233,31 @@ class ModificationKeysWindow(tk.Toplevel):
             return "break"
 
     def _toggle_pass(self, idx):
-        _, cmb_var, prev, pas, cmb = self.rows[idx]
+        row = self.rows[idx]
+        _, cmb_var, prev, pas, cmb = row[:5]
+        card, lbl_cap, lbl_name, chip = row[5:9]
         if pas.get():
             prev.set(cmb_var.get())
             cmb_var.set("Pass")
             cmb.config(
                 state="disabled"
             )  # 'readonly'보다 'disabled'가 명확하나 원본 의도 유지시 'readonly'
+            # Dim card chrome and surface the PASS chip.
+            card.config(
+                bg=theme.SURFACE_PANEL, highlightbackground=theme.SURFACE_DIVIDER
+            )
+            lbl_cap.config(fg=theme.INK_MUTED, bg=theme.SURFACE_SUNKEN)
+            lbl_name.config(fg=theme.INK_MUTED, bg=theme.SURFACE_PANEL)
+            chip.config(bg=theme.SIGNAL_TINT, fg=theme.SIGNAL_BASE)
         else:
             cmb_var.set(prev.get())
             cmb.config(state="normal")
+            card.config(
+                bg=theme.SURFACE_CANVAS, highlightbackground=theme.SURFACE_DIVIDER
+            )
+            lbl_cap.config(fg=theme.INK_PRIMARY, bg=theme.SURFACE_SUNKEN)
+            lbl_name.config(fg=theme.INK_PRIMARY, bg=theme.SURFACE_CANVAS)
+            chip.config(bg=theme.SURFACE_CANVAS, fg=theme.SURFACE_CANVAS)
 
     def save(self):
         data = {

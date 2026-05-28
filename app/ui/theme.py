@@ -160,12 +160,12 @@ def make_fonts() -> dict[str, tkfont.Font]:
     sans = _sans_family()
     mono = _mono_family()
     return {
-        "display": tkfont.Font(family=sans, size=16, weight="bold"),
-        "heading": tkfont.Font(family=sans, size=13, weight="bold"),
-        "body": tkfont.Font(family=sans, size=11, weight="normal"),
-        "body_bold": tkfont.Font(family=sans, size=11, weight="bold"),
-        "caption": tkfont.Font(family=sans, size=10, weight="normal"),
-        "mono": tkfont.Font(family=mono, size=11, weight="normal"),
+        "display": tkfont.Font(family=sans, size=18, weight="bold"),
+        "heading": tkfont.Font(family=sans, size=14, weight="bold"),
+        "body": tkfont.Font(family=sans, size=12, weight="normal"),
+        "body_bold": tkfont.Font(family=sans, size=12, weight="bold"),
+        "caption": tkfont.Font(family=sans, size=11, weight="normal"),
+        "mono": tkfont.Font(family=mono, size=12, weight="normal"),
     }
 
 

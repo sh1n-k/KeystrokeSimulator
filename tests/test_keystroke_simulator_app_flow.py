@@ -475,6 +475,25 @@ class TestMainUiState(unittest.TestCase):
             state="disabled",
         )
 
+    def test_profile_nav_focus_opens_profile_combobox(self):
+        app = self._make_ui_stub(running=False)
+
+        KeystrokeSimulatorApp._focus_profile_selector(app)
+
+        app.profile_frame.profile_combobox.focus_set.assert_called_once()
+        app.profile_frame.profile_combobox.tk.call.assert_called_once_with(
+            "ttk::combobox::Post", app.profile_frame.profile_combobox
+        )
+
+    def test_tools_nav_focuses_tools_section_without_opening_settings(self):
+        app = self._make_ui_stub(running=False)
+        app.open_settings = MagicMock()
+
+        KeystrokeSimulatorApp._focus_tools_section(app)
+
+        app.button_frame.quick_events_button.focus_set.assert_called_once()
+        app.open_settings.assert_not_called()
+
     @patch("app.ui.simulator_app.load_profile")
     def test_readiness_snapshot_reports_runtime_toggle_conflict(
         self, mock_load_profile

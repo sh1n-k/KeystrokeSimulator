@@ -34,7 +34,25 @@ class KeystrokeSettings(tk.Toplevel):
         except tk.TclError:
             pass
         theme.install_styles(self)
-        self.grid_columnconfigure((1, 2), weight=1)
+        # Top ContextBar mirrors the main window so each dialog reads as
+        # part of the same workstation surface.
+        self._build_context_bar().grid(
+            row=0, column=0, columnspan=2, sticky="we"
+        )
+        tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).grid(
+            row=1, column=0, columnspan=2, sticky="we"
+        )
+        # Two-pane layout: left rail (sections) + right content frame.
+        # All section widgets are mounted on self.content so the existing
+        # _create_*_section helpers keep using grid as before — they just
+        # operate on the content frame's grid instead of the window's.
+        self.nav_rail = self._build_settings_nav_rail()
+        self.nav_rail.grid(row=2, column=0, sticky="ns", padx=(0, theme.SPACE_2))
+        self.content = ttk.Frame(self)
+        self.content.grid(row=2, column=1, sticky="nsew")
+        self.content.grid_columnconfigure((1, 2), weight=1)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=1)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind("<Escape>", self.on_close)
         self._restore_window_position()
@@ -44,6 +62,94 @@ class KeystrokeSettings(tk.Toplevel):
         self.grab_set()
         self.focus_force()
         self.after(10, self.lift)
+
+    def _build_context_bar(self) -> tk.Frame:
+        f = theme.fonts()
+        bar = tk.Frame(
+            self,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_2,
+        )
+        tk.Label(
+            bar,
+            text=txt("Settings", "설정"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_PRIMARY,
+            font=f["heading"],
+        ).pack(side="left")
+        tk.Label(
+            bar,
+            text=txt("Workstation Defaults", "워크스테이션 기본값"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+        ).pack(side="left", padx=(theme.SPACE_3, 0))
+        return bar
+
+    def _build_settings_nav_rail(self) -> tk.Frame:
+        f = theme.fonts()
+        rail = tk.Frame(
+            self,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_3,
+            width=160,
+        )
+        rail.pack_propagate(False)
+        tk.Label(
+            rail,
+            text=txt("SECTIONS", "섹션"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+            anchor="w",
+        ).pack(fill="x", pady=(0, theme.SPACE_2))
+        self._settings_nav_labels: dict[str, tk.Label] = {}
+        for key, en, ko in [
+            ("keys", "Start / Stop", "시작 / 중지"),
+            ("language", "Language", "언어"),
+            ("timing", "Timing", "타이밍"),
+        ]:
+            label = tk.Label(
+                rail,
+                text=txt(en, ko),
+                bg=theme.SURFACE_PANEL,
+                fg=theme.INK_SECONDARY,
+                font=f["body"],
+                anchor="w",
+                padx=theme.SPACE_2,
+                pady=theme.SPACE_1,
+                cursor="hand2",
+            )
+            label.pack(fill="x", pady=(0, theme.SPACE_1))
+            label.bind("<Button-1>", lambda _e, section=key: self._show_settings_section(section))
+            self._settings_nav_labels[key] = label
+        return rail
+
+    def _show_settings_section(self, section: str) -> None:
+        sections = {
+            "keys": (getattr(self, "card_keys", None), getattr(self, "warning_label", None)),
+            "language": (getattr(self, "card_lang", None),),
+            "timing": (getattr(self, "card_timing", None),),
+        }
+        for key, widgets in sections.items():
+            for widget in widgets:
+                if widget is None:
+                    continue
+                if key == section:
+                    widget.grid()
+                else:
+                    widget.grid_remove()
+
+        f = theme.fonts()
+        for key, label in getattr(self, "_settings_nav_labels", {}).items():
+            selected = key == section
+            label.config(
+                bg=theme.SURFACE_CANVAS if selected else theme.SURFACE_PANEL,
+                fg=theme.SIGNAL_BASE if selected else theme.INK_SECONDARY,
+                font=f["body_bold"] if selected else f["body"],
+            )
 
     def _restore_window_position(self):
         state = StateUtils.load_main_app_state() or {}
@@ -92,39 +198,64 @@ class KeystrokeSettings(tk.Toplevel):
             logger.error(f"Save failed: {e}")
 
     def _create_widgets(self):
-        # 1. Start/Stop Key Section
+        # 3-section card layout: Start/Stop · Language · Timing.
+        self.card_keys = ttk.LabelFrame(
+            self.content, text=txt("Start / Stop", "시작 / 중지")
+        )
+        self.card_keys.grid(
+            row=0, column=0, columnspan=5, padx=theme.SPACE_2, pady=(theme.SPACE_2, theme.SPACE_1), sticky="we"
+        )
+        self.card_keys.grid_columnconfigure(1, weight=1)
+
+        self.card_lang = ttk.LabelFrame(
+            self.content, text=txt("Language", "언어")
+        )
+        self.card_lang.grid(
+            row=1, column=0, columnspan=5, padx=theme.SPACE_2, pady=theme.SPACE_1, sticky="we"
+        )
+        self.card_lang.grid_columnconfigure(1, weight=1)
+
+        self.card_timing = ttk.LabelFrame(
+            self.content, text=txt("Timing", "타이밍")
+        )
+        self.card_timing.grid(
+            row=2, column=0, columnspan=5, padx=theme.SPACE_2, pady=theme.SPACE_1, sticky="we"
+        )
+        self.card_timing.grid_columnconfigure((1, 2), weight=1)
+
         self._create_key_section()
         self._create_language_section()
 
         # 2. Numeric Entries
         v_cmd = (self.register(self._validate_numeric), "%P")
         self._add_range_row(
-            2, txt("Key pressed time", "키 누름 시간"), "key_pressed_time", v_cmd
+            0, txt("Key pressed time", "키 누름 시간"), "key_pressed_time", v_cmd
         )
         self._add_range_row(
-            3, txt("Delay between loop", "루프 간 지연"), "delay_between_loop", v_cmd
+            1, txt("Delay between loop", "루프 간 지연"), "delay_between_loop", v_cmd
         )
 
         # 3. Warning callout (uses status.warn tones for a calmer feel)
         self.warning_label = ttk.Label(
-            self,
+            self.content,
             text="",
             foreground=theme.STATUS_WARN_FG,
             background=theme.STATUS_WARN_BG,
             padding=(theme.SPACE_2, theme.SPACE_1),
         )
-        self.warning_label.grid(row=4, column=0, columnspan=5, pady=5, sticky="we")
+        self.warning_label.grid(row=3, column=0, columnspan=5, padx=theme.SPACE_2, pady=theme.SPACE_1, sticky="we")
         self.warning_label.configure(wraplength=420)
         self._update_warning_text()
 
         # 4. Buttons
         self._create_buttons()
+        self._show_settings_section("keys")
 
     def _create_key_section(self):
-        ttk.Label(self, text=txt("Start/Stop Key:", "시작/중지 키:")).grid(
+        ttk.Label(self.card_keys, text=txt("Start/Stop Key:", "시작/중지 키:")).grid(
             row=0, column=0, padx=10, pady=5, sticky="w"
         )
-        key_frame = ttk.Frame(self)
+        key_frame = ttk.Frame(self.card_keys)
         key_frame.grid(row=0, column=1, columnspan=3, padx=10, pady=5, sticky="w")
 
         self._press_key_label = txt("Press Key", "키 입력")
@@ -162,47 +293,58 @@ class KeystrokeSettings(tk.Toplevel):
         self._toggle_combo_state()
 
     def _create_language_section(self):
-        ttk.Label(self, text=txt("Language:", "언어:")).grid(
-            row=1, column=0, padx=10, pady=5, sticky="w"
+        ttk.Label(self.card_lang, text=txt("Language:", "언어:")).grid(
+            row=0, column=0, padx=10, pady=5, sticky="w"
         )
-        self.language_combo = ttk.Combobox(self, state="readonly")
+        self.language_combo = ttk.Combobox(self.card_lang, state="readonly")
         labels = [LANGUAGE_LABELS[code] for code in ("en", "ko")]
         self.language_combo["values"] = labels
         selected_label = LANGUAGE_LABELS.get(
             normalize_language(self.settings.language), LANGUAGE_LABELS["en"]
         )
         self.language_combo.set(selected_label)
-        self.language_combo.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+        self.language_combo.grid(row=0, column=1, padx=10, pady=5, sticky="w")
 
     def _create_buttons(self):
-        btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=5, column=0, columnspan=3, pady=10)
+        # Run-dock (bottom action band) — separator above + panel-tone strip
+        # under it so this reads as the same surface as the main window.
+        tk.Frame(self.content, bg=theme.SURFACE_DIVIDER, height=1).grid(
+            row=4, column=0, columnspan=5, sticky="we", pady=(theme.SPACE_2, 0)
+        )
+        dock = tk.Frame(
+            self.content,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_2,
+        )
+        dock.grid(row=5, column=0, columnspan=5, sticky="we")
         button_defs = [
-            (txt("Reset", "초기화"), self.on_reset, ("Reset", "초기화")),
-            (txt("OK", "확인"), self.on_ok, ("OK", "확인")),
-            (txt("Cancel", "취소"), self.on_close, ("Cancel", "취소")),
+            (txt("Reset", "초기화"), self.on_reset, ("Reset", "초기화"), "Danger.TButton"),
+            (txt("OK", "확인"), self.on_ok, ("OK", "확인"), "Accent.TButton"),
+            (txt("Cancel", "취소"), self.on_close, ("Cancel", "취소"), "Outline.TButton"),
         ]
-        for text, cmd, width_pair in button_defs:
+        for text, cmd, width_pair, style in button_defs:
             ttk.Button(
-                btn_frame,
+                dock,
                 text=text,
                 width=dual_text_width(*width_pair, padding=3, min_width=7),
                 command=cmd,
+                style=style,
             ).pack(side="left", padx=5)
 
     def _add_range_row(self, row: int, label: str, setting_prefix: str, v_cmd):
-        ttk.Label(self, text=f"{label} ({txt('min, max', '최소, 최대')}):").grid(
-            row=row, column=0, padx=10, pady=5, sticky="w"
-        )
+        ttk.Label(
+            self.card_timing, text=f"{label} ({txt('min, max', '최소, 최대')}):"
+        ).grid(row=row, column=0, padx=10, pady=5, sticky="w")
         for col, suffix in enumerate(["min", "max"], start=1):
             key = f"{setting_prefix}_{suffix}"
             self.ui_vars[key] = tk.StringVar(value=str(getattr(self.settings, key)))
             ttk.Entry(
-                self,
+                self.card_timing,
                 textvariable=self.ui_vars[key],
                 validate="key",
                 validatecommand=v_cmd,
-            ).grid(row=row, column=col, padx=10, pady=5)
+            ).grid(row=row, column=col, padx=10, pady=5, sticky="w")
 
     def _toggle_combo_state(self):
         if self.is_windows:

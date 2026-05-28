@@ -103,6 +103,32 @@ class TestValidateNumeric(unittest.TestCase):
         self.assertFalse(KeystrokeSettings._validate_numeric("99999"))
 
 
+class TestKeystrokeSettingsNavRail(unittest.TestCase):
+    def test_show_settings_section_only_displays_selected_card(self):
+        stub = KeystrokeSettings.__new__(KeystrokeSettings)
+        stub.card_keys = MagicMock()
+        stub.card_lang = MagicMock()
+        stub.card_timing = MagicMock()
+        stub.warning_label = MagicMock()
+        stub._settings_nav_labels = {
+            "keys": MagicMock(),
+            "language": MagicMock(),
+            "timing": MagicMock(),
+        }
+
+        with patch(
+            "app.ui.settings.theme.fonts",
+            return_value={"body": "body-font", "body_bold": "bold-font"},
+        ):
+            KeystrokeSettings._show_settings_section(stub, "timing")
+
+        stub.card_keys.grid_remove.assert_called_once()
+        stub.warning_label.grid_remove.assert_called_once()
+        stub.card_lang.grid_remove.assert_called_once()
+        stub.card_timing.grid.assert_called_once()
+        stub._settings_nav_labels["timing"].config.assert_called_once()
+
+
 class TestKeystrokeSettingsWindowState(unittest.TestCase):
     @patch("app.ui.settings.StateUtils.load_main_app_state")
     @patch("app.ui.settings.WindowUtils.center_window")

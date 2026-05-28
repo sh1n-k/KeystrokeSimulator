@@ -22,10 +22,10 @@ SW_ROW_IMAGE_SIZE = 40
 # design tokens defined in app/ui/theme.py.
 SW_BG_BASE = theme.SURFACE_PAPER
 SW_BG_PANEL = theme.SURFACE_PANEL
-SW_BG_ROW = "#efeee9"
-SW_BG_CHIP = "#e8e6de"
-SW_BG_THUMBNAIL = "#d9d6cd"
-SW_BG_ROW_ACTIVE = "#e7e5dc"
+SW_BG_ROW = theme.SURFACE_CANVAS
+SW_BG_CHIP = theme.SURFACE_SUNKEN
+SW_BG_THUMBNAIL = theme.SURFACE_SUNKEN
+SW_BG_ROW_ACTIVE = theme.SIGNAL_TINT
 
 SW_FG_PRIMARY = theme.INK_PRIMARY
 SW_FG_MUTED = theme.INK_MUTED
@@ -35,6 +35,7 @@ SW_BORDER_SOFT = theme.SURFACE_DIVIDER
 
 class KeystrokeSortEvents(tk.Toplevel):
     HEADER_COLUMNS = [
+        ("", 2, "center", False, ""),
         ("#", 3, "center", False, "#"),
         ("Enabled", 5, "center", False, "사용"),
         ("Image", 6, "center", False, "이미지"),
@@ -144,8 +145,8 @@ class KeystrokeSortEvents(tk.Toplevel):
 
     def _build_summary_text(self) -> str:
         return txt(
-            "{count} event(s). Drag a row by its text area to reorder it. Click an image to open a full preview.",
-            "이벤트 {count}개. 각 행의 텍스트 영역을 드래그해서 순서를 바꾸고, 이미지를 클릭하면 크게 볼 수 있습니다.",
+            "{count} event(s). Drag the handle to reorder. Click an image to open a full preview.",
+            "이벤트 {count}개. 핸들을 드래그해서 순서를 바꾸고, 이미지를 클릭하면 크게 볼 수 있습니다.",
             count=len(self.events),
         )
 
@@ -215,8 +216,21 @@ class KeystrokeSortEvents(tk.Toplevel):
             bd=0,
         )
         f.pack(pady=(0, SW_PAD_XS), fill=tk.X)
+        f._event_model = evt  # type: ignore[attr-defined]
 
         widgets = []
+
+        # 0. Drag handle (visual affordance; cursor switches to hand2)
+        lbl_handle = tk.Label(
+            f,
+            text="⋮⋮",
+            width=2,
+            anchor="center",
+            bg=SW_BG_ROW,
+            fg=SW_FG_MUTED,
+            cursor="hand2",
+        )
+        widgets.append(lbl_handle)
 
         # 1. Index
         widgets.append(
@@ -281,11 +295,9 @@ class KeystrokeSortEvents(tk.Toplevel):
         )
         widgets.append(lbl_key)
 
-        # Pack & Bind
+        # Pack & Bind. Only the explicit handle starts a drag; other text
+        # areas stay passive so accidental row movement is less likely.
         for w in widgets:
-            is_interactive = isinstance(w, (ttk.Entry, ttk.Checkbutton))
-            is_image_widget = w is lbl_img
-
             w.pack(
                 side=tk.LEFT,
                 padx=SW_PAD_SM,
@@ -294,10 +306,7 @@ class KeystrokeSortEvents(tk.Toplevel):
                 expand=isinstance(w, ttk.Entry),
             )
 
-            if not is_interactive and not is_image_widget:
-                self._bind_drag_events(w, f)
-
-        self._bind_drag_events(f, f)
+        self._bind_drag_events(lbl_handle, f)
 
     # ... (이하 기존 메서드 동일: _bind_drag_events, _drag_start, _drag_motion, _drag_end, _load_profile, save, close, _load_state) ...
     def _bind_drag_events(self, widget, parent_frame):
@@ -315,8 +324,9 @@ class KeystrokeSortEvents(tk.Toplevel):
         self._close_image_preview()
 
         preview = tk.Toplevel(self)
-        preview.title("Event Image Preview")
+        preview.title(txt("Event Image Preview", "이벤트 이미지 미리보기"))
         preview.transient(self)
+        preview.configure(bg=SW_BG_BASE)
         preview.protocol("WM_DELETE_WINDOW", self._close_image_preview)
         preview.bind("<Escape>", self._close_image_preview)
 
@@ -324,25 +334,34 @@ class KeystrokeSortEvents(tk.Toplevel):
         self._preview_photo = ImageTk.PhotoImage(img)
         lbl = ttk.Label(preview, image=self._preview_photo)
         lbl.image = self._preview_photo
-        lbl.pack()
+        lbl.pack(padx=SW_PAD_MD, pady=SW_PAD_MD)
+        # Clicking the preview itself dismisses it — modal toast behavior.
+        lbl.bind("<Button-1>", self._close_image_preview)
 
-        x = click_event.x_root if click_event else self.winfo_rootx()
-        y = click_event.y_root if click_event else self.winfo_rooty()
-        offset_x, offset_y = 12, 12
-        x += offset_x
-        y += offset_y
+        # Centered modal: locate the preview on the sort window so the
+        # interaction reads as a focused overlay rather than a tooltip.
+        self.update_idletasks()
+        win_w = self.winfo_width() or img.width
+        win_h = self.winfo_height() or img.height
+        x = self.winfo_rootx() + max(0, (win_w - img.width) // 2)
+        y = self.winfo_rooty() + max(0, (win_h - img.height) // 2)
         max_x = max(0, self.winfo_screenwidth() - img.width)
         max_y = max(0, self.winfo_screenheight() - img.height)
         x = min(max(0, x), max_x)
         y = min(max(0, y), max_y)
 
-        preview.geometry(f"{img.width}x{img.height}+{x}+{y}")
+        preview.geometry(f"{img.width + 2 * SW_PAD_MD}x{img.height + 2 * SW_PAD_MD}+{x}+{y}")
+        preview.grab_set()
         preview.focus_force()
 
         self._preview_win = preview
 
     def _close_image_preview(self, event=None):
         if self._preview_win and self._preview_win.winfo_exists():
+            try:
+                self._preview_win.grab_release()
+            except tk.TclError:
+                pass
             self._preview_win.destroy()
         self._preview_win = None
         self._preview_photo = None
@@ -379,7 +398,18 @@ class KeystrokeSortEvents(tk.Toplevel):
                 insert_idx = i
                 break
 
-        old_idx = int(frame.winfo_children()[0].cget("text")) - 1
+        moved_event = getattr(frame, "_event_model", None)
+        old_idx = None
+        if moved_event is not None:
+            old_idx = next(
+                (i for i, evt in enumerate(self.events) if evt is moved_event),
+                None,
+            )
+        if old_idx is None:
+            del self._drag_data
+            self._refresh_list()
+            return
+
         moved_event = self.events.pop(old_idx)
         self.events.insert(insert_idx, moved_event)
 

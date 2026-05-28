@@ -44,6 +44,32 @@ class EventImporter:
         self.load_pos()
 
     def create_ui(self):
+        f = theme.fonts()
+        # ContextBar — dialog title + role description to match the rest of
+        # the workstation surface.
+        bar = tk.Frame(
+            self.win,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_2,
+        )
+        bar.pack(fill="x", side="top")
+        tk.Label(
+            bar,
+            text=txt("Import Events", "이벤트 가져오기"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_PRIMARY,
+            font=f["heading"],
+        ).pack(side="left")
+        tk.Label(
+            bar,
+            text=txt("Copy events from another profile", "다른 프로필에서 이벤트 복사"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+        ).pack(side="left", padx=(theme.SPACE_3, 0))
+        tk.Frame(self.win, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x")
+
         # 1. 프로필 선택 영역
         f_prof = ttk.Frame(self.win)
         f_prof.pack(pady=10, fill="x", padx=10)
@@ -81,16 +107,20 @@ class EventImporter:
         self.canvas.bind("<Configure>", self._on_canvas_configure)
         self.win.bind_all("<MouseWheel>", self._on_mousewheel)
 
-        # 3. 하단 버튼 영역 (run dock 톤)
-        f_btn = tk.Frame(self.win, bg=theme.SURFACE_PAPER)
-        f_btn.pack(side="bottom", pady=10, fill="x", padx=10)
-        ttk.Button(
+        # 3. 하단 RunDock — 분리선 + 패널 톤으로 메인 창과 동일 표면.
+        tk.Frame(self.win, bg=theme.SURFACE_DIVIDER, height=1).pack(
+            side="bottom", fill="x"
+        )
+        f_btn = tk.Frame(self.win, bg=theme.SURFACE_PANEL)
+        f_btn.pack(side="bottom", fill="x", padx=0, pady=0, ipady=theme.SPACE_2)
+        self.btn_ok = ttk.Button(
             f_btn,
             text=txt("Import", "가져오기"),
-            width=dual_text_width("Import", "가져오기", padding=2, min_width=8),
+            width=dual_text_width("Import", "가져오기", padding=2, min_width=12),
             command=self.on_ok,
             style="Accent.TButton",
-        ).pack(side="left", padx=5)
+        )
+        self.btn_ok.pack(side="left", padx=5)
         ttk.Button(
             f_btn,
             text=txt("Cancel", "취소"),
@@ -98,15 +128,28 @@ class EventImporter:
             command=self.close,
             style="Outline.TButton",
         ).pack(side="left", padx=5)
-        ttk.Button(
+        # All/None toggle rendered as a text link to keep the run-dock light.
+        f = theme.fonts()
+        link_all = tk.Label(
             f_btn,
-            text=txt("Select/Deselect All", "전체 선택/해제"),
-            width=dual_text_width(
-                "Select/Deselect All", "전체 선택/해제", padding=2, min_width=14
+            text=txt("Select / Deselect All", "전체 선택 / 해제"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.SIGNAL_BASE,
+            cursor="hand2",
+            font=(
+                f["caption"].cget("family"),
+                f["caption"].cget("size"),
+                "underline",
             ),
-            command=self.toggle_all,
-            style="Outline.TButton",
-        ).pack(side="right", padx=5)
+        )
+        link_all.pack(side="right", padx=theme.SPACE_2)
+        link_all.bind("<Button-1>", lambda _e: self.toggle_all())
+        self.lbl_selection_count = ttk.Label(
+            f_btn,
+            text="",
+            foreground=theme.INK_MUTED,
+        )
+        self.lbl_selection_count.pack(side="right", padx=theme.SPACE_2)
 
     # --- 스크롤 관련 핸들러 ---
     def _on_frame_configure(self, event):
@@ -128,6 +171,8 @@ class EventImporter:
         if names:
             self.cb_prof.current(0)
             self.load_events()
+        else:
+            self._refresh_selection_summary()
 
     def load_events(self, event=None):
         prof_name = self.cb_prof.get()
@@ -151,34 +196,80 @@ class EventImporter:
         if self.current_profile_data and self.current_profile_data.event_list:
             for i, evt in enumerate(self.current_profile_data.event_list):
                 self._add_event_row(i, evt)
+        self._refresh_selection_summary()
 
     def _add_event_row(self, idx, evt):
         var = tk.IntVar()
+        var.trace_add("write", lambda *_: self._refresh_selection_summary())
 
-        # Grid 사용 및 패딩 조정
-        ttk.Checkbutton(self.f_events, text=f"{idx + 1}", variable=var).grid(
-            row=idx, column=0, sticky="w", padx=(5, 10), pady=2
-        )
+        # Left color bar reflects the checked state of this row.
+        bar = tk.Frame(self.f_events, bg=theme.SURFACE_DIVIDER, width=4)
+        bar.grid(row=idx, column=0, sticky="ns", padx=(2, theme.SPACE_1))
+        bar.grid_propagate(False)
+
+        def _sync_bar(*_):
+            bar.configure(
+                bg=theme.SIGNAL_BASE if var.get() else theme.SURFACE_DIVIDER
+            )
+
+        var.trace_add("write", lambda *_: _sync_bar())
+
+        chk = ttk.Checkbutton(self.f_events, text=f"{idx + 1}", variable=var)
+        chk.grid(row=idx, column=1, sticky="w", padx=(0, theme.SPACE_2), pady=2)
 
         e_name = ttk.Entry(self.f_events)
         e_name.insert(0, evt.event_name or "")
         e_name.config(state="readonly")
-        e_name.grid(row=idx, column=1, padx=5, pady=2, sticky="ew")
+        e_name.grid(row=idx, column=2, padx=5, pady=2, sticky="ew")
 
         e_key = ttk.Entry(self.f_events, width=8, justify="center")
         e_key.insert(0, evt.key_to_enter or "")
         e_key.config(state="readonly")
-        e_key.grid(row=idx, column=2, padx=5, pady=2)
+        e_key.grid(row=idx, column=3, padx=5, pady=2)
+
+        # Hover background transition: the bar widens visually by darkening
+        # SURFACE_DIVIDER while the row is hovered (without affecting state).
+        idle_bg = theme.SURFACE_DIVIDER
+        hover_bg = theme.SURFACE_SUNKEN
+
+        def _on_enter(_e=None):
+            if not var.get():
+                bar.configure(bg=hover_bg)
+
+        def _on_leave(_e=None):
+            if not var.get():
+                bar.configure(bg=idle_bg)
+
+        for w in (bar, chk, e_name, e_key):
+            w.bind("<Enter>", _on_enter)
+            w.bind("<Leave>", _on_leave)
 
         # 이름 컬럼이 늘어나도록 설정
-        self.f_events.columnconfigure(1, weight=1)
+        self.f_events.columnconfigure(2, weight=1)
 
         self.checkboxes.append(var)
+        self._refresh_selection_summary()
+
+    def _refresh_selection_summary(self) -> None:
+        if not getattr(self, "lbl_selection_count", None):
+            return
+        count = sum(1 for v in self.checkboxes if v.get())
+        self.lbl_selection_count.config(
+            text=txt(
+                f"{count} selected",
+                f"{count}개 선택됨",
+            )
+        )
+        if getattr(self, "btn_ok", None):
+            label = txt("Import", "가져오기")
+            self.btn_ok.config(text=f"{label}{f' ({count})' if count else ''}")
+            self.btn_ok.config(state="normal" if count else "disabled")
 
     def toggle_all(self):
         target = 1 if any(v.get() == 0 for v in self.checkboxes) else 0
         for v in self.checkboxes:
             v.set(target)
+        self._refresh_selection_summary()
 
     def _copy_event(self, evt: EventModel) -> EventModel:
         """이벤트 깊은 복사 (PIL Image 포함) - 매우 중요"""
