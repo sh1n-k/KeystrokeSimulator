@@ -53,6 +53,21 @@ class WindowUtils:
         win.update_idletasks()
 
 
+class MonitorUtils:
+    @staticmethod
+    def get_primary_size() -> tuple[int, int]:
+        if IS_MAC:
+            frame = AppKit.NSScreen.screens()[0].frame()
+            return int(frame.size.width), int(frame.size.height)
+        if IS_WIN:
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            except OSError:
+                pass
+            return win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
+        raise RuntimeError(f"Unsupported platform: {OS_NAME}")
+
+
 class KeyUtils:
     _KEY_MAPS = {
         "darwin": {

@@ -4,18 +4,15 @@ from threading import Event, Thread
 from typing import Callable, Optional, Tuple
 
 import mss
-import screeninfo
 from PIL import Image
 from loguru import logger
+
+from app.utils.system import MonitorUtils
 
 
 class ScreenshotCapturer:
     def __init__(self):
-        current_monitor = screeninfo.get_monitors()[0]
-        self.screen_width, self.screen_height = (
-            current_monitor.width,
-            current_monitor.height,
-        )
+        self.screen_width, self.screen_height = MonitorUtils.get_primary_size()
         self.box_w = 100
         self.box_h = 100
         self.current_position = (0, 0)
