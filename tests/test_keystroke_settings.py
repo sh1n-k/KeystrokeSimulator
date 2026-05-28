@@ -5,7 +5,11 @@ import unittest
 from unittest.mock import patch, mock_open, MagicMock
 
 from app.core.models import UserSettings
-from app.ui.settings import KeystrokeSettings
+from app.ui.settings import (
+    KeystrokeSettings,
+    SETTINGS_WINDOW_DEFAULT_GEOMETRY,
+    SETTINGS_WINDOW_MIN_SIZE,
+)
 
 _RUN_GUI_TESTS = os.environ.get("RUN_GUI_TESTS", "0") == "1"
 
@@ -81,6 +85,45 @@ class TestKeystrokeSettings(unittest.TestCase):
         self.assertEqual(saved_data["language"], "ko")
         settings_win.destroy()
 
+    @patch("app.ui.settings.WindowUtils.center_window")
+    def test_language_section_keeps_timing_nav_visible(self, mock_center):
+        self.root.deiconify()
+        self.root.update()
+        settings_win = KeystrokeSettings(self.root)
+
+        settings_win._show_settings_section("language")
+        settings_win.update()
+
+        timing_label = settings_win._settings_nav_labels["timing"]
+        timing_bottom = timing_label.winfo_rooty() + timing_label.winfo_height()
+        window_bottom = settings_win.winfo_rooty() + settings_win.winfo_height()
+        self.assertGreaterEqual(settings_win.winfo_height(), SETTINGS_WINDOW_MIN_SIZE[1])
+        self.assertLessEqual(timing_bottom, window_bottom)
+        settings_win.destroy()
+
+    @patch("app.ui.settings.WindowUtils.center_window")
+    def test_action_buttons_stay_bottom_aligned_between_sections(self, mock_center):
+        self.root.deiconify()
+        self.root.update()
+        settings_win = KeystrokeSettings(self.root)
+
+        positions = []
+        for section in ("keys", "language", "timing"):
+            settings_win._show_settings_section(section)
+            settings_win.update()
+            positions.append(settings_win.button_dock.winfo_y())
+
+        self.assertEqual(len(set(positions)), 1)
+        dock_bottom = settings_win.button_dock.winfo_y() + settings_win.button_dock.winfo_height()
+        self.assertEqual(dock_bottom, settings_win.winfo_height())
+        right_gap = (
+            settings_win.button_dock.winfo_width()
+            - settings_win.button_group.winfo_x()
+            - settings_win.button_group.winfo_width()
+        )
+        self.assertLess(right_gap, settings_win.button_group.winfo_x())
+        settings_win.destroy()
+
 class TestValidateNumeric(unittest.TestCase):
     """_validate_numeric: Tk 불필요한 static method 테스트"""
 
@@ -138,7 +181,9 @@ class TestKeystrokeSettingsWindowState(unittest.TestCase):
 
         KeystrokeSettings._restore_window_position(stub)
 
-        stub.geometry.assert_called_once_with("+120+340")
+        stub.geometry.assert_called_once_with(
+            f"{SETTINGS_WINDOW_DEFAULT_GEOMETRY}+120+340"
+        )
         mock_center.assert_not_called()
 
     @patch("app.ui.settings.StateUtils.load_main_app_state")

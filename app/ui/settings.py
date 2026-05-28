@@ -11,6 +11,9 @@ from app.core.models import UserSettings
 from app.utils.system import WindowUtils, StateUtils
 from app.ui import theme
 
+SETTINGS_WINDOW_DEFAULT_GEOMETRY = "800x280"
+SETTINGS_WINDOW_MIN_SIZE = (700, 260)
+
 
 class KeystrokeSettings(tk.Toplevel):
     VALID_CHARS = set("`[];',./-=\"")
@@ -34,6 +37,8 @@ class KeystrokeSettings(tk.Toplevel):
         except tk.TclError:
             pass
         theme.install_styles(self)
+        self.geometry(SETTINGS_WINDOW_DEFAULT_GEOMETRY)
+        self.minsize(*SETTINGS_WINDOW_MIN_SIZE)
         # Top ContextBar mirrors the main window so each dialog reads as
         # part of the same workstation surface.
         self._build_context_bar().grid(
@@ -156,7 +161,7 @@ class KeystrokeSettings(tk.Toplevel):
         pos = StateUtils.parse_slash_int_pair(state.get("settings_position"))
         if pos is not None:
             try:
-                self.geometry(f"+{pos[0]}+{pos[1]}")
+                self.geometry(f"{SETTINGS_WINDOW_DEFAULT_GEOMETRY}+{pos[0]}+{pos[1]}")
                 return
             except tk.TclError:
                 pass
@@ -308,16 +313,20 @@ class KeystrokeSettings(tk.Toplevel):
     def _create_buttons(self):
         # Run-dock (bottom action band) — separator above + panel-tone strip
         # under it so this reads as the same surface as the main window.
-        tk.Frame(self.content, bg=theme.SURFACE_DIVIDER, height=1).grid(
-            row=4, column=0, columnspan=5, sticky="we", pady=(theme.SPACE_2, 0)
+        tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).grid(
+            row=3, column=0, columnspan=2, sticky="we"
         )
         dock = tk.Frame(
-            self.content,
+            self,
             bg=theme.SURFACE_PANEL,
             padx=theme.SPACE_3,
             pady=theme.SPACE_2,
         )
-        dock.grid(row=5, column=0, columnspan=5, sticky="we")
+        dock.grid(row=4, column=0, columnspan=2, sticky="we")
+        self.button_dock = dock
+        button_group = tk.Frame(dock, bg=theme.SURFACE_PANEL)
+        button_group.pack(side=tk.RIGHT)
+        self.button_group = button_group
         button_defs = [
             (txt("Reset", "초기화"), self.on_reset, ("Reset", "초기화"), "Danger.TButton"),
             (txt("OK", "확인"), self.on_ok, ("OK", "확인"), "Accent.TButton"),
@@ -325,7 +334,7 @@ class KeystrokeSettings(tk.Toplevel):
         ]
         for text, cmd, width_pair, style in button_defs:
             ttk.Button(
-                dock,
+                button_group,
                 text=text,
                 width=dual_text_width(*width_pair, padding=3, min_width=7),
                 command=cmd,

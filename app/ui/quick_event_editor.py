@@ -178,22 +178,26 @@ class KeystrokeQuickEventEditor:
         tk.Frame(self.win, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x")
         f_btn = tk.Frame(self.win, bg=theme.SURFACE_PANEL)
         f_btn.pack(fill="x", ipady=theme.SPACE_2)
+        self.button_dock = f_btn
+        button_group = tk.Frame(f_btn, bg=theme.SURFACE_PANEL)
+        button_group.pack(anchor="center")
+        self.button_group = button_group
         ttk.Button(
-            f_btn,
+            button_group,
             text=txt("Grab (Ctrl)", "캡처 (Ctrl)"),
             width=dual_text_width(
                 "Grab (Ctrl)", "캡처 (Ctrl)", padding=2, min_width=11
             ),
             command=self.hold_image,
             style="Accent.TButton",
-        ).pack(side=tk.LEFT, padx=theme.SPACE_3)
+        ).pack(side=tk.LEFT, padx=(0, theme.SPACE_3))
         ttk.Button(
-            f_btn,
+            button_group,
             text=txt("Close (ESC)", "닫기 (ESC)"),
             width=dual_text_width("Close (ESC)", "닫기 (ESC)", padding=2, min_width=11),
             command=self.close,
             style="Outline.TButton",
-        ).pack(side=tk.LEFT, padx=(0, theme.SPACE_3))
+        ).pack(side=tk.LEFT)
 
         self.lbl_feedback = ttk.Label(
             self.win,
