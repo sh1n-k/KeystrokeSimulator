@@ -10,6 +10,7 @@ from app.utils.i18n import dual_text_width, txt
 from app.core.models import EventModel
 from app.storage.profile_storage import list_profile_names, load_profile
 from app.utils.system import StateUtils
+from app.ui import theme
 
 
 class EventImporter:
@@ -32,6 +33,11 @@ class EventImporter:
 
         self.win.protocol("WM_DELETE_WINDOW", self.close)
         self.win.bind("<Escape>", self.close)
+        try:
+            self.win.configure(bg=theme.SURFACE_PAPER)
+        except tk.TclError:
+            pass
+        theme.install_styles(self.win)
 
         self.create_ui()
         self.load_profiles()
@@ -75,29 +81,32 @@ class EventImporter:
         self.canvas.bind("<Configure>", self._on_canvas_configure)
         self.win.bind_all("<MouseWheel>", self._on_mousewheel)
 
-        # 3. 하단 버튼 영역
-        f_btn = ttk.Frame(self.win)
+        # 3. 하단 버튼 영역 (run dock 톤)
+        f_btn = tk.Frame(self.win, bg=theme.SURFACE_PAPER)
         f_btn.pack(side="bottom", pady=10, fill="x", padx=10)
         ttk.Button(
             f_btn,
-            text=txt("OK", "확인"),
-            width=dual_text_width("OK", "확인", padding=2, min_width=6),
+            text=txt("Import", "가져오기"),
+            width=dual_text_width("Import", "가져오기", padding=2, min_width=8),
             command=self.on_ok,
+            style="Accent.TButton",
         ).pack(side="left", padx=5)
         ttk.Button(
             f_btn,
             text=txt("Cancel", "취소"),
             width=dual_text_width("Cancel", "취소", padding=2, min_width=7),
             command=self.close,
+            style="Outline.TButton",
         ).pack(side="left", padx=5)
         ttk.Button(
             f_btn,
             text=txt("Select/Deselect All", "전체 선택/해제"),
-            width=dual_text_width("Select/Deselect All", "전체 선택/해제", padding=2, min_width=14),
+            width=dual_text_width(
+                "Select/Deselect All", "전체 선택/해제", padding=2, min_width=14
+            ),
             command=self.toggle_all,
-        ).pack(
-            side="right", padx=5
-        )
+            style="Outline.TButton",
+        ).pack(side="right", padx=5)
 
     # --- 스크롤 관련 핸들러 ---
     def _on_frame_configure(self, event):

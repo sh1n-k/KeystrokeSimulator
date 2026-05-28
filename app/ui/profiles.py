@@ -24,19 +24,20 @@ from app.utils.runtime_toggle import (
     normalize_runtime_toggle_wheel_event,
     runtime_toggle_member_count,
 )
+from app.ui import theme
 
-UI_PAD_XS = 2
-UI_PAD_SM = 4
-UI_PAD_MD = 8
+UI_PAD_XS = theme.SPACE_1
+UI_PAD_SM = theme.SPACE_1
+UI_PAD_MD = theme.SPACE_2
 
-BADGE_BG_INFO = "#eef3ff"
-BADGE_FG_INFO = "#1e3a8a"
-BADGE_BG_OK = "#e6f4ea"
-BADGE_FG_OK = "#1e5f3a"
-BADGE_BG_WARN = "#fff4cc"
-BADGE_FG_WARN = "#7a5b00"
-BADGE_BG_ERR = "#fdecea"
-BADGE_FG_ERR = "#9f1f1f"
+BADGE_BG_INFO = theme.STATUS_INFO_BG
+BADGE_FG_INFO = theme.STATUS_INFO_FG
+BADGE_BG_OK = theme.STATUS_READY_BG
+BADGE_FG_OK = theme.STATUS_READY_FG
+BADGE_BG_WARN = theme.STATUS_WARN_BG
+BADGE_FG_WARN = theme.STATUS_WARN_FG
+BADGE_BG_ERR = theme.STATUS_ERROR_BG
+BADGE_FG_ERR = theme.STATUS_ERROR_FG
 
 
 def _autosave_perf_enabled() -> bool:
@@ -673,55 +674,35 @@ class EventRow(ttk.Frame):
         self._last_saved_name = event.event_name if event else ""
         self._bound_event_id = id(event) if event else None
 
-        # 1. Index
-        ttk.Label(self, text=str(row_num + 1), width=2, anchor="center").pack(
+        # Two-line cell: left color bar | (header row + meta row).
+        self.color_bar = tk.Frame(self, bg=theme.SIGNAL_BASE, width=4)
+        self.color_bar.pack(side=tk.LEFT, fill="y", padx=(0, UI_PAD_SM))
+        self.color_bar.pack_propagate(False)
+
+        cell_body = ttk.Frame(self)
+        cell_body.pack(side=tk.LEFT, fill="x", expand=True)
+
+        # ------------------------------------------------------------------
+        # Header row: index · use check · name entry · action buttons.
+        # ------------------------------------------------------------------
+        header = ttk.Frame(cell_body)
+        header.pack(fill="x")
+
+        ttk.Label(header, text=str(row_num + 1), width=2, anchor="center").pack(
             side=tk.LEFT
         )
+        ttk.Checkbutton(
+            header, variable=self.use_var, command=self._on_toggle_use
+        ).pack(side=tk.LEFT)
 
-        # 2. Checkbox
-        ttk.Checkbutton(self, variable=self.use_var, command=self._on_toggle_use).pack(
-            side=tk.LEFT
+        self.entry = ttk.Entry(header)
+        self.entry.pack(
+            side=tk.LEFT, padx=(UI_PAD_SM, UI_PAD_SM), fill=tk.X, expand=True
         )
-
-        # 3. Runtime Toggle Membership
-        self.chk_runtime_toggle = ttk.Checkbutton(
-            self,
-            variable=self.runtime_toggle_var,
-            command=self._on_toggle_runtime_member,
-        )
-        self.chk_runtime_toggle.pack(side=tk.LEFT, padx=(0, UI_PAD_XS))
-        self._tip_runtime_toggle = ToolTip(self.chk_runtime_toggle)
-
-        # 4. Condition Indicator
-        self.lbl_cond = ttk.Label(self, text="", width=9, anchor="center")
-        self.lbl_cond.pack(side=tk.LEFT)
-        self._tip_cond = ToolTip(self.lbl_cond)
-
-        # 5. Group ID Label (클릭 가능)
-        self.lbl_grp = ttk.Label(
-            self, text="", width=14, anchor="center", relief="sunken", cursor="hand2"
-        )
-        self.lbl_grp.pack(side=tk.LEFT, padx=2)
-        self.lbl_grp.bind("<Button-1>", self._on_group_click)
-        self._tip_grp = ToolTip(self.lbl_grp)
-
-        # 6. Key Display Label
-        self.lbl_key = ttk.Label(
-            self, text="", width=12, anchor="center", relief="groove"
-        )
-        self.lbl_key.pack(side=tk.LEFT, padx=2)
-        self.lbl_key.bind(
-            "<Button-1>", lambda e: self._on_click("open")
-        )  # 클릭 바인딩 추가
-        self._tip_key = ToolTip(self.lbl_key)
-
-        # 7. Event Name Entry
-        self.entry = ttk.Entry(self)
-        self.entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         if event:
             self.entry.insert(0, event.event_name or "")
 
-        # 8. Action Buttons
+        # Action buttons live at the end of the header row.
         self.btn_delete = None
         for en, ko, key, min_width in [
             ("Edit", "편집", "open", 7),
@@ -729,7 +710,7 @@ class EventRow(ttk.Frame):
             ("🗑 Delete", "🗑 삭제", "remove", 9),
         ]:
             btn = ttk.Button(
-                self,
+                header,
                 text=txt(en, ko),
                 width=dual_text_width(en, ko, padding=2, min_width=min_width),
                 command=lambda k=key: self._on_click(k),
@@ -738,6 +719,50 @@ class EventRow(ttk.Frame):
             btn.bind("<Button-3>", lambda e: self.cbs["menu"](e, self.row_num))
             if key == "remove":
                 self.btn_delete = btn
+
+        # ------------------------------------------------------------------
+        # Meta row: group · key · condition badge · runtime-toggle chip.
+        # ------------------------------------------------------------------
+        meta = ttk.Frame(cell_body)
+        meta.pack(fill="x", pady=(theme.SPACE_1, 0))
+
+        self.lbl_grp = ttk.Label(
+            meta,
+            text="",
+            width=14,
+            anchor="center",
+            relief="sunken",
+            cursor="hand2",
+            padding=(theme.SPACE_1, 0),
+        )
+        self.lbl_grp.pack(side=tk.LEFT, padx=(theme.SPACE_2, theme.SPACE_1))
+        self.lbl_grp.bind("<Button-1>", self._on_group_click)
+        self._tip_grp = ToolTip(self.lbl_grp)
+
+        self.lbl_key = ttk.Label(
+            meta,
+            text="",
+            width=12,
+            anchor="center",
+            relief="groove",
+            padding=(theme.SPACE_1, 0),
+        )
+        self.lbl_key.pack(side=tk.LEFT, padx=(0, theme.SPACE_1))
+        self.lbl_key.bind("<Button-1>", lambda e: self._on_click("open"))
+        self._tip_key = ToolTip(self.lbl_key)
+
+        self.lbl_cond = ttk.Label(meta, text="", width=9, anchor="center")
+        self.lbl_cond.pack(side=tk.LEFT, padx=(0, theme.SPACE_1))
+        self._tip_cond = ToolTip(self.lbl_cond)
+
+        self.chk_runtime_toggle = ttk.Checkbutton(
+            meta,
+            text=txt("Extra", "추가"),
+            variable=self.runtime_toggle_var,
+            command=self._on_toggle_runtime_member,
+        )
+        self.chk_runtime_toggle.pack(side=tk.LEFT, padx=(0, theme.SPACE_1))
+        self._tip_runtime_toggle = ToolTip(self.chk_runtime_toggle)
 
         # Context Menu Binding
         self.entry.bind("<Button-3>", lambda e: self.cbs["menu"](e, self.row_num))
@@ -788,7 +813,8 @@ class EventRow(ttk.Frame):
             self._last_saved_name = event_name
         self._bound_event_id = id(self.event)
 
-        # Condition Only
+        # Condition Only — keep the magnifier glyph and the legacy gray/black
+        # foregrounds so regression assertions on entry color remain valid.
         is_cond = not getattr(self.event, "execute_action", True)
         self.lbl_cond.config(text=txt("🔎 Cond", "🔎 조건") if is_cond else "")
         self.entry.config(foreground="gray" if is_cond else "black")
@@ -804,7 +830,9 @@ class EventRow(ttk.Frame):
             )
         )
 
-        # Group
+        # Group — keep the raw group id text (the regression suite checks
+        # `lbl_grp.cget('text')` against the bare value). The visual emphasis
+        # comes from the surrounding chip styling, not from icon prefixes.
         grp = self.event.group_id or ""
         self.lbl_grp.config(text=grp if grp else txt("No Group", "그룹 없음"))
         self._tip_grp.update_text(
@@ -819,7 +847,9 @@ class EventRow(ttk.Frame):
             )
         )
 
-        # Key
+        # Key — preserve the legacy glyph format that the regression suite
+        # asserts (🔎 / ⌨️ / 🔁 prefixes). The chip styling now relies on
+        # surrounding padding and color cues rather than icon swaps.
         key = self.event.key_to_enter or ""
         invert = getattr(self.event, "invert_match", False)
         if is_cond:
@@ -829,6 +859,18 @@ class EventRow(ttk.Frame):
         if invert:
             display = f"🔁 {display}"
         self.lbl_key.config(text=display)
+
+        # Left color bar reflects the row's overall liveness.
+        if hasattr(self, "color_bar"):
+            if not getattr(self.event, "use_event", True):
+                bar_color = theme.SURFACE_DIVIDER
+            elif is_cond:
+                bar_color = theme.INK_MUTED
+            elif key:
+                bar_color = theme.SIGNAL_BASE
+            else:
+                bar_color = theme.STATUS_WARN_FG
+            self.color_bar.config(bg=bar_color)
         if invert:
             self._tip_key.update_text(
                 txt(
@@ -1317,7 +1359,12 @@ class EventListFrame(ttk.Frame):
             )
 
     def _create_header(self):
-        """컬럼 헤더 생성"""
+        """2-라인 셀에 맞춘 가벼운 헤더 + 분리선.
+
+        새 EventRow는 좌측 컬러바 + 상단(인덱스/사용/이름/액션) +
+        하단(그룹/키/조건/추가) 두 줄로 구성된다. 헤더는 상단 줄에
+        대응되는 가이드만 한 줄로 표시한다.
+        """
         header = ttk.Frame(self)
         header.grid(
             row=2,
@@ -1328,76 +1375,46 @@ class EventListFrame(ttk.Frame):
             sticky="ew",
         )
 
-        # 각 컬럼 레이블 (EventRow와 동일한 너비)
-        _hdr = [
-            ("#", 2, "center", {}, txt("Event index", "이벤트 순서")),
-            (
-                txt("Use", "사용"),
-                3,
-                "center",
-                {},
-                txt("Uncheck to skip this event.", "체크 해제 시 이벤트를 건너뜁니다"),
+        # leading spacers to align with the cell's color bar + index/check
+        ttk.Label(header, text="", width=2).pack(side=tk.LEFT)
+        lbl_use = ttk.Label(
+            header,
+            text=txt("Use", "사용"),
+            width=4,
+            anchor="center",
+        )
+        lbl_use.pack(side=tk.LEFT)
+        ToolTip(
+            lbl_use,
+            txt("Uncheck to skip this event.", "체크 해제 시 이벤트를 건너뜁니다"),
+        )
+
+        lbl_name = ttk.Label(
+            header,
+            text=txt("Event", "이벤트"),
+            anchor="w",
+        )
+        lbl_name.pack(side=tk.LEFT, padx=(UI_PAD_SM, UI_PAD_SM), fill=tk.X, expand=True)
+        ToolTip(
+            lbl_name,
+            txt(
+                "Top: event name. Bottom: ▣ group · ⌨ key · ◐ condition · + extra.",
+                "윗줄: 이벤트 이름. 아랫줄: ▣ 그룹 · ⌨ 입력 키 · ◐ 조건 · + 추가",
             ),
-            (
-                txt("Extra", "추가"),
-                4,
-                "center",
-                {},
-                txt(
-                    "Checked events belong to the runtime extra group.",
-                    "체크된 이벤트는 실행 중 추가 이벤트 묶음에 속합니다.",
-                ),
-            ),
-            (
-                txt("Type", "실행 유형"),
-                10,
-                "center",
-                {},
-                txt(
-                    "Condition-only or key-input execution.",
-                    "조건 전용 또는 키 입력 실행",
-                ),
-            ),
-            (
-                txt("Group", "그룹"),
-                14,
-                "center",
-                {"padx": 2},
-                txt("Event group (click to change).", "이벤트 그룹 (클릭하여 변경)"),
-            ),
-            (
-                txt("Input Key", "입력 키"),
-                10,
-                "center",
-                {"padx": 2},
-                txt("Key to input (click to edit).", "입력할 키 (클릭하여 편집)"),
-            ),
-            (
-                txt("Event Name", "이벤트 이름"),
-                0,
-                "w",
-                {"padx": 5, "fill": tk.X, "expand": True},
-                txt("Event name.", "이벤트 이름"),
-            ),
-            (
-                txt("Actions", "동작"),
-                22,
-                "center",
-                {},
-                txt("Edit / Copy / Delete", "편집 / 복사 / 삭제"),
-            ),
-        ]
-        for text, width, anchor, pack_kw, tip in _hdr:
-            kw = {"text": text, "anchor": anchor}
-            if width:
-                kw["width"] = width
-            lbl = ttk.Label(header, **kw)
-            lbl.pack(side=tk.LEFT, **pack_kw)
-            ToolTip(lbl, tip)
+        )
+
+        lbl_actions = ttk.Label(
+            header,
+            text=txt("Actions", "동작"),
+            width=22,
+            anchor="center",
+        )
+        lbl_actions.pack(side=tk.LEFT)
+        ToolTip(lbl_actions, txt("Edit / Copy / Delete", "편집 / 복사 / 삭제"))
 
         # 구분선
         ttk.Separator(self, orient="horizontal").grid(
-            row=2, column=0, columnspan=2, sticky="ew", pady=(18, 0), padx=UI_PAD_MD
+            row=2, column=0, columnspan=2, sticky="ew", pady=(20, 0), padx=UI_PAD_MD
         )
 
     def _load_events(self):
@@ -1707,6 +1724,12 @@ class KeystrokeProfiles:
         self.win.grab_set()
         self.win.bind("<Escape>", self._close)
         self.win.protocol("WM_DELETE_WINDOW", self._close)
+        # Workstation tone: force light palette even in dark-mode hosts.
+        try:
+            self.win.configure(bg=theme.SURFACE_PAPER)
+        except tk.TclError:
+            pass
+        theme.install_styles(self.win)
 
         self.profile = self._load()
         self.p_frame = ProfileFrame(
@@ -1726,17 +1749,26 @@ class KeystrokeProfiles:
 
         f_status = ttk.Frame(self.win)
         f_status.pack(fill="x", padx=UI_PAD_MD, pady=(0, UI_PAD_SM))
-        ttk.Label(f_status, text=txt("Save status:", "저장 상태:")).pack(side=tk.LEFT)
+        ttk.Label(
+            f_status,
+            text=txt("Save:", "저장:"),
+            foreground=theme.INK_MUTED,
+        ).pack(side=tk.LEFT)
         self.lbl_save_badge = tk.Label(
             f_status,
             text="",
-            relief="groove",
-            borderwidth=1,
-            padx=8,
-            pady=2,
+            relief="flat",
+            borderwidth=0,
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_1,
+            font=theme.fonts()["caption"],
+            highlightthickness=1,
+            highlightbackground=theme.SURFACE_DIVIDER,
         )
         self.lbl_save_badge.pack(side=tk.LEFT, padx=UI_PAD_SM)
-        self.lbl_status = ttk.Label(f_status, text="", foreground="gray")
+        self.lbl_status = ttk.Label(
+            f_status, text="", foreground=theme.INK_MUTED
+        )
         self.lbl_status.pack(side=tk.LEFT, padx=UI_PAD_MD)
 
         f_summary = ttk.Frame(f_status)
@@ -1775,10 +1807,13 @@ class KeystrokeProfiles:
         return tk.Label(
             parent,
             text="",
-            relief="groove",
-            borderwidth=1,
-            padx=8,
-            pady=2,
+            relief="flat",
+            borderwidth=0,
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_1,
+            font=theme.fonts()["caption"],
+            highlightthickness=1,
+            highlightbackground=theme.SURFACE_DIVIDER,
         )
 
     def _load(self):

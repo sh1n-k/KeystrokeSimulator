@@ -9,6 +9,7 @@ from loguru import logger
 from app.utils.i18n import LANGUAGE_LABELS, normalize_language, set_language, txt, dual_text_width
 from app.core.models import UserSettings
 from app.utils.system import WindowUtils, StateUtils
+from app.ui import theme
 
 
 class KeystrokeSettings(tk.Toplevel):
@@ -28,6 +29,11 @@ class KeystrokeSettings(tk.Toplevel):
     def _setup_window(self):
         if self.master:
             self.transient(self.master)
+        try:
+            self.configure(bg=theme.SURFACE_PAPER)
+        except tk.TclError:
+            pass
+        theme.install_styles(self)
         self.grid_columnconfigure((1, 2), weight=1)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind("<Escape>", self.on_close)
@@ -99,11 +105,15 @@ class KeystrokeSettings(tk.Toplevel):
             3, txt("Delay between loop", "루프 간 지연"), "delay_between_loop", v_cmd
         )
 
-        # 3. Warning
+        # 3. Warning callout (uses status.warn tones for a calmer feel)
         self.warning_label = ttk.Label(
-            self, text="", foreground="red", background="white"
+            self,
+            text="",
+            foreground=theme.STATUS_WARN_FG,
+            background=theme.STATUS_WARN_BG,
+            padding=(theme.SPACE_2, theme.SPACE_1),
         )
-        self.warning_label.grid(row=4, column=0, columnspan=5, pady=5, sticky="w")
+        self.warning_label.grid(row=4, column=0, columnspan=5, pady=5, sticky="we")
         self.warning_label.configure(wraplength=420)
         self._update_warning_text()
 

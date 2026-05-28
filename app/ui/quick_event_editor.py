@@ -13,6 +13,7 @@ from app.core.capturer import ScreenshotCapturer
 from app.core.models import EventModel
 from app.storage.profile_storage import ensure_quick_profile, load_profile, save_profile
 from app.utils.system import StateUtils, WindowUtils, KeyUtils
+from app.ui import theme
 
 
 class KeystrokeQuickEventEditor:
@@ -58,21 +59,51 @@ class KeystrokeQuickEventEditor:
         self.chk_thread.start()
 
     def _create_ui(self):
+        try:
+            self.win.configure(bg=theme.SURFACE_PAPER)
+        except tk.TclError:
+            pass
+        theme.install_styles(self.win)
+        f = theme.fonts()
+
+        # Compact stepper header on top of the editor.
+        header = tk.Frame(
+            self.win, bg=theme.SURFACE_PANEL, padx=theme.SPACE_3, pady=theme.SPACE_2
+        )
+        header.pack(fill="x", side="top")
+        tk.Label(
+            header,
+            text=txt("QUICK ADD", "빠른 추가"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_SECONDARY,
+            font=f["body_bold"],
+        ).pack(side=tk.LEFT)
+        self.lbl_session = tk.Label(
+            header,
+            text="",
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+        )
+        self.lbl_session.pack(side=tk.RIGHT)
+        tk.Frame(self.win, bg=theme.SURFACE_DIVIDER, height=1).pack(
+            fill="x", side="top"
+        )
+
         f_intro = ttk.LabelFrame(self.win, text=txt("Quick Flow", "빠른 작업 순서"))
         f_intro.pack(fill="x", padx=8, pady=(8, 5))
         ttk.Label(
             f_intro,
             text=txt(
-                "1. Move the mouse with ALT.\n2. Press CTRL to freeze the left preview.\n3. Click the right preview to choose the pixel.\n4. Press CTRL again to save the Quick event.",
-                "1. ALT로 마우스를 이동합니다.\n2. CTRL로 왼쪽 미리보기를 고정합니다.\n3. 오른쪽 미리보기에서 픽셀을 클릭합니다.\n4. CTRL을 다시 눌러 Quick 이벤트를 저장합니다.",
+                "① ALT  move pointer   ② CTRL  freeze preview   ③ click target   ④ CTRL  save",
+                "① ALT  마우스 이동   ② CTRL  미리보기 고정   ③ 대상 클릭   ④ CTRL  저장",
             ),
             justify="left",
-            wraplength=360,
+            wraplength=420,
+            foreground=theme.INK_SECONDARY,
         ).pack(anchor="w", padx=8, pady=(4, 2))
-        self.lbl_step = ttk.Label(f_intro, text="", foreground="#1e3a8a")
-        self.lbl_step.pack(anchor="w", padx=8, pady=(0, 2))
-        self.lbl_session = ttk.Label(f_intro, text="", foreground="#555555")
-        self.lbl_session.pack(anchor="w", padx=8, pady=(0, 6))
+        self.lbl_step = ttk.Label(f_intro, text="", foreground=theme.SIGNAL_BASE)
+        self.lbl_step.pack(anchor="w", padx=8, pady=(0, 6))
 
         # Images
         f_img = tk.Frame(self.win)
@@ -175,7 +206,15 @@ class KeystrokeQuickEventEditor:
             pass
 
     def _mk_lbl(self, p, bg, r, c):
-        l = tk.Label(p, width=10, height=5, bg=bg)
+        # Larger previews so users can actually verify what was captured.
+        l = tk.Label(
+            p,
+            width=18,
+            height=9,
+            bg=theme.SURFACE_SUNKEN,
+            highlightthickness=1,
+            highlightbackground=theme.SURFACE_DIVIDER,
+        )
         l.grid(row=r, column=c, padx=5)
         return l
 

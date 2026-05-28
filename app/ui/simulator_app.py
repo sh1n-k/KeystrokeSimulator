@@ -60,15 +60,18 @@ from app.utils.system import (
     KeyUtils,
     ProcessCollector,
 )
+from app.ui import theme
 
-STATUS_BG_INFO = "#eef3ff"
-STATUS_FG_INFO = "#1e3a8a"
-STATUS_BG_OK = "#e6f4ea"
-STATUS_FG_OK = "#1e5f3a"
-STATUS_BG_WARN = "#fff4cc"
-STATUS_FG_WARN = "#7a5b00"
-STATUS_BG_ERR = "#fdecea"
-STATUS_FG_ERR = "#9f1f1f"
+STATUS_BG_INFO = theme.STATUS_INFO_BG
+STATUS_FG_INFO = theme.STATUS_INFO_FG
+STATUS_BG_OK = theme.STATUS_READY_BG
+STATUS_FG_OK = theme.STATUS_READY_FG
+STATUS_BG_WARN = theme.STATUS_WARN_BG
+STATUS_FG_WARN = theme.STATUS_WARN_FG
+STATUS_BG_ERR = theme.STATUS_ERROR_BG
+STATUS_FG_ERR = theme.STATUS_ERROR_FG
+STATUS_BG_RUN = theme.STATUS_RUNNING_BG
+STATUS_FG_RUN = theme.STATUS_RUNNING_FG
 
 
 def safe_call(func, *args, **kwargs):
@@ -82,23 +85,29 @@ def safe_call(func, *args, **kwargs):
 class ProcessFrame(tk.Frame):
     def __init__(self, master, textvariable, *args, **kwargs):
         super().__init__(master, *args, **kwargs)
-        self.lbl_process = tk.Label(self)
-        self.lbl_process.pack(side=tk.LEFT, padx=5)
+        # 4-column grid keeps Process/Profile/Tools rows visually aligned.
+        # col 0: label (fixed width)
+        # col 1: combobox (stretches)
+        # col 2..: buttons (fixed width)
+        self.grid_columnconfigure(0, weight=0, minsize=80)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(2, weight=0, minsize=120)
+        self.grid_columnconfigure(3, weight=0, minsize=120)
+
+        self.lbl_process = tk.Label(self, anchor="w", width=8)
+        self.lbl_process.grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.process_combobox = ttk.Combobox(
             self, textvariable=textvariable, state="readonly"
         )
-        self.process_combobox.pack(side=tk.LEFT, padx=5)
+        self.process_combobox.grid(row=0, column=1, sticky="we", padx=(0, 6))
         self.refresh_button = tk.Button(self, command=self.refresh_processes)
-        self.refresh_button.pack(side=tk.LEFT)
+        self.refresh_button.grid(row=0, column=2, sticky="we", padx=(0, 6))
         self.refresh_texts()
         self.refresh_processes()
 
     def refresh_texts(self):
         self.lbl_process.config(text=txt("Process:", "프로세스:"))
-        self.refresh_button.config(
-            text=txt("Refresh", "새로고침"),
-            width=dual_text_width("Refresh", "새로고침", padding=2, min_width=8),
-        )
+        self.refresh_button.config(text=txt("Refresh", "새로고침"))
 
     def refresh_processes(self):
         curr_val = self.process_combobox.get()
@@ -129,20 +138,26 @@ class ProfileFrame(tk.Frame):
         self._bold_font = tkfont.nametofont("TkTextFont").copy()
         self._bold_font.configure(weight="bold")
 
-        self.lbl_profiles = tk.Label(self)
-        self.lbl_profiles.pack(side=tk.LEFT, padx=5)
+        # Same 4-column grid as ProcessFrame so labels/combos/buttons line up.
+        self.grid_columnconfigure(0, weight=0, minsize=80)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(2, weight=0, minsize=120)
+        self.grid_columnconfigure(3, weight=0, minsize=120)
+
+        self.lbl_profiles = tk.Label(self, anchor="w", width=8)
+        self.lbl_profiles.grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.profile_combobox = ttk.Combobox(
             self, textvariable=self.profile_display_var, state="readonly"
         )
-        self.profile_combobox.pack(side=tk.LEFT, padx=5)
+        self.profile_combobox.grid(row=0, column=1, sticky="we", padx=(0, 6))
         self.profile_combobox.bind(
             "<<ComboboxSelected>>",
             self._on_profile_selected,
         )
         self.copy_button = tk.Button(self, command=self.copy_profile)
-        self.copy_button.pack(side=tk.LEFT)
+        self.copy_button.grid(row=0, column=2, sticky="we", padx=(0, 6))
         self.del_button = tk.Button(self, command=self.delete_profile)
-        self.del_button.pack(side=tk.LEFT)
+        self.del_button.grid(row=0, column=3, sticky="we")
         self.refresh_texts()
         self.load_profiles()
 
@@ -234,14 +249,8 @@ class ProfileFrame(tk.Frame):
 
     def refresh_texts(self):
         self.lbl_profiles.config(text=txt("Profiles:", "프로필:"))
-        self.copy_button.config(
-            text=txt("Copy", "복사"),
-            width=dual_text_width("Copy", "복사", padding=2, min_width=9),
-        )
-        self.del_button.config(
-            text=txt("Delete", "삭제"),
-            width=dual_text_width("Delete", "삭제", padding=2, min_width=9),
-        )
+        self.copy_button.config(text=txt("Copy", "복사"))
+        self.del_button.config(text=txt("Delete", "삭제"))
 
     def copy_profile(self):
         if not (curr := self.get_selected_profile_name()):
@@ -315,24 +324,29 @@ class ProfileFrame(tk.Frame):
 
 
 class ButtonFrame(tk.Frame):
+    """4-column grid keeps tools row aligned with the row beneath it."""
+
+    _BTN_KEYS = (
+        ("start", ("Start", "시작")),
+        ("quick_events", ("Quick Events", "빠른 이벤트")),
+        ("settings", ("Settings", "설정")),
+        ("clear_logs", ("Clear Logs", "로그 삭제")),
+    )
+
     def __init__(self, master, toggle_cb, events_cb, settings_cb, clear_cb, **kwargs):
         super().__init__(master, **kwargs)
-        btns_config = [
-            ("start", ("Start", "시작"), toggle_cb),
-            ("quick_events", ("Quick Events", "빠른 이벤트"), events_cb),
-            ("settings", ("Settings", "설정"), settings_cb),
-            ("clear_logs", ("Clear Logs", "로그 삭제"), clear_cb),
-        ]
-        self.btns = {}
-        for key, label_pair, cmd in btns_config:
-            btn = tk.Button(
-                self,
-                text=txt(*label_pair),
-                width=dual_text_width(*label_pair, padding=2, min_width=9),
-                height=1,
-                command=cmd,
-            )
-            btn.pack(side=tk.LEFT, padx=5)
+        for col in range(4):
+            self.grid_columnconfigure(col, weight=1, uniform="tools")
+        commands = {
+            "start": toggle_cb,
+            "quick_events": events_cb,
+            "settings": settings_cb,
+            "clear_logs": clear_cb,
+        }
+        self.btns: dict[str, tk.Button] = {}
+        for col, (key, label_pair) in enumerate(self._BTN_KEYS):
+            btn = tk.Button(self, text=txt(*label_pair), height=1, command=commands[key])
+            btn.grid(row=0, column=col, sticky="we", padx=(0, 6) if col < 3 else (0, 0))
             self.btns[key] = btn
         self.start_stop_button = self.btns["start"]
         self.quick_events_button = self.btns["quick_events"]
@@ -340,51 +354,40 @@ class ButtonFrame(tk.Frame):
         self.clear_logs_button = self.btns["clear_logs"]
 
     def refresh_texts(self):
-        for key, label_pair in {
-            "start": ("Start", "시작"),
-            "quick_events": ("Quick Events", "빠른 이벤트"),
-            "settings": ("Settings", "설정"),
-            "clear_logs": ("Clear Logs", "로그 삭제"),
-        }.items():
-            self.btns[key].config(
-                text=txt(*label_pair),
-                width=dual_text_width(*label_pair, padding=2, min_width=9),
-            )
+        for key, label_pair in self._BTN_KEYS:
+            self.btns[key].config(text=txt(*label_pair))
 
 
 class ProfileButtonFrame(tk.Frame):
+    """Same 4-column grid; the empty fourth cell preserves alignment."""
+
+    _BTN_KEYS = (
+        ("modkeys", ("ModKeys", "수정키")),
+        ("edit_profile", ("Edit Profile", "프로필 편집")),
+        ("sort_profile", ("Sort Profile", "프로필 정렬")),
+    )
+
     def __init__(self, master, mod_cb, edit_cb, sort_cb, **kwargs):
         super().__init__(master, **kwargs)
-        btns_config = [
-            ("modkeys", ("ModKeys", "수정키"), mod_cb),
-            ("edit_profile", ("Edit Profile", "프로필 편집"), edit_cb),
-            ("sort_profile", ("Sort Profile", "프로필 정렬"), sort_cb),
-        ]
-        self.btns = {}
-        for key, label_pair, cmd in btns_config:
-            btn = tk.Button(
-                self,
-                text=txt(*label_pair),
-                width=dual_text_width(*label_pair, padding=2, min_width=9),
-                height=1,
-                command=cmd,
-            )
-            btn.pack(side=tk.LEFT, padx=5)
+        for col in range(4):
+            self.grid_columnconfigure(col, weight=1, uniform="tools")
+        commands = {
+            "modkeys": mod_cb,
+            "edit_profile": edit_cb,
+            "sort_profile": sort_cb,
+        }
+        self.btns: dict[str, tk.Button] = {}
+        for col, (key, label_pair) in enumerate(self._BTN_KEYS):
+            btn = tk.Button(self, text=txt(*label_pair), height=1, command=commands[key])
+            btn.grid(row=0, column=col, sticky="we", padx=(0, 6))
             self.btns[key] = btn
         self.settings_button = self.btns["edit_profile"]
         self.modkeys_button = self.btns["modkeys"]
         self.sort_button = self.btns["sort_profile"]
 
     def refresh_texts(self):
-        for key, label_pair in {
-            "modkeys": ("ModKeys", "수정키"),
-            "edit_profile": ("Edit Profile", "프로필 편집"),
-            "sort_profile": ("Sort Profile", "프로필 정렬"),
-        }.items():
-            self.btns[key].config(
-                text=txt(*label_pair),
-                width=dual_text_width(*label_pair, padding=2, min_width=9),
-            )
+        for key, label_pair in self._BTN_KEYS:
+            self.btns[key].config(text=txt(*label_pair))
 
 
 class KeystrokeSimulatorApp(tk.Tk):
@@ -427,71 +430,255 @@ class KeystrokeSimulatorApp(tk.Tk):
         self._update_ui()
 
     def _create_ui(self):
-        self.status_frame = tk.LabelFrame(self, padx=10, pady=8)
-        self.status_frame.pack(fill="x", padx=10, pady=(10, 5))
+        # Workstation theme: paper-tone root + ttk styles.
+        self.configure(bg=theme.SURFACE_PAPER)
+        try:
+            ttk.Style(self).theme_use("default")
+        except tk.TclError:
+            pass
+        theme.install_styles(self)
+        f = theme.fonts()
 
+        # --- Context Bar (top header) -----------------------------------
+        self.context_bar = tk.Frame(
+            self,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_2,
+        )
+        self.context_bar.pack(fill="x", side="top")
+        self.lbl_app_title = tk.Label(
+            self.context_bar,
+            text="KEYSTROKE SIMULATOR",
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_SECONDARY,
+            font=f["heading"],
+        )
+        self.lbl_app_title.pack(side=tk.LEFT)
+        self.lbl_app_subtitle = tk.Label(
+            self.context_bar,
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+        )
+        self.lbl_app_subtitle.pack(side=tk.RIGHT)
+        tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x", side="top")
+
+        # --- Run Dock (bottom, packed before body so it stays anchored) --
+        tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x", side="bottom")
+        self.run_dock = tk.Frame(
+            self,
+            bg=theme.SURFACE_PAPER,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_3,
+        )
+        self.run_dock.pack(fill="x", side="bottom")
+
+        # --- Body (cards live here) --------------------------------------
+        self.body = tk.Frame(
+            self,
+            bg=theme.SURFACE_PAPER,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_3,
+        )
+        self.body.pack(fill="both", expand=True, side="top")
+
+        # TARGET card -----------------------------------------------------
+        self.target_card, target_body = self._make_card(
+            self.body, txt("Target", "대상")
+        )
+        self.target_card.pack(fill="x", pady=(0, theme.SPACE_3))
+        self.process_frame = ProcessFrame(target_body, self.selected_process)
+        self.process_frame.configure(bg=theme.SURFACE_CANVAS)
+        self.process_frame.pack(fill="x", pady=(0, theme.SPACE_1))
+        self.profile_frame = ProfileFrame(
+            target_body, self.selected_profile, self.profiles_dir
+        )
+        self.profile_frame.configure(bg=theme.SURFACE_CANVAS)
+        self.profile_frame.pack(fill="x")
+
+        # STATE card ------------------------------------------------------
+        self.status_frame, status_body = self._make_card(
+            self.body, txt("State", "상태")
+        )
+        self.status_frame.pack(fill="x", pady=(0, theme.SPACE_3))
+        # Color-bar on the left + content stack on the right.
+        self.status_color_bar = tk.Frame(
+            status_body, bg=theme.STATUS_READY_FG, width=4
+        )
+        self.status_color_bar.pack(side=tk.LEFT, fill="y", padx=(0, theme.SPACE_2))
+        status_stack = tk.Frame(status_body, bg=theme.SURFACE_CANVAS)
+        status_stack.pack(side=tk.LEFT, fill="both", expand=True)
+        # Pill: icon + badge text in one rounded background.
         self.lbl_status_badge = tk.Label(
-            self.status_frame,
-            relief="groove",
-            borderwidth=1,
-            padx=8,
-            pady=2,
+            status_stack,
+            bg=theme.STATUS_READY_BG,
+            fg=theme.STATUS_READY_FG,
+            font=f["body_bold"],
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_1,
+            anchor="w",
         )
         self.lbl_status_badge.pack(anchor="w")
         self.lbl_status_title = tk.Label(
-            self.status_frame,
-            font=tkfont.nametofont("TkHeadingFont")
-            if "TkHeadingFont" in tkfont.names()
-            else tkfont.nametofont("TkDefaultFont"),
+            status_stack,
+            font=f["heading"],
+            bg=theme.SURFACE_CANVAS,
+            fg=theme.INK_PRIMARY,
             anchor="w",
             justify="left",
         )
-        self.lbl_status_title.pack(anchor="w", pady=(6, 2))
+        self.lbl_status_title.pack(anchor="w", pady=(theme.SPACE_2, 0))
         self.lbl_status_detail = tk.Label(
-            self.status_frame,
+            status_stack,
             anchor="w",
             justify="left",
-            fg="#555555",
+            bg=theme.SURFACE_CANVAS,
+            fg=theme.INK_SECONDARY,
             wraplength=560,
+            font=f["body"],
         )
-        self.lbl_status_detail.pack(anchor="w")
+        self.lbl_status_detail.pack(anchor="w", pady=(theme.SPACE_1, 0))
         self.lbl_hotkey_hint = tk.Label(
-            self.status_frame,
+            status_stack,
             anchor="w",
             justify="left",
-            fg="#666666",
+            bg=theme.SURFACE_CANVAS,
+            fg=theme.INK_MUTED,
             wraplength=560,
+            font=f["caption"],
         )
-        self.lbl_hotkey_hint.pack(anchor="w", pady=(4, 0))
+        self.lbl_hotkey_hint.pack(anchor="w", pady=(theme.SPACE_2, 0))
 
-        self.process_frame = ProcessFrame(self, self.selected_process)
-        self.profile_frame = ProfileFrame(
-            self, self.selected_profile, self.profiles_dir
+        # TOOLS card ------------------------------------------------------
+        self.tools_card, tools_body = self._make_card(
+            self.body, txt("Tools", "도구")
         )
+        self.tools_card.pack(fill="x")
         self.button_frame = ButtonFrame(
-            self,
+            tools_body,
             self.toggle_start_stop,
             self.open_quick_events,
             self.open_settings,
             self.clear_local_logs,
         )
+        self.button_frame.configure(bg=theme.SURFACE_CANVAS)
+        self.button_frame.pack(fill="x", pady=(0, theme.SPACE_1))
         self.profile_button_frame = ProfileButtonFrame(
-            self, self.open_modkeys, self.open_profile, self.sort_profile_events
+            tools_body,
+            self.open_modkeys,
+            self.open_profile,
+            self.sort_profile_events,
         )
+        self.profile_button_frame.configure(bg=theme.SURFACE_CANVAS)
+        self.profile_button_frame.pack(fill="x")
 
-        for f in (
-            self.process_frame,
-            self.profile_frame,
-            self.button_frame,
-            self.profile_button_frame,
+        # The Start button sits inside ButtonFrame; restyle it as the
+        # single accent action while keeping its variable reference.
+        self._apply_accent_button(self.button_frame.start_stop_button)
+        # Mute the remaining tk.Button widgets to the outline look.
+        for sec in (
+            self.button_frame.quick_events_button,
+            self.button_frame.settings_button,
+            self.button_frame.clear_logs_button,
+            self.profile_button_frame.modkeys_button,
+            self.profile_button_frame.settings_button,  # Edit Profile
+            self.profile_button_frame.sort_button,
+            self.process_frame.refresh_button,
+            self.profile_frame.copy_button,
+            self.profile_frame.del_button,
         ):
-            f.pack(pady=5)
+            self._apply_outline_button(sec)
+
+        # Calm labels inside Process/Profile rows to the canvas tone.
+        for w in (self.process_frame.lbl_process, self.profile_frame.lbl_profiles):
+            w.configure(
+                bg=theme.SURFACE_CANVAS,
+                fg=theme.INK_SECONDARY,
+                font=f["body"],
+            )
+
+        # --- Run Dock contents ------------------------------------------
+        self.lbl_run_status = tk.Label(
+            self.run_dock,
+            bg=theme.SURFACE_PAPER,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+            anchor="w",
+        )
+        self.lbl_run_status.pack(side=tk.LEFT)
 
         style = ttk.Style(self)
-        style.theme_use("default")
-        style.configure("TEntry", fieldbackground="white")
+        style.configure("TEntry", fieldbackground=theme.SURFACE_CANVAS)
         self._refresh_ui_texts()
         WindowUtils.center_window(self)
+
+    # ---------------------------------------------------------------
+    # Helpers used by _create_ui
+    # ---------------------------------------------------------------
+    def _make_card(self, parent: tk.Misc, title: str) -> tuple[tk.Frame, tk.Frame]:
+        """Create a workstation-style card with a thin divider title."""
+        f = theme.fonts()
+        outer = tk.Frame(
+            parent,
+            bg=theme.SURFACE_CANVAS,
+            highlightthickness=1,
+            highlightbackground=theme.SURFACE_DIVIDER,
+        )
+        header = tk.Frame(outer, bg=theme.SURFACE_CANVAS)
+        header.pack(fill="x", padx=theme.SPACE_3, pady=(theme.SPACE_2, 0))
+        title_label = tk.Label(
+            header,
+            text=title,
+            bg=theme.SURFACE_CANVAS,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+            anchor="w",
+        )
+        title_label.pack(side=tk.LEFT, anchor="w")
+        # Track the label so refresh_texts can update it later if needed.
+        outer._title_label = title_label  # type: ignore[attr-defined]
+        body = tk.Frame(outer, bg=theme.SURFACE_CANVAS)
+        body.pack(
+            fill="x",
+            padx=theme.SPACE_3,
+            pady=(theme.SPACE_1, theme.SPACE_3),
+        )
+        return outer, body
+
+    @staticmethod
+    def _apply_accent_button(btn: tk.Button) -> None:
+        f = theme.fonts()
+        btn.configure(
+            bg=theme.SIGNAL_BASE,
+            fg=theme.INK_INVERSE,
+            activebackground=theme.SIGNAL_HOVER,
+            activeforeground=theme.INK_INVERSE,
+            disabledforeground=theme.SURFACE_PAPER,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+            font=f["body_bold"],
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_1,
+        )
+
+    @staticmethod
+    def _apply_outline_button(btn: tk.Button) -> None:
+        f = theme.fonts()
+        btn.configure(
+            bg=theme.SURFACE_CANVAS,
+            fg=theme.INK_PRIMARY,
+            activebackground=theme.SURFACE_SUNKEN,
+            activeforeground=theme.INK_PRIMARY,
+            disabledforeground=theme.INK_MUTED,
+            relief="flat",
+            borderwidth=1,
+            highlightbackground=theme.SURFACE_DIVIDER,
+            highlightcolor=theme.SURFACE_DIVIDER,
+            highlightthickness=1,
+            font=f["body"],
+        )
 
     def _bind_selection_traces(self):
         for var in (self.selected_process, self.selected_profile):
@@ -539,20 +726,40 @@ class KeystrokeSimulatorApp(tk.Tk):
         self._update_ui()
 
     def _refresh_ui_texts(self):
-        if hasattr(self, "status_frame"):
-            self.status_frame.config(text=txt("Ready Check", "실행 준비"))
+        self._set_card_title(
+            getattr(self, "target_card", None), txt("Target", "대상")
+        )
+        self._set_card_title(
+            getattr(self, "status_frame", None), txt("State", "상태")
+        )
+        self._set_card_title(
+            getattr(self, "tools_card", None), txt("Tools", "도구")
+        )
         if hasattr(self, "process_frame"):
             self.process_frame.refresh_texts()
         if hasattr(self, "profile_frame"):
             self.profile_frame.refresh_texts()
         if hasattr(self, "button_frame"):
             self.button_frame.refresh_texts()
+            self._apply_accent_button(self.button_frame.start_stop_button)
         if hasattr(self, "profile_button_frame"):
             self.profile_button_frame.refresh_texts()
         if hasattr(self, "lbl_hotkey_hint"):
             self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
         if hasattr(self, "lbl_status_badge"):
             self._update_main_status()
+        if hasattr(self, "lbl_app_subtitle"):
+            self.lbl_app_subtitle.config(
+                text=txt("Workstation", "워크스테이션")
+            )
+
+    @staticmethod
+    def _set_card_title(card: tk.Misc | None, title: str) -> None:
+        if card is None:
+            return
+        label = getattr(card, "_title_label", None)
+        if label is not None:
+            label.config(text=title)
 
     def _get_hotkey_hint_text(self) -> str:
         if not hasattr(self, "settings"):
@@ -874,14 +1081,47 @@ class KeystrokeSimulatorApp(tk.Tk):
         if not hasattr(self, "lbl_status_badge"):
             return
         snapshot = self._get_readiness_snapshot()
+        bg = snapshot["bg"]
+        fg = snapshot["fg"]
+        running = self.is_running.get()
+        if running:
+            bg, fg = STATUS_BG_RUN, STATUS_FG_RUN
+        icon = self._icon_for_status(bg, running)
+        badge_text = f"{icon}  {snapshot['badge_text']}" if icon else snapshot["badge_text"]
         self.lbl_status_badge.config(
-            text=snapshot["badge_text"],
-            bg=snapshot["bg"],
-            fg=snapshot["fg"],
+            text=badge_text,
+            bg=bg,
+            fg=fg,
         )
+        if hasattr(self, "status_color_bar"):
+            self.status_color_bar.config(bg=fg)
         self.lbl_status_title.config(text=snapshot["title"])
         self.lbl_status_detail.config(text=snapshot["detail"])
         self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
+        if hasattr(self, "lbl_run_status"):
+            self.lbl_run_status.config(text=self._run_dock_text(snapshot, running))
+
+    @staticmethod
+    def _icon_for_status(bg: str, running: bool) -> str:
+        if running:
+            return theme.STATUS_RUNNING_ICON
+        return {
+            theme.STATUS_INFO_BG: theme.STATUS_INFO_ICON,
+            theme.STATUS_READY_BG: theme.STATUS_READY_ICON,
+            theme.STATUS_WARN_BG: theme.STATUS_WARN_ICON,
+            theme.STATUS_ERROR_BG: theme.STATUS_ERROR_ICON,
+            theme.STATUS_RUNNING_BG: theme.STATUS_RUNNING_ICON,
+        }.get(bg, theme.STATUS_INFO_ICON)
+
+    def _run_dock_text(self, snapshot: dict, running: bool) -> str:
+        if running:
+            return txt(
+                "Running. Press the hotkey or Stop to halt.",
+                "실행 중. 단축키 또는 중지로 멈출 수 있습니다.",
+            )
+        if snapshot.get("can_start"):
+            return txt("Ready to start.", "시작할 준비가 되었습니다.")
+        return snapshot.get("badge_text", "")
 
     def _setup_event_handlers(self):
         self.unbind_events()
@@ -1258,10 +1498,25 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_frame.copy_button.config(state=state)
         self.profile_frame.del_button.config(state=state)
 
-        self.button_frame.start_stop_button.config(
+        start_btn = self.button_frame.start_stop_button
+        start_btn.config(
             text=txt("Stop", "중지") if running else txt("Start", "시작"),
             state="normal" if running or readiness["can_start"] else "disabled",
         )
+        if running:
+            start_btn.configure(
+                bg=theme.STATUS_RUNNING_FG,
+                fg=theme.INK_INVERSE,
+                activebackground=theme.STATUS_ERROR_FG,
+                activeforeground=theme.INK_INVERSE,
+            )
+        else:
+            start_btn.configure(
+                bg=theme.SIGNAL_BASE,
+                fg=theme.INK_INVERSE,
+                activebackground=theme.SIGNAL_HOVER,
+                activeforeground=theme.INK_INVERSE,
+            )
         self.button_frame.quick_events_button.config(state=state)
         self.button_frame.settings_button.config(state=state)
         self.button_frame.clear_logs_button.config(state=state)

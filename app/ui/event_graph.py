@@ -1167,11 +1167,19 @@ def _draw_legend(
 
 
 def _load_font(size: int) -> ImageFont.ImageFont:
+    # Korean / multilingual fallback chain — macOS, Windows, Linux paths.
     candidates = [
         "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
         "/System/Library/Fonts/AppleSDGothicNeo.ttc",
         "/Library/Fonts/AppleGothic.ttf",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        # Windows Korean font fallbacks
+        "C:/Windows/Fonts/malgun.ttf",
+        "C:/Windows/Fonts/malgunbd.ttf",
+        "C:/Windows/Fonts/gulim.ttc",
+        # Linux Korean fallbacks (Noto family)
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     ]
     for path in candidates:
         if Path(path).exists():

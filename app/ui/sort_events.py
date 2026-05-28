@@ -10,24 +10,27 @@ from app.utils.i18n import dual_text_width, txt
 from app.core.models import EventModel
 from app.storage.profile_storage import load_profile, save_profile
 from app.utils.system import StateUtils, WindowUtils
+from app.ui import theme
 
-SW_PAD_XS = 2
-SW_PAD_SM = 4
-SW_PAD_MD = 8
-SW_PAD_LG = 12
+SW_PAD_XS = theme.SPACE_1
+SW_PAD_SM = theme.SPACE_1
+SW_PAD_MD = theme.SPACE_2
+SW_PAD_LG = theme.SPACE_3
 SW_ROW_IMAGE_SIZE = 40
 
-SW_BG_BASE = "#f3f2ee"
-SW_BG_PANEL = "#f7f6f2"
+# Workstation tones — these legacy names now alias the canonical
+# design tokens defined in app/ui/theme.py.
+SW_BG_BASE = theme.SURFACE_PAPER
+SW_BG_PANEL = theme.SURFACE_PANEL
 SW_BG_ROW = "#efeee9"
 SW_BG_CHIP = "#e8e6de"
 SW_BG_THUMBNAIL = "#d9d6cd"
 SW_BG_ROW_ACTIVE = "#e7e5dc"
 
-SW_FG_PRIMARY = "#2f2f2a"
-SW_FG_MUTED = "#6f6d64"
-SW_FG_WARN = "#8a6f2d"
-SW_BORDER_SOFT = "#d6d3c9"
+SW_FG_PRIMARY = theme.INK_PRIMARY
+SW_FG_MUTED = theme.INK_MUTED
+SW_FG_WARN = theme.STATUS_WARN_FG
+SW_BORDER_SOFT = theme.SURFACE_DIVIDER
 
 
 class KeystrokeSortEvents(tk.Toplevel):

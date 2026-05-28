@@ -13,6 +13,7 @@ from app.utils.i18n import txt, dual_text_width
 from app.core.capturer import ScreenshotCapturer
 from app.core.models import EventModel
 from app.utils.system import KeyUtils, PermissionUtils, StateUtils, WindowUtils
+from app.ui import theme
 
 
 class KeystrokeEventEditor:
@@ -101,6 +102,48 @@ class KeystrokeEventEditor:
         )
 
     def _create_layout(self):
+        # Apply the workstation theme to this editor window.
+        try:
+            self.win.configure(bg=theme.SURFACE_PAPER)
+        except tk.TclError:
+            pass
+        theme.install_styles(self.win)
+        f = theme.fonts()
+
+        # Stepper header — always visible above the Notebook so users see
+        # "Step 1/3 · Basic" no matter which tab is open.
+        self.stepper_bar = tk.Frame(
+            self.win,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_2,
+        )
+        self.stepper_bar.pack(fill="x", side="top")
+        self.lbl_stepper_title = tk.Label(
+            self.stepper_bar,
+            text="",
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_SECONDARY,
+            font=f["body_bold"],
+            anchor="w",
+        )
+        self.lbl_stepper_title.pack(side=tk.LEFT)
+        self.lbl_stepper_hint = tk.Label(
+            self.stepper_bar,
+            text=txt(
+                "ALT  move pointer · CTRL  capture image · click right image to set target",
+                "ALT  마우스 이동 · CTRL  이미지 캡처 · 오른쪽 이미지 클릭으로 대상 지정",
+            ),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+            anchor="e",
+        )
+        self.lbl_stepper_hint.pack(side=tk.RIGHT)
+        tk.Frame(self.win, bg=theme.SURFACE_DIVIDER, height=1).pack(
+            fill="x", side="top"
+        )
+
         self.notebook = ttk.Notebook(self.win)
         self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
 
@@ -108,14 +151,41 @@ class KeystrokeEventEditor:
         self.tab_detail = ttk.Frame(self.notebook)
         self.tab_logic = ttk.Frame(self.notebook)
 
-        self.notebook.add(self.tab_basic, text=txt("Basic", "기본"))
-        self.notebook.add(self.tab_detail, text=txt("Advanced", "상세 설정"))
-        self.notebook.add(self.tab_logic, text=txt("Conditions / Group", "조건 / 그룹"))
+        self.notebook.add(self.tab_basic, text=txt("① Basic", "① 기본"))
+        self.notebook.add(self.tab_detail, text=txt("② Advanced", "② 상세 설정"))
+        self.notebook.add(
+            self.tab_logic, text=txt("③ Conditions / Group", "③ 조건 / 그룹")
+        )
 
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
         self._setup_basic_tab()
         self._setup_detail_tab()
         self._setup_logic_tab()
         self._setup_bottom_buttons()
+        self._refresh_stepper_title()
+
+    # ------------------------------------------------------------------
+    # Stepper header helpers
+    # ------------------------------------------------------------------
+    _STEP_TITLES = [
+        ("Step 1 of 3 · Basic", "단계 1 / 3 · 기본"),
+        ("Step 2 of 3 · Advanced", "단계 2 / 3 · 상세 설정"),
+        ("Step 3 of 3 · Conditions / Group", "단계 3 / 3 · 조건 / 그룹"),
+    ]
+
+    def _refresh_stepper_title(self) -> None:
+        if not hasattr(self, "lbl_stepper_title"):
+            return
+        try:
+            idx = self.notebook.index(self.notebook.select())
+        except (tk.TclError, AttributeError):
+            idx = 0
+        idx = max(0, min(idx, len(self._STEP_TITLES) - 1))
+        en, ko = self._STEP_TITLES[idx]
+        self.lbl_stepper_title.config(text=txt(en, ko))
+
+    def _on_tab_changed(self, _event=None) -> None:
+        self._refresh_stepper_title()
 
     def _setup_basic_tab(self):
         f_name = tk.Frame(self.tab_basic)
@@ -125,18 +195,51 @@ class KeystrokeEventEditor:
         self.entry_name.pack(side="left", fill="x", expand=True, padx=5)
 
         f_img = tk.Frame(self.tab_basic)
-        f_img.pack(pady=5)
-        self.lbl_img1 = tk.Label(f_img, width=10, height=5, bg="red")
-        self.lbl_img1.grid(row=0, column=0, padx=5)
-        self.lbl_img2 = tk.Label(f_img, width=10, height=5, bg="gray")
-        self.lbl_img2.grid(row=0, column=1, padx=5)
+        f_img.pack(pady=theme.SPACE_2)
+        # Labels above each preview so users know which is live vs captured.
+        ttk.Label(
+            f_img, text=txt("Live View", "실시간 화면"), foreground=theme.INK_MUTED
+        ).grid(row=0, column=0, padx=theme.SPACE_2)
+        ttk.Label(
+            f_img, text=txt("Captured", "캡처본"), foreground=theme.INK_MUTED
+        ).grid(row=0, column=1, padx=theme.SPACE_2)
+        self.lbl_img1 = tk.Label(
+            f_img,
+            width=18,
+            height=9,
+            bg=theme.SURFACE_SUNKEN,
+            highlightthickness=1,
+            highlightbackground=theme.SURFACE_DIVIDER,
+        )
+        self.lbl_img1.grid(row=1, column=0, padx=theme.SPACE_2)
+        self.lbl_img2 = tk.Label(
+            f_img,
+            width=18,
+            height=9,
+            bg=theme.SURFACE_SUNKEN,
+            highlightthickness=1,
+            highlightbackground=theme.SURFACE_DIVIDER,
+        )
+        self.lbl_img2.grid(row=1, column=1, padx=theme.SPACE_2)
         for seq in ("<Button-1>", "<B1-Motion>"):
             self.lbl_img2.bind(seq, self.get_coordinates_of_held_image)
 
         f_ref = tk.Frame(self.tab_basic)
-        f_ref.pack(pady=5)
-        self.lbl_ref = tk.Label(f_ref, width=2, height=1, bg="gray")
-        self.lbl_ref.grid(row=0, column=1, padx=5)
+        f_ref.pack(pady=theme.SPACE_1)
+        ttk.Label(
+            f_ref,
+            text=txt("Reference pixel:", "기준 픽셀:"),
+            foreground=theme.INK_MUTED,
+        ).grid(row=0, column=0, padx=theme.SPACE_1)
+        self.lbl_ref = tk.Label(
+            f_ref,
+            width=2,
+            height=1,
+            bg=theme.SURFACE_SUNKEN,
+            highlightthickness=1,
+            highlightbackground=theme.SURFACE_DIVIDER,
+        )
+        self.lbl_ref.grid(row=0, column=1, padx=theme.SPACE_1)
 
         self.coord_entries = self.create_coord_entries(
             tk.Frame(self.tab_basic),
@@ -477,16 +580,26 @@ class KeystrokeEventEditor:
         gb_cond.pack(fill="both", expand=True, pady=5)
 
         cols = ("event", "state")
-        self.tree_cond = ttk.Treeview(gb_cond, columns=cols, show="headings", height=5)
+        self.tree_cond = ttk.Treeview(gb_cond, columns=cols, show="headings", height=8)
         self.tree_cond.heading("event", text=txt("Event Name", "이벤트 이름"))
         self.tree_cond.heading("state", text=txt("Required State", "필요 상태"))
-        self.tree_cond.column("event", width=150)
-        self.tree_cond.column("state", width=100)
+        self.tree_cond.column("event", width=180)
+        self.tree_cond.column("state", width=140)
 
-        # 색상 태그
-        self.tree_cond.tag_configure("active", background="#d4edda")
-        self.tree_cond.tag_configure("inactive", background="#f8d7da")
-        self.tree_cond.tag_configure("ignore", background="")
+        # 색상 태그 (theme tokens: color + icon + label = 3-axis cues)
+        self.tree_cond.tag_configure(
+            "active",
+            background=theme.COND_ACTIVE_BG,
+            foreground=theme.COND_ACTIVE_FG,
+        )
+        self.tree_cond.tag_configure(
+            "inactive",
+            background=theme.COND_INACTIVE_BG,
+            foreground=theme.COND_INACTIVE_FG,
+        )
+        self.tree_cond.tag_configure(
+            "ignore", background="", foreground=theme.INK_MUTED
+        )
 
         sb = ttk.Scrollbar(gb_cond, orient="vertical", command=self.tree_cond.yview)
         self.tree_cond.configure(yscrollcommand=sb.set)

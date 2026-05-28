@@ -7,6 +7,7 @@ from loguru import logger
 from app.utils.i18n import dual_text_width, txt
 from app.storage.profile_storage import load_profile, save_profile
 from app.utils.system import WindowUtils
+from app.ui import theme
 
 
 class ModificationKeysWindow(tk.Toplevel):
@@ -17,6 +18,11 @@ class ModificationKeysWindow(tk.Toplevel):
         self.title(txt("Modification Keys", "수정 키 설정"))
         self.transient(master)
         self.grab_set()
+        try:
+            self.configure(bg=theme.SURFACE_PAPER)
+        except tk.TclError:
+            pass
+        theme.install_styles(self)
 
         self.valid_keys = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
         self.labels = ("Alt", "Ctrl", "Shift")
@@ -31,35 +37,73 @@ class ModificationKeysWindow(tk.Toplevel):
         WindowUtils.center_window(self)
 
     def _setup_ui(self):
+        # Each modifier becomes its own card.
         for i, lbl in enumerate(self.labels):
-            ttk.Label(self, text=lbl).grid(row=i, column=1, padx=5, pady=5)
+            card = tk.Frame(
+                self,
+                bg=theme.SURFACE_CANVAS,
+                highlightthickness=1,
+                highlightbackground=theme.SURFACE_DIVIDER,
+            )
+            card.grid(
+                row=i,
+                column=0,
+                columnspan=6,
+                padx=theme.SPACE_3,
+                pady=theme.SPACE_1,
+                sticky="we",
+            )
+            tk.Label(
+                card,
+                text=lbl,
+                width=8,
+                bg=theme.SURFACE_CANVAS,
+                fg=theme.INK_PRIMARY,
+                font=theme.fonts()["body_bold"],
+            ).grid(row=0, column=0, padx=theme.SPACE_2, pady=theme.SPACE_2)
 
             chk = tk.BooleanVar()
-            ttk.Checkbutton(self, variable=chk).grid(row=i, column=2, padx=5)
+            ttk.Checkbutton(card, variable=chk).grid(
+                row=0, column=1, padx=theme.SPACE_1
+            )
 
             cmb_var = tk.StringVar(value="PressKey")
             cmb = ttk.Combobox(
-                self, textvariable=cmb_var, values=["PressKey"], width=10
+                card, textvariable=cmb_var, values=["PressKey"], width=10
             )
-            cmb.grid(row=i, column=3, padx=5)
-            cmb.bind("<KeyPress>", lambda e, v=cmb_var, idx=i: self._on_key(e, v, idx))
+            cmb.grid(row=0, column=2, padx=theme.SPACE_1)
+            cmb.bind(
+                "<KeyPress>", lambda e, v=cmb_var, idx=i: self._on_key(e, v, idx)
+            )
 
-            ttk.Label(self, text=txt("Pass", "패스")).grid(row=i, column=4, padx=5)
+            tk.Label(
+                card,
+                text=txt("Pass through", "패스"),
+                bg=theme.SURFACE_CANVAS,
+                fg=theme.INK_MUTED,
+                font=theme.fonts()["caption"],
+            ).grid(row=0, column=3, padx=(theme.SPACE_3, theme.SPACE_1))
 
             pas = tk.BooleanVar(value=False)
             ttk.Checkbutton(
-                self, variable=pas, command=lambda idx=i: self._toggle_pass(idx)
-            ).grid(row=i, column=5, padx=5)
+                card, variable=pas, command=lambda idx=i: self._toggle_pass(idx)
+            ).grid(row=0, column=4, padx=theme.SPACE_1)
 
             self.rows.append((chk, cmb_var, tk.StringVar(value="PressKey"), pas, cmb))
 
         ttk.Button(
             self,
             text=txt("Save (Enter)", "저장 (Enter)"),
-            width=dual_text_width("Save (Enter)", "저장 (Enter)", padding=2, min_width=12),
+            width=dual_text_width(
+                "Save (Enter)", "저장 (Enter)", padding=2, min_width=12
+            ),
             command=self.save,
+            style="Accent.TButton",
         ).grid(
-            row=len(self.labels), column=0, columnspan=6, pady=10
+            row=len(self.labels),
+            column=0,
+            columnspan=6,
+            pady=theme.SPACE_3,
         )
 
     def _load_data(self):
