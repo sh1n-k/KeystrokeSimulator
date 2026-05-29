@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: keystroke-static-verify
+        name: keystroke static verify
+        entry: uv run -m scripts.verify --static-only
+        language: system
+        pass_filenames: false

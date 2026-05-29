@@ -147,6 +147,70 @@ class TestProfileJsonStorage(unittest.TestCase):
             raw = json.loads((prof_dir / "CrossOs.json").read_text(encoding="utf-8"))
             self.assertEqual(raw["profile"]["runtime_toggle_key"], "Alt")
 
+    def test_load_profile_invalid_json_falls_back_without_overwriting_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            path = prof_dir / "Broken.json"
+            path.write_text("{bad", encoding="utf-8")
+
+            loaded = load_profile(prof_dir, "Broken", migrate=True)
+
+            self.assertEqual(loaded.name, "Broken")
+            self.assertEqual(loaded.event_list, [])
+            self.assertEqual(path.read_text(encoding="utf-8"), "{bad")
+
+    def test_load_profile_non_object_root_falls_back(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            (prof_dir / "Broken.json").write_text("[]", encoding="utf-8")
+
+            loaded = load_profile(prof_dir, "Broken", migrate=True)
+
+            self.assertEqual(loaded.name, "Broken")
+            self.assertEqual(loaded.event_list, [])
+
+    def test_load_profile_ignores_invalid_shape_without_crashing(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            payload = {
+                "profile": [],
+                "events": [
+                    "bad",
+                    {"event_name": "BadPriority", "priority": "oops"},
+                    {"event_name": "BadXY", "capture_size": ["x", "y"]},
+                ],
+            }
+            (prof_dir / "Mixed.json").write_text(json.dumps(payload), encoding="utf-8")
+
+            loaded = load_profile(prof_dir, "Mixed", migrate=False)
+
+            self.assertEqual(len(loaded.event_list), 2)
+            self.assertEqual(loaded.event_list[0].priority, 0)
+            self.assertEqual(loaded.event_list[1].capture_size, (100, 100))
+
+    def test_load_profile_skips_migration_when_invalid_data_was_ignored(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            path = prof_dir / "Mixed.json"
+            payload = {
+                "profile": {"name": "Mixed"},
+                "events": [
+                    {"event_name": "A", "key_to_enter": "X"},
+                    {"event_name": "A", "key_to_enter": "Y"},
+                    "bad",
+                ],
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            loaded = load_profile(prof_dir, "Mixed", migrate=True)
+            raw = json.loads(path.read_text(encoding="utf-8"))
+
+            self.assertEqual(
+                [evt.event_name for evt in loaded.event_list], ["A", "A (2)"]
+            )
+            self.assertEqual(raw["events"][1]["event_name"], "A")
+            self.assertEqual(raw["events"][2], "bad")
+
 class TestRenameProfileFiles(unittest.TestCase):
     """rename_profile_files: 프로필 파일 이름 변경"""
 
@@ -333,6 +397,33 @@ class TestEventRoundtrip(unittest.TestCase):
         }
         restored = event_from_dict(raw)
         self.assertEqual(restored.capture_size, (100, 100))
+
+    def test_non_boolean_conditions_are_rejected(self):
+        with self.assertRaises(ValueError):
+            event_from_dict(
+                {
+                    "event_name": "Conditions",
+                    "conditions": {"A": True, "B": False, "C": "false"},
+                }
+            )
+
+    def test_profile_load_skips_event_with_invalid_conditions(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            payload = {
+                "profile": {"name": "InvalidCondition"},
+                "events": [
+                    {"event_name": "Good", "conditions": {"A": True}},
+                    {"event_name": "Bad", "conditions": {"A": "false"}},
+                ],
+            }
+            (prof_dir / "InvalidCondition.json").write_text(
+                json.dumps(payload), encoding="utf-8"
+            )
+
+            loaded = load_profile(prof_dir, "InvalidCondition", migrate=True)
+
+            self.assertEqual([evt.event_name for evt in loaded.event_list], ["Good"])
 
     def test_image_roundtrip_preserves_pixels(self):
         """이미지 포함 roundtrip에서 픽셀 보존"""

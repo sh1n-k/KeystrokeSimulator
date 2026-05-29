@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 import copy
 import os
 import time
 import tkinter as tk
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from tkinter import ttk, messagebox, simpledialog
-from typing import Callable, Optional, List
+from typing import Any, ClassVar, Literal, Optional, Protocol, TypeAlias, TypedDict, cast
 
 from PIL import Image, ImageTk
+from loguru import logger
 
 from app.utils.i18n import txt, dual_text_width
 from app.ui.event_graph import ensure_profile_graph_image
@@ -15,7 +19,7 @@ from app.ui.event_importer import EventImporter
 from app.core.models import ProfileModel, EventModel
 from app.core.validation import find_duplicate_event_names, normalized_event_name
 from app.storage.profile_storage import load_profile, rename_profile_files, save_profile
-from app.utils.system import WindowUtils, StateUtils, KeyUtils
+from app.utils.system import WindowUtils, StateUtils
 from app.utils.runtime_toggle import (
     collect_runtime_toggle_validation_errors,
     display_runtime_toggle_trigger,
@@ -41,18 +45,48 @@ BADGE_FG_WARN = theme.STATUS_WARN_FG
 BADGE_BG_ERR = theme.STATUS_ERROR_BG
 BADGE_FG_ERR = theme.STATUS_ERROR_FG
 
+ImageIdentity: TypeAlias = tuple[int, tuple[int, int], str] | None
+EventFingerprint: TypeAlias = tuple[object, ...]
+ProfileFingerprint: TypeAlias = tuple[object, ...]
+ClickAction: TypeAlias = Literal["open", "copy", "remove"]
+SortKey: TypeAlias = Callable[[EventModel], tuple[object, ...]]
+KeySortOrder: TypeAlias = tuple[int, int, str]
+EventProvider: TypeAlias = Callable[[], EventModel | None]
+
+
+class SaveCallback(Protocol):
+    def __call__(self, check_name: bool = False, reload: bool = False) -> object: ...
+
+
+class EventRowCallbacks(TypedDict, total=False):
+    open: Callable[[int, EventModel | None], object]
+    copy: Callable[[EventModel | None], object]
+    remove: Callable[["EventRow", int], object]
+    menu: Callable[[tk.Event[tk.Misc], int], object]
+    group_select: Callable[[int, EventModel], object]
+    save: Callable[[], object]
+    select: Callable[[EventModel], object]
+
+
+class AccordionSection(TypedDict):
+    wrapper: tk.Frame
+    header: tk.Frame
+    glyph: tk.Label
+    body: tk.Frame
+    expanded: bool
+
 
 def _autosave_perf_enabled() -> bool:
     return os.getenv("KEYSIM_PROFILE_PERF") == "1"
 
 
-def _image_identity(img: Image.Image | None):
+def _image_identity(img: Image.Image | None) -> ImageIdentity:
     if img is None:
         return None
     return (id(img), img.size, img.mode)
 
 
-def _event_fingerprint(evt: EventModel):
+def _event_fingerprint(evt: EventModel) -> EventFingerprint:
     return (
         getattr(evt, "event_name", None),
         bool(getattr(evt, "use_event", True)),
@@ -76,7 +110,9 @@ def _event_fingerprint(evt: EventModel):
     )
 
 
-def _profile_fingerprint(profile: ProfileModel, profile_name: str, favorite: bool):
+def _profile_fingerprint(
+    profile: ProfileModel, profile_name: str, favorite: bool
+) -> ProfileFingerprint:
     return (
         profile_name,
         bool(favorite),
@@ -89,30 +125,30 @@ def _profile_fingerprint(profile: ProfileModel, profile_name: str, favorite: boo
 class ToolTip:
     """경량 툴팁: 위젯에 마우스를 올리면 설명 텍스트를 표시한다."""
 
-    def __init__(self, widget, text: str = "", delay: int = 400):
+    def __init__(self, widget: tk.Misc, text: str = "", delay: int = 400) -> None:
         self.widget = widget
         self.text = text
         self.delay = delay
-        self._after_id = None
-        self._tw = None
+        self._after_id: str | None = None
+        self._tw: tk.Toplevel | None = None
         widget.bind("<Enter>", self._on_enter, add="+")
         widget.bind("<Leave>", self._on_leave, add="+")
         widget.bind("<ButtonPress>", self._on_leave, add="+")
 
-    def _on_enter(self, event=None):
+    def _on_enter(self, event: tk.Event[tk.Misc] | None = None) -> None:
         self._cancel()
         self._after_id = self.widget.after(self.delay, self._show)
 
-    def _on_leave(self, event=None):
+    def _on_leave(self, event: tk.Event[tk.Misc] | None = None) -> None:
         self._cancel()
         self._hide()
 
-    def _cancel(self):
+    def _cancel(self) -> None:
         if self._after_id:
             self.widget.after_cancel(self._after_id)
             self._after_id = None
 
-    def _show(self):
+    def _show(self) -> None:
         if not self.text:
             return
         try:
@@ -122,7 +158,7 @@ class ToolTip:
             return
         self._tw = tk.Toplevel(self.widget)
         self._tw.wm_overrideredirect(True)
-        self._tw.wm_attributes("-topmost", True)
+        cast(Any, self._tw).wm_attributes("-topmost", True)
         self._tw.wm_geometry(f"+{x}+{y}")
         tk.Label(
             self._tw,
@@ -137,24 +173,24 @@ class ToolTip:
             pady=4,
         ).pack()
 
-    def _hide(self):
+    def _hide(self) -> None:
         if self._tw:
             self._tw.destroy()
             self._tw = None
 
-    def update_text(self, text: str):
+    def update_text(self, text: str) -> None:
         self.text = text
 
 
 class ProfileFrame(ttk.Frame):
     def __init__(
         self,
-        master,
+        master: tk.Misc,
         name: str,
         fav: bool,
         on_change: Optional[Callable[[], None]] = None,
         profiles_dir: Optional[Path] = None,
-    ):
+    ) -> None:
         super().__init__(master)
         self.on_change = on_change
         self._original_name = name
@@ -173,14 +209,20 @@ class ProfileFrame(ttk.Frame):
         self.lbl_warn = ttk.Label(self, text="", foreground="#b30000")
         self.lbl_warn.pack(side=tk.LEFT, padx=(UI_PAD_SM, 0))
 
-        self.entry.bind("<KeyRelease>", lambda e: self._notify_changed())
-        self.entry.bind("<FocusOut>", lambda e: self._notify_changed())
-        self.fav_var.trace_add("write", lambda *_: self._notify_changed())
+        def on_entry_changed(_event: tk.Event[tk.Misc]) -> None:
+            self._notify_changed()
 
-    def get_data(self):
+        def on_favorite_changed(*_args: str) -> None:
+            self._notify_changed()
+
+        self.entry.bind("<KeyRelease>", on_entry_changed)
+        self.entry.bind("<FocusOut>", on_entry_changed)
+        self.fav_var.trace_add("write", on_favorite_changed)
+
+    def get_data(self) -> tuple[str, bool]:
         return self.entry.get(), self.fav_var.get()
 
-    def _validate(self):
+    def _validate(self) -> None:
         name = self.entry.get().strip()
         if not name:
             self.lbl_warn.config(
@@ -194,7 +236,7 @@ class ProfileFrame(ttk.Frame):
             return
         self.lbl_warn.config(text="")
 
-    def _notify_changed(self):
+    def _notify_changed(self) -> None:
         self._validate()
         if self.on_change:
             self.on_change()
@@ -203,10 +245,10 @@ class ProfileFrame(ttk.Frame):
 class RuntimeToggleSettingsFrame(ttk.LabelFrame):
     def __init__(
         self,
-        master,
+        master: tk.Misc,
         profile: ProfileModel,
         on_change: Optional[Callable[[], None]] = None,
-    ):
+    ) -> None:
         super().__init__(
             master, text=txt("Runtime Event Group", "실행 중 추가 이벤트 묶음")
         )
@@ -308,12 +350,12 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         profile.runtime_toggle_enabled = enabled
         profile.runtime_toggle_key = key
 
-    def _notify_changed(self):
+    def _notify_changed(self) -> None:
         self._sync_state()
         if self.on_change:
             self.on_change()
 
-    def _sync_state(self):
+    def _sync_state(self) -> None:
         enabled = self.enabled_var.get()
         self.key_entry.config(state="readonly" if enabled else "disabled")
         self.capture_button.config(state="normal" if enabled else "disabled")
@@ -322,11 +364,18 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
             self._stop_capture()
             self.capture_status_var.set("")
 
-    def _bind_capture(self, widget, sequence: str, handler) -> None:
+    def _bind_capture(
+        self,
+        widget: tk.Misc,
+        sequence: str,
+        handler: Callable[[tk.Event[tk.Misc]], object],
+    ) -> None:
         func_id = widget.bind(sequence, handler, add="+")
         self._capture_bindings.append((widget, sequence, func_id))
 
-    def _start_capture(self, _event=None):
+    def _start_capture(
+        self, _event: tk.Event[tk.Misc] | None = None
+    ) -> Literal["break"]:
         if not self.enabled_var.get():
             return "break"
         if self._capture_active:
@@ -339,7 +388,7 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
                 "입력을 기다리는 중... 키를 누르거나 마우스 휠을 움직이세요. Esc 로 취소합니다.",
             )
         )
-        top = self.winfo_toplevel()
+        top = cast(tk.Misc, self.winfo_toplevel())
         self._bind_capture(top, "<KeyPress>", self._on_capture_key_press)
         self._bind_capture(top, "<MouseWheel>", self._on_capture_mouse_wheel)
         self._bind_capture(top, "<Button-4>", self._on_capture_mouse_wheel)
@@ -347,12 +396,12 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         top.focus_force()
         return "break"
 
-    def _stop_capture(self):
+    def _stop_capture(self) -> None:
         for widget, sequence, func_id in self._capture_bindings:
             try:
                 widget.unbind(sequence, func_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"Capture binding cleanup failed: {exc}")
         self._capture_bindings.clear()
         self._capture_active = False
 
@@ -361,13 +410,16 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         self.key_var.set(display_runtime_toggle_trigger(self._selected_trigger) or "")
         self._notify_changed()
 
-    def _clear_trigger(self):
+    def _clear_trigger(self) -> None:
         self._stop_capture()
         self.capture_status_var.set("")
         self._set_trigger(None)
 
-    def _on_capture_key_press(self, event):
-        if getattr(event, "keysym", "") == "Escape":
+    def _on_capture_key_press(
+        self, event: tk.Event[tk.Misc]
+    ) -> Literal["break"]:
+        event_obj = cast(Any, event)
+        if getattr(event_obj, "keysym", "") == "Escape":
             self._stop_capture()
             self.capture_status_var.set(
                 txt("Input capture cancelled.", "입력 받기를 취소했습니다.")
@@ -375,9 +427,9 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
             return "break"
 
         trigger = normalize_runtime_toggle_capture_key(
-            getattr(event, "keysym", None),
-            getattr(event, "char", None),
-            getattr(event, "keycode", None),
+            getattr(event_obj, "keysym", None),
+            getattr(event_obj, "char", None),
+            getattr(event_obj, "keycode", None),
         )
         if not trigger:
             return "break"
@@ -393,9 +445,12 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         self._set_trigger(trigger)
         return "break"
 
-    def _on_capture_mouse_wheel(self, event):
+    def _on_capture_mouse_wheel(
+        self, event: tk.Event[tk.Misc]
+    ) -> Literal["break"]:
+        event_obj = cast(Any, event)
         trigger = normalize_runtime_toggle_wheel_event(
-            delta=getattr(event, "delta", None), num=getattr(event, "num", None)
+            delta=getattr(event_obj, "delta", None), num=getattr(event_obj, "num", None)
         )
         if not trigger:
             return "break"
@@ -416,16 +471,20 @@ class GroupSelector(tk.Toplevel):
     """그룹 선택/생성 팝업"""
 
     def __init__(
-        self, master, current_group: str, existing_groups: List[str], callback: Callable
-    ):
+        self,
+        master: tk.Misc,
+        current_group: str | None,
+        existing_groups: Sequence[str],
+        callback: Callable[[str | None], object],
+    ) -> None:
         super().__init__(master)
         self.callback = callback
-        self.result = None
+        self.result: str | None = None
         self.none_label = txt("(None)", "(없음)")
         self.existing_groups = {g.lower(): g for g in existing_groups}
 
         self.title(txt("Select Group", "그룹 선택"))
-        self.transient(master)
+        cast(Any, self).transient(master)
         self.grab_set()
         self.resizable(False, False)
 
@@ -442,7 +501,9 @@ class GroupSelector(tk.Toplevel):
         self.listbox = tk.Listbox(frame, height=8, width=25)
         self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.listbox.yview)
+        scrollbar = ttk.Scrollbar(
+            frame, orient=tk.VERTICAL, command=cast(Any, self.listbox).yview
+        )
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.listbox.config(yscrollcommand=scrollbar.set)
 
@@ -459,7 +520,10 @@ class GroupSelector(tk.Toplevel):
         else:
             self.listbox.selection_set(0)
 
-        self.listbox.bind("<Double-Button-1>", lambda e: self._on_select())
+        def on_listbox_double_click(_event: tk.Event[tk.Misc]) -> None:
+            self._on_select()
+
+        self.listbox.bind("<Double-Button-1>", on_listbox_double_click)
 
         # 버튼 프레임
         btn_frame = ttk.Frame(self)
@@ -481,19 +545,26 @@ class GroupSelector(tk.Toplevel):
         y = master.winfo_rooty() + 50
         self.geometry(f"+{x}+{y}")
 
-        self.bind("<Escape>", lambda e: self.destroy())
-        self.bind("<Return>", lambda e: self._on_select())
+        def on_escape(_event: tk.Event[tk.Misc]) -> None:
+            self.destroy()
 
-    def _on_select(self):
-        sel = self.listbox.curselection()
+        def on_return(_event: tk.Event[tk.Misc]) -> None:
+            self._on_select()
+
+        self.bind("<Escape>", on_escape)
+        self.bind("<Return>", on_return)
+
+    def _on_select(self) -> None:
+        listbox = cast(Any, self.listbox)
+        sel = cast(tuple[int, ...], listbox.curselection())
         if not sel:
             return
-        value = self.listbox.get(sel[0])
+        value = cast(str, listbox.get(sel[0]))
         self.result = None if value == self.none_label else value
         self.callback(self.result)
         self.destroy()
 
-    def _on_new(self):
+    def _on_new(self) -> None:
         new_name = simpledialog.askstring(
             txt("New Group", "새 그룹"),
             txt("Enter new group name:", "새 그룹 이름을 입력하세요:"),
@@ -503,13 +574,14 @@ class GroupSelector(tk.Toplevel):
             return
         new_name = new_name.strip()
         if not new_name:
-            return messagebox.showwarning(
+            messagebox.showwarning(
                 txt("Invalid Group", "유효하지 않은 그룹"),
                 txt("Group name cannot be empty.", "그룹 이름은 비워둘 수 없습니다."),
                 parent=self,
             )
+            return
         if new_name in {"(None)", self.none_label}:
-            return messagebox.showwarning(
+            messagebox.showwarning(
                 txt("Invalid Group", "유효하지 않은 그룹"),
                 txt(
                     f"'{self.none_label}' is reserved.",
@@ -517,12 +589,14 @@ class GroupSelector(tk.Toplevel):
                 ),
                 parent=self,
             )
+            return
         if new_name.lower() in self.existing_groups:
-            return messagebox.showwarning(
+            messagebox.showwarning(
                 txt("Duplicate Group", "중복 그룹"),
                 txt(f"'{new_name}' already exists.", f"'{new_name}' 이미 존재합니다."),
                 parent=self,
             )
+            return
         self.result = new_name
         self.callback(self.result)
         self.destroy()
@@ -531,11 +605,11 @@ class GroupSelector(tk.Toplevel):
 class GroupManagerDialog(tk.Toplevel):
     def __init__(
         self,
-        master,
+        master: tk.Misc,
         get_group_counts: Callable[[], dict[str, int]],
         rename_cb: Callable[[str, str], tuple[bool, str]],
         clear_cb: Callable[[str], int],
-    ):
+    ) -> None:
         super().__init__(master)
         self.get_group_counts = get_group_counts
         self.rename_cb = rename_cb
@@ -543,7 +617,7 @@ class GroupManagerDialog(tk.Toplevel):
         self._name_map: list[str] = []
 
         self.title(txt("Manage Groups", "그룹 관리"))
-        self.transient(master)
+        cast(Any, self).transient(master)
         self.grab_set()
         self.resizable(False, False)
 
@@ -561,7 +635,9 @@ class GroupManagerDialog(tk.Toplevel):
         self.listbox = tk.Listbox(body, height=10, width=36)
         self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        scrollbar = ttk.Scrollbar(body, orient=tk.VERTICAL, command=self.listbox.yview)
+        scrollbar = ttk.Scrollbar(
+            body, orient=tk.VERTICAL, command=cast(Any, self.listbox).yview
+        )
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.listbox.config(yscrollcommand=scrollbar.set)
 
@@ -577,8 +653,14 @@ class GroupManagerDialog(tk.Toplevel):
             side=tk.RIGHT, padx=2
         )
 
-        self.listbox.bind("<Double-Button-1>", lambda e: self._rename_group())
-        self.bind("<Escape>", lambda e: self.destroy())
+        def on_listbox_double_click(_event: tk.Event[tk.Misc]) -> None:
+            self._rename_group()
+
+        def on_escape(_event: tk.Event[tk.Misc]) -> None:
+            self.destroy()
+
+        self.listbox.bind("<Double-Button-1>", on_listbox_double_click)
+        self.bind("<Escape>", on_escape)
         self._reload_groups()
 
         self.update_idletasks()
@@ -586,7 +668,7 @@ class GroupManagerDialog(tk.Toplevel):
         y = master.winfo_rooty() + 60
         self.geometry(f"+{x}+{y}")
 
-    def _reload_groups(self, selected_name: Optional[str] = None):
+    def _reload_groups(self, selected_name: Optional[str] = None) -> None:
         data = self.get_group_counts()
         self.listbox.delete(0, tk.END)
         self._name_map = sorted(data.keys())
@@ -611,7 +693,8 @@ class GroupManagerDialog(tk.Toplevel):
     def _selected_group(self) -> Optional[str]:
         if not self._name_map:
             return None
-        sel = self.listbox.curselection()
+        listbox = cast(Any, self.listbox)
+        sel = cast(tuple[int, ...], listbox.curselection())
         if not sel:
             return None
         idx = sel[0]
@@ -619,7 +702,7 @@ class GroupManagerDialog(tk.Toplevel):
             return self._name_map[idx]
         return None
 
-    def _rename_group(self):
+    def _rename_group(self) -> None:
         group = self._selected_group()
         if not group:
             return
@@ -633,12 +716,13 @@ class GroupManagerDialog(tk.Toplevel):
             return
         ok, msg = self.rename_cb(group, new_name)
         if not ok:
-            return messagebox.showwarning(
+            messagebox.showwarning(
                 txt("Rename Failed", "이름 변경 실패"), msg, parent=self
             )
+            return
         self._reload_groups(selected_name=new_name.strip())
 
-    def _clear_group(self):
+    def _clear_group(self) -> None:
         group = self._selected_group()
         if not group:
             return
@@ -664,7 +748,13 @@ class GroupManagerDialog(tk.Toplevel):
 
 
 class EventRow(ttk.Frame):
-    def __init__(self, master, row_num: int, event: Optional[EventModel], cbs: dict):
+    def __init__(
+        self,
+        master: tk.Misc,
+        row_num: int,
+        event: Optional[EventModel],
+        cbs: EventRowCallbacks,
+    ) -> None:
         super().__init__(master)
         self.row_num, self.event, self.cbs = row_num, event, cbs
         self.use_var = tk.BooleanVar(value=event.use_event if event else True)
@@ -673,8 +763,9 @@ class EventRow(ttk.Frame):
             if event
             else False
         )
-        self._last_saved_name = event.event_name if event else ""
+        self.last_saved_name: str = (event.event_name or "") if event else ""
         self._bound_event_id = id(event) if event else None
+        self.btn_delete: ttk.Button | None = None
 
         # Two-line cell: left color bar | (header row + meta row).
         self.color_bar = tk.Frame(self, bg=theme.SIGNAL_BASE, width=4)
@@ -705,12 +796,12 @@ class EventRow(ttk.Frame):
             self.entry.insert(0, event.event_name or "")
 
         # Action buttons live at the end of the header row.
-        self.btn_delete = None
-        for en, ko, key, min_width in [
+        button_specs: tuple[tuple[str, str, ClickAction, int], ...] = (
             ("Edit", "편집", "open", 7),
             ("Copy", "복사", "copy", 7),
             ("🗑 Delete", "🗑 삭제", "remove", 9),
-        ]:
+        )
+        for en, ko, key, min_width in button_specs:
             btn = ttk.Button(
                 header,
                 text=txt(en, ko),
@@ -718,7 +809,7 @@ class EventRow(ttk.Frame):
                 command=lambda k=key: self._on_click(k),
             )
             btn.pack(side=tk.LEFT, padx=UI_PAD_XS)
-            btn.bind("<Button-3>", lambda e: self.cbs["menu"](e, self.row_num))
+            btn.bind("<Button-3>", self._on_context_menu)
             if key == "remove":
                 self.btn_delete = btn
 
@@ -750,7 +841,7 @@ class EventRow(ttk.Frame):
             padding=(theme.SPACE_1, 0),
         )
         self.lbl_key.pack(side=tk.LEFT, padx=(0, theme.SPACE_1))
-        self.lbl_key.bind("<Button-1>", lambda e: self._on_click("open"))
+        self.lbl_key.bind("<Button-1>", self._on_open_click)
         self._tip_key = ToolTip(self.lbl_key)
 
         self.lbl_cond = ttk.Label(meta, text="", width=9, anchor="center")
@@ -767,7 +858,7 @@ class EventRow(ttk.Frame):
         self._tip_runtime_toggle = ToolTip(self.chk_runtime_toggle)
 
         # Context Menu Binding
-        self.entry.bind("<Button-3>", lambda e: self.cbs["menu"](e, self.row_num))
+        self.entry.bind("<Button-3>", self._on_context_menu)
         self.entry.bind("<KeyRelease>", self._on_name_changed)
         self.entry.bind("<FocusOut>", self._on_name_changed)
         self.entry.bind("<FocusIn>", self._on_select)
@@ -777,10 +868,12 @@ class EventRow(ttk.Frame):
         # Initial Display
         self.update_display()
 
-    def update_display(self):
+    def update_display(self) -> None:
         """이벤트 상태에 따라 UI 갱신"""
         if not self.event:
-            runtime_toggle_var = getattr(self, "runtime_toggle_var", None)
+            runtime_toggle_var = cast(
+                tk.BooleanVar | None, getattr(self, "runtime_toggle_var", None)
+            )
             if runtime_toggle_var is not None:
                 runtime_toggle_var.set(False)
             self.lbl_cond.config(text="")
@@ -789,8 +882,12 @@ class EventRow(ttk.Frame):
             return
 
         self.use_var.set(self.event.use_event)
-        runtime_toggle_var = getattr(self, "runtime_toggle_var", None)
-        runtime_toggle_tip = getattr(self, "_tip_runtime_toggle", None)
+        runtime_toggle_var = cast(
+            tk.BooleanVar | None, getattr(self, "runtime_toggle_var", None)
+        )
+        runtime_toggle_tip = cast(
+            ToolTip | None, getattr(self, "_tip_runtime_toggle", None)
+        )
         if runtime_toggle_var is not None:
             runtime_toggle_var.set(
                 bool(getattr(self.event, "runtime_toggle_member", False))
@@ -815,7 +912,7 @@ class EventRow(ttk.Frame):
             self.entry.delete(0, tk.END)
             self.entry.insert(0, event_name)
         if event_rebound:
-            self._last_saved_name = event_name
+            self.last_saved_name = event_name
         self._bound_event_id = id(self.event)
 
         # Condition Only — SOT icon vocabulary (◐ for conditions).
@@ -903,41 +1000,61 @@ class EventRow(ttk.Frame):
                 )
             )
 
-    def _on_toggle_use(self):
+    def _on_context_menu(self, event: tk.Event[tk.Misc]) -> object:
+        menu_cb = self.cbs.get("menu")
+        if menu_cb is None:
+            return None
+        return menu_cb(event, self.row_num)
+
+    def _on_open_click(self, _event: tk.Event[tk.Misc]) -> None:
+        self._on_click("open")
+
+    def _on_toggle_use(self) -> None:
         if self.event:
             self.event.use_event = self.use_var.get()
-            if "save" in self.cbs:
-                self.cbs["save"]()
+            save_cb = self.cbs.get("save")
+            if save_cb is not None:
+                save_cb()
 
-    def _on_group_click(self, event=None):
+    def _on_group_click(self, event: tk.Event[tk.Misc] | None = None) -> None:
         if self.event:
-            if "group_select" in self.cbs:
-                self.cbs["group_select"](self.row_num, self.event)
+            group_select_cb = self.cbs.get("group_select")
+            if group_select_cb is not None:
+                group_select_cb(self.row_num, self.event)
 
-    def _on_toggle_runtime_member(self):
+    def _on_toggle_runtime_member(self) -> None:
         if self.event:
             self.event.runtime_toggle_member = self.runtime_toggle_var.get()
             self.update_display()
-            if "save" in self.cbs:
-                self.cbs["save"]()
+            save_cb = self.cbs.get("save")
+            if save_cb is not None:
+                save_cb()
 
-    def _on_select(self, event=None):
-        if self.event and "select" in self.cbs:
-            self.cbs["select"](self.event)
+    def _on_select(self, event: tk.Event[tk.Misc] | None = None) -> None:
+        select_cb = self.cbs.get("select")
+        if self.event and select_cb is not None:
+            select_cb(self.event)
 
-    def _on_click(self, key):
+    def _on_click(self, key: ClickAction) -> None:
         if key == "open":
-            self.cbs["open"](self.row_num, self.event)
+            open_cb = self.cbs.get("open")
+            if open_cb is not None:
+                open_cb(self.row_num, self.event)
         elif key == "copy":
-            self.cbs["copy"](self.event)
+            copy_cb = self.cbs.get("copy")
+            if copy_cb is not None:
+                copy_cb(self.event)
         elif key == "remove":
-            self.cbs["remove"](self, self.row_num)
+            remove_cb = self.cbs.get("remove")
+            if remove_cb is not None:
+                remove_cb(self, self.row_num)
 
-    def _on_name_changed(self, event=None):
+    def _on_name_changed(self, event: tk.Event[tk.Misc] | None = None) -> None:
         if self.event:
             self.event.event_name = self.entry.get()
-            if "save" in self.cbs:
-                self.cbs["save"]()
+            save_cb = self.cbs.get("save")
+            if save_cb is not None:
+                save_cb()
 
     def get_name(self) -> str:
         return self.entry.get()
@@ -945,7 +1062,7 @@ class EventRow(ttk.Frame):
 
 class EventListFrame(ttk.Frame):
     # 특수 키 정렬 순서 (클래스 상수)
-    SPECIAL_KEYS_ORDER = {
+    SPECIAL_KEYS_ORDER: ClassVar[dict[str, int]] = {
         "SPACE": 0,
         "TAB": 1,
         "ENTER": 2,
@@ -967,21 +1084,21 @@ class EventListFrame(ttk.Frame):
 
     def __init__(
         self,
-        win,
+        win: tk.Misc,
         profile: ProfileModel,
-        save_cb: Callable,
+        save_cb: SaveCallback,
         name_getter: Optional[Callable[[], str]] = None,
         status_cb: Optional[Callable[[str], None]] = None,
         select_cb: Optional[Callable[[EventModel], None]] = None,
-    ):
+    ) -> None:
         super().__init__(win)
         self.win, self.profile, self.save_cb = win, profile, save_cb
-        self.rows: List[EventRow] = []
-        self.ctx_row = None
+        self.rows: list[EventRow] = []
+        self.ctx_row: int | None = None
         self.profile_name_getter = name_getter
         self.status_cb = status_cb
         self.select_cb = select_cb
-        self.graph_viewer = None
+        self.graph_viewer: ProfileGraphViewer | None = None
         self.empty_state_frame: Optional[ttk.LabelFrame] = None
         self.add_event_label = txt("➕ Add Event", "➕ 이벤트 추가")
 
@@ -1087,7 +1204,9 @@ class EventListFrame(ttk.Frame):
         self.more_menu = tk.Menu(self.btn_more, tearoff=0)
         self.more_menu.add_command(
             label=txt("📥 Import", "📥 가져오기"),
-            command=lambda: EventImporter(self.win, self._import),
+            command=lambda: EventImporter(
+                cast(tk.Toplevel, self.win), self._import
+            ),
         )
         self.more_menu.add_command(
             label=txt("🧩 Manage Groups", "🧩 그룹 관리"),
@@ -1107,18 +1226,19 @@ class EventListFrame(ttk.Frame):
         self._create_header()
         self._load_events()
 
-    def _get_existing_groups(self) -> List[str]:
+    def _get_existing_groups(self) -> list[str]:
         """프로필 내 모든 고유 그룹 ID 반환"""
         return list(set(e.group_id for e in self.profile.event_list if e.group_id))
 
     def _get_profile_name(self) -> str:
         if self.profile_name_getter:
             return self.profile_name_getter()
-        if getattr(self.profile, "name", None):
-            return self.profile.name
+        profile_name = self.profile.name
+        if profile_name:
+            return profile_name
         return "profile"
 
-    def _get_key_sort_order(self, key: str | None) -> tuple:
+    def _get_key_sort_order(self, key: str | None) -> KeySortOrder:
         """키 정렬 순서 반환: 숫자 → 알파벳 → 펑션키 → 특수문자 → None"""
         if not key:
             return (99, 0, "")
@@ -1156,7 +1276,7 @@ class EventListFrame(ttk.Frame):
         return 0 if not getattr(event, "execute_action", True) else 1
 
     def _sort_events_with_feedback(
-        self, sort_key, title_text: str, message_text: str
+        self, sort_key: SortKey, title_text: str, message_text: str
     ) -> None:
         if not self.profile.event_list:
             return
@@ -1170,10 +1290,10 @@ class EventListFrame(ttk.Frame):
             parent=self.win,
         )
 
-    def _sort_events_by_name(self):
+    def _sort_events_by_name(self) -> None:
         """이벤트 타입 우선, 같은 타입 내에서는 이름순 정렬."""
 
-        def sort_key(e: EventModel):
+        def sort_key(e: EventModel) -> tuple[object, ...]:
             name = e.event_name or ""
             return (self._get_event_type_sort_order(e), name.casefold(), name)
 
@@ -1186,10 +1306,10 @@ class EventListFrame(ttk.Frame):
             ),
         )
 
-    def _sort_events_by_key(self):
+    def _sort_events_by_key(self) -> None:
         """이벤트 타입 우선, 조건은 이름순/실행은 입력 키 순서로 정렬."""
 
-        def sort_key(e: EventModel):
+        def sort_key(e: EventModel) -> tuple[object, ...]:
             name = e.event_name or ""
             type_order = self._get_event_type_sort_order(e)
             if type_order == 0:
@@ -1211,11 +1331,11 @@ class EventListFrame(ttk.Frame):
             ),
         )
 
-    def _sort_events(self):
+    def _sort_events(self) -> None:
         """기존 호출 호환용: 키 순서 정렬로 연결."""
         self._sort_events_by_key()
 
-    def _manage_groups(self):
+    def _manage_groups(self) -> None:
         """그룹 관리 다이얼로그"""
         if not self._get_existing_groups():
             messagebox.showinfo(
@@ -1278,7 +1398,7 @@ class EventListFrame(ttk.Frame):
             self.save_cb(check_name=False)
         return changed
 
-    def _open_graph(self):
+    def _open_graph(self) -> None:
         self.save_names()
         name = self._get_profile_name()
         if self.graph_viewer and self.graph_viewer.is_open():
@@ -1295,11 +1415,11 @@ class EventListFrame(ttk.Frame):
         )
         self.graph_viewer.refresh(force=False)
 
-    def _on_group_select(self, row_num: int, event: EventModel):
+    def _on_group_select(self, row_num: int, event: EventModel) -> None:
         """그룹 선택 팝업 열기"""
         existing = self._get_existing_groups()
 
-        def on_selected(new_group):
+        def on_selected(new_group: str | None) -> None:
             event.group_id = new_group
             if 0 <= row_num < len(self.rows):
                 self.rows[row_num].update_display()
@@ -1307,23 +1427,25 @@ class EventListFrame(ttk.Frame):
 
         GroupSelector(self.win, event.group_id, existing, on_selected)
 
-    def _show_menu(self, event, row_num):
+    def _show_menu(self, event: tk.Event[tk.Misc], row_num: int) -> None:
         self.ctx_row = row_num
+        event_obj = cast(Any, event)
         try:
-            self.menu.tk_popup(event.x_root, event.y_root)
+            self.menu.tk_popup(event_obj.x_root, event_obj.y_root)
         finally:
             self.menu.grab_release()
 
-    def _apply_pixel_batch(self):
+    def _apply_pixel_batch(self) -> None:
         if self.ctx_row is None:
             return
         src = self.profile.event_list[self.ctx_row]
         if not (src.latest_position and src.clicked_position):
-            return messagebox.showwarning(
+            messagebox.showwarning(
                 txt("Warning", "경고"),
                 txt("Invalid source event.", "유효하지 않은 원본 이벤트입니다."),
                 parent=self.win,
             )
+            return
 
         if not messagebox.askyesno(
             txt("Confirm", "확인"),
@@ -1344,8 +1466,9 @@ class EventListFrame(ttk.Frame):
             ):
                 try:
                     evt.clicked_position = src.clicked_position
-                    evt.ref_pixel_value = evt.held_screenshot.getpixel(
-                        src.clicked_position
+                    evt.ref_pixel_value = cast(
+                        tuple[int, ...],
+                        evt.held_screenshot.getpixel(src.clicked_position),
                     )
                     evt.match_mode = getattr(src, "match_mode", "pixel")
                     evt.region_size = getattr(src, "region_size", None)
@@ -1367,7 +1490,7 @@ class EventListFrame(ttk.Frame):
                 parent=self.win,
             )
 
-    def _create_header(self):
+    def _create_header(self) -> None:
         """2-라인 셀에 맞춘 가벼운 헤더 + 분리선.
 
         새 EventRow는 좌측 컬러바 + 상단(인덱스/사용/이름/액션) +
@@ -1426,13 +1549,13 @@ class EventListFrame(ttk.Frame):
             row=2, column=0, columnspan=2, sticky="ew", pady=(20, 0), padx=UI_PAD_MD
         )
 
-    def _load_events(self):
+    def _load_events(self) -> None:
         for i, evt in enumerate(self.profile.event_list):
             self._add_row(i, evt, resize=False)
         self._update_delete_buttons()
         self._sync_empty_state()
 
-    def _sync_empty_state(self):
+    def _sync_empty_state(self) -> None:
         has_events = bool(self.profile.event_list)
         if has_events:
             if self.empty_state_frame and self.empty_state_frame.winfo_exists():
@@ -1481,27 +1604,39 @@ class EventListFrame(ttk.Frame):
         else:
             self.empty_state_frame.grid()
 
-    def _add_event(self):
+    @staticmethod
+    def _empty_event_provider() -> EventModel | None:
+        return None
+
+    def _add_event(self) -> None:
         row_idx = len(self.profile.event_list)
         KeystrokeEventEditor(
-            self.win,
+            cast(tk.Tk | tk.Toplevel, self.win),
             row_idx,
             self._on_editor_save,
-            lambda: None,
+            self._empty_event_provider,
             existing_events=self.profile.event_list,
         )
 
-    def _add_row(self, row_num=None, event=None, resize=True):
+    def _add_row(
+        self,
+        row_num: int | None = None,
+        event: EventModel | None = None,
+        resize: bool = True,
+    ) -> None:
         if self.empty_state_frame and self.empty_state_frame.winfo_exists():
             self.empty_state_frame.grid_remove()
         idx = len(self.rows) if row_num is None else row_num
-        cbs = {
+        def save_without_name_check() -> None:
+            self.save_cb(check_name=False)
+
+        cbs: EventRowCallbacks = {
             "open": self._open_editor,
             "copy": self._copy_row,
             "remove": self._remove_row,
             "menu": self._show_menu,
             "group_select": self._on_group_select,  # NEW
-            "save": lambda: self.save_cb(check_name=False),  # 추가
+            "save": save_without_name_check,  # 추가
             "select": self._select_event,
         }
         row = EventRow(self, idx, event, cbs)
@@ -1519,12 +1654,15 @@ class EventListFrame(ttk.Frame):
         if self.select_cb:
             self.select_cb(event)
 
-    def _open_editor(self, row, evt):
+    def _open_editor(self, row: int, evt: EventModel | None) -> None:
+        def event_provider() -> EventModel:
+            return cast(EventModel, evt)
+
         KeystrokeEventEditor(
-            self.win,
+            cast(tk.Tk | tk.Toplevel, self.win),
             row,
             self._on_editor_save,
-            lambda: evt,
+            event_provider,
             existing_events=self.profile.event_list,
         )
 
@@ -1541,9 +1679,11 @@ class EventListFrame(ttk.Frame):
                 return True
         return False
 
-    def _on_editor_save(self, evt, is_edit, row=0):
+    def _on_editor_save(self, evt: EventModel, is_edit: bool, row: int = 0) -> None:
         ignore_index = row if is_edit else None
-        if self._is_duplicate_event_name(evt.event_name, ignore_index=ignore_index):
+        if self._is_duplicate_event_name(
+            evt.event_name or "", ignore_index=ignore_index
+        ):
             messagebox.showerror(
                 txt("Duplicate Event Name", "중복 이벤트 이름"),
                 txt(
@@ -1570,15 +1710,16 @@ class EventListFrame(ttk.Frame):
         self.update_events()
         self.save_cb(check_name=False)
 
-    def _copy_row(self, evt):
+    def _copy_row(self, evt: EventModel | None) -> None:
         if not evt:
-            return messagebox.showinfo(
+            messagebox.showinfo(
                 txt("Info", "안내"),
                 txt(
                     "Only configured events can be copied.",
                     "설정된 이벤트만 복사할 수 있습니다.",
                 ),
             )
+            return
         try:
             # 수동으로 이벤트 복사
             new = EventModel(
@@ -1620,7 +1761,7 @@ class EventListFrame(ttk.Frame):
                 txt(f"Copy failed: {e}", f"복사 실패: {e}"),
             )
 
-    def _remove_row(self, row_widget, row_num):
+    def _remove_row(self, row_widget: EventRow, row_num: int) -> None:
         if len(self.profile.event_list) < 2:
             return
         row_widget.destroy()
@@ -1642,14 +1783,14 @@ class EventListFrame(ttk.Frame):
         self.save_cb()
         self.win.update_idletasks()
 
-    def _import(self, evts):
+    def _import(self, evts: list[EventModel]) -> None:
         self.profile.event_list.extend(evts)
         for e in evts:
             self._add_row(event=e)
         self._sync_empty_state()
         self.save_cb()
 
-    def _update_row_indices(self):
+    def _update_row_indices(self) -> None:
         """모든 행의 인덱스 라벨 업데이트"""
         for i, row in enumerate(self.rows):
             row.grid(
@@ -1670,14 +1811,14 @@ class EventListFrame(ttk.Frame):
                     except (ValueError, tk.TclError):
                         continue
 
-    def _update_delete_buttons(self):
+    def _update_delete_buttons(self) -> None:
         can_delete = len(self.profile.event_list) > 1
         state = "normal" if can_delete else "disabled"
         for row in self.rows:
             if row.btn_delete:
                 row.btn_delete.config(state=state)
 
-    def update_events(self):
+    def update_events(self) -> None:
         curr, new = len(self.rows), len(self.profile.event_list)
 
         # Update existing rows
@@ -1701,23 +1842,23 @@ class EventListFrame(ttk.Frame):
         self._sync_empty_state()
         self.win.update_idletasks()
 
-    def save_names(self):
+    def save_names(self) -> None:
         for i, r in enumerate(self.rows):
             if i < len(self.profile.event_list):
-                old_name = r._last_saved_name
+                old_name = r.last_saved_name
                 new_name = r.get_name()
                 if old_name and new_name and old_name != new_name:
                     self._update_condition_references(old_name, new_name)
                 self.profile.event_list[i].event_name = new_name
-                r._last_saved_name = new_name
+                r.last_saved_name = new_name
 
-    def _update_condition_references(self, old_name: str, new_name: str):
+    def _update_condition_references(self, old_name: str, new_name: str) -> None:
         """이벤트 이름 변경 시 조건 참조 업데이트"""
         for evt in self.profile.event_list:
             if hasattr(evt, "conditions") and old_name in evt.conditions:
                 evt.conditions[new_name] = evt.conditions.pop(old_name)
 
-    def _remove_condition_references(self, removed_name: str):
+    def _remove_condition_references(self, removed_name: str) -> None:
         """삭제된 이벤트를 참조하는 조건을 제거"""
         for evt in self.profile.event_list:
             if hasattr(evt, "conditions") and removed_name in evt.conditions:
@@ -1725,20 +1866,25 @@ class EventListFrame(ttk.Frame):
 
 
 class KeystrokeProfiles:
-    def __init__(self, main_win, prof_name, save_cb=None):
+    def __init__(
+        self,
+        main_win: tk.Misc,
+        prof_name: str,
+        save_cb: Callable[[str], object] | None = None,
+    ) -> None:
         self.main_win, self.prof_name, self.ext_save_cb = main_win, prof_name, save_cb
         self.prof_dir = Path("profiles")
         self._dirty = False
-        self._autosave_after_id = None
-        self._last_saved_fingerprint = None
+        self._autosave_after_id: str | None = None
+        self._last_saved_fingerprint: ProfileFingerprint | None = None
         self._overview_status_text = ""
-        self._inspector_event = None
+        self._inspector_event: EventModel | None = None
 
         self.win = tk.Toplevel(main_win)
         self.win.title(f"{txt('Profile Manager', '프로필 관리자')} - {self.prof_name}")
         self.win.geometry(PROFILE_WINDOW_DEFAULT_GEOMETRY)
         self.win.minsize(*PROFILE_WINDOW_MIN_SIZE)
-        self.win.transient(main_win)
+        cast(Any, self.win).transient(main_win)
         self.win.grab_set()
         self.win.bind("<Escape>", self._close)
         self.win.protocol("WM_DELETE_WINDOW", self._close)
@@ -1840,7 +1986,7 @@ class KeystrokeProfiles:
         self._set_save_status("saved")
 
     @staticmethod
-    def _make_chip(parent) -> tk.Label:
+    def _make_chip(parent: tk.Misc) -> tk.Label:
         return tk.Label(
             parent,
             text="",
@@ -1950,21 +2096,33 @@ class KeystrokeProfiles:
 
     # --- NavRail action forwards (preserve existing call sites) -------
     def _nav_action_add(self) -> None:
-        if getattr(self, "e_frame", None):
-            self.e_frame._add_event()
+        e_frame = getattr(self, "e_frame", None)
+        if e_frame:
+            add_event = cast(Callable[[], None], e_frame._add_event)
+            add_event()
 
     def _nav_action_import(self) -> None:
         # Mirror the call site already used by EventListFrame's import button.
-        if getattr(self, "e_frame", None):
-            EventImporter(self.win, self.e_frame._import)
+        e_frame = getattr(self, "e_frame", None)
+        if e_frame:
+            import_events = cast(
+                Callable[[list[EventModel]], None], e_frame._import
+            )
+            EventImporter(self.win, import_events)
 
     def _nav_action_sort(self) -> None:
-        if getattr(self, "e_frame", None):
-            self.e_frame._sort_events_by_name()
+        e_frame = getattr(self, "e_frame", None)
+        if e_frame:
+            sort_events = cast(
+                Callable[[], None], e_frame._sort_events_by_name
+            )
+            sort_events()
 
     def _nav_action_graph(self) -> None:
-        if getattr(self, "e_frame", None):
-            self.e_frame._open_graph()
+        e_frame = getattr(self, "e_frame", None)
+        if e_frame:
+            open_graph = cast(Callable[[], None], e_frame._open_graph)
+            open_graph()
 
     # ------------------------------------------------------------------
     # Right-side Inspector
@@ -1989,7 +2147,7 @@ class KeystrokeProfiles:
         ).pack(fill="x", pady=(0, theme.SPACE_2))
 
         # Accordion sections — each header toggles its body via _toggle_section.
-        self._inspector_sections: dict[str, dict] = {}
+        self._inspector_sections: dict[str, AccordionSection] = {}
 
         summary_body = self._make_accordion_section(
             panel, "summary", txt("Summary", "요약"), expanded=True
@@ -2069,7 +2227,7 @@ class KeystrokeProfiles:
         if expanded:
             body.pack(fill="x", pady=(theme.SPACE_1, 0))
 
-        section = {
+        section: AccordionSection = {
             "wrapper": wrapper,
             "header": header,
             "glyph": glyph,
@@ -2078,7 +2236,9 @@ class KeystrokeProfiles:
         }
         self._inspector_sections[key] = section
 
-        def _toggle(_e=None, _key=key):
+        def _toggle(
+            _e: tk.Event[tk.Misc] | None = None, _key: str = key
+        ) -> None:
             self._toggle_accordion_section(_key)
 
         header.bind("<Button-1>", _toggle)
@@ -2158,13 +2318,13 @@ class KeystrokeProfiles:
         self._inspector_event = event
         self._refresh_inspector()
 
-    def _load(self):
+    def _load(self) -> ProfileModel:
         try:
             return load_profile(self.prof_dir, self.prof_name, migrate=True)
         except Exception:
             return ProfileModel(name=self.prof_name, event_list=[], favorite=False)
 
-    def _ensure_unique_event_names(self):
+    def _ensure_unique_event_names(self) -> None:
         duplicates = find_duplicate_event_names(self.profile.event_list or [])
         if duplicates:
             dup_text = ", ".join(duplicates)
@@ -2176,7 +2336,7 @@ class KeystrokeProfiles:
                 )
             )
 
-    def _save(self, check_name=True, reload=True):
+    def _save(self, check_name: bool = True, reload: bool = True) -> bool:
         started = time.perf_counter()
         if not self.profile.event_list:
             raise ValueError(
@@ -2242,7 +2402,7 @@ class KeystrokeProfiles:
             )
         return old_name != self.prof_name
 
-    def _show_temp_status(self, text: str, duration_ms: int = 2000):
+    def _show_temp_status(self, text: str, duration_ms: int = 2000) -> None:
         self.lbl_status.config(text=text, foreground="#006600")
         self.win.after(
             duration_ms, lambda: self.lbl_status.config(text="", foreground="gray")
@@ -2259,7 +2419,7 @@ class KeystrokeProfiles:
         except (tk.TclError, AttributeError):
             return
 
-    def _refresh_profile_overview(self):
+    def _refresh_profile_overview(self) -> None:
         self._refresh_nav_groups()
         self._refresh_inspector()
         events = list(self.profile.event_list or [])
@@ -2292,7 +2452,7 @@ class KeystrokeProfiles:
             fg="#2f6f3e",
         )
         if warning_count:
-            warning_parts = []
+            warning_parts: list[str] = []
             if missing_key_count:
                 warning_parts.append(
                     txt(
@@ -2344,7 +2504,7 @@ class KeystrokeProfiles:
             fg=BADGE_FG_OK,
         )
 
-    def _set_save_status(self, status: str, detail: str = ""):
+    def _set_save_status(self, status: str, detail: str = "") -> None:
         self._refresh_profile_overview()
         if status == "saving":
             self.lbl_save_badge.config(
@@ -2390,14 +2550,14 @@ class KeystrokeProfiles:
                 foreground="#b30000",
             )
 
-    def _set_dirty(self, dirty: bool):
+    def _set_dirty(self, dirty: bool) -> None:
         self._dirty = dirty
         star = "* " if dirty else ""
         self.win.title(
             f"{star}{txt('Profile Manager', '프로필 관리자')} - {self.prof_name}"
         )
 
-    def _run_autosave(self, check_name=False):
+    def _run_autosave(self, check_name: bool = False) -> None:
         self._autosave_after_id = None
         started = time.perf_counter()
         try:
@@ -2414,7 +2574,9 @@ class KeystrokeProfiles:
                     f"[perf] autosave[{self.prof_name}]: {(time.perf_counter() - started) * 1000.0:.3f}ms"
                 )
 
-    def _schedule_autosave(self, delay_ms=250, check_name=False):
+    def _schedule_autosave(
+        self, delay_ms: int = 250, check_name: bool = False
+    ) -> None:
         if self._autosave_after_id:
             self.win.after_cancel(self._autosave_after_id)
             self._autosave_after_id = None
@@ -2422,12 +2584,12 @@ class KeystrokeProfiles:
             delay_ms, lambda: self._run_autosave(check_name=check_name)
         )
 
-    def _on_changed(self, check_name=False, reload=False):
+    def _on_changed(self, check_name: bool = False, reload: bool = False) -> None:
         self._set_dirty(True)
         self._set_save_status("saving")
         self._schedule_autosave(check_name=check_name)
 
-    def _flush_autosave(self, check_name=True):
+    def _flush_autosave(self, check_name: bool = True) -> bool:
         if self._autosave_after_id:
             self.win.after_cancel(self._autosave_after_id)
             self._autosave_after_id = None
@@ -2443,7 +2605,7 @@ class KeystrokeProfiles:
             messagebox.showerror(txt("Error", "오류"), str(e), parent=self.win)
             return False
 
-    def _close(self, event=None):
+    def _close(self, event: tk.Event[tk.Misc] | None = None) -> None:
         if not self._flush_autosave(check_name=True):
             return
         StateUtils.save_main_app_state(
@@ -2453,7 +2615,7 @@ class KeystrokeProfiles:
             self.ext_save_cb(self.prof_name)
         self.win.destroy()
 
-    def _load_pos(self):
+    def _load_pos(self) -> None:
         pos = StateUtils.parse_slash_int_pair(
             StateUtils.load_main_app_state().get("prof_pos")
         )
@@ -2466,12 +2628,12 @@ class KeystrokeProfiles:
 class ProfileGraphViewer:
     def __init__(
         self,
-        parent: tk.Tk | tk.Toplevel,
+        parent: tk.Misc,
         profile: ProfileModel,
         profile_name: str,
         name_getter: Optional[Callable[[], str]] = None,
         on_close: Optional[Callable[[], None]] = None,
-    ):
+    ) -> None:
         self.parent = parent
         self.profile = profile
         self.profile_name = profile_name
@@ -2482,10 +2644,13 @@ class ProfileGraphViewer:
 
         self.win = tk.Toplevel(parent)
         self.win.title(txt("Profile Graph", "프로필 그래프"))
-        self.win.transient(parent)
+        cast(Any, self.win).transient(parent)
         self.win.geometry("900x600")
         self.win.protocol("WM_DELETE_WINDOW", self._close)
-        self.win.bind("<Escape>", lambda e: self._close())
+        def on_escape(_event: tk.Event[tk.Misc]) -> None:
+            self._close()
+
+        self.win.bind("<Escape>", on_escape)
         self.win.focus_force()
         try:
             self.parent.grab_release()
@@ -2517,17 +2682,20 @@ class ProfileGraphViewer:
         self.canvas.pack(side=tk.LEFT, fill="both", expand=True)
 
         self.scroll_y = ttk.Scrollbar(
-            frame, orient="vertical", command=self.canvas.yview
+            frame, orient="vertical", command=cast(Any, self.canvas).yview
         )
         self.scroll_y.pack(side=tk.RIGHT, fill="y")
         self.scroll_x = ttk.Scrollbar(
-            self.win, orient="horizontal", command=self.canvas.xview
+            self.win, orient="horizontal", command=cast(Any, self.canvas).xview
         )
         self.scroll_x.pack(side=tk.BOTTOM, fill="x")
 
         self.canvas.configure(yscrollcommand=self.scroll_y.set)
         self.canvas.configure(xscrollcommand=self.scroll_x.set)
-        self.canvas.bind("<Enter>", lambda e: self.canvas.focus_set())
+        def on_canvas_enter(_event: tk.Event[tk.Misc]) -> None:
+            self.canvas.focus_set()
+
+        self.canvas.bind("<Enter>", on_canvas_enter)
         self.canvas.bind("<MouseWheel>", self._on_mousewheel)
         self.canvas.bind("<Button-4>", self._on_mousewheel)
         self.canvas.bind("<Button-5>", self._on_mousewheel)
@@ -2535,16 +2703,16 @@ class ProfileGraphViewer:
         self.win.bind("<Button-4>", self._on_mousewheel)
         self.win.bind("<Button-5>", self._on_mousewheel)
 
-        self.photo = None
+        self.photo: ImageTk.PhotoImage | None = None
 
     def is_open(self) -> bool:
-        return self.win.winfo_exists()
+        return bool(self.win.winfo_exists())
 
-    def lift(self):
-        self.win.lift()
+    def lift(self) -> None:
+        cast(Any, self.win).lift()
         self.win.focus_force()
 
-    def refresh(self, force: bool = False):
+    def refresh(self, force: bool = False) -> None:
         if self.name_getter:
             self.profile_name = self.name_getter()
         self.profile_name = self.profile_name or "profile"
@@ -2563,31 +2731,32 @@ class ProfileGraphViewer:
 
         self.photo = ImageTk.PhotoImage(view_img)
         self.canvas.delete("all")
-        self.canvas.create_image(0, 0, image=self.photo, anchor="nw")
+        cast(Any, self.canvas).create_image(0, 0, image=self.photo, anchor="nw")
         self.canvas.config(scrollregion=(0, 0, view_img.width, view_img.height))
         self.lbl_info.config(text=f"{path.name}  {view_img.width}x{view_img.height}")
         self._apply_window_size(view_img.width, view_img.height, force=force)
 
-    def set_profile_name(self, name: str):
+    def set_profile_name(self, name: str) -> None:
         self.profile_name = name
 
-    def _on_mousewheel(self, event):
-        if event.num == 4:
+    def _on_mousewheel(self, event: tk.Event[tk.Misc]) -> None:
+        event_obj = cast(Any, event)
+        if event_obj.num == 4:
             self.canvas.yview_scroll(-1, "units")
             return
-        if event.num == 5:
+        if event_obj.num == 5:
             self.canvas.yview_scroll(1, "units")
             return
-        if not event.delta:
+        if not event_obj.delta:
             return
-        if abs(event.delta) < 120:
-            step = -1 if event.delta > 0 else 1
+        if abs(event_obj.delta) < 120:
+            step = -1 if event_obj.delta > 0 else 1
         else:
-            step = int(-event.delta / 120)
+            step = int(-event_obj.delta / 120)
         if step != 0:
             self.canvas.yview_scroll(step, "units")
 
-    def _apply_window_size(self, img_w: int, img_h: int, force: bool = False):
+    def _apply_window_size(self, img_w: int, img_h: int, force: bool = False) -> None:
         if self._auto_sized and not force:
             return
         self.win.update_idletasks()
@@ -2605,7 +2774,7 @@ class ProfileGraphViewer:
         WindowUtils.center_window(self.win)
         self._auto_sized = True
 
-    def _close(self):
+    def _close(self) -> None:
         try:
             self.win.grab_release()
         except tk.TclError:

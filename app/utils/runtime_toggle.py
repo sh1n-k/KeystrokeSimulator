@@ -1,5 +1,6 @@
 import platform
-from typing import Iterable
+from collections.abc import Iterable
+from typing import Protocol
 
 from app.utils.i18n import txt
 from app.core.models import EventModel, ProfileModel
@@ -18,6 +19,12 @@ MOUSE_TRIGGER_TOKENS = (
 )
 RUNTIME_TOGGLE_DEBOUNCE_SECONDS = 0.25
 RUNTIME_TOGGLE_SCROLL_GESTURE_SECONDS = 0.75
+
+
+class StartStopSettings(Protocol):
+    toggle_start_stop_mac: bool
+    use_alt_shift_hotkey: bool
+    start_stop_key: str
 
 
 _RUNTIME_TOGGLE_CAPTURE_ALIASES = {
@@ -181,7 +188,7 @@ def normalize_runtime_toggle_capture_key(
     return None
 
 
-def normalize_runtime_toggle_listener_key(key) -> str:
+def normalize_runtime_toggle_listener_key(key: object) -> str:
     vk = getattr(key, "vk", None)
     keycode_name = KeyUtils.get_key_name_for_keycode(vk)
     if keycode_name:
@@ -220,17 +227,19 @@ def active_runtime_toggle_events(events: Iterable[EventModel]) -> list[EventMode
     return [evt for evt in events if getattr(evt, "use_event", True)]
 
 
-def _resolve_start_stop_trigger(settings, os_name: str | None = None) -> str | None:
+def _resolve_start_stop_trigger(
+    settings: StartStopSettings | None, os_name: str | None = None
+) -> str | None:
     if settings is None:
         return None
 
     os_name = os_name or platform.system()
-    if os_name == "Darwin" and getattr(settings, "toggle_start_stop_mac", False):
+    if os_name == "Darwin" and settings.toggle_start_stop_mac:
         return "ALT_SHIFT_MAC"
-    if os_name == "Windows" and getattr(settings, "use_alt_shift_hotkey", False):
+    if os_name == "Windows" and settings.use_alt_shift_hotkey:
         return "ALT_SHIFT_WIN"
 
-    start_stop_key = getattr(settings, "start_stop_key", None) or ""
+    start_stop_key = settings.start_stop_key or ""
     if not start_stop_key or start_stop_key == "DISABLED":
         return None
     return normalize_runtime_toggle_trigger(start_stop_key)
@@ -239,7 +248,7 @@ def _resolve_start_stop_trigger(settings, os_name: str | None = None) -> str | N
 def collect_runtime_toggle_validation_errors(
     profile: ProfileModel,
     events: Iterable[EventModel],
-    settings=None,
+    settings: StartStopSettings | None = None,
     os_name: str | None = None,
 ) -> list[str]:
     if not getattr(profile, "runtime_toggle_enabled", False):

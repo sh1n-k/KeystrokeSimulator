@@ -1,7 +1,7 @@
 import time
 import tkinter as tk
 from threading import Event, Thread
-from typing import Callable, Optional, Tuple
+from collections.abc import Callable
 
 import mss
 from PIL import Image
@@ -11,25 +11,25 @@ from app.utils.system import MonitorUtils
 
 
 class ScreenshotCapturer:
-    def __init__(self):
+    def __init__(self) -> None:
         self.screen_width, self.screen_height = MonitorUtils.get_primary_size()
         self.box_w = 100
         self.box_h = 100
-        self.current_position = (0, 0)
+        self.current_position: tuple[int, int] = (0, 0)
 
         self.capturing: Event = Event()
-        self.capture_thread: Optional[Thread] = None
-        self.screenshot_callback: Optional[Callable[[Tuple, Image.Image], None]] = None
-        self._last_capture_signature = None
+        self.capture_thread: Thread | None = None
+        self.screenshot_callback: Callable[[tuple[int, int], Image.Image], None] | None = None
+        self._last_capture_signature: tuple[tuple[int, int], int, int] | None = None
         self._idle_cycles = 0
 
-    def get_current_mouse_position(self) -> Optional[Tuple[int, int]]:
+    def get_current_mouse_position(self) -> tuple[int, int]:
         return self.current_position
 
-    def set_capture_size(self, w: int, h: int):
+    def set_capture_size(self, w: int, h: int) -> None:
         self.box_w, self.box_h = max(1, w), max(1, h)
 
-    def set_current_mouse_position(self, position):
+    def set_current_mouse_position(self, position: tuple[int, int]) -> None:
         mouse_x, mouse_y = position
         if (
             mouse_x + self.box_w >= self.screen_width
@@ -39,20 +39,20 @@ class ScreenshotCapturer:
 
         self.current_position = (mouse_x, mouse_y)
 
-    def set_mouse_position(self, position):
+    def set_mouse_position(self, position: tuple[int, int]) -> None:
         self.current_position = position
 
-    def start_capture(self):
+    def start_capture(self) -> None:
         self.capturing.set()
         self._last_capture_signature = None
         self._idle_cycles = 0
         self.capture_thread = Thread(target=self.capture_screenshot)
         self.capture_thread.start()
 
-    def stop_capture(self):
+    def stop_capture(self) -> None:
         self.capturing.clear()
 
-    def capture_screenshot(self):
+    def capture_screenshot(self) -> None:
         with mss.mss() as sct:
             while self.capturing.is_set():
                 try:

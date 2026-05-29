@@ -11,7 +11,6 @@ from app.ui.event_graph import (
     _build_components,
     _build_graph,
     _build_layers,
-    _build_order_map,
     _bezier_point,
     _bezier_tangent,
     _calc_control_point,
@@ -21,11 +20,9 @@ from app.ui.event_graph import (
     _fade_color,
     _group_color,
     _optimize_layer_order,
-    _pack_components,
     _profile_hash,
     _wrap_label,
     _wrap_layers,
-    ComponentLayout,
 )
 from app.core.models import EventModel, ProfileModel
 

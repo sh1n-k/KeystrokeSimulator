@@ -1,0 +1,17 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.13
+      - run: uv sync --all-groups
+      - run: uv run -m scripts.verify

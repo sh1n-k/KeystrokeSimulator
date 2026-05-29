@@ -1,22 +1,40 @@
+from __future__ import annotations
+
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import Dict, Any
+from typing import ClassVar, TypeAlias
 
 from loguru import logger
+from app.core.models import ModificationKeys
 from app.utils.i18n import dual_text_width, txt
 from app.storage.profile_storage import load_profile, save_profile
 from app.utils.system import WindowUtils
 from app.ui import theme
 
+ModKeyRow: TypeAlias = tuple[
+    tk.BooleanVar,
+    tk.StringVar,
+    tk.StringVar,
+    tk.BooleanVar,
+    ttk.Combobox,
+    tk.Frame,
+    tk.Label,
+    tk.Label,
+    tk.Label,
+]
+
 
 class ModificationKeysWindow(tk.Toplevel):
-    def __init__(self, master, profile_name):
+    def __init__(
+        self, master: tk.Tk | tk.Toplevel | None, profile_name: str
+    ) -> None:
         super().__init__(master)
         self.prof_name = profile_name
         self.prof_dir = Path("profiles")
         self.title(txt("Modification Keys", "수정 키 설정"))
-        self.transient(master)
+        if master is not None:
+            self.transient(master)
         self.grab_set()
         try:
             self.configure(bg=theme.SURFACE_PAPER)
@@ -24,20 +42,20 @@ class ModificationKeysWindow(tk.Toplevel):
             pass
         theme.install_styles(self)
 
-        self.valid_keys = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-        self.labels = ("Alt", "Ctrl", "Shift")
-        self.rows = []  # (chk_var, cmb_var, prev_val, pass_var, cmb_widget, card, lbl_cap, lbl_name, chip)
+        self.valid_keys: set[str] = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        self.labels: tuple[str, ...] = ("Alt", "Ctrl", "Shift")
+        self.rows: list[ModKeyRow] = []
 
         self._setup_ui()
         self._load_data()
 
-        self.bind("<Return>", lambda e: self.save())
-        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Return>", lambda _event: self.save())
+        self.bind("<Escape>", lambda _event: self.destroy())
         self.focus_force()
         WindowUtils.center_window(self)
 
     # SOT icon vocabulary for modifier keycaps.
-    _KEYCAPS = {"Alt": "⎇", "Ctrl": "⌃", "Shift": "⇧"}
+    _KEYCAPS: ClassVar[dict[str, str]] = {"Alt": "⎇", "Ctrl": "⌃", "Shift": "⇧"}
 
     def _build_context_bar(self) -> tk.Frame:
         f = theme.fonts()
@@ -63,7 +81,7 @@ class ModificationKeysWindow(tk.Toplevel):
         ).pack(side="left", padx=(theme.SPACE_3, 0))
         return bar
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         # Top ContextBar — keeps profile context visible across the dialog.
         bar = self._build_context_bar()
         bar.grid(row=0, column=0, columnspan=7, sticky="we")
@@ -195,7 +213,7 @@ class ModificationKeysWindow(tk.Toplevel):
             style="Accent.TButton",
         ).pack(side="right")
 
-    def _load_data(self):
+    def _load_data(self) -> None:
         if not (self.prof_dir / f"{self.prof_name}.json").exists():
             logger.warning(f"Profile '{self.prof_name}' missing.")
             return self.destroy()
@@ -206,25 +224,31 @@ class ModificationKeysWindow(tk.Toplevel):
             # Default initialization if missing
             if not getattr(p, "modification_keys", None):
                 p.modification_keys = {
-                    l.lower(): {"enabled": True, "value": "Pass", "pass": True}
-                    for l in self.labels
+                    label.lower(): {"enabled": True, "value": "Pass", "pass": True}
+                    for label in self.labels
                 }
                 save_profile(self.prof_dir, p, name=self.prof_name)
 
+            mod_keys = p.modification_keys or {}
             for i, lbl in enumerate(self.labels):
-                if d := p.modification_keys.get(lbl.lower()):
+                if d := mod_keys.get(lbl.lower()):
                     r = self.rows[i]
-                    r[0].set(d["enabled"])
-                    r[1].set(d["value"])
-                    r[2].set(d["value"])
-                    r[3].set(d["pass"])
-                    if d["pass"]:
+                    value = str(d.get("value", "PressKey"))
+                    enabled = bool(d.get("enabled", True))
+                    pass_through = bool(d.get("pass", False))
+                    r[0].set(enabled)
+                    r[1].set(value)
+                    r[2].set(value)
+                    r[3].set(pass_through)
+                    if pass_through:
                         self._toggle_pass(i)
             logger.info(f"Loaded keys for '{self.prof_name}'")
         except Exception as e:
             logger.error(f"Load failed: {e}")
 
-    def _on_key(self, event, var, idx):
+    def _on_key(
+        self, event: tk.Event[tk.Misc], var: tk.StringVar, idx: int
+    ) -> str | None:
         if (
             not self.rows[idx][3].get()
             and (char := event.char.upper()) in self.valid_keys
@@ -232,7 +256,7 @@ class ModificationKeysWindow(tk.Toplevel):
             var.set(char)
             return "break"
 
-    def _toggle_pass(self, idx):
+    def _toggle_pass(self, idx: int) -> None:
         row = self.rows[idx]
         _, cmb_var, prev, pas, cmb = row[:5]
         card, lbl_cap, lbl_name, chip = row[5:9]
@@ -259,14 +283,14 @@ class ModificationKeysWindow(tk.Toplevel):
             lbl_name.config(fg=theme.INK_PRIMARY, bg=theme.SURFACE_CANVAS)
             chip.config(bg=theme.SURFACE_CANVAS, fg=theme.SURFACE_CANVAS)
 
-    def save(self):
-        data = {
+    def save(self) -> None:
+        data: ModificationKeys = {
             lbl.lower(): {
                 "enabled": r[0].get(),
                 "value": "Pass" if r[3].get() else r[1].get(),
                 "pass": r[3].get(),
             }
-            for lbl, r in zip(self.labels, self.rows)
+            for lbl, r in zip(self.labels, self.rows, strict=True)
         }
 
         try:

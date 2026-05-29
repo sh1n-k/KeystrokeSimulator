@@ -120,6 +120,29 @@ class TestStartSimulation(unittest.TestCase):
 
     @patch("app.ui.simulator_app.KeystrokeProcessor")
     @patch("app.ui.simulator_app.load_profile")
+    def test_start_simulation_returns_false_when_processor_has_no_event_data(
+        self, mock_load_profile, mock_processor_cls
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+        profile = ProfileModel(
+            name="Quick",
+            event_list=[EventModel(event_name="MissingCapture", key_to_enter="A")],
+        )
+        mock_load_profile.return_value = profile
+        mock_processor = MagicMock()
+        mock_processor.event_data_list = []
+        mock_processor_cls.return_value = mock_processor
+
+        result = KeystrokeSimulatorApp._start_simulation(app)
+
+        self.assertFalse(result)
+        mock_processor.start.assert_not_called()
+        app.sound_player.play_start_sound.assert_not_called()
+
+    @patch("app.ui.simulator_app.KeystrokeProcessor")
+    @patch("app.ui.simulator_app.load_profile")
     def test_start_simulation_accepts_legacy_independent_thread_events(
         self, mock_load_profile, mock_processor_cls
     ):
@@ -522,6 +545,25 @@ class TestMainUiState(unittest.TestCase):
         self.assertFalse(snapshot["can_start"])
         self.assertEqual(snapshot["badge_text"], "Toggle Conflict")
         self.assertIn("conflicts with event input key", snapshot["detail"])
+
+    @patch("app.ui.simulator_app.PermissionUtils.missing_macos_permissions", return_value=[])
+    @patch("app.ui.simulator_app.load_profile")
+    def test_readiness_snapshot_blocks_missing_capture_data(
+        self, mock_load_profile, _mock_permissions
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+        mock_load_profile.return_value = ProfileModel(
+            name="Quick",
+            event_list=[EventModel(event_name="MissingCapture", key_to_enter="A")],
+        )
+
+        snapshot = KeystrokeSimulatorApp._get_readiness_snapshot(app)
+
+        self.assertFalse(snapshot["can_start"])
+        self.assertEqual(snapshot["badge_text"], "Check Events")
+        self.assertIn("captured coordinates", snapshot["title"])
 
 
 class TestRuntimeEditGuards(unittest.TestCase):

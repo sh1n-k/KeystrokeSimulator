@@ -49,15 +49,17 @@ uv run -m app.secure
 ### 테스트
 
 ```bash
-uv run -m unittest discover -s tests -p "test_*.py" -q
+uv run -m scripts.verify                 # ruff + pyright + unittest
+uv run -m scripts.verify --static-only   # ruff + pyright only
+uv run pre-commit run --all-files        # optional local hook check
 ```
 
 ### 빌드
 
 ```bash
 uv sync --group build
-uv run --group build -m scripts.build_secure    # PyInstaller 단일 실행 파일
-uv run --group build -m scripts.build_secure --check
+uv run --group build -m scripts.build_secure --check  # ruff + pyright + input check
+uv run --group build -m scripts.build_secure          # PyInstaller 단일 실행 파일
 ```
 
 ### 라이선스
@@ -108,15 +110,17 @@ uv run -m app.secure
 ### Testing
 
 ```bash
-uv run -m unittest discover -s tests -p "test_*.py" -q
+uv run -m scripts.verify                 # ruff + pyright + unittest
+uv run -m scripts.verify --static-only   # ruff + pyright only
+uv run pre-commit run --all-files        # optional local hook check
 ```
 
 ### Build
 
 ```bash
 uv sync --group build
-uv run --group build -m scripts.build_secure    # PyInstaller single executable
-uv run --group build -m scripts.build_secure --check
+uv run --group build -m scripts.build_secure --check  # ruff + pyright + input check
+uv run --group build -m scripts.build_secure          # PyInstaller single executable
 ```
 
 ### License

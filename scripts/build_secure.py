@@ -9,6 +9,9 @@ from dotenv import load_dotenv
 
 VERSION = "3.0"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 ENTRY_SCRIPT = PROJECT_ROOT / "app" / "secure.py"
 DIST_ROOT = PROJECT_ROOT / "dist" / "secure"
 WORK_ROOT = PROJECT_ROOT / "build" / "pyinstaller"
@@ -21,6 +24,7 @@ HIDDEN_IMPORTS = [
     "app.core.processor",
     "app.storage.profile_display",
     "app.storage.profile_storage",
+    "app.storage.settings_storage",
     "app.ui.event_editor",
     "app.ui.event_graph",
     "app.ui.event_importer",
@@ -35,7 +39,20 @@ HIDDEN_IMPORTS = [
     "app.utils.sound_assets",
     "app.utils.sounds",
     "app.utils.system",
+    "miniaudio",
 ]
+PLATFORM_HIDDEN_IMPORTS = {
+    "darwin": [
+        "ApplicationServices",
+        "AppKit",
+        "Quartz",
+    ],
+    "win32": [
+        "win32api",
+        "win32gui",
+        "win32process",
+    ],
+}
 PLATFORM_NAMES = {
     "darwin": "macos",
     "win32": "windows",
@@ -49,7 +66,12 @@ def parse_args():
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Validate build inputs and report output locations without building.",
+        help="Run static checks, validate build inputs, and report output locations.",
+    )
+    parser.add_argument(
+        "--skip-verify",
+        action="store_true",
+        help="Skip ruff and pyright before checking or building.",
     )
     return parser.parse_args()
 
@@ -95,6 +117,16 @@ def build_output_paths(platform_name: str) -> tuple[Path, Path, Path]:
     return dist_dir, work_dir, spec_dir
 
 
+def hidden_imports_for_platform() -> list[str]:
+    return HIDDEN_IMPORTS + PLATFORM_HIDDEN_IMPORTS.get(sys.platform, [])
+
+
+def run_build_static_checks() -> int:
+    from scripts.verify import run_static_checks
+
+    return run_static_checks()
+
+
 def build(platform_name: str, env_values: dict[str, str]) -> Path:
     import PyInstaller.__main__
 
@@ -131,7 +163,10 @@ def build(platform_name: str, env_values: dict[str, str]) -> Path:
                 f"--workpath={work_dir / 'work'}",
                 f"--specpath={spec_dir}",
                 f"--paths={PROJECT_ROOT}",
-                *[f"--hidden-import={module}" for module in HIDDEN_IMPORTS],
+                *[
+                    f"--hidden-import={module}"
+                    for module in hidden_imports_for_platform()
+                ],
             ]
         )
     finally:
@@ -143,6 +178,12 @@ def build(platform_name: str, env_values: dict[str, str]) -> Path:
 def main():
     args = parse_args()
     platform_name = get_platform_name()
+
+    if not args.skip_verify:
+        print("Running static checks before build...")
+        if run_build_static_checks() != 0:
+            raise SystemExit("Static checks failed.")
+
     env_values = load_required_env()
     artifact_name = build_artifact_name(platform_name)
     dist_dir, work_dir, spec_dir = build_output_paths(platform_name)

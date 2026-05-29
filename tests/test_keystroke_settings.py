@@ -2,7 +2,7 @@ import json
 import os
 import tkinter as tk
 import unittest
-from unittest.mock import patch, mock_open, MagicMock
+from unittest.mock import patch, MagicMock
 
 from app.core.models import UserSettings
 from app.ui.settings import (

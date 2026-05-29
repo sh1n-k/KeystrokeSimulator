@@ -1,25 +1,65 @@
 import asyncio
 import ctypes
+import importlib
 import os
 import platform
 import random
 import re
 import threading
 import time
-from typing import List, Dict, Optional, Any, Set, Tuple
+from collections.abc import Awaitable, Callable
+from typing import NotRequired, Protocol, TypedDict, cast
 
 import numpy as np
 import mss
+from numpy.typing import NDArray
 from loguru import logger
 
-from app.core.models import EventModel
+from app.core.models import EventModel, ModificationKeys, UserSettings
 from app.utils.system import KeyUtils, ProcessUtils
 
-# OS-specific imports
-if platform.system() == "Windows":
-    import win32gui, win32process
-elif platform.system() == "Darwin":
-    from Quartz import CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap
+ImageArray = NDArray[np.uint8]
+Rect = dict[str, int]
+KeyAction = Callable[[int], None]
+
+
+class CheckPoint(TypedDict):
+    pos: tuple[int, int]
+    color: ImageArray
+
+
+class EventData(TypedDict):
+    name: str
+    mode: str
+    invert: bool
+    key: str | None
+    center_x: int
+    center_y: int
+    dur: float | None
+    rand: float | None
+    exec: bool
+    group: str | None
+    priority: int
+    conds: dict[str, bool]
+    runtime_toggle_member: bool
+    independent: bool
+    region_w: int
+    region_h: int
+    rel_x: int
+    rel_y: int
+    ref_img: NotRequired[ImageArray]
+    check_points: NotRequired[list[CheckPoint]]
+    ref_bgr: NotRequired[ImageArray]
+    capture_rect: NotRequired[Rect]
+
+
+class CaptureGroup(TypedDict):
+    rect: Rect
+    events: list[EventData]
+
+
+class AppWithSettings(Protocol):
+    settings: UserSettings
 
 
 def _processor_perf_enabled() -> bool:
@@ -33,8 +73,8 @@ def _log_perf(label: str, start: float) -> None:
 
 
 def _normalize_key_name(
-    key_codes: Dict[str, int], key_name: Optional[str]
-) -> Optional[str]:
+    key_codes: dict[str, int], key_name: str | None
+) -> str | None:
     """Return the key name that exists in key_codes (case-insensitive)."""
     if not key_name:
         return None
@@ -58,25 +98,62 @@ def _normalize_key_name(
     return None
 
 
+def _noop_key_action(_code: int) -> None:
+    return None
+
+
+def _windows_key_event(code: int, flags: int) -> None:
+    windll = ctypes.__dict__["windll"]
+    keybd_event = cast(Callable[[int, int, int, int], None], windll.user32.keybd_event)
+    keybd_event(code, 0, flags, 0)
+
+
+def _windows_key_press(code: int) -> None:
+    _windows_key_event(code, 0)
+
+
+def _windows_key_release(code: int) -> None:
+    _windows_key_event(code, 2)
+
+
+def _darwin_key_event(code: int, pressed: bool) -> None:
+    quartz = importlib.import_module("Quartz")
+    symbols = quartz.__dict__
+    create_event = cast(Callable[[object, int, bool], object], symbols["CGEventCreateKeyboardEvent"])
+    post_event = cast(Callable[[object, object], None], symbols["CGEventPost"])
+    event_tap = symbols["kCGHIDEventTap"]
+    post_event(event_tap, create_event(None, code, pressed))
+
+
+def _darwin_key_press(code: int) -> None:
+    _darwin_key_event(code, True)
+
+
+def _darwin_key_release(code: int) -> None:
+    _darwin_key_event(code, False)
+
+
 class KeySimulator:
-    def __init__(self, os_type: str):
+    def __init__(self, os_type: str) -> None:
         self.os_type = os_type
         if os_type == "Windows":
-            self.press = lambda c: ctypes.windll.user32.keybd_event(c, 0, 0, 0)
-            self.release = lambda c: ctypes.windll.user32.keybd_event(c, 0, 2, 0)
+            self.press: KeyAction = _windows_key_press
+            self.release: KeyAction = _windows_key_release
         elif os_type == "Darwin":
-            self.press = lambda c: CGEventPost(
-                kCGHIDEventTap, CGEventCreateKeyboardEvent(None, c, True)
-            )
-            self.release = lambda c: CGEventPost(
-                kCGHIDEventTap, CGEventCreateKeyboardEvent(None, c, False)
-            )
+            self.press = _darwin_key_press
+            self.release = _darwin_key_release
         else:
-            self.press = self.release = lambda c: None
+            self.press = self.release = _noop_key_action
 
 
 class ModificationKeyHandler:
-    def __init__(self, key_codes, default_press_times, mod_keys, os_type):
+    def __init__(
+        self,
+        key_codes: dict[str, int],
+        default_press_times: tuple[float, float],
+        mod_keys: ModificationKeys,
+        os_type: str,
+    ) -> None:
         self.key_codes = key_codes
         # press_time: (min_sec, max_sec) 튜플
         self.press_time = default_press_times
@@ -87,7 +164,7 @@ class ModificationKeyHandler:
 
     async def check_and_process(self) -> bool:
         active = False
-        tasks = []
+        tasks: list[Awaitable[None]] = []
 
         # 설정된 ModKey들을 순회하며 물리적 눌림 확인
         for k, v in self.mod_keys.items():
@@ -95,7 +172,8 @@ class ModificationKeyHandler:
                 active = True
                 # 'Pass' 설정이 아닐 경우(다른 키로 매핑된 경우) 키 입력 시뮬레이션
                 if not v.get("pass") and (val := v.get("value")):
-                    tasks.append(self._sim_key(val))
+                    if isinstance(val, str):
+                        tasks.append(self._sim_key(val))
 
         # 매핑된 키 입력 병렬 실행
         if tasks:
@@ -108,7 +186,7 @@ class ModificationKeyHandler:
 
         return active
 
-    async def _sim_key(self, key_name: str):
+    async def _sim_key(self, key_name: str) -> None:
         norm_key = _normalize_key_name(self.key_codes, key_name)
         if norm_key and (code := self.key_codes.get(norm_key)):
             self.sim.press(code)
@@ -121,12 +199,12 @@ class KeystrokeProcessor:
 
     def __init__(
         self,
-        main_app,
+        main_app: AppWithSettings,
         target_proc: str,
-        events: List[EventModel],
-        mod_keys: Dict,
+        events: list[EventModel],
+        mod_keys: ModificationKeys,
         term_event: threading.Event,
-    ):
+    ) -> None:
         self.main_app = main_app
         self.term_event = term_event
         self.os_type = platform.system()
@@ -153,77 +231,86 @@ class KeystrokeProcessor:
         self.key_lock = threading.Lock()
         self.state_lock = threading.Lock()
 
-        self.pressed_keys: Set[str] = set()
-        self.current_states: Dict[str, bool] = {}
+        self.pressed_keys: set[str] = set()
+        self.current_states: dict[str, bool] = {}
         self.runtime_toggle_active = False
-        self._roi_warn_logged: Set[str] = set()
+        self._roi_warn_logged: set[str] = set()
 
-        self.event_data_list = self._init_event_data(events)
-        self.main_capture_groups = self._build_capture_groups(self.event_data_list)
+        self.event_data_list: list[EventData] = self._init_event_data(events)
+        self.main_capture_groups: list[CaptureGroup] = self._build_capture_groups(
+            self.event_data_list
+        )
 
         self.loop = asyncio.new_event_loop()
         self.main_thread = threading.Thread(target=self._run_loop, daemon=True)
 
-    def start(self):
+    def start(self) -> None:
         logger.info(f"Processor starting... PID: {self.pid}")
         self.main_thread.start()
 
-    def stop(self):
+    def stop(self) -> None:
         logger.info("Processor stopping...")
         self.term_event.set()
 
         if self.main_thread.is_alive():
             self.main_thread.join(timeout=1.0)
 
-    def _init_event_data(self, raw_events: List[EventModel]) -> List[Dict]:
-        events_data = []
+    def _init_event_data(self, raw_events: list[EventModel]) -> list[EventData]:
+        events_data: list[EventData] = []
 
         for e in raw_events:
             if not e.use_event:
                 continue
 
-            if getattr(e, "match_mode", "pixel") == "pixel":
+            mode = e.match_mode or "pixel"
+            latest_position = e.latest_position
+            clicked_position = e.clicked_position
+            if latest_position is None or clicked_position is None:
+                continue
+
+            if mode == "pixel":
                 if not e.ref_pixel_value or len(e.ref_pixel_value) < 3:
                     continue
 
-            center_x = e.latest_position[0] + e.clicked_position[0]
-            center_y = e.latest_position[1] + e.clicked_position[1]
-            mode = getattr(e, "match_mode", "pixel")
+            center_x = latest_position[0] + clicked_position[0]
+            center_y = latest_position[1] + clicked_position[1]
             key = (
                 _normalize_key_name(self.key_codes, e.key_to_enter)
                 if e.key_to_enter
                 else None
             )
 
-            evt_data = {
+            evt_data: EventData = {
                 "name": e.event_name or "Unknown",
                 "mode": mode,
-                "invert": getattr(e, "invert_match", False),
+                "invert": e.invert_match,
                 "key": key,
                 "center_x": center_x,
                 "center_y": center_y,
-                "dur": getattr(e, "press_duration_ms", None),
-                "rand": getattr(e, "randomization_ms", None),
-                "exec": getattr(e, "execute_action", True),
-                "group": getattr(e, "group_id", None),
-                "priority": getattr(e, "priority", 0),
-                "conds": getattr(e, "conditions", {}),
-                "runtime_toggle_member": bool(
-                    getattr(e, "runtime_toggle_member", False)
-                ),
+                "dur": e.press_duration_ms,
+                "rand": e.randomization_ms,
+                "exec": e.execute_action,
+                "group": e.group_id,
+                "priority": e.priority,
+                "conds": e.conditions,
+                "runtime_toggle_member": bool(e.runtime_toggle_member),
                 # independent_thread is deprecated at runtime; all events now
                 # flow through the main evaluation pipeline.
                 "independent": False,
+                "region_w": 1,
+                "region_h": 1,
+                "rel_x": 0,
+                "rel_y": 0,
             }
 
             if evt_data["mode"] == "region":
-                r_size = getattr(e, "region_size", (20, 20))
+                r_size = e.region_size
                 w, h = r_size if r_size else (20, 20)
                 evt_data["region_w"], evt_data["region_h"] = w, h
 
                 if e.held_screenshot:
                     full_img = np.array(e.held_screenshot.convert("RGB"))
-                    cx, cy = e.clicked_position
+                    cx, cy = clicked_position
                     y1, y2 = (
                         max(0, cy - h // 2),
                         min(full_img.shape[0], cy + h // 2 + (h % 2)),
@@ -251,10 +338,15 @@ class KeystrokeProcessor:
                             )
                         )
                         evt_data["check_points"] = [
-                            {"pos": (px, py), "color": evt_data["ref_img"][py, px]}
+                            {
+                                "pos": (px, py),
+                                "color": cast(ImageArray, evt_data["ref_img"][py, px]),
+                            }
                             for px, py in pts
                         ]
             else:
+                if e.ref_pixel_value is None:
+                    continue
                 ref_rgb = e.ref_pixel_value[:3]
                 evt_data["ref_bgr"] = np.array(ref_rgb[::-1], dtype=np.uint8)
 
@@ -262,7 +354,7 @@ class KeystrokeProcessor:
 
         return events_data
 
-    def _run_loop(self):
+    def _run_loop(self) -> None:
         asyncio.set_event_loop(self.loop)
         try:
             self.loop.run_until_complete(self._process_main())
@@ -271,7 +363,7 @@ class KeystrokeProcessor:
         finally:
             self.loop.close()
 
-    async def _process_main(self):
+    async def _process_main(self) -> None:
         if not self.event_data_list or not self.main_capture_groups:
             return
 
@@ -301,9 +393,9 @@ class KeystrokeProcessor:
 
                 try:
                     cycle_started = time.perf_counter()
-                    local_match_states = {}
+                    local_match_states: dict[str, bool] = {}
                     for group in self.main_capture_groups:
-                        img = np.array(sct.grab(group["rect"]))
+                        img = cast(ImageArray, np.array(sct.grab(group["rect"])))
                         local_match_states.update(
                             self._evaluate_capture_group(img, group["events"])
                         )
@@ -315,11 +407,11 @@ class KeystrokeProcessor:
                 await asyncio.sleep(random.uniform(*self.delays))
 
     @staticmethod
-    def _rect_area(rect: Dict[str, int]) -> int:
+    def _rect_area(rect: Rect) -> int:
         return max(1, rect["width"]) * max(1, rect["height"])
 
     @staticmethod
-    def _merge_rects(rect_a: Dict[str, int], rect_b: Dict[str, int]) -> Dict[str, int]:
+    def _merge_rects(rect_a: Rect, rect_b: Rect) -> Rect:
         left = min(rect_a["left"], rect_b["left"])
         top = min(rect_a["top"], rect_b["top"])
         right = max(rect_a["left"] + rect_a["width"], rect_b["left"] + rect_b["width"])
@@ -331,13 +423,13 @@ class KeystrokeProcessor:
             "height": max(1, bottom - top),
         }
 
-    def _assign_group_relative_coords(self, group: Dict[str, Any]) -> None:
+    def _assign_group_relative_coords(self, group: CaptureGroup) -> None:
         rect = group["rect"]
         for evt in group["events"]:
             evt["rel_x"] = evt["center_x"] - rect["left"]
             evt["rel_y"] = evt["center_y"] - rect["top"]
 
-    def _build_capture_groups(self, events_data: List[Dict]) -> List[Dict]:
+    def _build_capture_groups(self, events_data: list[EventData]) -> list[CaptureGroup]:
         if not events_data:
             return []
 
@@ -347,7 +439,7 @@ class KeystrokeProcessor:
             events_data,
             key=lambda evt: (evt["center_x"], evt["center_y"], evt.get("name", "")),
         )
-        groups: List[Dict[str, Any]] = []
+        groups: list[CaptureGroup] = []
 
         for evt in sorted_events:
             evt_rect = self._build_capture_rect(evt)
@@ -381,10 +473,10 @@ class KeystrokeProcessor:
             self._assign_group_relative_coords(group)
         return groups
 
-    def _select_by_group_priority(self, events: List[Dict]) -> List[Dict]:
+    def _select_by_group_priority(self, events: list[EventData]) -> list[EventData]:
         """그룹별 우선순위로 이벤트 선택"""
-        groups = {}
-        no_group = []
+        groups: dict[str, list[EventData]] = {}
+        no_group: list[EventData] = []
 
         for evt in events:
             if evt["group"]:
@@ -405,7 +497,7 @@ class KeystrokeProcessor:
         return final_events
 
     @staticmethod
-    def _event_execution_signature(evt: Dict) -> Tuple[Any, ...]:
+    def _event_execution_signature(evt: EventData) -> tuple[object, ...]:
         """실행 직전 dedupe에 사용할 서명(동일 입력만 병합)."""
         mode = evt.get("mode")
         if mode == "region":
@@ -416,7 +508,7 @@ class KeystrokeProcessor:
                 )
                 for pt in evt.get("check_points", [])
             )
-            match_sig: Tuple[Any, ...] = (
+            match_sig: tuple[object, ...] = (
                 "region",
                 evt.get("region_w"),
                 evt.get("region_h"),
@@ -429,7 +521,7 @@ class KeystrokeProcessor:
             )
             match_sig = ("pixel", ref_bgr)
 
-        conds = evt.get("conds") or {}
+        conds = evt.get("conds", {})
         cond_sig = tuple(sorted((str(k), bool(v)) for k, v in conds.items()))
 
         return (
@@ -446,9 +538,11 @@ class KeystrokeProcessor:
             cond_sig,
         )
 
-    def _dedupe_events_for_execution(self, events: List[Dict]) -> List[Dict]:
-        seen: Set[Tuple[Any, ...]] = set()
-        deduped: List[Dict] = []
+    def _dedupe_events_for_execution(
+        self, events: list[EventData]
+    ) -> list[EventData]:
+        seen: set[tuple[object, ...]] = set()
+        deduped: list[EventData] = []
         for evt in events:
             signature = self._event_execution_signature(evt)
             if signature in seen:
@@ -472,8 +566,8 @@ class KeystrokeProcessor:
         return active
 
     def _resolve_effective_states(
-        self, local_match_states: Dict[str, bool]
-    ) -> Dict[str, bool]:
+        self, local_match_states: dict[str, bool]
+    ) -> dict[str, bool]:
         """
         조건 체인을 포함한 '실제 활성 상태' 계산.
         - raw match가 False면 비활성
@@ -485,8 +579,8 @@ class KeystrokeProcessor:
             base_states = dict(self.current_states)
             runtime_toggle_active = bool(self.runtime_toggle_active)
 
-        resolved: Dict[str, bool] = {}
-        visiting: Set[str] = set()
+        resolved: dict[str, bool] = {}
+        visiting: set[str] = set()
 
         def resolve(name: str) -> bool:
             if name in resolved:
@@ -529,16 +623,18 @@ class KeystrokeProcessor:
         return resolved
 
     def _evaluate_capture_group(
-        self, img: np.ndarray, events: List[Dict]
-    ) -> Dict[str, bool]:
-        local_match_states = {}
+        self, img: ImageArray, events: list[EventData]
+    ) -> dict[str, bool]:
+        local_match_states: dict[str, bool] = {}
         for evt in events:
             local_match_states[evt["name"]] = self._check_match(
                 img, evt, is_independent=False
             )
         return local_match_states
 
-    async def _apply_local_match_states(self, local_match_states: Dict[str, bool]):
+    async def _apply_local_match_states(
+        self, local_match_states: dict[str, bool]
+    ) -> None:
         local_states = self._resolve_effective_states(local_match_states)
 
         with self.state_lock:
@@ -564,7 +660,7 @@ class KeystrokeProcessor:
         if tasks:
             await asyncio.gather(*tasks)
 
-    def _build_capture_rect(self, evt: Dict) -> Dict[str, int]:
+    def _build_capture_rect(self, evt: EventData) -> Rect:
         """이벤트에 대한 캡처 영역 생성"""
         cx, cy = evt["center_x"], evt["center_y"]
         if evt["mode"] == "region":
@@ -573,8 +669,8 @@ class KeystrokeProcessor:
         return {"top": cy, "left": cx, "width": 1, "height": 1}
 
     def _extract_roi(
-        self, img: np.ndarray, evt: Dict, is_independent: bool
-    ) -> Optional[np.ndarray]:
+        self, img: ImageArray, evt: EventData, is_independent: bool
+    ) -> ImageArray | None:
         """이미지에서 관심 영역(ROI) 추출"""
         if is_independent:
             return img[:, :, :3]
@@ -598,7 +694,7 @@ class KeystrokeProcessor:
 
         return img[y : y + h, x : x + w, :3]
 
-    def _check_match(self, img: np.ndarray, evt: Dict, is_independent: bool) -> bool:
+    def _check_match(self, img: ImageArray, evt: EventData, is_independent: bool) -> bool:
         matched = False
         evaluated = False
         try:
@@ -621,6 +717,9 @@ class KeystrokeProcessor:
                     matched = True
                     evaluated = True
             else:
+                ref_bgr = evt.get("ref_bgr")
+                if ref_bgr is None:
+                    return False
                 # 픽셀 모드
                 if is_independent:
                     pixel = img[0, 0, :3]
@@ -629,7 +728,7 @@ class KeystrokeProcessor:
                     if py >= img.shape[0] or px >= img.shape[1]:
                         return False
                     pixel = img[py, px][:3]
-                matched = np.array_equal(pixel, evt["ref_bgr"])
+                matched = bool(np.array_equal(pixel, ref_bgr))
                 evaluated = True
         except Exception:
             return False
@@ -637,21 +736,25 @@ class KeystrokeProcessor:
             return not matched
         return matched
 
-    def _calculate_press_duration(self, evt: Dict) -> float:
+    def _calculate_press_duration(self, evt: EventData) -> float:
         """목표 키 누름 지속 시간 계산 (초 단위)"""
+        duration_ms = evt["dur"]
+        randomization_ms = evt["rand"]
         duration = (
-            evt["dur"] / 1000.0
-            if evt["dur"]
+            duration_ms / 1000.0
+            if duration_ms
             else random.uniform(*self.default_press_times)
         )
-        if evt["rand"]:
-            duration += random.uniform(-evt["rand"], evt["rand"]) / 1000.0
+        if randomization_ms:
+            duration += (
+                random.uniform(-randomization_ms, randomization_ms) / 1000.0
+            )
         return max(0.05, duration)
 
     def _snapshot_condition_states(
-        self, evt: Dict, state_snapshot: Optional[Dict[str, bool]] = None
-    ) -> Dict[str, bool]:
-        conds = evt.get("conds") or {}
+        self, evt: EventData, state_snapshot: dict[str, bool] | None = None
+    ) -> dict[str, bool]:
+        conds = evt.get("conds", {})
         if not conds:
             return {}
 
@@ -669,9 +772,9 @@ class KeystrokeProcessor:
 
     @staticmethod
     def _format_condition_states(
-        evt: Dict, condition_states: Optional[Dict[str, bool]] = None
+        evt: EventData, condition_states: dict[str, bool] | None = None
     ) -> str:
-        conds = evt.get("conds") or {}
+        conds = evt.get("conds", {})
         if not conds:
             return ""
 
@@ -685,9 +788,9 @@ class KeystrokeProcessor:
     def _log_key_execution(
         self,
         mode: str,
-        evt: Dict,
+        evt: EventData,
         target_duration: float,
-        state_snapshot: Optional[Dict[str, bool]] = None,
+        state_snapshot: dict[str, bool] | None = None,
     ) -> None:
         condition_states = self._snapshot_condition_states(evt, state_snapshot)
         cond_suffix = self._format_condition_states(evt, condition_states)
@@ -696,7 +799,9 @@ class KeystrokeProcessor:
             f"(Duration: {target_duration:.3f}s){cond_suffix}"
         )
 
-    async def _wait_until_async(self, end_time: float, check_interval: float = 0.02):
+    async def _wait_until_async(
+        self, end_time: float, check_interval: float = 0.02
+    ) -> None:
         """절대 종료 시간까지 비동기 대기"""
         while time.time() < end_time and not self.term_event.is_set():
             remaining = end_time - time.time()
@@ -704,7 +809,7 @@ class KeystrokeProcessor:
                 break
             await asyncio.sleep(min(check_interval, remaining))
 
-    def _wait_until_sync(self, end_time: float, check_interval: float = 0.02):
+    def _wait_until_sync(self, end_time: float, check_interval: float = 0.02) -> None:
         """절대 종료 시간까지 동기 대기"""
         while time.time() < end_time and not self.term_event.is_set():
             remaining = end_time - time.time()
@@ -713,8 +818,8 @@ class KeystrokeProcessor:
             time.sleep(min(check_interval, remaining))
 
     async def _press_key_async(
-        self, evt: Dict, state_snapshot: Optional[Dict[str, bool]] = None
-    ):
+        self, evt: EventData, state_snapshot: dict[str, bool] | None = None
+    ) -> None:
         """비동기 키 입력 실행 (메인 루프용)"""
         if self.term_event.is_set():
             return
@@ -738,7 +843,7 @@ class KeystrokeProcessor:
             with self.key_lock:
                 self.pressed_keys.discard(key)
 
-    def _sync_press_key(self, evt: Dict):
+    def _sync_press_key(self, evt: EventData) -> None:
         """동기 키 입력 실행 (독립 스레드용)"""
         key = evt["key"]
         if not key or not (code := self.key_codes.get(key)):

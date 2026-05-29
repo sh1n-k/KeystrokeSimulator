@@ -1,4 +1,3 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -42,6 +41,13 @@ class TestStateUtils(unittest.TestCase):
     def test_load_nonexistent_returns_empty(self):
         """파일 없을 때 load → 빈 dict"""
         data = StateUtils.load_main_app_state()
+        self.assertEqual(data, {})
+
+    def test_load_non_object_json_returns_empty(self):
+        StateUtils.path.write_text("[]", encoding="utf-8")
+
+        data = StateUtils.load_main_app_state()
+
         self.assertEqual(data, {})
 
     def test_merge_behavior(self):
