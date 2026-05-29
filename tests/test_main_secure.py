@@ -1,9 +1,7 @@
-import sys
 import unittest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 # app.secure imports Tkinter and requests at module level; patch heavy deps before import
-import app.secure  # noqa: E402 - must come after sys.modules patching
 from app.secure import Application, AuthService, AuthUI, Config
 
 

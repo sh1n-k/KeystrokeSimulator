@@ -64,7 +64,7 @@ class AuthService:
                 error_message = error_data.get(
                     "message", txt("Authentication failed", "인증에 실패했습니다")
                 )
-            except:
+            except Exception:
                 error_message = txt(
                     "Server error: {code}",
                     "서버 오류: {code}",

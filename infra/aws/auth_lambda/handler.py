@@ -316,9 +316,6 @@ def retry_operation(operation, **kwargs):
 
 def log_auth_request(user_id, action, ip, status):
     current_time = int(time.time())
-    expiration_time = current_time + (
-        LOG_RETENTION_DAYS * 24 * 60 * 60
-    )  # TTL in seconds
 
     # Create a composite key: userId#timestamp
     composite_key = f"{user_id}#{current_time}"
@@ -397,7 +394,7 @@ def send_telegram_message_async(user_id, ip, status):
         message = f"User ID: {user_id}\nIP: {ip}\nStatus: {status}"
         encoded_message = urllib.parse.quote(message)
 
-        url = f"api.telegram.org"
+        url = "api.telegram.org"
         path = f"/bot{BOT_TOKEN}/sendMessage?chat_id={CHAT_ID}&text={encoded_message}"
 
         conn = http.client.HTTPSConnection(url)

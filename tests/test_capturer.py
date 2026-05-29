@@ -1,4 +1,3 @@
-import threading
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -100,7 +99,10 @@ class TestCapturerAttributes(unittest.TestCase):
     def test_screenshot_callback_settable(self):
         """screenshot_callback 설정 가능"""
         capturer = self._make_capturer()
-        cb = lambda pos, img: None
+
+        def cb(pos, img):
+            return None
+
         capturer.screenshot_callback = cb
         self.assertIs(capturer.screenshot_callback, cb)
 

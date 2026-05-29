@@ -4,12 +4,11 @@ import tkinter as tk
 import tkinter.ttk as ttk
 from threading import Thread
 from tkinter import messagebox
-from typing import Callable, Optional, List, Dict, Set
+from typing import Callable, Optional, List, Dict
 
 from PIL import ImageTk, Image, ImageDraw
-from loguru import logger
 
-from app.utils.i18n import txt, dual_text_width
+from app.utils.i18n import txt
 from app.core.capturer import ScreenshotCapturer
 from app.core.models import EventModel
 from app.utils.system import KeyUtils, PermissionUtils, StateUtils, WindowUtils

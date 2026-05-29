@@ -313,13 +313,6 @@ def _optimize_layer_order(
         incoming_map.setdefault(edge.dst, []).append(edge.src)
         outgoing_map.setdefault(edge.src, []).append(edge.dst)
 
-    def layer_index_map() -> Dict[str, int]:
-        index = {}
-        for layer in layers:
-            for i, node_id in enumerate(layer):
-                index[node_id] = i
-        return index
-
     def avg_neighbor_pos(node_id: str, neighbors: List[str], pos_map: Dict[str, int]):
         positions = [pos_map[n] for n in neighbors if n in pos_map]
         if not positions:
@@ -327,7 +320,6 @@ def _optimize_layer_order(
         return sum(positions) / len(positions)
 
     for _ in range(iterations):
-        prev_index = layer_index_map()
         for i in range(1, len(layers)):
             pos_map = {n_id: idx for idx, n_id in enumerate(layers[i - 1])}
 
@@ -339,7 +331,6 @@ def _optimize_layer_order(
 
             layers[i] = sorted(layers[i], key=key)
 
-        next_index = layer_index_map()
         for i in range(len(layers) - 2, -1, -1):
             pos_map = {n_id: idx for idx, n_id in enumerate(layers[i + 1])}
 

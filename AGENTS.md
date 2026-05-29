@@ -15,6 +15,8 @@ Git / 변경 안전장치:
 - 대규모 rename/migration, formatter 전면 적용, 바이너리 변경, 대량 의존성 업데이트, 삭제 위험 작업은 실행 전에 확인한다.
 
 검증:
-- 기본 검증은 `uv run -m unittest discover -s tests -p "test_*.py" -q`를 우선한다.
+- 기본 검증은 `uv run -m scripts.verify`를 우선한다. 이 명령은 `ruff`, `pyright`, 단위 테스트를 순서대로 실행한다.
+- 빠른 정적 검증은 `uv run -m scripts.verify --static-only`를 사용한다.
+- 로컬 훅 검증은 `uv run pre-commit run --all-files`를 사용한다.
 - UI/IPC/DB migration/사용자 플로우에 영향이 있을 때만 필요한 범위의 GUI/E2E 검증을 추가한다.
 - 검증을 못 했거나 일부만 했으면 이유와 재현 command를 남긴다.

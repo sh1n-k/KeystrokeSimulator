@@ -1,6 +1,5 @@
 import json
 import os
-import sys
 import platform
 import ast
 from pathlib import Path
@@ -17,7 +16,6 @@ if IS_WIN:
     import ctypes
     import win32api
     import win32gui
-    import win32process
     from win32process import GetWindowThreadProcessId, GetModuleFileNameEx
 elif IS_MAC:
     import AppKit

@@ -9,6 +9,9 @@ from dotenv import load_dotenv
 
 VERSION = "3.0"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 ENTRY_SCRIPT = PROJECT_ROOT / "app" / "secure.py"
 DIST_ROOT = PROJECT_ROOT / "dist" / "secure"
 WORK_ROOT = PROJECT_ROOT / "build" / "pyinstaller"
@@ -49,7 +52,12 @@ def parse_args():
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Validate build inputs and report output locations without building.",
+        help="Run static checks, validate build inputs, and report output locations.",
+    )
+    parser.add_argument(
+        "--skip-verify",
+        action="store_true",
+        help="Skip ruff and pyright before checking or building.",
     )
     return parser.parse_args()
 
@@ -93,6 +101,12 @@ def build_output_paths(platform_name: str) -> tuple[Path, Path, Path]:
     work_dir = WORK_ROOT / platform_name
     spec_dir = work_dir / "spec"
     return dist_dir, work_dir, spec_dir
+
+
+def run_build_static_checks() -> int:
+    from scripts.verify import run_static_checks
+
+    return run_static_checks()
 
 
 def build(platform_name: str, env_values: dict[str, str]) -> Path:
@@ -143,6 +157,12 @@ def build(platform_name: str, env_values: dict[str, str]) -> Path:
 def main():
     args = parse_args()
     platform_name = get_platform_name()
+
+    if not args.skip_verify:
+        print("Running static checks before build...")
+        if run_build_static_checks() != 0:
+            raise SystemExit("Static checks failed.")
+
     env_values = load_required_env()
     artifact_name = build_artifact_name(platform_name)
     dist_dir, work_dir, spec_dir = build_output_paths(platform_name)

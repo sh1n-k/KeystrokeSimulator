@@ -9,13 +9,13 @@ from unittest.mock import patch, MagicMock
 # Headless CI guard: skip when RUN_GUI_TESTS is not set
 _RUN_GUI_TESTS = os.environ.get("RUN_GUI_TESTS", "0") == "1"
 
-from app.ui.simulator_app import KeystrokeSimulatorApp
-from app.core.models import ProfileModel, EventModel
-from app.storage.profile_display import QUICK_PROFILE_NAME
-from app.utils.i18n import txt
+from app.ui.simulator_app import KeystrokeSimulatorApp  # noqa: E402
+from app.core.models import ProfileModel, EventModel  # noqa: E402
+from app.storage.profile_display import QUICK_PROFILE_NAME  # noqa: E402
+from app.utils.i18n import txt  # noqa: E402
 
 # Suppress loguru output during tests to prevent clutter
-from loguru import logger
+from loguru import logger  # noqa: E402
 logger.remove()
 logger.add(lambda msg: None, level="ERROR")
 

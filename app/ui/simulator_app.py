@@ -14,7 +14,7 @@ from tkinter import ttk, messagebox
 from loguru import logger
 import pynput.keyboard
 import pynput.mouse
-from app.utils.i18n import dual_text_width, normalize_language, set_language, txt
+from app.utils.i18n import normalize_language, set_language, txt
 
 from app.core.validation import find_duplicate_event_names
 from app.core.models import ProfileModel, EventModel, UserSettings
@@ -45,7 +45,6 @@ from app.utils.runtime_toggle import (
     display_runtime_toggle_trigger,
     is_keyboard_runtime_toggle_trigger,
     is_mouse_button_runtime_toggle_trigger,
-    is_supported_runtime_toggle_trigger,
     is_wheel_runtime_toggle_trigger,
     collect_runtime_toggle_validation_errors,
     normalize_runtime_toggle_listener_key,

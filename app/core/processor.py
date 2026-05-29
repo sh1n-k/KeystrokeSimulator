@@ -16,9 +16,7 @@ from app.core.models import EventModel
 from app.utils.system import KeyUtils, ProcessUtils
 
 # OS-specific imports
-if platform.system() == "Windows":
-    import win32gui, win32process
-elif platform.system() == "Darwin":
+if platform.system() == "Darwin":
     from Quartz import CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap
 
 

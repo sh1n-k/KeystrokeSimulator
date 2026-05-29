@@ -15,7 +15,7 @@ from app.ui.event_importer import EventImporter
 from app.core.models import ProfileModel, EventModel
 from app.core.validation import find_duplicate_event_names, normalized_event_name
 from app.storage.profile_storage import load_profile, rename_profile_files, save_profile
-from app.utils.system import WindowUtils, StateUtils, KeyUtils
+from app.utils.system import WindowUtils, StateUtils
 from app.utils.runtime_toggle import (
     collect_runtime_toggle_validation_errors,
     display_runtime_toggle_trigger,

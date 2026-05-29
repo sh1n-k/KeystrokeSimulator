@@ -3,7 +3,7 @@ import tkinter.ttk as ttk
 import time
 from pathlib import Path
 from threading import Thread
-from typing import List, Tuple
+from typing import List
 
 from PIL import Image, ImageTk
 from loguru import logger
@@ -225,7 +225,7 @@ class KeystrokeQuickEventEditor:
 
     def _mk_lbl(self, p, bg, r, c):
         # Larger previews so users can actually verify what was captured.
-        l = tk.Label(
+        label = tk.Label(
             p,
             width=18,
             height=9,
@@ -233,14 +233,14 @@ class KeystrokeQuickEventEditor:
             highlightthickness=1,
             highlightbackground=theme.SURFACE_DIVIDER,
         )
-        l.grid(row=r, column=c, padx=5)
-        return l
+        label.grid(row=r, column=c, padx=5)
+        return label
 
     def _mk_entries(self, p, labels):
         entries = []
-        for i, txt in enumerate(labels):
+        for i, label_text in enumerate(labels):
             r, c = divmod(i, 2)
-            tk.Label(p, text=txt).grid(row=r, column=c * 2, padx=1, sticky=tk.E)
+            tk.Label(p, text=label_text).grid(row=r, column=c * 2, padx=1, sticky=tk.E)
             e = tk.Entry(p, width=4)
             e.grid(row=r, column=c * 2 + 1, padx=4, sticky=tk.W)
             e.bind("<Up>", lambda ev, en=e: self._adj_val(en, 1))
@@ -451,10 +451,6 @@ class KeystrokeQuickEventEditor:
         if not getattr(self, "lbl_gauge", None):
             return
         idx = self._current_step_index()
-        glyphs = []
-        for i in range(4):
-            glyphs.append("●" if i <= idx else "○")
-        gauge = "  ━━  ".join(glyphs)
         labels = [
             txt("POINT", "포인트"),
             txt("CAPTURE", "캡처"),

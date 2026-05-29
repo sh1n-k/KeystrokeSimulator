@@ -1,7 +1,6 @@
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import Dict, Any
 
 from loguru import logger
 from app.utils.i18n import dual_text_width, txt
@@ -206,8 +205,8 @@ class ModificationKeysWindow(tk.Toplevel):
             # Default initialization if missing
             if not getattr(p, "modification_keys", None):
                 p.modification_keys = {
-                    l.lower(): {"enabled": True, "value": "Pass", "pass": True}
-                    for l in self.labels
+                    label.lower(): {"enabled": True, "value": "Pass", "pass": True}
+                    for label in self.labels
                 }
                 save_profile(self.prof_dir, p, name=self.prof_name)
 
