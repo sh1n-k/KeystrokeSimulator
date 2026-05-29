@@ -306,6 +306,14 @@ class TestAuthUIRequestAuthentication(unittest.TestCase):
         mock_err.assert_called_once()
         ui.on_success_callback.assert_not_called()
 
+    def test_null_session_token_shows_error(self):
+        ui = _make_auth_ui()
+        ui.auth_service.request_authentication.return_value = {"sessionToken": None}
+        with patch.object(ui, "show_error_and_reactivate") as mock_err:
+            ui.request_authentication()
+        mock_err.assert_called_once()
+        ui.on_success_callback.assert_not_called()
+
     def test_service_exception_shows_error(self):
         ui = _make_auth_ui()
         ui.auth_service.request_authentication.side_effect = Exception("Server error")

@@ -1,16 +1,19 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
 import tkinter as tk
 import tkinter.ttk as ttk
 import time
 from pathlib import Path
 from threading import Thread
-from typing import List
+from typing import Any, cast
 
 from PIL import Image, ImageTk
 from loguru import logger
 
 from app.utils.i18n import dual_text_width, txt
 from app.core.capturer import ScreenshotCapturer
-from app.core.models import EventModel
+from app.core.models import ColorTuple, EventModel, Position
 from app.storage.profile_storage import ensure_quick_profile, load_profile, save_profile
 from app.utils.system import StateUtils, WindowUtils, KeyUtils
 from app.ui import theme
@@ -23,27 +26,34 @@ class KeystrokeQuickEventEditor:
         self.win.transient(settings_window)
         self.win.grab_set()
         self.win.focus_force()
-        self.win.attributes("-topmost", True)
+        cast(Any, self.win).attributes("-topmost", True)
         self.win.bind("<Escape>", self.close)
         self.win.protocol("WM_DELETE_WINDOW", self.close)
 
         self.event_idx = 1
-        self.events: List[EventModel] = []
-        self.latest_pos = None
-        self.clicked_pos = None
-        self.latest_img = None
-        self.held_img = None
-        self.ref_pixel = None
+        self.events: list[EventModel] = []
+        self.latest_pos: Position | None = None
+        self.clicked_pos: Position | None = None
+        self.latest_img: Image.Image | None = None
+        self.held_img: Image.Image | None = None
+        self.ref_pixel: ColorTuple | None = None
         self.saved_count = 0
 
         self.capture_w_var = tk.IntVar(value=100)
         self.capture_h_var = tk.IntVar(value=100)
 
-        self.spn_capture_w = None
-        self.spn_capture_h = None
-        self.lbl_step = None
-        self.lbl_session = None
-        self.lbl_feedback = None
+        self.spn_capture_w: ttk.Spinbox | None = None
+        self.spn_capture_h: ttk.Spinbox | None = None
+        self.lbl_step: ttk.Label | None = None
+        self.lbl_session: tk.Label | None = None
+        self.lbl_feedback: ttk.Label | None = None
+        self.lbl_gauge: ttk.Label | None = None
+        self.lbl_img1: tk.Label
+        self.lbl_img2: tk.Label
+        self.lbl_ref: tk.Label
+        self.entries: list[tk.Entry] = []
+        self.button_dock: tk.Frame
+        self.button_group: tk.Frame
 
         self.capturer = ScreenshotCapturer()
         self.capturer.screenshot_callback = self.update_capture
@@ -58,7 +68,7 @@ class KeystrokeQuickEventEditor:
         self.chk_thread = Thread(target=self._check_keys, daemon=True)
         self.chk_thread.start()
 
-    def _create_ui(self):
+    def _create_ui(self) -> None:
         try:
             self.win.configure(bg=theme.SURFACE_PAPER)
         except tk.TclError:
@@ -141,10 +151,9 @@ class KeystrokeQuickEventEditor:
         self.lbl_ref.grid(row=0, column=1, padx=5)
 
         # Coords
-        self.entries = self._mk_entries(
-            tk.Frame(self.win), ["X1:", "Y1:", "X2:", "Y2:"]
-        )
-        self.entries[0].master.pack()
+        entries_frame = tk.Frame(self.win)
+        self.entries = self._mk_entries(entries_frame, ["X1:", "Y1:", "X2:", "Y2:"])
+        entries_frame.pack()
 
         # Capture Size
         f_size = tk.Frame(self.win)
@@ -210,7 +219,7 @@ class KeystrokeQuickEventEditor:
         self.lbl_feedback.pack(pady=(0, 8), fill="both")
         self._refresh_status_text()
 
-    def _on_capture_size_change(self, *args):
+    def _on_capture_size_change(self, *_args: object) -> None:
         """캡처 크기 변경 시 capturer 동기화"""
         try:
             w = max(50, min(1000, self.capture_w_var.get()))
@@ -223,7 +232,7 @@ class KeystrokeQuickEventEditor:
         except (ValueError, tk.TclError):
             pass
 
-    def _mk_lbl(self, p, bg, r, c):
+    def _mk_lbl(self, p: tk.Misc, _bg: str, r: int, c: int) -> tk.Label:
         # Larger previews so users can actually verify what was captured.
         label = tk.Label(
             p,
@@ -236,8 +245,8 @@ class KeystrokeQuickEventEditor:
         label.grid(row=r, column=c, padx=5)
         return label
 
-    def _mk_entries(self, p, labels):
-        entries = []
+    def _mk_entries(self, p: tk.Frame, labels: Sequence[str]) -> list[tk.Entry]:
+        entries: list[tk.Entry] = []
         for i, label_text in enumerate(labels):
             r, c = divmod(i, 2)
             tk.Label(p, text=label_text).grid(row=r, column=c * 2, padx=1, sticky=tk.E)
@@ -251,7 +260,7 @@ class KeystrokeQuickEventEditor:
             e.bind("<FocusOut>", self._update_pos_from_entry)
         return entries
 
-    def _adj_val(self, e, d):
+    def _adj_val(self, e: tk.Entry, d: int) -> str:
         try:
             v = int(e.get()) + d
             e.delete(0, tk.END)
@@ -262,7 +271,7 @@ class KeystrokeQuickEventEditor:
             pass
         return "break"
 
-    def _update_pos_from_entry(self, event=None):
+    def _update_pos_from_entry(self, event: object | None = None) -> None:
         try:
             self.capturer.set_current_mouse_position(
                 (int(self.entries[0].get()), int(self.entries[1].get()))
@@ -270,7 +279,7 @@ class KeystrokeQuickEventEditor:
         except ValueError:
             pass
 
-    def _check_keys(self):
+    def _check_keys(self) -> None:
         while self.chk_active:
             if KeyUtils.mod_key_pressed("alt"):
                 self.capturer.set_current_mouse_position(self.win.winfo_pointerxy())
@@ -279,7 +288,7 @@ class KeystrokeQuickEventEditor:
                 time.sleep(0.2)
             time.sleep(0.1)
 
-    def update_capture(self, pos, img):
+    def update_capture(self, pos: Position, img: Image.Image) -> None:
         if pos and img:
             self.latest_pos, self.latest_img = pos, img
             try:
@@ -290,7 +299,7 @@ class KeystrokeQuickEventEditor:
             except (tk.TclError, AttributeError):
                 pass
 
-    def hold_image(self):
+    def hold_image(self) -> None:
         if not (self.latest_pos and self.latest_img):
             self._set_feedback(
                 txt(
@@ -316,7 +325,7 @@ class KeystrokeQuickEventEditor:
         )
         self._refresh_status_text()
 
-    def _on_click_held(self, event):
+    def _on_click_held(self, event: tk.Event[tk.Misc]) -> None:
         if not self.held_img:
             self._set_feedback(
                 txt(
@@ -338,7 +347,7 @@ class KeystrokeQuickEventEditor:
 
         if 0 <= ix < self.held_img.width and 0 <= iy < self.held_img.height:
             self.clicked_pos = (ix, iy)
-            self.ref_pixel = self.held_img.getpixel((ix, iy))
+            self.ref_pixel = cast(ColorTuple, self.held_img.getpixel((ix, iy)))
             self._upd_img(self.lbl_ref, Image.new("RGBA", (25, 25), self.ref_pixel))
             self._set_entries(self.entries[2:], ix, iy)
             self._apply_overlay(self.held_img, self.lbl_img2)
@@ -350,21 +359,30 @@ class KeystrokeQuickEventEditor:
             )
             self._refresh_status_text()
 
-    def _apply_overlay(self, img, lbl):
+    def _apply_overlay(self, img: Image.Image, lbl: tk.Label) -> None:
         """십자선 오버레이"""
         if not self.clicked_pos:
             return
         cx, cy = self.clicked_pos
 
         res = img.copy()
-        px = res.load()
+        pixels = cast(Any, res.load())
         w, h = res.size
         for x in range(w):
-            px[x, cy] = tuple(255 - c for c in px[x, cy][:3]) + (255,)
+            pixels[x, cy] = self._inverted_pixel(pixels[x, cy])
         for y in range(h):
-            px[cx, y] = tuple(255 - c for c in px[cx, y][:3]) + (255,)
+            pixels[cx, y] = self._inverted_pixel(pixels[cx, y])
 
         self._upd_img(lbl, self._scale_for_display(res))
+
+    @staticmethod
+    def _inverted_pixel(pixel: object) -> tuple[int, int, int, int]:
+        if isinstance(pixel, int):
+            r = g = b = pixel
+        else:
+            channels = cast(ColorTuple, pixel)
+            r, g, b = channels[:3]
+        return (255 - int(r), 255 - int(g), 255 - int(b), 255)
 
     @staticmethod
     def _scale_for_display(img: Image.Image) -> Image.Image:
@@ -373,28 +391,29 @@ class KeystrokeQuickEventEditor:
         scale = min(MAX_DISPLAY / img.width, MAX_DISPLAY / img.height, 1.0)
         if scale < 1.0:
             return img.resize(
-                (int(img.width * scale), int(img.height * scale)), Image.LANCZOS
+                (int(img.width * scale), int(img.height * scale)),
+                Image.Resampling.LANCZOS,
             )
         return img
 
-    def _upd_img(self, lbl, img):
+    def _upd_img(self, lbl: tk.Label, img: Image.Image) -> None:
         try:
             p = ImageTk.PhotoImage(img.convert("RGB"), master=lbl)
             lbl.configure(image=p, width=img.width, height=img.height)
-            lbl.image = p
+            cast(Any, lbl).image = p
         except Exception as e:
             logger.error(f"Img update failed: {e}")
 
-    def _set_entries(self, ents, x, y):
+    def _set_entries(self, ents: Sequence[tk.Entry], x: int, y: int) -> None:
         for i, v in enumerate((x, y)):
             ents[i].delete(0, tk.END)
             ents[i].insert(0, str(v))
 
-    def _set_feedback(self, text: str, color: str = "#555555"):
+    def _set_feedback(self, text: str, color: str = "#555555") -> None:
         if self.lbl_feedback:
             self.lbl_feedback.config(text=text, foreground=color)
 
-    def _refresh_status_text(self):
+    def _refresh_status_text(self) -> None:
         if self.lbl_session:
             self.lbl_session.config(
                 text=txt(
@@ -448,7 +467,8 @@ class KeystrokeQuickEventEditor:
         return 3
 
     def _refresh_gauge(self) -> None:
-        if not getattr(self, "lbl_gauge", None):
+        lbl_gauge = getattr(self, "lbl_gauge", None)
+        if lbl_gauge is None:
             return
         idx = self._current_step_index()
         labels = [
@@ -458,22 +478,20 @@ class KeystrokeQuickEventEditor:
             txt("SAVE", "저장"),
         ]
         # Render in a single line: ● POINT  ━━  ● CAPTURE  ━━  ○ PICK  ━━  ○ SAVE
-        parts = []
+        parts: list[str] = []
         for i, label in enumerate(labels):
             mark = "●" if i <= idx else "○"
             parts.append(f"{mark} {label}")
         text = "  ━━  ".join(parts)
-        self.lbl_gauge.config(text=text)
+        lbl_gauge.config(text=text)
 
-    def save_event(self):
-        if all(
-            [
-                self.latest_pos,
-                self.clicked_pos,
-                self.latest_img,
-                self.held_img,
-                self.ref_pixel,
-            ]
+    def save_event(self) -> None:
+        if (
+            self.latest_pos is not None
+            and self.clicked_pos is not None
+            and self.latest_img is not None
+            and self.held_img is not None
+            and self.ref_pixel is not None
         ):
             self.events.append(
                 EventModel(
@@ -503,7 +521,7 @@ class KeystrokeQuickEventEditor:
             )
             self._refresh_status_text()
 
-    def close(self, event=None):
+    def close(self, event: object | None = None) -> None:
         self.chk_active = False
         if self.chk_thread.is_alive():
             self.chk_thread.join(0.5)
@@ -518,7 +536,7 @@ class KeystrokeQuickEventEditor:
         self.win.grab_release()
         self.win.destroy()
 
-    def _load_pos(self):
+    def _load_pos(self) -> None:
         s = StateUtils.load_main_app_state()
         pos = StateUtils.parse_slash_int_pair(s.get("quick_pos")) if s else None
         if pos is not None:

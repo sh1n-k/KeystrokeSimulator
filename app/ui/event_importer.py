@@ -1,13 +1,16 @@
+from __future__ import annotations
+
 import copy
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Any, cast
 
 from loguru import logger
 from app.utils.i18n import dual_text_width, txt
 
-from app.core.models import EventModel
+from app.core.models import EventModel, ProfileModel
 from app.storage.profile_storage import list_profile_names, load_profile
 from app.utils.system import StateUtils
 from app.ui import theme
@@ -17,19 +20,25 @@ class EventImporter:
     def __init__(
         self,
         profiles_window: tk.Toplevel,
-        confirm_callback: Optional[Callable[[list[EventModel]], None]] = None,
-    ):
+        confirm_callback: Callable[[list[EventModel]], None] | None = None,
+    ) -> None:
         self.win = tk.Toplevel(profiles_window)
         self.win.title(txt("Import Events", "이벤트 가져오기"))
         self.win.transient(profiles_window)  # 부모창 위에 뜨도록 설정
         self.win.focus_force()
-        self.win.attributes("-topmost", True)
+        cast(Any, self.win).attributes("-topmost", True)
         self.win.grab_set()
 
         self.profile_dir = Path("profiles")
         self.confirm_cb = confirm_callback
-        self.checkboxes = []
-        self.current_profile_data = None
+        self.checkboxes: list[tk.IntVar] = []
+        self.current_profile_data: ProfileModel | None = None
+        self.cb_prof: ttk.Combobox
+        self.canvas: tk.Canvas
+        self.f_events: ttk.Frame
+        self.canvas_window: int
+        self.btn_ok: ttk.Button
+        self.lbl_selection_count: ttk.Label
 
         self.win.protocol("WM_DELETE_WINDOW", self.close)
         self.win.bind("<Escape>", self.close)
@@ -43,7 +52,7 @@ class EventImporter:
         self.load_profiles()
         self.load_pos()
 
-    def create_ui(self):
+    def create_ui(self) -> None:
         f = theme.fonts()
         # ContextBar — dialog title + role description to match the rest of
         # the workstation surface.
@@ -85,8 +94,9 @@ class EventImporter:
         container.pack(pady=5, padx=10, fill="both", expand=True)
 
         self.canvas = tk.Canvas(container, highlightthickness=0)
+        canvas_yview = cast(Any, self.canvas).yview
         scrollbar = ttk.Scrollbar(
-            container, orient="vertical", command=self.canvas.yview
+            container, orient="vertical", command=canvas_yview
         )
 
         # 캔버스 내부 프레임
@@ -152,19 +162,19 @@ class EventImporter:
         self.lbl_selection_count.pack(side="right", padx=theme.SPACE_2)
 
     # --- 스크롤 관련 핸들러 ---
-    def _on_frame_configure(self, event):
+    def _on_frame_configure(self, event: tk.Event[tk.Misc]) -> None:
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
-    def _on_canvas_configure(self, event):
-        self.canvas.itemconfig(self.canvas_window, width=event.width)
+    def _on_canvas_configure(self, event: tk.Event[tk.Misc]) -> None:
+        self.canvas.itemconfig(self.canvas_window, width=cast(Any, event).width)
 
-    def _on_mousewheel(self, event):
+    def _on_mousewheel(self, event: tk.Event[tk.Misc]) -> None:
         if self.canvas.bbox("all")[3] > self.canvas.winfo_height():
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            self.canvas.yview_scroll(int(-1 * (cast(Any, event).delta / 120)), "units")
 
     # -----------------------
 
-    def load_profiles(self):
+    def load_profiles(self) -> None:
         self.profile_dir.mkdir(exist_ok=True)
         names = list_profile_names(self.profile_dir)
         self.cb_prof["values"] = names
@@ -174,7 +184,7 @@ class EventImporter:
         else:
             self._refresh_selection_summary()
 
-    def load_events(self, event=None):
+    def load_events(self, event: tk.Event[tk.Misc] | None = None) -> None:
         prof_name = self.cb_prof.get()
         if not prof_name:
             return
@@ -198,21 +208,25 @@ class EventImporter:
                 self._add_event_row(i, evt)
         self._refresh_selection_summary()
 
-    def _add_event_row(self, idx, evt):
+    def _add_event_row(self, idx: int, evt: EventModel) -> None:
         var = tk.IntVar()
-        var.trace_add("write", lambda *_: self._refresh_selection_summary())
+
+        def _refresh_from_trace(*_args: str) -> None:
+            self._refresh_selection_summary()
+
+        var.trace_add("write", _refresh_from_trace)
 
         # Left color bar reflects the checked state of this row.
         bar = tk.Frame(self.f_events, bg=theme.SURFACE_DIVIDER, width=4)
         bar.grid(row=idx, column=0, sticky="ns", padx=(2, theme.SPACE_1))
         bar.grid_propagate(False)
 
-        def _sync_bar(*_):
+        def _sync_bar(*_args: str) -> None:
             bar.configure(
                 bg=theme.SIGNAL_BASE if var.get() else theme.SURFACE_DIVIDER
             )
 
-        var.trace_add("write", lambda *_: _sync_bar())
+        var.trace_add("write", _sync_bar)
 
         chk = ttk.Checkbutton(self.f_events, text=f"{idx + 1}", variable=var)
         chk.grid(row=idx, column=1, sticky="w", padx=(0, theme.SPACE_2), pady=2)
@@ -232,11 +246,11 @@ class EventImporter:
         idle_bg = theme.SURFACE_DIVIDER
         hover_bg = theme.SURFACE_SUNKEN
 
-        def _on_enter(_e=None):
+        def _on_enter(_event: tk.Event[tk.Misc] | None = None) -> None:
             if not var.get():
                 bar.configure(bg=hover_bg)
 
-        def _on_leave(_e=None):
+        def _on_leave(_event: tk.Event[tk.Misc] | None = None) -> None:
             if not var.get():
                 bar.configure(bg=idle_bg)
 
@@ -251,8 +265,6 @@ class EventImporter:
         self._refresh_selection_summary()
 
     def _refresh_selection_summary(self) -> None:
-        if not getattr(self, "lbl_selection_count", None):
-            return
         count = sum(1 for v in self.checkboxes if v.get())
         self.lbl_selection_count.config(
             text=txt(
@@ -260,12 +272,11 @@ class EventImporter:
                 f"{count}개 선택됨",
             )
         )
-        if getattr(self, "btn_ok", None):
-            label = txt("Import", "가져오기")
-            self.btn_ok.config(text=f"{label}{f' ({count})' if count else ''}")
-            self.btn_ok.config(state="normal" if count else "disabled")
+        label = txt("Import", "가져오기")
+        self.btn_ok.config(text=f"{label}{f' ({count})' if count else ''}")
+        self.btn_ok.config(state="normal" if count else "disabled")
 
-    def toggle_all(self):
+    def toggle_all(self) -> None:
         target = 1 if any(v.get() == 0 for v in self.checkboxes) else 0
         for v in self.checkboxes:
             v.set(target)
@@ -275,28 +286,28 @@ class EventImporter:
         """이벤트 깊은 복사 (PIL Image 포함) - 매우 중요"""
         new_evt = EventModel(
             event_name=evt.event_name,
-            capture_size=getattr(evt, "capture_size", (100, 100)),
+            capture_size=evt.capture_size,
             latest_position=evt.latest_position,
             clicked_position=evt.clicked_position,
             latest_screenshot=None,  # not persisted; left preview is always live capture
             held_screenshot=evt.held_screenshot.copy() if evt.held_screenshot else None,
             ref_pixel_value=evt.ref_pixel_value,
             key_to_enter=evt.key_to_enter,
-            press_duration_ms=getattr(evt, "press_duration_ms", None),
-            randomization_ms=getattr(evt, "randomization_ms", None),
-            independent_thread=getattr(evt, "independent_thread", False),
-            match_mode=getattr(evt, "match_mode", "pixel"),
-            invert_match=getattr(evt, "invert_match", False),
-            region_size=getattr(evt, "region_size", None),
-            execute_action=getattr(evt, "execute_action", True),
-            group_id=getattr(evt, "group_id", None),
-            priority=getattr(evt, "priority", 0),
-            conditions=copy.deepcopy(getattr(evt, "conditions", {})),
+            press_duration_ms=evt.press_duration_ms,
+            randomization_ms=evt.randomization_ms,
+            independent_thread=evt.independent_thread,
+            match_mode=evt.match_mode,
+            invert_match=evt.invert_match,
+            region_size=evt.region_size,
+            execute_action=evt.execute_action,
+            group_id=evt.group_id,
+            priority=evt.priority,
+            conditions=copy.deepcopy(evt.conditions),
         )
-        new_evt.use_event = getattr(evt, "use_event", True)
+        new_evt.use_event = evt.use_event
         return new_evt
 
-    def on_ok(self):
+    def on_ok(self) -> None:
         if not self.current_profile_data:
             return
 
@@ -312,7 +323,7 @@ class EventImporter:
 
         self.close()
 
-    def close(self, event=None):
+    def close(self, event: tk.Event[tk.Misc] | None = None) -> None:
         self.win.unbind_all("<MouseWheel>")  # 마우스 휠 바인딩 해제
         StateUtils.save_main_app_state(
             importer_pos=f"{self.win.winfo_x()}/{self.win.winfo_y()}"
@@ -320,7 +331,7 @@ class EventImporter:
         self.win.grab_release()
         self.win.destroy()
 
-    def load_pos(self):
+    def load_pos(self) -> None:
         pos = StateUtils.parse_slash_int_pair(
             StateUtils.load_main_app_state().get("importer_pos")
         )

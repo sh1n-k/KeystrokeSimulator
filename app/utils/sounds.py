@@ -3,45 +3,63 @@ from __future__ import annotations
 import atexit
 import array
 import base64
+import importlib
 import threading
-from typing import Optional
+from collections.abc import Generator
+from dataclasses import dataclass
+from typing import Any, TypeAlias, cast
 
-import miniaudio
+from loguru import logger
 
 from app.utils.sound_assets import (
     RUNTIME_TOGGLE_OFF_SOUND,
     RUNTIME_TOGGLE_ON_SOUND,
 )
 
+miniaudio: Any = importlib.import_module("miniaudio")
+SampleArray: TypeAlias = array.array[int]
 
 _CHANNELS = 2
 _SAMPLE_RATE = 44100
 _SAMPLE_FORMAT = miniaudio.SampleFormat.SIGNED16
-_SAMPLE_WIDTH = miniaudio.width_from_format(_SAMPLE_FORMAT)
+_SAMPLE_WIDTH = int(miniaudio.width_from_format(_SAMPLE_FORMAT))
 _BUFFER_MSEC = 20
 _SAMPLE_MIN = -32768
 _SAMPLE_MAX = 32767
 
 
+@dataclass
+class _ActiveSound:
+    samples: SampleArray
+    position: int
+
+    def __getitem__(self, index: int) -> SampleArray | int:
+        if index == 0:
+            return self.samples
+        if index == 1:
+            return self.position
+        raise IndexError(index)
+
+
 class _SoundHandle:
-    def __init__(self, player: "SoundPlayer", samples: array.array):
+    def __init__(self, player: "SoundPlayer", samples: SampleArray) -> None:
         self._player = player
         self._samples = samples
 
-    def play(self):
-        self._player._queue_samples(self._samples)
+    def play(self) -> None:
+        self._player.queue_samples(self._samples)
 
 
 class SoundPlayer:
-    def __init__(self):
-        self.start_sound = None
-        self.stop_sound = None
-        self.runtime_toggle_on_sound = None
-        self.runtime_toggle_off_sound = None
-        self._active_sounds = []
+    def __init__(self) -> None:
+        self.start_sound: _SoundHandle | None = None
+        self.stop_sound: _SoundHandle | None = None
+        self.runtime_toggle_on_sound: _SoundHandle | None = None
+        self.runtime_toggle_off_sound: _SoundHandle | None = None
+        self._active_sounds: list[_ActiveSound] = []
         self._lock = threading.Lock()
-        self._device = None
-        self._stream = None
+        self._device: Any | None = None
+        self._stream: Generator[bytes | SampleArray, int, None] | None = None
         try:
             self.start_sound = self._load_sound(START_SOUND)
             self.stop_sound = self._load_sound(STOP_SOUND)
@@ -53,7 +71,7 @@ class SoundPlayer:
             self._disable()
             print(f"Sound init error: {e}")
 
-    def _load_sound(self, b64_data: str) -> Optional[_SoundHandle]:
+    def _load_sound(self, b64_data: str) -> _SoundHandle | None:
         """Decode base64 audio once so trigger-time playback stays lightweight."""
         if not b64_data:
             return None
@@ -64,23 +82,25 @@ class SoundPlayer:
                 nchannels=_CHANNELS,
                 sample_rate=_SAMPLE_RATE,
             )
-            return _SoundHandle(self, decoded.samples)
+            return _SoundHandle(self, cast(SampleArray, decoded.samples))
         except Exception as e:
             print(f"Sound load error: {e}")
             return None
 
-    def _start_device(self):
-        self._stream = self._mix_stream()
-        next(self._stream)
-        self._device = miniaudio.PlaybackDevice(
+    def _start_device(self) -> None:
+        stream = self._mix_stream()
+        next(stream)
+        self._stream = stream
+        device = miniaudio.PlaybackDevice(
             output_format=_SAMPLE_FORMAT,
             nchannels=_CHANNELS,
             sample_rate=_SAMPLE_RATE,
             buffersize_msec=_BUFFER_MSEC,
         )
-        self._device.start(self._stream)
+        self._device = device
+        device.start(stream)
 
-    def close(self):
+    def close(self) -> None:
         with self._lock:
             device = self._device
             self._device = None
@@ -89,26 +109,26 @@ class SoundPlayer:
         if device is not None:
             try:
                 device.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"Sound device close failed: {exc}")
 
-    def _disable(self):
+    def _disable(self) -> None:
         self.start_sound = None
         self.stop_sound = None
         self.runtime_toggle_on_sound = None
         self.runtime_toggle_off_sound = None
         self.close()
 
-    def __del__(self):
+    def __del__(self) -> None:
         self.close()
 
-    def _queue_samples(self, samples: array.array):
+    def queue_samples(self, samples: SampleArray) -> None:
         with self._lock:
             if self._device is None:
                 return
-            self._active_sounds.append([samples, 0])
+            self._active_sounds.append(_ActiveSound(samples, 0))
 
-    def _mix_stream(self):
+    def _mix_stream(self) -> Generator[bytes | SampleArray, int, None]:
         required_frames = yield b""
         while True:
             sample_count = int(required_frames) * _CHANNELS
@@ -119,9 +139,10 @@ class SoundPlayer:
                 mixed = None
             else:
                 mixed = array.array("h", [0]) * sample_count
-                remaining = []
+                remaining: list[_ActiveSound] = []
                 for sound in active_sounds:
-                    samples, position = sound
+                    samples = sound.samples
+                    position = sound.position
                     end = min(position + sample_count, len(samples))
                     for index, sample in enumerate(samples[position:end]):
                         value = mixed[index] + sample
@@ -131,7 +152,7 @@ class SoundPlayer:
                             value = _SAMPLE_MIN
                         mixed[index] = value
                     if end < len(samples):
-                        sound[1] = end
+                        sound.position = end
                         remaining.append(sound)
                 if remaining:
                     with self._lock:
@@ -142,19 +163,19 @@ class SoundPlayer:
             else:
                 required_frames = yield mixed
 
-    def play_start_sound(self):
+    def play_start_sound(self) -> None:
         if self.start_sound:
             self.start_sound.play()
 
-    def play_stop_sound(self):
+    def play_stop_sound(self) -> None:
         if self.stop_sound:
             self.stop_sound.play()
 
-    def play_runtime_toggle_on_sound(self):
+    def play_runtime_toggle_on_sound(self) -> None:
         if self.runtime_toggle_on_sound:
             self.runtime_toggle_on_sound.play()
 
-    def play_runtime_toggle_off_sound(self):
+    def play_runtime_toggle_off_sound(self) -> None:
         if self.runtime_toggle_off_sound:
             self.runtime_toggle_off_sound.play()
 

@@ -1,4 +1,5 @@
-import json
+from __future__ import annotations
+
 import os
 import platform
 import re
@@ -6,10 +7,11 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import font as tkfont
-from dataclasses import fields, asdict
+from collections.abc import Callable
 from pathlib import Path
+from tkinter import font as tkfont
 from tkinter import ttk, messagebox
+from typing import Any, ParamSpec, Protocol, TypedDict, TypeVar, cast
 
 from loguru import logger
 import pynput.keyboard
@@ -17,7 +19,7 @@ import pynput.mouse
 from app.utils.i18n import normalize_language, set_language, txt
 
 from app.core.validation import find_duplicate_event_names
-from app.core.models import ProfileModel, EventModel, UserSettings
+from app.core.models import EventModel, ProfileModel, UserSettings
 from app.ui.modkeys import ModificationKeysWindow
 from app.storage.profile_storage import (
     copy_profile as copy_profile_storage,
@@ -28,6 +30,7 @@ from app.storage.profile_storage import (
     load_profile,
     load_profile_meta_favorite,
 )
+from app.storage.settings_storage import load_user_settings, save_user_settings
 from app.core.processor import KeystrokeProcessor
 from app.ui.profiles import KeystrokeProfiles
 from app.ui.quick_event_editor import KeystrokeQuickEventEditor
@@ -58,6 +61,7 @@ from app.utils.system import (
     WindowUtils,
     KeyUtils,
     ProcessCollector,
+    install_exception_hooks,
 )
 from app.ui import theme
 
@@ -72,8 +76,27 @@ STATUS_FG_ERR = theme.STATUS_ERROR_FG
 STATUS_BG_RUN = theme.STATUS_RUNNING_BG
 STATUS_FG_RUN = theme.STATUS_RUNNING_FG
 
+P = ParamSpec("P")
+R = TypeVar("R")
+VoidCallback = Callable[[], None]
+SecureCallback = Callable[[], None]
 
-def safe_call(func, *args, **kwargs):
+
+class ReadinessSnapshot(TypedDict):
+    can_start: bool
+    badge_text: str
+    title: str
+    detail: str
+    bg: str
+    fg: str
+
+
+class InputListener(Protocol):
+    def start(self) -> object: ...
+    def stop(self) -> object: ...
+
+
+def safe_call(func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R | None:
     """예외를 무시하고 함수 호출"""
     try:
         return func(*args, **kwargs)
@@ -82,7 +105,13 @@ def safe_call(func, *args, **kwargs):
 
 
 class ProcessFrame(tk.Frame):
-    def __init__(self, master, textvariable, *args, **kwargs):
+    def __init__(
+        self,
+        master: tk.Misc,
+        textvariable: tk.StringVar,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(master, *args, **kwargs)
         # 4-column grid keeps Process/Profile/Tools rows visually aligned.
         # col 0: label (fixed width)
@@ -93,29 +122,31 @@ class ProcessFrame(tk.Frame):
         self.grid_columnconfigure(2, weight=0, minsize=120)
         self.grid_columnconfigure(3, weight=0, minsize=120)
 
-        self.lbl_process = tk.Label(self, anchor="w", width=8)
+        self.lbl_process: tk.Label = tk.Label(self, anchor="w", width=8)
         self.lbl_process.grid(row=0, column=0, sticky="w", padx=(0, 6))
-        self.process_combobox = ttk.Combobox(
+        self.process_combobox: ttk.Combobox = ttk.Combobox(
             self, textvariable=textvariable, state="readonly"
         )
         self.process_combobox.grid(row=0, column=1, sticky="we", padx=(0, 6))
-        self.refresh_button = tk.Button(self, command=self.refresh_processes)
+        self.refresh_button: tk.Button = tk.Button(
+            self, command=self.refresh_processes
+        )
         self.refresh_button.grid(row=0, column=2, sticky="we", padx=(0, 6))
         self.refresh_texts()
         self.refresh_processes()
 
-    def refresh_texts(self):
+    def refresh_texts(self) -> None:
         self.lbl_process.config(text=txt("Process:", "프로세스:"))
         self.refresh_button.config(text=txt("Refresh", "새로고침"))
 
-    def refresh_processes(self):
+    def refresh_processes(self) -> None:
         curr_val = self.process_combobox.get()
         curr_name = (
             curr_val.rsplit(" (", 1)[0] if curr_val and "(" in curr_val else None
         )
 
         procs = sorted(ProcessCollector.get(), key=lambda x: x[0].lower())
-        self.process_combobox["values"] = [f"{n} ({p})" for n, p, _ in procs]
+        self.process_combobox.configure(values=[f"{n} ({p})" for n, p, _ in procs])
 
         idx = next((i for i, (n, _, _) in enumerate(procs) if n == curr_name), 0)
         if procs:
@@ -124,14 +155,21 @@ class ProcessFrame(tk.Frame):
 
 
 class ProfileFrame(tk.Frame):
-    def __init__(self, master, textvariable, profiles_dir, *args, **kwargs):
+    def __init__(
+        self,
+        master: tk.Misc,
+        textvariable: tk.StringVar,
+        profiles_dir: str | Path,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(master, *args, **kwargs)
         self.profiles_dir = Path(profiles_dir)
         self.selected_profile_var = textvariable
-        self.profile_display_var = tk.StringVar()
-        self.profile_names = []
-        self.name_to_index = {}
-        self.favorite_names = set()
+        self.profile_display_var: tk.StringVar = tk.StringVar()
+        self.profile_names: list[str] = []
+        self.name_to_index: dict[str, int] = {}
+        self.favorite_names: set[str] = set()
 
         self._normal_font = tkfont.nametofont("TkTextFont").copy()
         self._bold_font = tkfont.nametofont("TkTextFont").copy()
@@ -143,9 +181,9 @@ class ProfileFrame(tk.Frame):
         self.grid_columnconfigure(2, weight=0, minsize=120)
         self.grid_columnconfigure(3, weight=0, minsize=120)
 
-        self.lbl_profiles = tk.Label(self, anchor="w", width=8)
+        self.lbl_profiles: tk.Label = tk.Label(self, anchor="w", width=8)
         self.lbl_profiles.grid(row=0, column=0, sticky="w", padx=(0, 6))
-        self.profile_combobox = ttk.Combobox(
+        self.profile_combobox: ttk.Combobox = ttk.Combobox(
             self, textvariable=self.profile_display_var, state="readonly"
         )
         self.profile_combobox.grid(row=0, column=1, sticky="we", padx=(0, 6))
@@ -153,14 +191,14 @@ class ProfileFrame(tk.Frame):
             "<<ComboboxSelected>>",
             self._on_profile_selected,
         )
-        self.copy_button = tk.Button(self, command=self.copy_profile)
+        self.copy_button: tk.Button = tk.Button(self, command=self.copy_profile)
         self.copy_button.grid(row=0, column=2, sticky="we", padx=(0, 6))
-        self.del_button = tk.Button(self, command=self.delete_profile)
+        self.del_button: tk.Button = tk.Button(self, command=self.delete_profile)
         self.del_button.grid(row=0, column=3, sticky="we")
         self.refresh_texts()
         self.load_profiles()
 
-    def _apply_selected_profile_font(self, profile_name: str):
+    def _apply_selected_profile_font(self, profile_name: str) -> None:
         font = (
             self._bold_font
             if profile_name in self.favorite_names
@@ -169,7 +207,7 @@ class ProfileFrame(tk.Frame):
         )
         self.profile_combobox.configure(font=font)
 
-    def _on_profile_selected(self, _event=None):
+    def _on_profile_selected(self, _event: object | None = None) -> None:
         idx = self.profile_combobox.current()
         if not (0 <= idx < len(self.profile_names)):
             return
@@ -191,7 +229,7 @@ class ProfileFrame(tk.Frame):
             return self.profile_names[idx]
         return self.selected_profile_var.get()
 
-    def load_profiles(self, select_name: str | None = None):
+    def load_profiles(self, select_name: str | None = None) -> None:
         started = time.perf_counter()
         self.profiles_dir.mkdir(exist_ok=True)
         ensure_quick_profile(self.profiles_dir)
@@ -201,8 +239,9 @@ class ProfileFrame(tk.Frame):
             for name in list_profile_names(self.profiles_dir)
             if name != QUICK_PROFILE_NAME
         ]
-        favs, non_favs = [], []
-        favorite_map = {}
+        favs: list[str] = []
+        non_favs: list[str] = []
+        favorite_map: dict[str, bool] = {}
         try:
             favorite_map = load_profile_favorites(self.profiles_dir, names)
         except Exception as e:
@@ -223,10 +262,12 @@ class ProfileFrame(tk.Frame):
         self.profile_names = sorted_profiles
         self.name_to_index = {name: idx for idx, name in enumerate(sorted_profiles)}
 
-        self.profile_combobox["values"] = build_profile_display_values(
-            sorted_profiles,
-            self.favorite_names,
-            quick_profile_name=QUICK_PROFILE_NAME,
+        self.profile_combobox.configure(
+            values=build_profile_display_values(
+                sorted_profiles,
+                self.favorite_names,
+                quick_profile_name=QUICK_PROFILE_NAME,
+            )
         )
 
         if not sorted_profiles:
@@ -246,12 +287,12 @@ class ProfileFrame(tk.Frame):
                 f"[perf] load_profiles: {(time.perf_counter() - started) * 1000.0:.3f}ms"
             )
 
-    def refresh_texts(self):
+    def refresh_texts(self) -> None:
         self.lbl_profiles.config(text=txt("Profiles:", "프로필:"))
         self.copy_button.config(text=txt("Copy", "복사"))
         self.del_button.config(text=txt("Delete", "삭제"))
 
-    def copy_profile(self):
+    def copy_profile(self) -> None:
         if not (curr := self.get_selected_profile_name()):
             return
         dst_name = f"{curr} - Copied"
@@ -286,7 +327,7 @@ class ProfileFrame(tk.Frame):
                 parent=self,
             )
 
-    def delete_profile(self):
+    def delete_profile(self) -> None:
         curr = self.get_selected_profile_name()
         if not curr:
             return
@@ -332,11 +373,19 @@ class ButtonFrame(tk.Frame):
         ("clear_logs", ("Clear Logs", "로그 삭제")),
     )
 
-    def __init__(self, master, toggle_cb, events_cb, settings_cb, clear_cb, **kwargs):
+    def __init__(
+        self,
+        master: tk.Misc,
+        toggle_cb: VoidCallback,
+        events_cb: VoidCallback,
+        settings_cb: VoidCallback,
+        clear_cb: VoidCallback,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(master, **kwargs)
         for col in range(4):
             self.grid_columnconfigure(col, weight=1, uniform="tools")
-        commands = {
+        commands: dict[str, VoidCallback] = {
             "start": toggle_cb,
             "quick_events": events_cb,
             "settings": settings_cb,
@@ -352,7 +401,7 @@ class ButtonFrame(tk.Frame):
         self.settings_button = self.btns["settings"]
         self.clear_logs_button = self.btns["clear_logs"]
 
-    def refresh_texts(self):
+    def refresh_texts(self) -> None:
         for key, label_pair in self._BTN_KEYS:
             self.btns[key].config(text=txt(*label_pair))
 
@@ -366,11 +415,18 @@ class ProfileButtonFrame(tk.Frame):
         ("sort_profile", ("Sort Profile", "프로필 정렬")),
     )
 
-    def __init__(self, master, mod_cb, edit_cb, sort_cb, **kwargs):
+    def __init__(
+        self,
+        master: tk.Misc,
+        mod_cb: VoidCallback,
+        edit_cb: VoidCallback,
+        sort_cb: VoidCallback,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(master, **kwargs)
         for col in range(3):
             self.grid_columnconfigure(col, weight=1, uniform="tools")
-        commands = {
+        commands: dict[str, VoidCallback] = {
             "modkeys": mod_cb,
             "edit_profile": edit_cb,
             "sort_profile": sort_cb,
@@ -384,43 +440,45 @@ class ProfileButtonFrame(tk.Frame):
         self.modkeys_button = self.btns["modkeys"]
         self.sort_button = self.btns["sort_profile"]
 
-    def refresh_texts(self):
+    def refresh_texts(self) -> None:
         for key, label_pair in self._BTN_KEYS:
             self.btns[key].config(text=txt(*label_pair))
 
 
 class KeystrokeSimulatorApp(tk.Tk):
-    def __init__(self, secure_callback=None):
+    def __init__(self, secure_callback: SecureCallback | None = None) -> None:
         super().__init__()
-        self.secure_callback = secure_callback
+        install_exception_hooks(self)
+        self.secure_callback: SecureCallback | None = secure_callback
         self.title("Python 3.12")
-        self.profiles_dir = "profiles"
-        self.is_running = tk.BooleanVar(value=False)
-        self.selected_process = tk.StringVar()
-        self.selected_profile = tk.StringVar()
-        self.keystroke_processor = None
-        self.terminate_event = threading.Event()
-        self.settings_window = None
-        self.latest_scroll_time = None
-        self.sound_player = SoundPlayer()
+        self.profiles_dir: str = "profiles"
+        self.is_running: tk.BooleanVar = tk.BooleanVar(value=False)
+        self.selected_process: tk.StringVar = tk.StringVar()
+        self.selected_profile: tk.StringVar = tk.StringVar()
+        self.keystroke_processor: KeystrokeProcessor | None = None
+        self.terminate_event: threading.Event = threading.Event()
+        self.settings: UserSettings = UserSettings()
+        self.settings_window: KeystrokeSettings | None = None
+        self.latest_scroll_time: float | None = None
+        self.sound_player: SoundPlayer = SoundPlayer()
 
         # Input Listeners
-        self.start_stop_mouse_listener = None
-        self.runtime_toggle_mouse_listener = None
-        self.keyboard_listener = None
-        self.alt_pressed = False
-        self.shift_pressed = False
-        self.last_alt_shift_toggle_time = 0
-        self.ctrl_check_thread = None
-        self.ctrl_check_active = False
-        self._selection_trace_handles = []
-        self.runtime_toggle_enabled = False
-        self.runtime_toggle_key = None
-        self.runtime_toggle_active = False
-        self.runtime_toggle_member_count = 0
-        self.last_runtime_toggle_time = 0
-        self.latest_runtime_scroll_time = None
-        self.toggle_transition_in_progress = False
+        self.start_stop_mouse_listener: InputListener | None = None
+        self.runtime_toggle_mouse_listener: InputListener | None = None
+        self.keyboard_listener: InputListener | None = None
+        self.alt_pressed: bool = False
+        self.shift_pressed: bool = False
+        self.last_alt_shift_toggle_time: float = 0
+        self.ctrl_check_thread: threading.Thread | None = None
+        self.ctrl_check_active: bool = False
+        self._selection_trace_handles: list[str] = []
+        self.runtime_toggle_enabled: bool = False
+        self.runtime_toggle_key: str | None = None
+        self.runtime_toggle_active: bool = False
+        self.runtime_toggle_member_count: int = 0
+        self.last_runtime_toggle_time: float = 0
+        self.latest_runtime_scroll_time: float | None = None
+        self.toggle_transition_in_progress: bool = False
 
         self._create_ui()
         self._bind_selection_traces()
@@ -428,7 +486,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self._setup_event_handlers()
         self._update_ui()
 
-    def _create_ui(self):
+    def _create_ui(self) -> None:
         # Workstation theme: paper-tone root + ttk styles.
         self.configure(bg=theme.SURFACE_PAPER)
         try:
@@ -439,14 +497,14 @@ class KeystrokeSimulatorApp(tk.Tk):
         f = theme.fonts()
 
         # --- Context Bar (top header) -----------------------------------
-        self.context_bar = tk.Frame(
+        self.context_bar: tk.Frame = tk.Frame(
             self,
             bg=theme.SURFACE_PANEL,
             padx=theme.SPACE_3,
             pady=theme.SPACE_2,
         )
         self.context_bar.pack(fill="x", side="top")
-        self.lbl_app_title = tk.Label(
+        self.lbl_app_title: tk.Label = tk.Label(
             self.context_bar,
             text="KEYSTROKE SIMULATOR",
             bg=theme.SURFACE_PANEL,
@@ -454,7 +512,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             font=f["heading"],
         )
         self.lbl_app_title.pack(side=tk.LEFT)
-        self.lbl_app_subtitle = tk.Label(
+        self.lbl_app_subtitle: tk.Label = tk.Label(
             self.context_bar,
             bg=theme.SURFACE_PANEL,
             fg=theme.INK_MUTED,
@@ -465,7 +523,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         # --- Run Dock (bottom, packed before body so it stays anchored) --
         tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x", side="bottom")
-        self.run_dock = tk.Frame(
+        self.run_dock: tk.Frame = tk.Frame(
             self,
             bg=theme.SURFACE_PAPER,
             padx=theme.SPACE_3,
@@ -474,27 +532,30 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.run_dock.pack(fill="x", side="bottom")
 
         # --- Body (cards live here) --------------------------------------
-        self.body = tk.Frame(
+        self.body: tk.Frame = tk.Frame(
             self,
             bg=theme.SURFACE_PAPER,
             padx=theme.SPACE_3,
             pady=theme.SPACE_3,
         )
         self.body.pack(fill="both", expand=True, side="top")
-        self.nav_rail = self._build_main_nav_rail(self.body)
+        self.nav_rail: tk.Frame = self._build_main_nav_rail(self.body)
         self.nav_rail.pack(side=tk.LEFT, fill="y", padx=(0, theme.SPACE_3))
-        self.workspace = tk.Frame(self.body, bg=theme.SURFACE_PAPER)
+        self.workspace: tk.Frame = tk.Frame(self.body, bg=theme.SURFACE_PAPER)
         self.workspace.pack(side=tk.LEFT, fill="both", expand=True)
 
         # TARGET card -----------------------------------------------------
+        self.target_card: tk.Frame
+        self.status_frame: tk.Frame
+        self.tools_card: tk.Frame
         self.target_card, target_body = self._make_card(
             self.workspace, txt("Target", "대상")
         )
         self.target_card.pack(fill="x", pady=(0, theme.SPACE_3))
-        self.process_frame = ProcessFrame(target_body, self.selected_process)
+        self.process_frame: ProcessFrame = ProcessFrame(target_body, self.selected_process)
         self.process_frame.configure(bg=theme.SURFACE_CANVAS)
         self.process_frame.pack(fill="x", pady=(0, theme.SPACE_1))
-        self.profile_frame = ProfileFrame(
+        self.profile_frame: ProfileFrame = ProfileFrame(
             target_body, self.selected_profile, self.profiles_dir
         )
         self.profile_frame.configure(bg=theme.SURFACE_CANVAS)
@@ -506,14 +567,14 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         self.status_frame.pack(fill="x", pady=(0, theme.SPACE_3))
         # Color-bar on the left + content stack on the right.
-        self.status_color_bar = tk.Frame(
+        self.status_color_bar: tk.Frame = tk.Frame(
             status_body, bg=theme.STATUS_READY_FG, width=4
         )
         self.status_color_bar.pack(side=tk.LEFT, fill="y", padx=(0, theme.SPACE_2))
         status_stack = tk.Frame(status_body, bg=theme.SURFACE_CANVAS)
         status_stack.pack(side=tk.LEFT, fill="both", expand=True)
         # Pill: icon + badge text in one rounded background.
-        self.lbl_status_badge = tk.Label(
+        self.lbl_status_badge: tk.Label = tk.Label(
             status_stack,
             bg=theme.STATUS_READY_BG,
             fg=theme.STATUS_READY_FG,
@@ -523,7 +584,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             anchor="w",
         )
         self.lbl_status_badge.pack(anchor="w")
-        self.lbl_status_title = tk.Label(
+        self.lbl_status_title: tk.Label = tk.Label(
             status_stack,
             font=f["heading"],
             bg=theme.SURFACE_CANVAS,
@@ -532,7 +593,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             justify="left",
         )
         self.lbl_status_title.pack(anchor="w", pady=(theme.SPACE_2, 0))
-        self.lbl_status_detail = tk.Label(
+        self.lbl_status_detail: tk.Label = tk.Label(
             status_stack,
             anchor="w",
             justify="left",
@@ -542,7 +603,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             font=f["body"],
         )
         self.lbl_status_detail.pack(anchor="w", pady=(theme.SPACE_1, 0))
-        self.lbl_hotkey_hint = tk.Label(
+        self.lbl_hotkey_hint: tk.Label = tk.Label(
             status_stack,
             anchor="w",
             justify="left",
@@ -558,7 +619,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.workspace, txt("Tools", "도구")
         )
         self.tools_card.pack(fill="x")
-        self.button_frame = ButtonFrame(
+        self.button_frame: ButtonFrame = ButtonFrame(
             tools_body,
             self.toggle_start_stop,
             self.open_quick_events,
@@ -567,7 +628,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         self.button_frame.configure(bg=theme.SURFACE_CANVAS)
         self.button_frame.pack(fill="x", pady=(0, theme.SPACE_1))
-        self.profile_button_frame = ProfileButtonFrame(
+        self.profile_button_frame: ProfileButtonFrame = ProfileButtonFrame(
             tools_body,
             self.open_modkeys,
             self.open_profile,
@@ -618,7 +679,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             )
 
         # --- Run Dock contents ------------------------------------------
-        self.lbl_run_status = tk.Label(
+        self.lbl_run_status: tk.Label = tk.Label(
             self.run_dock,
             bg=theme.SURFACE_PAPER,
             fg=theme.INK_MUTED,
@@ -626,7 +687,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             anchor="w",
         )
         self.lbl_run_status.pack(side=tk.LEFT)
-        self.run_start_button = tk.Button(
+        self.run_start_button: tk.Button = tk.Button(
             self.run_dock,
             text=txt("Start", "시작"),
             command=self.toggle_start_stop,
@@ -653,7 +714,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         rail.pack_propagate(False)
 
-        def make_item(icon: str, en: str, ko: str, command) -> None:
+        def make_item(icon: str, en: str, ko: str, command: VoidCallback) -> None:
             item = tk.Label(
                 rail,
                 text=f"{icon}\n{txt(en, ko)}",
@@ -683,7 +744,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self._focus_combobox(widget)
 
     @staticmethod
-    def _focus_combobox(widget) -> None:
+    def _focus_combobox(widget: ttk.Combobox | None) -> None:
         if widget is None:
             return
         widget.focus_set()
@@ -721,7 +782,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         title_label.pack(side=tk.LEFT, anchor="w")
         # Track the label so refresh_texts can update it later if needed.
-        outer._title_label = title_label  # type: ignore[attr-defined]
+        cast(Any, outer)._title_label = title_label
         body = tk.Frame(outer, bg=theme.SURFACE_CANVAS)
         body.pack(
             fill="x",
@@ -764,52 +825,43 @@ class KeystrokeSimulatorApp(tk.Tk):
             font=f["body"],
         )
 
-    def _bind_selection_traces(self):
-        for var in (self.selected_process, self.selected_profile):
-            self._selection_trace_handles.append(
-                var.trace_add("write", lambda *_: self.after_idle(self._update_ui))
-            )
+    def _bind_selection_traces(self) -> None:
+        def schedule_update(*_args: object) -> None:
+            self.after_idle(self._update_ui)
 
-    def _load_settings_and_state(self):
+        for var in (self.selected_process, self.selected_profile):
+            self._selection_trace_handles.append(var.trace_add("write", schedule_update))
+
+    def _load_settings_and_state(self) -> None:
         # Load settings
         s_file = Path("user_settings.json")
-        valid_keys = {f.name for f in fields(UserSettings)}
-        try:
-            data = (
-                json.loads(s_file.read_text(encoding="utf-8"))
-                if s_file.exists()
-                else {}
-            )
-            self.settings = UserSettings(
-                **{k: v for k, v in data.items() if k in valid_keys}
-            )
-        except Exception:
-            self.settings = UserSettings()
-        self.settings.language = normalize_language(
-            getattr(self.settings, "language", None)
-        )
+        self.settings, can_save_settings = load_user_settings(s_file)
+        self.settings.language = normalize_language(self.settings.language)
         set_language(self.settings.language)
-        s_file.write_text(json.dumps(asdict(self.settings), indent=2), encoding="utf-8")
+        if can_save_settings:
+            save_user_settings(self.settings, s_file)
         self._refresh_ui_texts()
 
         # Load state
         state = StateUtils.load_main_app_state() or {}
-        if proc := state.get("process"):
+        proc = state.get("process")
+        if isinstance(proc, str) and proc:
             match = next(
                 (
                     p
-                    for p in self.process_frame.process_combobox["values"]
+                    for p in cast(tuple[str, ...], self.process_frame.process_combobox.cget("values"))
                     if p.startswith(proc)
                 ),
                 None,
             )
             if match:
                 self.selected_process.set(match)
-        if prof := state.get("profile"):
+        prof = state.get("profile")
+        if isinstance(prof, str) and prof:
             self.profile_frame.set_selected_profile(prof)
         self._update_ui()
 
-    def _refresh_ui_texts(self):
+    def _refresh_ui_texts(self) -> None:
         self._set_card_title(
             getattr(self, "target_card", None), txt("Target", "대상")
         )
@@ -886,7 +938,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         return hint
 
     @staticmethod
-    def _listener_key_name(key) -> str:
+    def _listener_key_name(key: object) -> str:
         return normalize_runtime_toggle_listener_key(key)
 
     def _selected_process_pid(self) -> int | None:
@@ -896,7 +948,7 @@ class KeystrokeSimulatorApp(tk.Tk):
     def _target_process_is_active(self) -> bool:
         return ProcessUtils.is_process_active(self._selected_process_pid())
 
-    def _reset_runtime_toggle_session(self):
+    def _reset_runtime_toggle_session(self) -> None:
         self.runtime_toggle_enabled = False
         self.runtime_toggle_key = None
         self.runtime_toggle_active = False
@@ -952,7 +1004,21 @@ class KeystrokeSimulatorApp(tk.Tk):
             )
         ]
 
-    def _get_readiness_snapshot(self) -> dict[str, object]:
+    @staticmethod
+    def _events_with_processor_inputs(events: list[EventModel]) -> list[EventModel]:
+        ready: list[EventModel] = []
+        for evt in events:
+            if evt.latest_position is None or evt.clicked_position is None:
+                continue
+            mode = evt.match_mode or "pixel"
+            if mode == "pixel" and (
+                evt.ref_pixel_value is None or len(evt.ref_pixel_value) < 3
+            ):
+                continue
+            ready.append(evt)
+        return ready
+
+    def _get_readiness_snapshot(self) -> ReadinessSnapshot:
         if self.is_running.get():
             detail = txt(
                 "Stop first if you want to change process, profile, or event settings.",
@@ -1125,7 +1191,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         missing_permissions = PermissionUtils.missing_macos_permissions()
         if missing_permissions:
-            missing_labels = []
+            missing_labels: list[str] = []
             if "screen" in missing_permissions:
                 missing_labels.append(txt("Screen Recording", "화면 기록"))
             if "accessibility" in missing_permissions:
@@ -1147,6 +1213,23 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "fg": STATUS_FG_ERR,
             }
 
+        processor_ready_count = len(self._events_with_processor_inputs(runnable_events))
+        if processor_ready_count == 0:
+            return {
+                "can_start": False,
+                "badge_text": txt("Check Events", "이벤트 확인"),
+                "title": txt(
+                    "Enabled events need captured coordinates and reference data.",
+                    "활성 이벤트에는 캡처 좌표와 기준 데이터가 필요합니다.",
+                ),
+                "detail": txt(
+                    "Open Profile Manager and recapture events with missing target positions or reference pixels.",
+                    "프로필 편집에서 대상 좌표나 기준 픽셀이 빠진 이벤트를 다시 캡처하세요.",
+                ),
+                "bg": STATUS_BG_WARN,
+                "fg": STATUS_FG_WARN,
+            }
+
         return {
             "can_start": True,
             "badge_text": txt("Ready", "준비 완료"),
@@ -1164,17 +1247,19 @@ class KeystrokeSimulatorApp(tk.Tk):
             "fg": STATUS_FG_INFO,
         }
 
-    def _update_main_status(self):
+    def _update_main_status(self) -> None:
         if not hasattr(self, "lbl_status_badge"):
             return
         snapshot = self._get_readiness_snapshot()
-        bg = snapshot["bg"]
-        fg = snapshot["fg"]
+        bg: str = snapshot["bg"]
+        fg: str = snapshot["fg"]
         running = self.is_running.get()
         if running:
             bg, fg = STATUS_BG_RUN, STATUS_FG_RUN
         icon = self._icon_for_status(bg, running)
-        badge_text = f"{icon}  {snapshot['badge_text']}" if icon else snapshot["badge_text"]
+        badge_text = (
+            f"{icon}  {snapshot['badge_text']}" if icon else snapshot["badge_text"]
+        )
         self.lbl_status_badge.config(
             text=badge_text,
             bg=bg,
@@ -1200,7 +1285,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             theme.STATUS_RUNNING_BG: theme.STATUS_RUNNING_ICON,
         }.get(bg, theme.STATUS_INFO_ICON)
 
-    def _run_dock_text(self, snapshot: dict, running: bool) -> str:
+    def _run_dock_text(self, snapshot: ReadinessSnapshot, running: bool) -> str:
         if running:
             return txt(
                 "Running. Press the hotkey or Stop to halt.",
@@ -1208,9 +1293,9 @@ class KeystrokeSimulatorApp(tk.Tk):
             )
         if snapshot.get("can_start"):
             return txt("Ready to start.", "시작할 준비가 되었습니다.")
-        return snapshot.get("badge_text", "")
+        return snapshot["badge_text"]
 
-    def _setup_event_handlers(self):
+    def _setup_event_handlers(self) -> None:
         self.unbind_events()
         self.bind("<Escape>", self.on_closing)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -1234,8 +1319,11 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         key = self.settings.start_stop_key
         if key.startswith("W_"):
-            self.start_stop_mouse_listener = pynput.mouse.Listener(
-                on_scroll=self._on_mouse_scroll
+            self.start_stop_mouse_listener = cast(
+                InputListener,
+                pynput.mouse.Listener(
+                    on_scroll=self._on_mouse_scroll
+                ),
             )
             self.start_stop_mouse_listener.start()
 
@@ -1243,9 +1331,12 @@ class KeystrokeSimulatorApp(tk.Tk):
             is_wheel_runtime_toggle_trigger(runtime_toggle_trigger)
             or is_mouse_button_runtime_toggle_trigger(runtime_toggle_trigger)
         ):
-            self.runtime_toggle_mouse_listener = pynput.mouse.Listener(
-                on_scroll=self._on_runtime_toggle_mouse_scroll,
-                on_click=self._on_runtime_toggle_mouse_click,
+            self.runtime_toggle_mouse_listener = cast(
+                InputListener,
+                pynput.mouse.Listener(
+                    on_scroll=self._on_runtime_toggle_mouse_scroll,
+                    on_click=self._on_runtime_toggle_mouse_click,
+                ),
             )
             self.runtime_toggle_mouse_listener.start()
 
@@ -1258,12 +1349,15 @@ class KeystrokeSimulatorApp(tk.Tk):
             or (key != "DISABLED" and not key.startswith("W_"))
         )
         if should_listen_keyboard and not use_mac_polling:
-            self.keyboard_listener = pynput.keyboard.Listener(
-                on_press=self._on_key_press, on_release=self._on_key_release
+            self.keyboard_listener = cast(
+                InputListener,
+                pynput.keyboard.Listener(
+                    on_press=self._on_key_press, on_release=self._on_key_release
+                ),
             )
             self.keyboard_listener.start()
 
-    def _on_key_press(self, key):
+    def _on_key_press(self, key: object) -> None:
         now = time.time()
         if key in (pynput.keyboard.Key.alt_l, pynput.keyboard.Key.alt_r):
             self.alt_pressed = True
@@ -1289,7 +1383,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         if self._should_toggle_start_stop(key_str):
             self.after(0, self.toggle_start_stop)
 
-    def _on_key_release(self, key):
+    def _on_key_release(self, key: object) -> None:
         if key in (pynput.keyboard.Key.alt_l, pynput.keyboard.Key.alt_r):
             self.alt_pressed = False
         if key in (pynput.keyboard.Key.shift_l, pynput.keyboard.Key.shift_r):
@@ -1318,7 +1412,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             and self._target_process_is_active()
         )
 
-    def _check_for_long_alt_shift(self):
+    def _check_for_long_alt_shift(self) -> None:
         last_state, last_time = False, 0
         last_runtime_toggle_state = False
         idle_sleep = 0.01
@@ -1366,7 +1460,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             except Exception:
                 time.sleep(0.1)
 
-    def _on_mouse_scroll(self, x, y, dx, dy):
+    def _on_mouse_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
         pid_match = re.search(r"\((\d+)\)", self.selected_process.get())
         if not pid_match or not ProcessUtils.is_process_active(int(pid_match.group(1))):
             return
@@ -1390,7 +1484,9 @@ class KeystrokeSimulatorApp(tk.Tk):
             and self._target_process_is_active()
         )
 
-    def _on_runtime_toggle_mouse_scroll(self, x, y, dx, dy):
+    def _on_runtime_toggle_mouse_scroll(
+        self, x: int, y: int, dx: int, dy: int
+    ) -> None:
         trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
         curr_time = time.time()
         if not self._runtime_toggle_trigger_ready(curr_time):
@@ -1408,7 +1504,9 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.last_runtime_toggle_time = curr_time
             self.after(0, self.toggle_runtime_event_group)
 
-    def _on_runtime_toggle_mouse_click(self, x, y, button, pressed):
+    def _on_runtime_toggle_mouse_click(
+        self, x: int, y: int, button: object, pressed: bool
+    ) -> None:
         if not pressed:
             return
 
@@ -1429,7 +1527,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.last_runtime_toggle_time = curr_time
             self.after(0, self.toggle_runtime_event_group)
 
-    def clear_local_logs(self):
+    def clear_local_logs(self) -> None:
         log_dir = Path("logs")
         if not messagebox.askokcancel(
             txt("Confirm", "확인"),
@@ -1437,9 +1535,10 @@ class KeystrokeSimulatorApp(tk.Tk):
         ):
             return
         if not log_dir.exists():
-            return messagebox.showinfo(
+            messagebox.showinfo(
                 txt("Info", "안내"), txt("No logs.", "로그가 없습니다.")
             )
+            return
 
         deleted_size, count = 0, 0
         for p in log_dir.glob("*"):
@@ -1466,7 +1565,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             msg,
         )
 
-    def toggle_start_stop(self, event=None):
+    def toggle_start_stop(self, event: object | None = None) -> None:
         if self.toggle_transition_in_progress:
             return
         self.toggle_transition_in_progress = True
@@ -1487,7 +1586,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         finally:
             self.toggle_transition_in_progress = False
 
-    def _start_simulation(self):
+    def _start_simulation(self) -> bool:
         if not (
             self.selected_process.get()
             and "(" in self.selected_process.get()
@@ -1516,11 +1615,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         if not events:
             return False
         self._configure_runtime_toggle_session(profile, events)
-        # Keep the mac polling thread alive while Option+Shift is still held.
-        if platform.system() != "Darwin" or not self.__dict__.get(
-            "ctrl_check_active", False
-        ):
-            self._setup_event_handlers()
 
         self.terminate_event.clear()
         self.keystroke_processor = KeystrokeProcessor(
@@ -1530,12 +1624,23 @@ class KeystrokeSimulatorApp(tk.Tk):
             profile.modification_keys or {},
             self.terminate_event,
         )
+        if not self.keystroke_processor.event_data_list:
+            self.keystroke_processor = None
+            self._reset_runtime_toggle_session()
+            return False
+
+        # Keep the mac polling thread alive while Option+Shift is still held.
+        if platform.system() != "Darwin" or not self.__dict__.get(
+            "ctrl_check_active", False
+        ):
+            self._setup_event_handlers()
+
         self.keystroke_processor.start()
         self._save_latest_state()
         self.sound_player.play_start_sound()
         return True
 
-    def _stop_simulation(self):
+    def _stop_simulation(self) -> None:
         if self.keystroke_processor:
             safe_call(self.keystroke_processor.stop)
             self.keystroke_processor = None
@@ -1548,7 +1653,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.sound_player.play_stop_sound()
             self._update_ui()
 
-    def toggle_runtime_event_group(self):
+    def toggle_runtime_event_group(self) -> bool:
         if not (
             self.is_running.get()
             and self.keystroke_processor
@@ -1570,10 +1675,10 @@ class KeystrokeSimulatorApp(tk.Tk):
             hotkey_hint.config(text=self._get_hotkey_hint_text())
         return True
 
-    def update_ui(self):
+    def update_ui(self) -> None:
         return self._update_ui()
 
-    def _update_ui(self):
+    def _update_ui(self) -> None:
         running = self.is_running.get()
         state = "disabled" if running else "normal"
         readonly_state = "disabled" if running else "readonly"
@@ -1617,49 +1722,50 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_button_frame.sort_button.config(state=state)
         self._update_main_status()
 
-    def open_modkeys(self):
+    def open_modkeys(self) -> None:
         if self.is_running.get():
             return
         if self.selected_profile.get():
             ModificationKeysWindow(self, self.selected_profile.get())
 
-    def open_profile(self):
+    def open_profile(self) -> None:
         if self.selected_profile.get():
             KeystrokeProfiles(self, self.selected_profile.get(), self.reload_profiles)
 
-    def reload_profiles(self, new_name):
+    def reload_profiles(self, new_name: str) -> None:
         self.profile_frame.load_profiles(select_name=new_name)
         self._update_ui()
 
-    def sort_profile_events(self):
+    def sort_profile_events(self) -> None:
         self.unbind_events()
         if self.selected_profile.get():
             KeystrokeSortEvents(self, self.selected_profile.get(), self.reload_profiles)
 
-    def open_quick_events(self):
+    def open_quick_events(self) -> None:
         if self.is_running.get():
             return
         KeystrokeQuickEventEditor(self)
 
-    def open_settings(self):
+    def open_settings(self) -> None:
         existing_window = self.settings_window
         if existing_window and safe_call(existing_window.winfo_exists):
-            safe_call(existing_window.lift)
-            safe_call(existing_window.focus_force)
-            safe_call(existing_window.grab_set)
+            window = cast(Any, existing_window)
+            safe_call(window.lift)
+            safe_call(window.focus_force)
+            safe_call(window.grab_set)
             return
         if existing_window:
             self.settings_window = None
         self.unbind_events()
         self.settings_window = KeystrokeSettings(self)
 
-    def _save_latest_state(self):
+    def _save_latest_state(self) -> None:
         StateUtils.save_main_app_state(
             process=self.selected_process.get().split(" (")[0],
             profile=self.selected_profile.get(),
         )
 
-    def unbind_events(self):
+    def unbind_events(self) -> None:
         safe_call(self.unbind, "<Escape>")
 
         for listener in (
@@ -1678,19 +1784,19 @@ class KeystrokeSimulatorApp(tk.Tk):
             safe_call(self.ctrl_check_thread.join, timeout=0.5)
         self.ctrl_check_thread = None
 
-    def load_settings(self):
+    def load_settings(self) -> None:
         self._load_settings_and_state()
 
-    def setup_event_handlers(self):
+    def setup_event_handlers(self) -> None:
         self._setup_event_handlers()
 
-    def start_simulation(self):
+    def start_simulation(self) -> bool:
         return self._start_simulation()
 
-    def stop_simulation(self):
+    def stop_simulation(self) -> None:
         return self._stop_simulation()
 
-    def on_closing(self, event=None):
+    def on_closing(self, event: object | None = None) -> None:
         if getattr(self, "_is_closing", False):
             return
         self._is_closing = True

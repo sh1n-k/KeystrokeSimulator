@@ -2,69 +2,142 @@ import json
 import os
 import platform
 import ast
+import sys
+import threading
+import ctypes
+import importlib
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Optional, Dict
+from types import TracebackType
+from typing import Any, ClassVar, Protocol, cast
 
 from loguru import logger
 
-# OS-specific imports & Constants
 OS_NAME = platform.system().lower()
 IS_WIN = OS_NAME == "windows"
 IS_MAC = OS_NAME == "darwin"
+ProcessInfo = tuple[str, int, list[str] | None]
 
-if IS_WIN:
-    import ctypes
-    import win32api
-    import win32gui
-    from win32process import GetWindowThreadProcessId, GetModuleFileNameEx
-elif IS_MAC:
-    import AppKit
-    from ApplicationServices import AXIsProcessTrusted
-    from Quartz import (
-        kCGEventFlagMaskShift,
-        kCGEventFlagMaskAlternate,
-        kCGEventFlagMaskControl,
-        CGEventSourceFlagsState,
-        CGEventSourceKeyState,
-        CGPreflightScreenCaptureAccess,
-        kCGEventSourceStateHIDSystemState,
+
+class TkExceptionReporter(Protocol):
+    report_callback_exception: Callable[
+        [type[BaseException], BaseException, TracebackType | None], None
+    ]
+
+
+class WindowLike(Protocol):
+    def update_idletasks(self) -> None: ...
+    def winfo_screenwidth(self) -> int: ...
+    def winfo_screenheight(self) -> int: ...
+    def winfo_width(self) -> int: ...
+    def winfo_height(self) -> int: ...
+    def geometry(self, new_geometry: str) -> object: ...
+
+
+def _platform_module(name: str) -> Any:
+    return importlib.import_module(name)
+
+
+def _windows_windll() -> Any:
+    return ctypes.__dict__["windll"]
+
+
+def _quartz_symbol(name: str) -> Any:
+    return _platform_module("Quartz").__dict__[name]
+
+
+def _log_unhandled_exception(
+    message: str,
+    exc_type: type[BaseException],
+    exc_value: BaseException,
+    traceback: TracebackType | None,
+) -> None:
+    logger.opt(exception=(exc_type, exc_value, traceback)).error(message)
+
+
+def _handle_sys_exception(
+    exc_type: type[BaseException],
+    exc_value: BaseException,
+    traceback: TracebackType | None,
+) -> None:
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, traceback)
+        return
+    _log_unhandled_exception("Unhandled exception", exc_type, exc_value, traceback)
+
+
+def _handle_thread_exception(args: threading.ExceptHookArgs) -> None:
+    if issubclass(args.exc_type, KeyboardInterrupt):
+        threading.__excepthook__(args)
+        return
+    if args.exc_value is None:
+        logger.error("Unhandled thread exception without exception value")
+        return
+    thread_name = args.thread.name if args.thread else "unknown"
+    _log_unhandled_exception(
+        f"Unhandled thread exception in {thread_name}",
+        args.exc_type,
+        args.exc_value,
+        args.exc_traceback,
     )
+
+
+def _handle_tk_exception(
+    exc_type: type[BaseException],
+    exc_value: BaseException,
+    traceback: TracebackType | None,
+) -> None:
+    _log_unhandled_exception(
+        "Unhandled Tk callback exception", exc_type, exc_value, traceback
+    )
+
+
+def install_exception_hooks(root: object | None = None) -> None:
+    sys.excepthook = _handle_sys_exception
+    threading.excepthook = _handle_thread_exception
+    if root is not None:
+        tk_root = cast(TkExceptionReporter, root)
+        tk_root.report_callback_exception = _handle_tk_exception
 
 
 class WindowUtils:
     @staticmethod
-    def center_window(win):
-        win.update_idletasks()
-        x = (win.winfo_screenwidth() - win.winfo_width()) // 2
-        y = (win.winfo_screenheight() - win.winfo_height()) // 2
-        win.geometry(f"+{x}+{y}")
+    def center_window(win: object) -> None:
+        window = cast(WindowLike, win)
+        window.update_idletasks()
+        x = (window.winfo_screenwidth() - window.winfo_width()) // 2
+        y = (window.winfo_screenheight() - window.winfo_height()) // 2
+        window.geometry(f"+{x}+{y}")
 
     @staticmethod
-    def set_window_position(win, xp=0.5, yp=0.5):
-        win.update_idletasks()
-        x = int((win.winfo_screenwidth() - win.winfo_width()) * xp)
-        y = int((win.winfo_screenheight() - win.winfo_height()) * yp)
-        win.geometry(f"+{x}+{y}")
-        win.update_idletasks()
+    def set_window_position(win: object, xp: float = 0.5, yp: float = 0.5) -> None:
+        window = cast(WindowLike, win)
+        window.update_idletasks()
+        x = int((window.winfo_screenwidth() - window.winfo_width()) * xp)
+        y = int((window.winfo_screenheight() - window.winfo_height()) * yp)
+        window.geometry(f"+{x}+{y}")
+        window.update_idletasks()
 
 
 class MonitorUtils:
     @staticmethod
     def get_primary_size() -> tuple[int, int]:
         if IS_MAC:
-            frame = AppKit.NSScreen.screens()[0].frame()
+            appkit = _platform_module("AppKit")
+            frame = appkit.NSScreen.screens()[0].frame()
             return int(frame.size.width), int(frame.size.height)
         if IS_WIN:
             try:
-                ctypes.windll.shcore.SetProcessDpiAwareness(2)
+                _windows_windll().shcore.SetProcessDpiAwareness(2)
             except OSError:
                 pass
+            win32api = _platform_module("win32api")
             return win32api.GetSystemMetrics(0), win32api.GetSystemMetrics(1)
         raise RuntimeError(f"Unsupported platform: {OS_NAME}")
 
 
 class KeyUtils:
-    _KEY_MAPS = {
+    _KEY_MAPS: ClassVar[dict[str, dict[str, int]]] = {
         "darwin": {
             "1": 18,
             "2": 19,
@@ -216,11 +289,11 @@ class KeyUtils:
     CURRENT_KEYS = _KEY_MAPS.get(OS_NAME, {})
 
     @classmethod
-    def get_key_list(cls):
+    def get_key_list(cls) -> dict[str, int]:
         return cls.CURRENT_KEYS
 
     @classmethod
-    def get_key_name_list(cls):
+    def get_key_name_list(cls) -> list[str]:
         return list(cls.CURRENT_KEYS.keys())
 
     @classmethod
@@ -234,7 +307,7 @@ class KeyUtils:
         return None
 
     @classmethod
-    def get_keycode(cls, char: str):
+    def get_keycode(cls, char: str) -> int | None:
         return cls.CURRENT_KEYS.get(char.capitalize())
 
     @staticmethod
@@ -242,18 +315,23 @@ class KeyUtils:
         if IS_WIN:
             code = KeyUtils.get_keycode(key)
             return (
-                (ctypes.windll.user32.GetAsyncKeyState(code) & 0x8000 != 0)
+                (_windows_windll().user32.GetAsyncKeyState(code) & 0x8000 != 0)
                 if code
                 else False
             )
         elif IS_MAC:
+            mask_shift = _quartz_symbol("kCGEventFlagMaskShift")
+            mask_alt = _quartz_symbol("kCGEventFlagMaskAlternate")
+            mask_control = _quartz_symbol("kCGEventFlagMaskControl")
             mask = {
-                "shift": kCGEventFlagMaskShift,
-                "alt": kCGEventFlagMaskAlternate,
-                "ctrl": kCGEventFlagMaskControl,
+                "shift": mask_shift,
+                "alt": mask_alt,
+                "ctrl": mask_control,
             }.get(key.lower())
+            event_source_flags_state = _quartz_symbol("CGEventSourceFlagsState")
+            hid_system_state = _quartz_symbol("kCGEventSourceStateHIDSystemState")
             return (
-                (CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState) & mask) != 0
+                (event_source_flags_state(hid_system_state) & mask) != 0
                 if mask
                 else False
             )
@@ -269,9 +347,11 @@ class KeyUtils:
             return False
 
         if IS_WIN:
-            return ctypes.windll.user32.GetAsyncKeyState(code) & 0x8000 != 0
+            return bool(_windows_windll().user32.GetAsyncKeyState(code) & 0x8000)
         elif IS_MAC:
-            return bool(CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, code))
+            key_state = _quartz_symbol("CGEventSourceKeyState")
+            hid_system_state = _quartz_symbol("kCGEventSourceStateHIDSystemState")
+            return bool(key_state(hid_system_state, code))
         return False
 
 
@@ -279,7 +359,7 @@ class StateUtils:
     path = Path("./app_state.json")
 
     @classmethod
-    def save_main_app_state(cls, **kwargs):
+    def save_main_app_state(cls, **kwargs: object) -> None:
         try:
             data = cls.load_main_app_state()
             data.update({k: v for k, v in kwargs.items() if v is not None})
@@ -291,22 +371,37 @@ class StateUtils:
             logger.error(f"Save state failed: {e}")
 
     @classmethod
-    def load_main_app_state(cls) -> Dict:
+    def load_main_app_state(cls) -> dict[str, object]:
         if not cls.path.exists():
             return {}
         try:
-            return json.loads(cls.path.read_text(encoding="utf-8"))
+            data: object = json.loads(cls.path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                logger.error(
+                    f"Load state failed: expected object, got {type(data).__name__}"
+                )
+                return {}
+            raw_data = cast(Mapping[object, object], data)
+            return {str(k): v for k, v in raw_data.items()}
         except Exception as e:
             logger.error(f"Load state failed: {e}")
             return {}
 
     @staticmethod
-    def parse_slash_int_pair(raw) -> Optional[tuple[int, int]]:
+    def parse_slash_int_pair(raw: object) -> tuple[int, int] | None:
         if raw is None:
             return None
-        if isinstance(raw, (list, tuple)) and len(raw) >= 2:
+        if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+            seq = cast(Sequence[object], raw)
+            if len(seq) < 2:
+                return None
+            first, second = seq[0], seq[1]
+            if not isinstance(first, (int, float, str)) or not isinstance(
+                second, (int, float, str)
+            ):
+                return None
             try:
-                return (int(raw[0]), int(raw[1]))
+                return (int(first), int(second))
             except (TypeError, ValueError, OverflowError):
                 return None
         if not isinstance(raw, str):
@@ -320,12 +415,20 @@ class StateUtils:
             return None
 
     @staticmethod
-    def parse_position_tuple(raw) -> Optional[tuple[int, int]]:
+    def parse_position_tuple(raw: object) -> tuple[int, int] | None:
         if raw is None:
             return None
-        if isinstance(raw, (list, tuple)) and len(raw) >= 2:
+        if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+            seq = cast(Sequence[object], raw)
+            if len(seq) < 2:
+                return None
+            first, second = seq[0], seq[1]
+            if not isinstance(first, (int, float, str)) or not isinstance(
+                second, (int, float, str)
+            ):
+                return None
             try:
-                return (int(raw[0]), int(raw[1]))
+                return (int(first), int(second))
             except (TypeError, ValueError, OverflowError):
                 return None
         if not isinstance(raw, str):
@@ -334,10 +437,20 @@ class StateUtils:
             parsed = ast.literal_eval(raw)
         except (SyntaxError, ValueError):
             return None
-        if not isinstance(parsed, (list, tuple)) or len(parsed) < 2:
+        if not isinstance(parsed, Sequence) or isinstance(
+            parsed, (str, bytes, bytearray)
+        ):
+            return None
+        seq = cast(Sequence[object], parsed)
+        if len(seq) < 2:
+            return None
+        first, second = seq[0], seq[1]
+        if not isinstance(first, (int, float, str)) or not isinstance(
+            second, (int, float, str)
+        ):
             return None
         try:
-            return (int(parsed[0]), int(parsed[1]))
+            return (int(first), int(second))
         except (TypeError, ValueError, OverflowError):
             return None
 
@@ -348,7 +461,7 @@ class PermissionUtils:
         if not IS_MAC:
             return True
         try:
-            return bool(CGPreflightScreenCaptureAccess())
+            return bool(_quartz_symbol("CGPreflightScreenCaptureAccess")())
         except Exception:
             return False
 
@@ -357,7 +470,8 @@ class PermissionUtils:
         if not IS_MAC:
             return True
         try:
-            return bool(AXIsProcessTrusted())
+            application_services = _platform_module("ApplicationServices")
+            return bool(application_services.AXIsProcessTrusted())
         except Exception:
             return False
 
@@ -366,7 +480,7 @@ class PermissionUtils:
         if not IS_MAC:
             return []
 
-        missing = []
+        missing: list[str] = []
         if not PermissionUtils.has_screen_capture_access():
             missing.append("screen")
         if not PermissionUtils.has_accessibility_access():
@@ -376,34 +490,38 @@ class PermissionUtils:
 
 class ProcessCollector:
     @staticmethod
-    def get():
+    def get() -> list[ProcessInfo]:
         return ProcessCollector._get_mac() if IS_MAC else ProcessCollector._get_win()
 
     @staticmethod
-    def _get_mac():
+    def _get_mac() -> list[ProcessInfo]:
+        appkit = _platform_module("AppKit")
         return [
-            (app.localizedName(), app.processIdentifier(), None)
-            for app in AppKit.NSWorkspace.sharedWorkspace().runningApplications()
+            (str(app.localizedName() or ""), int(app.processIdentifier()), None)
+            for app in appkit.NSWorkspace.sharedWorkspace().runningApplications()
             if app.activationPolicy() == 0
         ]
 
     @staticmethod
-    def _get_win():
-        procs, wins = {}, {}
+    def _get_win() -> list[ProcessInfo]:
+        win32api = _platform_module("win32api")
+        win32gui = _platform_module("win32gui")
+        win32process = _platform_module("win32process")
+        procs: dict[int, str] = {}
+        wins: dict[int, list[str]] = {}
 
-        def cb(hwnd, _):
+        def cb(hwnd: int, _extra: object) -> bool:
             if win32gui.IsWindowVisible(hwnd):
-                _, pid = GetWindowThreadProcessId(hwnd)
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
                 if pid not in procs:
                     try:
                         h = win32api.OpenProcess(0x1000, False, pid)
-                        procs[pid] = os.path.basename(GetModuleFileNameEx(h, 0)).split(
-                            "."
-                        )[0]
+                        module_path = win32process.GetModuleFileNameEx(h, 0)
+                        procs[pid] = os.path.basename(str(module_path)).split(".")[0]
                         wins[pid] = [win32gui.GetWindowText(hwnd)]
                         win32api.CloseHandle(h)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug(f"Window process lookup failed for pid {pid}: {exc}")
                 elif (t := win32gui.GetWindowText(hwnd)) not in wins[pid]:
                     wins[pid].append(t)
             return True
@@ -419,12 +537,15 @@ class ProcessUtils:
             return False
         try:
             if IS_WIN:
+                win32gui = _platform_module("win32gui")
+                win32process = _platform_module("win32process")
                 if not (hwnd := win32gui.GetForegroundWindow()):
                     return False
-                return pid == GetWindowThreadProcessId(hwnd)[1]
+                return bool(pid == win32process.GetWindowThreadProcessId(hwnd)[1])
             elif IS_MAC:
-                app = AppKit.NSWorkspace.sharedWorkspace().activeApplication()
-                return app and app.get("NSApplicationProcessIdentifier") == pid
-        except Exception:
-            pass
+                appkit = _platform_module("AppKit")
+                app = appkit.NSWorkspace.sharedWorkspace().activeApplication()
+                return bool(app and app.get("NSApplicationProcessIdentifier") == pid)
+        except Exception as exc:
+            logger.debug(f"Active process check failed for pid {pid}: {exc}")
         return False

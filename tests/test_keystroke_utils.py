@@ -43,6 +43,13 @@ class TestStateUtils(unittest.TestCase):
         data = StateUtils.load_main_app_state()
         self.assertEqual(data, {})
 
+    def test_load_non_object_json_returns_empty(self):
+        StateUtils.path.write_text("[]", encoding="utf-8")
+
+        data = StateUtils.load_main_app_state()
+
+        self.assertEqual(data, {})
+
     def test_merge_behavior(self):
         """기존 데이터와 병합"""
         StateUtils.save_main_app_state(key1="val1")

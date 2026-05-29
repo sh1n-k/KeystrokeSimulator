@@ -244,7 +244,7 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         row._tip_cond = FakeToolTip()
         row._tip_grp = FakeToolTip()
         row._tip_key = FakeToolTip()
-        row._last_saved_name = "OldName"
+        row.last_saved_name = "OldName"
         row._bound_event_id = id(renamed)
         row.cbs = {"save": lambda: None}
 
@@ -454,7 +454,7 @@ class TestEventRowBadges(unittest.TestCase):
         row._tip_cond = FakeToolTip()
         row._tip_grp = FakeToolTip()
         row._tip_key = FakeToolTip()
-        row._last_saved_name = ""
+        row.last_saved_name = ""
         return row
 
     def test_row_displays_condition_badges(self):

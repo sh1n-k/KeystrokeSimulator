@@ -129,6 +129,9 @@ def _korean_font_family() -> str:
     return "Noto Sans CJK KR"
 
 
+KOREAN_FONT_FAMILY = _korean_font_family()
+
+
 def _sans_family() -> str:
     if sys.platform == "darwin":
         return "SF Pro Text"
@@ -151,7 +154,7 @@ class FontSpec:
     size: int
     weight: str = "normal"  # "normal" | "bold"
 
-    def as_tuple(self) -> tuple:
+    def as_tuple(self) -> tuple[str, int, str]:
         return (self.family, self.size, self.weight)
 
 

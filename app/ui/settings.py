@@ -1,13 +1,22 @@
-import json
+from __future__ import annotations
+
 import platform
 import tkinter as tk
-from dataclasses import asdict, fields
 from pathlib import Path
 from tkinter import ttk, messagebox
+from collections.abc import Callable
+from typing import Any, ClassVar, Protocol, cast
 
 from loguru import logger
-from app.utils.i18n import LANGUAGE_LABELS, normalize_language, set_language, txt, dual_text_width
+from app.utils.i18n import (
+    LANGUAGE_LABELS,
+    dual_text_width,
+    normalize_language,
+    set_language,
+    txt,
+)
 from app.core.models import UserSettings
+from app.storage.settings_storage import load_user_settings, save_user_settings
 from app.utils.system import WindowUtils, StateUtils
 from app.ui import theme
 
@@ -15,23 +24,45 @@ SETTINGS_WINDOW_DEFAULT_GEOMETRY = "800x280"
 SETTINGS_WINDOW_MIN_SIZE = (700, 260)
 
 
-class KeystrokeSettings(tk.Toplevel):
-    VALID_CHARS = set("`[];',./-=\"")
+class SettingsHost(Protocol):
+    settings_window: object | None
 
-    def __init__(self, master=None):
+    def load_settings(self) -> None: ...
+    def setup_event_handlers(self) -> None: ...
+
+
+class KeystrokeSettings(tk.Toplevel):
+    VALID_CHARS: ClassVar[set[str]] = set("`[];',./-=\"")
+
+    def __init__(self, master: tk.Misc | None = None) -> None:
         super().__init__(master)
+        self.app_master: object | None = master
         self.is_windows = platform.system() == "Windows"
-        self.ui_vars: dict[str, tk.Variable] = {}
-        self.language_code_by_label = {v: k for k, v in LANGUAGE_LABELS.items()}
+        self.ui_vars: dict[str, tk.BooleanVar | tk.StringVar] = {}
+        self.language_code_by_label: dict[str, str] = {
+            v: k for k, v in LANGUAGE_LABELS.items()
+        }
+        self._settings_nav_labels: dict[str, tk.Label] = {}
+        self.nav_rail: tk.Frame
+        self.content: ttk.Frame
+        self.card_keys: ttk.LabelFrame
+        self.card_lang: ttk.LabelFrame
+        self.card_timing: ttk.LabelFrame
+        self.warning_label: ttk.Label
+        self.start_stop_combo: ttk.Combobox
+        self.language_combo: ttk.Combobox
+        self.button_dock: tk.Frame
+        self.button_group: tk.Frame
+        self._press_key_label = ""
 
         self._load_settings()
         self.title(txt("Settings", "설정"))
         self._setup_window()
         self._create_widgets()
 
-    def _setup_window(self):
+    def _setup_window(self) -> None:
         if self.master:
-            self.transient(self.master)
+            cast(Any, self).transient(self.master)
         try:
             self.configure(bg=theme.SURFACE_PAPER)
         except tk.TclError:
@@ -61,12 +92,12 @@ class KeystrokeSettings(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind("<Escape>", self.on_close)
         self._restore_window_position()
-        self.lift()
-        self.attributes("-topmost", True)
-        self.after(10, lambda: self.attributes("-topmost", False))
+        cast(Any, self).lift()
+        cast(Any, self).attributes("-topmost", True)
+        self.after(10, lambda: cast(Any, self).attributes("-topmost", False))
         self.grab_set()
         self.focus_force()
-        self.after(10, self.lift)
+        self.after(10, cast(Callable[[], None], cast(Any, self).lift))
 
     def _build_context_bar(self) -> tk.Frame:
         f = theme.fonts()
@@ -110,7 +141,6 @@ class KeystrokeSettings(tk.Toplevel):
             font=f["caption"],
             anchor="w",
         ).pack(fill="x", pady=(0, theme.SPACE_2))
-        self._settings_nav_labels: dict[str, tk.Label] = {}
         for key, en, ko in [
             ("keys", "Start / Stop", "시작 / 중지"),
             ("language", "Language", "언어"),
@@ -128,27 +158,28 @@ class KeystrokeSettings(tk.Toplevel):
                 cursor="hand2",
             )
             label.pack(fill="x", pady=(0, theme.SPACE_1))
-            label.bind("<Button-1>", lambda _e, section=key: self._show_settings_section(section))
+            label.bind(
+                "<Button-1>",
+                lambda _event, section=key: self._show_settings_section(section),
+            )
             self._settings_nav_labels[key] = label
         return rail
 
     def _show_settings_section(self, section: str) -> None:
         sections = {
-            "keys": (getattr(self, "card_keys", None), getattr(self, "warning_label", None)),
-            "language": (getattr(self, "card_lang", None),),
-            "timing": (getattr(self, "card_timing", None),),
+            "keys": (self.card_keys, self.warning_label),
+            "language": (self.card_lang,),
+            "timing": (self.card_timing,),
         }
         for key, widgets in sections.items():
             for widget in widgets:
-                if widget is None:
-                    continue
                 if key == section:
                     widget.grid()
                 else:
                     widget.grid_remove()
 
         f = theme.fonts()
-        for key, label in getattr(self, "_settings_nav_labels", {}).items():
+        for key, label in self._settings_nav_labels.items():
             selected = key == section
             label.config(
                 bg=theme.SURFACE_CANVAS if selected else theme.SURFACE_PANEL,
@@ -156,7 +187,7 @@ class KeystrokeSettings(tk.Toplevel):
                 font=f["body_bold"] if selected else f["body"],
             )
 
-    def _restore_window_position(self):
+    def _restore_window_position(self) -> None:
         state = StateUtils.load_main_app_state() or {}
         pos = StateUtils.parse_slash_int_pair(state.get("settings_position"))
         if pos is not None:
@@ -167,7 +198,7 @@ class KeystrokeSettings(tk.Toplevel):
                 pass
         WindowUtils.center_window(self)
 
-    def _save_window_position(self):
+    def _save_window_position(self) -> None:
         try:
             StateUtils.save_main_app_state(
                 settings_position=f"{self.winfo_x()}/{self.winfo_y()}"
@@ -175,34 +206,20 @@ class KeystrokeSettings(tk.Toplevel):
         except tk.TclError:
             pass
 
-    def _load_settings(self):
+    def _load_settings(self) -> None:
         s_file = Path("user_settings.json")
-        valid_keys = {f.name for f in fields(UserSettings)}
-        try:
-            data = (
-                json.loads(s_file.read_text(encoding="utf-8"))
-                if s_file.exists()
-                else {}
-            )
-            self.settings = UserSettings(
-                **{k: v for k, v in data.items() if k in valid_keys}
-            )
-        except Exception as e:
-            logger.error(f"Load failed: {e}")
-            self.settings = UserSettings()
-        self.settings.language = normalize_language(getattr(self.settings, "language", None))
+        self.settings, _can_save = load_user_settings(s_file)
+        self.settings.language = normalize_language(self.settings.language)
         set_language(self.settings.language)
 
-    def _save_settings(self):
+    def _save_settings(self) -> None:
         try:
-            Path("user_settings.json").write_text(
-                json.dumps(asdict(self.settings), indent=2), encoding="utf-8"
-            )
+            save_user_settings(self.settings)
             logger.debug(f"Saved: {self.settings}")
         except Exception as e:
             logger.error(f"Save failed: {e}")
 
-    def _create_widgets(self):
+    def _create_widgets(self) -> None:
         # 3-section card layout: Start/Stop · Language · Timing.
         self.card_keys = ttk.LabelFrame(
             self.content, text=txt("Start / Stop", "시작 / 중지")
@@ -256,7 +273,7 @@ class KeystrokeSettings(tk.Toplevel):
         self._create_buttons()
         self._show_settings_section("keys")
 
-    def _create_key_section(self):
+    def _create_key_section(self) -> None:
         ttk.Label(self.card_keys, text=txt("Start/Stop Key:", "시작/중지 키:")).grid(
             row=0, column=0, padx=10, pady=5, sticky="w"
         )
@@ -297,7 +314,7 @@ class KeystrokeSettings(tk.Toplevel):
 
         self._toggle_combo_state()
 
-    def _create_language_section(self):
+    def _create_language_section(self) -> None:
         ttk.Label(self.card_lang, text=txt("Language:", "언어:")).grid(
             row=0, column=0, padx=10, pady=5, sticky="w"
         )
@@ -310,7 +327,7 @@ class KeystrokeSettings(tk.Toplevel):
         self.language_combo.set(selected_label)
         self.language_combo.grid(row=0, column=1, padx=10, pady=5, sticky="w")
 
-    def _create_buttons(self):
+    def _create_buttons(self) -> None:
         # Run-dock (bottom action band) — separator above + panel-tone strip
         # under it so this reads as the same surface as the main window.
         tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).grid(
@@ -327,7 +344,7 @@ class KeystrokeSettings(tk.Toplevel):
         button_group = tk.Frame(dock, bg=theme.SURFACE_PANEL)
         button_group.pack(side=tk.RIGHT)
         self.button_group = button_group
-        button_defs = [
+        button_defs: list[tuple[str, Callable[[], None], tuple[str, str], str]] = [
             (txt("Reset", "초기화"), self.on_reset, ("Reset", "초기화"), "Danger.TButton"),
             (txt("OK", "확인"), self.on_ok, ("OK", "확인"), "Accent.TButton"),
             (txt("Cancel", "취소"), self.on_close, ("Cancel", "취소"), "Outline.TButton"),
@@ -341,7 +358,9 @@ class KeystrokeSettings(tk.Toplevel):
                 style=style,
             ).pack(side="left", padx=5)
 
-    def _add_range_row(self, row: int, label: str, setting_prefix: str, v_cmd):
+    def _add_range_row(
+        self, row: int, label: str, setting_prefix: str, v_cmd: tuple[str, str]
+    ) -> None:
         ttk.Label(
             self.card_timing, text=f"{label} ({txt('min, max', '최소, 최대')}):"
         ).grid(row=row, column=0, padx=10, pady=5, sticky="w")
@@ -355,12 +374,18 @@ class KeystrokeSettings(tk.Toplevel):
                 validatecommand=v_cmd,
             ).grid(row=row, column=col, padx=10, pady=5, sticky="w")
 
-    def _toggle_combo_state(self):
+    def _bool_var(self, key: str) -> tk.BooleanVar:
+        return cast(tk.BooleanVar, self.ui_vars[key])
+
+    def _str_var(self, key: str) -> tk.StringVar:
+        return cast(tk.StringVar, self.ui_vars[key])
+
+    def _toggle_combo_state(self) -> None:
         if self.is_windows:
-            state = "disabled" if self.ui_vars["use_alt_shift"].get() else "readonly"
+            state = "disabled" if self._bool_var("use_alt_shift").get() else "readonly"
             self.start_stop_combo.config(state=state)
         else:
-            enabled = self.ui_vars["enable_key"].get()
+            enabled = self._bool_var("enable_key").get()
             self.settings.toggle_start_stop_mac = enabled
             self.settings.start_stop_key = (
                 "`"
@@ -374,8 +399,8 @@ class KeystrokeSettings(tk.Toplevel):
         else:
             self.start_stop_combo.current(0)
 
-    def _on_key_press(self, event):
-        if not self.is_windows and not self.ui_vars["enable_key"].get():
+    def _on_key_press(self, event: tk.Event[tk.Misc]) -> None:
+        if not self.is_windows and not self._bool_var("enable_key").get():
             return
 
         key = (event.char or event.keysym).upper()
@@ -386,7 +411,7 @@ class KeystrokeSettings(tk.Toplevel):
             self.start_stop_combo.set(key)
             self.settings.start_stop_key = key
 
-    def on_ok(self):
+    def on_ok(self) -> None:
         selected_language = self.language_code_by_label.get(
             self.language_combo.get(), "en"
         )
@@ -396,7 +421,9 @@ class KeystrokeSettings(tk.Toplevel):
         # 1. Key Validation
         invalid_keys = (self._press_key_label, "", "DISABLED")
         if self.is_windows:
-            self.settings.use_alt_shift_hotkey = self.ui_vars["use_alt_shift"].get()
+            self.settings.use_alt_shift_hotkey = self._bool_var(
+                "use_alt_shift"
+            ).get()
             if (
                 not self.settings.use_alt_shift_hotkey
                 and self.settings.start_stop_key in invalid_keys
@@ -405,7 +432,7 @@ class KeystrokeSettings(tk.Toplevel):
                     txt("Please select a Start/Stop key.", "시작/중지 키를 선택하세요.")
                 )
         elif (
-            self.ui_vars["enable_key"].get()
+            self._bool_var("enable_key").get()
             and self.settings.start_stop_key in invalid_keys
         ):
             return self._warn(
@@ -415,8 +442,8 @@ class KeystrokeSettings(tk.Toplevel):
         # 2. Numeric Validation & Update
         try:
             for prefix in ("key_pressed_time", "delay_between_loop"):
-                mn = int(self.ui_vars[f"{prefix}_min"].get() or 0)
-                mx = int(self.ui_vars[f"{prefix}_max"].get() or 0)
+                mn = int(self._str_var(f"{prefix}_min").get() or 0)
+                mx = int(self._str_var(f"{prefix}_max").get() or 0)
                 if mn >= mx:
                     return self._warn(txt("Min must be less than Max.", "최소값은 최대값보다 작아야 합니다."))
                 if not (50 <= mn and mx <= 500):
@@ -430,7 +457,7 @@ class KeystrokeSettings(tk.Toplevel):
         self._save_settings()
         self.on_close()
 
-    def on_reset(self):
+    def on_reset(self) -> None:
         if messagebox.askokcancel(
             txt("Warning", "경고"),
             txt("Reset settings?", "설정을 초기화하시겠습니까?"),
@@ -439,24 +466,27 @@ class KeystrokeSettings(tk.Toplevel):
             self._save_window_position()
             self.settings = UserSettings()
             replacement = KeystrokeSettings(self.master)
-            if self.master and hasattr(self.master, "settings_window"):
-                self.master.settings_window = replacement
+            if self.app_master is not None and hasattr(
+                self.app_master, "settings_window"
+            ):
+                cast(SettingsHost, self.app_master).settings_window = replacement
             self.destroy()
 
-    def on_close(self, event=None):
+    def on_close(self, event: tk.Event[tk.Misc] | None = None) -> None:
         self._save_window_position()
-        if self.master and hasattr(self.master, "settings_window"):
-            self.master.settings_window = None
-            if hasattr(self.master, "load_settings"):
-                self.master.load_settings()
-            if hasattr(self.master, "setup_event_handlers"):
-                self.master.setup_event_handlers()
+        if self.app_master is not None and hasattr(self.app_master, "settings_window"):
+            host = cast(SettingsHost, self.app_master)
+            host.settings_window = None
+            if hasattr(host, "load_settings"):
+                host.load_settings()
+            if hasattr(host, "setup_event_handlers"):
+                host.setup_event_handlers()
         self.destroy()
 
-    def _warn(self, msg):
+    def _warn(self, msg: str) -> None:
         self.warning_label.config(text=msg)
 
-    def _update_warning_text(self):
+    def _update_warning_text(self) -> None:
         msg = (
             txt("Start/Stop: A-Z, 0-9, special keys only.", "시작/중지: A-Z, 0-9, 특수키만 허용됩니다.")
             if self.is_windows
@@ -465,7 +495,7 @@ class KeystrokeSettings(tk.Toplevel):
         self.warning_label.config(text=msg)
 
     @staticmethod
-    def _validate_numeric(P):
+    def _validate_numeric(P: str) -> bool:
         return P == "" or (
             P.isdigit() and not (P.startswith("0") and len(P) > 1) and int(P) < 1000
         )

@@ -1,12 +1,24 @@
 import signal
+from collections.abc import Callable
 from pathlib import Path
+from types import FrameType
+from typing import Protocol, cast
 
 from loguru import logger
 
 from app.ui.simulator_app import KeystrokeSimulatorApp
+from app.utils.system import install_exception_hooks
 
 
-def main():
+class MainAppLike(Protocol):
+    def after(
+        self, ms: int, func: Callable[..., object] | None = None, *args: object
+    ) -> object: ...
+    def mainloop(self) -> object: ...
+    def on_closing(self) -> None: ...
+
+
+def main() -> None:
     log_path = Path("logs")
     log_path.mkdir(exist_ok=True)
 
@@ -16,11 +28,12 @@ def main():
         level="INFO",
         enqueue=False,
     )
+    install_exception_hooks()
     Path("profiles").mkdir(exist_ok=True)
 
-    app = None
+    app: MainAppLike | None = None
 
-    def graceful_shutdown(signum=None, frame=None):
+    def graceful_shutdown(signum: int, frame: FrameType | None) -> None:
         if app:
             app.after(0, app.on_closing)
 
@@ -28,7 +41,7 @@ def main():
     signal.signal(signal.SIGTERM, graceful_shutdown)
 
     try:
-        app = KeystrokeSimulatorApp()
+        app = cast(MainAppLike, KeystrokeSimulatorApp())
         logger.info("Application started.")
         app.mainloop()
     except (KeyboardInterrupt, Exception) as e:

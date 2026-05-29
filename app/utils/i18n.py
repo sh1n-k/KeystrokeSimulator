@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unicodedata
-from typing import Iterable
+from collections.abc import Iterable
 
 SUPPORTED_LANGUAGES = ("en", "ko")
 LANGUAGE_LABELS = {
@@ -28,7 +28,7 @@ def get_language() -> str:
     return _current_language
 
 
-def txt(en: str, ko: str, **fmt) -> str:
+def txt(en: str, ko: str, **fmt: object) -> str:
     base = ko if _current_language == "ko" else en
     return base.format(**fmt) if fmt else base
 
@@ -48,5 +48,8 @@ def dual_text_width(en: str, ko: str, padding: int = 2, min_width: int = 0) -> i
 def max_dual_text_width(
     pairs: Iterable[tuple[str, str]], padding: int = 2, min_width: int = 0
 ) -> int:
-    widths = [dual_text_width(en, ko, padding=padding, min_width=min_width) for en, ko in pairs]
+    widths = [
+        dual_text_width(en, ko, padding=padding, min_width=min_width)
+        for en, ko in pairs
+    ]
     return max(widths) if widths else min_width

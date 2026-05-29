@@ -1,20 +1,34 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import math
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import TypeAlias
 
 from PIL import Image, ImageDraw, ImageFont
+from loguru import logger
 
 from app.core.models import ProfileModel
 from app.ui import theme
 
+RGB: TypeAlias = tuple[int, int, int]
+RGBA: TypeAlias = tuple[int, int, int, int]
+Point: TypeAlias = tuple[int, int]
+FloatPoint: TypeAlias = tuple[float, float]
+Box: TypeAlias = tuple[int, int, int, int]
+FontLike: TypeAlias = ImageFont.ImageFont | ImageFont.FreeTypeFont
 
-def _rgb(hex_color: str) -> tuple[int, int, int]:
+
+def _rgb(hex_color: str) -> RGB:
     value = hex_color.lstrip("#")
-    return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
+    return (
+        int(value[0:2], 16),
+        int(value[2:4], 16),
+        int(value[4:6], 16),
+    )
 
 
 # Workstation palette in RGB form, derived from app/ui/theme.py tokens.
@@ -111,8 +125,8 @@ def ensure_profile_graph_image(
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             if meta.get("hash") == hash_val:
                 return img_path
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Profile graph cache metadata ignored: {exc}")
 
     image = render_profile_graph(profile, profile_name)
     image.save(img_path)
@@ -187,7 +201,7 @@ def render_profile_graph(profile: ProfileModel, profile_name: str) -> Image.Imag
     return img
 
 
-def _infer_condition_groups(nodes: List[GraphNode], edges: List[GraphEdge]) -> None:
+def _infer_condition_groups(nodes: list[GraphNode], edges: list[GraphEdge]) -> None:
     """Infer group_id for ungrouped condition-only nodes from their edge targets."""
     node_map = {n.node_id: n for n in nodes}
     for node in nodes:
@@ -205,10 +219,10 @@ def _infer_condition_groups(nodes: List[GraphNode], edges: List[GraphEdge]) -> N
             node.group_id = target_groups.pop()
 
 
-def _build_graph(profile: ProfileModel) -> Tuple[List[GraphNode], List[GraphEdge]]:
-    nodes: List[GraphNode] = []
-    edges: List[GraphEdge] = []
-    name_map: Dict[str, List[str]] = {}
+def _build_graph(profile: ProfileModel) -> tuple[list[GraphNode], list[GraphEdge]]:
+    nodes: list[GraphNode] = []
+    edges: list[GraphEdge] = []
+    name_map: dict[str, list[str]] = {}
 
     for idx, evt in enumerate(profile.event_list):
         raw_name = (evt.event_name or f"Event_{idx + 1}").strip()
@@ -227,7 +241,7 @@ def _build_graph(profile: ProfileModel) -> Tuple[List[GraphNode], List[GraphEdge
         nodes.append(node)
         name_map.setdefault(name, []).append(node_id)
 
-    missing_nodes: Dict[str, GraphNode] = {}
+    missing_nodes: dict[str, GraphNode] = {}
 
     for idx, evt in enumerate(profile.event_list):
         tgt_id = f"evt_{idx}"
@@ -257,14 +271,14 @@ def _build_graph(profile: ProfileModel) -> Tuple[List[GraphNode], List[GraphEdge
     return nodes, edges
 
 
-def _build_layers(
-    nodes: List[GraphNode],
-    edges: List[GraphEdge],
-    order_map: Dict[str, int] | None = None,
-) -> List[List[str]]:
+def _build_layers(  # pyright: ignore[reportUnusedFunction] - imported by graph algorithm tests.
+    nodes: list[GraphNode],
+    edges: list[GraphEdge],
+    order_map: dict[str, int] | None = None,
+) -> list[list[str]]:
     node_ids = [n.node_id for n in nodes]
     incoming = {n_id: 0 for n_id in node_ids}
-    adjacency: Dict[str, List[str]] = {n_id: [] for n_id in node_ids}
+    adjacency: dict[str, list[str]] = {n_id: [] for n_id in node_ids}
 
     for edge in edges:
         if edge.src in adjacency and edge.dst in incoming:
@@ -274,8 +288,8 @@ def _build_layers(
     if order_map is None:
         order_map = _build_order_map(node_ids, edges)
 
-    layers: List[List[str]] = []
-    visited = set()
+    layers: list[list[str]] = []
+    visited: set[str] = set()
 
     while True:
         layer = [
@@ -299,21 +313,21 @@ def _build_layers(
 
 
 def _optimize_layer_order(
-    layers: List[List[str]],
-    edges: List[GraphEdge],
-    base_order: Dict[str, int],
+    layers: list[list[str]],
+    edges: list[GraphEdge],
+    base_order: dict[str, int],
     iterations: int = 2,
-) -> List[List[str]]:
+) -> list[list[str]]:
     if len(layers) < 2:
         return layers
 
-    incoming_map: Dict[str, List[str]] = {}
-    outgoing_map: Dict[str, List[str]] = {}
+    incoming_map: dict[str, list[str]] = {}
+    outgoing_map: dict[str, list[str]] = {}
     for edge in edges:
         incoming_map.setdefault(edge.dst, []).append(edge.src)
         outgoing_map.setdefault(edge.src, []).append(edge.dst)
 
-    def avg_neighbor_pos(node_id: str, neighbors: List[str], pos_map: Dict[str, int]):
+    def avg_neighbor_pos(neighbors: list[str], pos_map: dict[str, int]) -> float | None:
         positions = [pos_map[n] for n in neighbors if n in pos_map]
         if not positions:
             return None
@@ -323,10 +337,11 @@ def _optimize_layer_order(
         for i in range(1, len(layers)):
             pos_map = {n_id: idx for idx, n_id in enumerate(layers[i - 1])}
 
-            def key(n_id: str):
-                bary = avg_neighbor_pos(n_id, incoming_map.get(n_id, []), pos_map)
+            def key(n_id: str, pos_map: dict[str, int] = pos_map) -> tuple[float, int]:
+                bary = avg_neighbor_pos(incoming_map.get(n_id, []), pos_map)
                 if bary is None:
-                    return (base_order.get(n_id, 0), base_order.get(n_id, 0))
+                    order = base_order.get(n_id, 0)
+                    return (float(order), order)
                 return (bary, base_order.get(n_id, 0))
 
             layers[i] = sorted(layers[i], key=key)
@@ -334,10 +349,11 @@ def _optimize_layer_order(
         for i in range(len(layers) - 2, -1, -1):
             pos_map = {n_id: idx for idx, n_id in enumerate(layers[i + 1])}
 
-            def key(n_id: str):
-                bary = avg_neighbor_pos(n_id, outgoing_map.get(n_id, []), pos_map)
+            def key(n_id: str, pos_map: dict[str, int] = pos_map) -> tuple[float, int]:
+                bary = avg_neighbor_pos(outgoing_map.get(n_id, []), pos_map)
                 if bary is None:
-                    return (base_order.get(n_id, 0), base_order.get(n_id, 0))
+                    order = base_order.get(n_id, 0)
+                    return (float(order), order)
                 return (bary, base_order.get(n_id, 0))
 
             layers[i] = sorted(layers[i], key=key)
@@ -347,15 +363,15 @@ def _optimize_layer_order(
 
 @dataclass
 class ComponentLayout:
-    node_ids: List[str]
-    layers: List[List[str]]
+    node_ids: list[str]
+    layers: list[list[str]]
     width: int
     height: int
 
 
 def _layout_graph(
-    nodes: List[GraphNode], edges: List[GraphEdge]
-) -> Tuple[Dict[str, Tuple[int, int]], int, int]:
+    nodes: list[GraphNode], edges: list[GraphEdge]
+) -> tuple[dict[str, Point], int, int]:
     node_ids = [n.node_id for n in nodes]
     if not node_ids:
         return {}, 640, 480
@@ -365,7 +381,7 @@ def _layout_graph(
     levels = _assign_levels(node_ids, edges)
     components = _build_components(node_ids, edges)
 
-    layouts: List[ComponentLayout] = []
+    layouts: list[ComponentLayout] = []
     max_cols = _calc_max_cols()
     max_comp_width = 0
 
@@ -394,12 +410,12 @@ def _layout_graph(
     return positions, total_w, total_h
 
 
-def _layers_for_component(comp: List[str], levels: Dict[str, int]) -> List[List[str]]:
+def _layers_for_component(comp: list[str], levels: dict[str, int]) -> list[list[str]]:
     max_level = 0
     for node_id in comp:
         max_level = max(max_level, levels.get(node_id, 0))
 
-    buckets: List[List[str]] = [[] for _ in range(max_level + 1)]
+    buckets: list[list[str]] = [[] for _ in range(max_level + 1)]
     for node_id in comp:
         lvl = levels.get(node_id, 0)
         buckets[lvl].append(node_id)
@@ -407,7 +423,7 @@ def _layers_for_component(comp: List[str], levels: Dict[str, int]) -> List[List[
     return [layer for layer in buckets if layer]
 
 
-def _count_group_breaks(layer: List[str], node_map: Dict[str, GraphNode]) -> int:
+def _count_group_breaks(layer: list[str], node_map: dict[str, GraphNode]) -> int:
     breaks = 0
     for i in range(1, len(layer)):
         g_prev = node_map[layer[i - 1]].group_id if layer[i - 1] in node_map else None
@@ -418,9 +434,9 @@ def _count_group_breaks(layer: List[str], node_map: Dict[str, GraphNode]) -> int
 
 
 def _calc_component_size(
-    layers: List[List[str]],
-    node_map: Dict[str, GraphNode] | None = None,
-) -> Tuple[int, int]:
+    layers: list[list[str]],
+    node_map: dict[str, GraphNode] | None = None,
+) -> tuple[int, int]:
     if not layers:
         return NODE_W, NODE_H
     if node_map is None:
@@ -437,13 +453,13 @@ def _calc_component_size(
 
 
 def _pack_components(
-    components: List[ComponentLayout],
+    components: list[ComponentLayout],
     max_width: int,
-    node_map: Dict[str, GraphNode] | None = None,
-) -> Tuple[Dict[str, Tuple[int, int]], int, int]:
+    node_map: dict[str, GraphNode] | None = None,
+) -> tuple[dict[str, Point], int, int]:
     if node_map is None:
         node_map = {}
-    positions: Dict[str, Tuple[int, int]] = {}
+    positions: dict[str, Point] = {}
     x = MARGIN
     y = MARGIN + TITLE_GAP
     row_h = 0
@@ -469,14 +485,14 @@ def _pack_components(
 
 
 def _layout_component_positions(
-    layers: List[List[str]],
+    layers: list[list[str]],
     comp_width: int,
-    node_map: Dict[str, GraphNode] | None = None,
-) -> Dict[str, Tuple[int, int]]:
+    node_map: dict[str, GraphNode] | None = None,
+) -> dict[str, Point]:
     if node_map is None:
         node_map = {}
     group_gap = GROUP_BG_PAD * 2
-    positions: Dict[str, Tuple[int, int]] = {}
+    positions: dict[str, Point] = {}
     y = 0
     for layer in layers:
         breaks = _count_group_breaks(layer, node_map)
@@ -497,9 +513,9 @@ def _layout_component_positions(
     return positions
 
 
-def _assign_levels(node_ids: List[str], edges: List[GraphEdge]) -> Dict[str, int]:
+def _assign_levels(node_ids: list[str], edges: list[GraphEdge]) -> dict[str, int]:
     incoming = {n_id: 0 for n_id in node_ids}
-    adjacency: Dict[str, List[str]] = {n_id: [] for n_id in node_ids}
+    adjacency: dict[str, list[str]] = {n_id: [] for n_id in node_ids}
 
     for edge in edges:
         if edge.src in adjacency and edge.dst in incoming:
@@ -526,22 +542,22 @@ def _assign_levels(node_ids: List[str], edges: List[GraphEdge]) -> Dict[str, int
     return levels
 
 
-def _build_components(node_ids: List[str], edges: List[GraphEdge]) -> List[List[str]]:
-    adjacency: Dict[str, List[str]] = {n_id: [] for n_id in node_ids}
+def _build_components(node_ids: list[str], edges: list[GraphEdge]) -> list[list[str]]:
+    adjacency: dict[str, list[str]] = {n_id: [] for n_id in node_ids}
     for edge in edges:
         if edge.src in adjacency and edge.dst in adjacency:
             adjacency[edge.src].append(edge.dst)
             adjacency[edge.dst].append(edge.src)
 
-    visited = set()
-    components: List[List[str]] = []
+    visited: set[str] = set()
+    components: list[list[str]] = []
 
     for node in node_ids:
         if node in visited:
             continue
-        stack = [node]
+        stack: list[str] = [node]
         visited.add(node)
-        comp = []
+        comp: list[str] = []
         while stack:
             current = stack.pop()
             comp.append(current)
@@ -554,21 +570,21 @@ def _build_components(node_ids: List[str], edges: List[GraphEdge]) -> List[List[
     return components
 
 
-def _build_order_map(node_ids: List[str], edges: List[GraphEdge]) -> Dict[str, int]:
+def _build_order_map(node_ids: list[str], edges: list[GraphEdge]) -> dict[str, int]:
     base_index = {n_id: idx for idx, n_id in enumerate(node_ids)}
-    adjacency: Dict[str, List[str]] = {n_id: [] for n_id in node_ids}
+    adjacency: dict[str, list[str]] = {n_id: [] for n_id in node_ids}
     for edge in edges:
         if edge.src in adjacency and edge.dst in adjacency:
             adjacency[edge.src].append(edge.dst)
             adjacency[edge.dst].append(edge.src)
 
-    order: List[str] = []
-    visited = set()
+    order: list[str] = []
+    visited: set[str] = set()
 
     for start in node_ids:
         if start in visited:
             continue
-        queue = [start]
+        queue: list[str] = [start]
         visited.add(start)
         while queue:
             current = queue.pop(0)
@@ -582,8 +598,8 @@ def _build_order_map(node_ids: List[str], edges: List[GraphEdge]) -> Dict[str, i
     return {n_id: idx for idx, n_id in enumerate(order)}
 
 
-def _wrap_layers(layers: List[List[str]], max_cols: int) -> List[List[str]]:
-    wrapped: List[List[str]] = []
+def _wrap_layers(layers: list[list[str]], max_cols: int) -> list[list[str]]:
+    wrapped: list[list[str]] = []
     for layer in layers:
         if not layer:
             continue
@@ -598,29 +614,13 @@ def _calc_max_cols() -> int:
     return max(3, min(8, int(cols)))
 
 
-def _layout_positions(layers: List[List[str]], canvas_width: int) -> Dict[str, Tuple[int, int]]:
-    positions: Dict[str, Tuple[int, int]] = {}
-    y = MARGIN + TITLE_GAP
-
-    for layer in layers:
-        row_width = len(layer) * NODE_W + max(0, len(layer) - 1) * X_GAP
-        start_x = max(MARGIN, (canvas_width - row_width) // 2)
-        x = start_x
-        for node_id in layer:
-            positions[node_id] = (x, y)
-            x += NODE_W + X_GAP
-        y += NODE_H + Y_GAP
-
-    return positions
-
-
 def _draw_node(
     draw: ImageDraw.ImageDraw,
     node: GraphNode,
-    pos: Tuple[int, int],
-    font: ImageFont.ImageFont,
-    font_small: ImageFont.ImageFont,
-):
+    pos: Point,
+    font: FontLike,
+    font_small: FontLike,
+) -> None:
     x, y = pos
     x2, y2 = x + NODE_W, y + NODE_H
 
@@ -652,10 +652,10 @@ def _draw_node(
 def _draw_node_badges(
     draw: ImageDraw.ImageDraw,
     node: GraphNode,
-    pos: Tuple[int, int],
-    font_small: ImageFont.ImageFont,
+    pos: Point,
+    font_small: FontLike,
 ) -> None:
-    badges: List[Tuple[str, Tuple[int, int, int]]] = []
+    badges: list[tuple[str, RGB]] = []
     if node.missing:
         badges.append(("warn", BADGE_COLOR_MISSING))
     if not node.use_event and not node.missing:
@@ -681,7 +681,7 @@ def _draw_badge(
     cy: int,
     radius: int,
     badge_type: str,
-    bg_color: Tuple[int, int, int],
+    bg_color: RGB,
 ) -> None:
     draw.ellipse(
         [cx - radius, cy - radius, cx + radius, cy + radius],
@@ -711,12 +711,12 @@ def _draw_badge(
 
 def _draw_edge(
     draw: ImageDraw.ImageDraw,
-    src_pos: Tuple[int, int],
-    dst_pos: Tuple[int, int],
+    src_pos: Point,
+    dst_pos: Point,
     state: bool | None,
-    font_small: ImageFont.ImageFont,
+    font_small: FontLike,
     offset: float = 0.0,
-):
+) -> None:
     sx, sy = src_pos
     tx, ty = dst_pos
 
@@ -754,7 +754,7 @@ def _draw_edge(
         draw.text((mx, my), label, fill=color, font=font_small)
 
 
-def _draw_arrow(draw: ImageDraw.ImageDraw, start, end, color):
+def _draw_arrow(draw: ImageDraw.ImageDraw, start: Point, end: Point, color: RGB) -> None:
     draw.line([start, end], fill=color, width=2)
     angle = math.atan2(end[1] - start[1], end[0] - start[0])
     head_len = 10
@@ -773,10 +773,10 @@ def _draw_arrow(draw: ImageDraw.ImageDraw, start, end, color):
 
 def _bezier_point(
     t: float,
-    p0: Tuple[float, float],
-    p1: Tuple[float, float],
-    p2: Tuple[float, float],
-) -> Tuple[float, float]:
+    p0: FloatPoint,
+    p1: FloatPoint,
+    p2: FloatPoint,
+) -> FloatPoint:
     x = (1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t ** 2 * p2[0]
     y = (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t ** 2 * p2[1]
     return (x, y)
@@ -784,20 +784,20 @@ def _bezier_point(
 
 def _bezier_tangent(
     t: float,
-    p0: Tuple[float, float],
-    p1: Tuple[float, float],
-    p2: Tuple[float, float],
-) -> Tuple[float, float]:
+    p0: FloatPoint,
+    p1: FloatPoint,
+    p2: FloatPoint,
+) -> FloatPoint:
     dx = 2 * (1 - t) * (p1[0] - p0[0]) + 2 * t * (p2[0] - p1[0])
     dy = 2 * (1 - t) * (p1[1] - p0[1]) + 2 * t * (p2[1] - p1[1])
     return (dx, dy)
 
 
 def _calc_control_point(
-    start: Tuple[int, int],
-    end: Tuple[int, int],
+    start: Point,
+    end: Point,
     offset: float,
-) -> Tuple[float, float]:
+) -> FloatPoint:
     mx = (start[0] + end[0]) / 2.0
     my = (start[1] + end[1]) / 2.0
     dx = end[0] - start[0]
@@ -811,18 +811,18 @@ def _calc_control_point(
 
 
 def _compute_edge_offsets(
-    edges: List[GraphEdge],
-    positions: Dict[str, Tuple[int, int]],
-) -> Dict[Tuple[str, str], float]:
-    dst_groups: Dict[str, List[Tuple[str, str]]] = {}
+    edges: list[GraphEdge],
+    positions: dict[str, Point],
+) -> dict[tuple[str, str], float]:
+    dst_groups: dict[str, list[tuple[str, str]]] = {}
     for edge in edges:
         if edge.src not in positions or edge.dst not in positions:
             continue
         dst_groups.setdefault(edge.dst, []).append((edge.src, edge.dst))
 
-    offsets: Dict[Tuple[str, str], float] = {}
+    offsets: dict[tuple[str, str], float] = {}
     spread = 20.0
-    for dst, pairs in dst_groups.items():
+    for _dst, pairs in dst_groups.items():
         n = len(pairs)
         for i, pair in enumerate(pairs):
             if n == 1:
@@ -834,12 +834,12 @@ def _compute_edge_offsets(
 
 def _draw_bezier_arrow(
     draw: ImageDraw.ImageDraw,
-    start: Tuple[int, int],
-    end: Tuple[int, int],
-    control: Tuple[float, float],
-    color: Tuple[int, int, int],
-) -> Tuple[float, float]:
-    points = []
+    start: Point,
+    end: Point,
+    control: FloatPoint,
+    color: RGB,
+) -> FloatPoint:
+    points: list[FloatPoint] = []
     for i in range(BEZIER_SEGMENTS + 1):
         t = i / BEZIER_SEGMENTS
         points.append(_bezier_point(t, start, control, end))
@@ -852,7 +852,7 @@ def _draw_bezier_arrow(
 
     head_len = 10
     trim_len = max(0, total_len - head_len)
-    trimmed = [points[0]]
+    trimmed: list[FloatPoint] = [points[0]]
     accum = 0.0
     for i in range(1, len(points)):
         dx = points[i][0] - points[i - 1][0]
@@ -886,11 +886,11 @@ def _draw_bezier_arrow(
 
 def _draw_dashed_rect(
     draw: ImageDraw.ImageDraw,
-    box: Tuple[int, int, int, int],
-    color,
+    box: Box,
+    color: RGB,
     dash: int = 6,
     gap: int = 4,
-):
+) -> None:
     x1, y1, x2, y2 = box
     _draw_dashed_line(draw, (x1, y1), (x2, y1), color, dash, gap)
     _draw_dashed_line(draw, (x1, y2), (x2, y2), color, dash, gap)
@@ -900,12 +900,12 @@ def _draw_dashed_rect(
 
 def _draw_dashed_line(
     draw: ImageDraw.ImageDraw,
-    start: Tuple[int, int],
-    end: Tuple[int, int],
-    color,
+    start: Point,
+    end: Point,
+    color: RGB,
     dash: int,
     gap: int,
-):
+) -> None:
     x1, y1 = start
     x2, y2 = end
 
@@ -928,11 +928,11 @@ def _draw_dashed_line(
 
 
 def _compute_group_bounds(
-    nodes: List[GraphNode],
-    positions: Dict[str, Tuple[int, int]],
-    font_small: ImageFont.ImageFont,
-) -> Dict[str, Tuple[int, int, int, int]]:
-    bounds: Dict[str, List[int]] = {}
+    nodes: list[GraphNode],
+    positions: dict[str, Point],
+    font_small: FontLike,
+) -> dict[str, Box]:
+    bounds: dict[str, list[int]] = {}
     for node in nodes:
         if not node.group_id or node.node_id not in positions:
             continue
@@ -948,7 +948,7 @@ def _compute_group_bounds(
             b[3] = max(b[3], y + NODE_H)
 
     label_h = _font_line_height(font_small)
-    result: Dict[str, Tuple[int, int, int, int]] = {}
+    result: dict[str, Box] = {}
     for gid, b in bounds.items():
         result[gid] = (
             b[0] - GROUP_BG_PAD,
@@ -961,9 +961,9 @@ def _compute_group_bounds(
 
 def _draw_group_backgrounds(
     img: Image.Image,
-    nodes: List[GraphNode],
-    positions: Dict[str, Tuple[int, int]],
-    font_small: ImageFont.ImageFont,
+    nodes: list[GraphNode],
+    positions: dict[str, Point],
+    font_small: FontLike,
 ) -> None:
     bounds = _compute_group_bounds(nodes, positions, font_small)
     if not bounds:
@@ -999,7 +999,7 @@ def _draw_group_backgrounds(
     img.paste(composited)
 
 
-def _group_color(group_id: str | None) -> Tuple[int, int, int]:
+def _group_color(group_id: str | None) -> RGB:
     if not group_id:
         return (220, 220, 220)
     digest = hashlib.md5(group_id.encode("utf-8")).hexdigest()
@@ -1007,11 +1007,15 @@ def _group_color(group_id: str | None) -> Tuple[int, int, int]:
     return PALETTE[idx]
 
 
-def _fade_color(color: Tuple[int, int, int], bg: Tuple[int, int, int], alpha: float):
-    return tuple(int(color[i] * alpha + bg[i] * (1 - alpha)) for i in range(3))
+def _fade_color(color: RGB, bg: RGB, alpha: float) -> RGB:
+    return (
+        int(color[0] * alpha + bg[0] * (1 - alpha)),
+        int(color[1] * alpha + bg[1] * (1 - alpha)),
+        int(color[2] * alpha + bg[2] * (1 - alpha)),
+    )
 
 
-def _wrap_label(text: str, width: int, max_lines: int) -> List[str]:
+def _wrap_label(text: str, width: int, max_lines: int) -> list[str]:
     lines = textwrap.wrap(text, width=width)
     if not lines:
         return [""]
@@ -1026,13 +1030,15 @@ def _label_wrap_width() -> int:
     return max(12, min(20, int(NODE_W / 12)))
 
 
-def _font_line_height(font: ImageFont.ImageFont) -> int:
+def _font_line_height(font: FontLike) -> int:
     try:
-        ascent, descent = font.getmetrics()
-        return ascent + descent + 2
+        if isinstance(font, ImageFont.FreeTypeFont):
+            ascent, descent = font.getmetrics()
+            return ascent + descent + 2
     except Exception:
-        bbox = font.getbbox("Ag")
-        return (bbox[3] - bbox[1]) + 2
+        pass
+    bbox = font.getbbox("Ag")
+    return int(bbox[3] - bbox[1]) + 2
 
 
 def _sanitize_filename(name: str) -> str:
@@ -1046,21 +1052,22 @@ RENDER_VERSION = "ws-v2"
 
 
 def _profile_hash(profile: ProfileModel) -> str:
+    events_payload: list[dict[str, object]] = []
     payload = {
         "render_version": RENDER_VERSION,
-        "events": [],
+        "events": events_payload,
     }
     for idx, evt in enumerate(profile.event_list):
-        payload["events"].append(
+        events_payload.append(
             {
                 "idx": idx,
                 "name": evt.event_name,
-                "group": getattr(evt, "group_id", None),
-                "priority": getattr(evt, "priority", 0),
-                "use_event": getattr(evt, "use_event", True),
-                "execute_action": getattr(evt, "execute_action", True),
-                "independent_thread": getattr(evt, "independent_thread", False),
-                "conditions": getattr(evt, "conditions", {}) or {},
+                "group": evt.group_id,
+                "priority": evt.priority,
+                "use_event": evt.use_event,
+                "execute_action": evt.execute_action,
+                "independent_thread": evt.independent_thread,
+                "conditions": evt.conditions,
             }
         )
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
@@ -1068,7 +1075,7 @@ def _profile_hash(profile: ProfileModel) -> str:
 
 
 def _calc_legend_height(
-    nodes: List[GraphNode],
+    nodes: list[GraphNode],
 ) -> int:
     groups = sorted(set(n.group_id for n in nodes if n.group_id))
     edge_rows = 3
@@ -1085,11 +1092,11 @@ def _calc_legend_height(
 def _draw_legend(
     draw: ImageDraw.ImageDraw,
     img: Image.Image,
-    nodes: List[GraphNode],
+    nodes: list[GraphNode],
     legend_y: int,
     canvas_width: int,
-    font: ImageFont.ImageFont,
-    font_legend: ImageFont.ImageFont,
+    font: FontLike,
+    font_legend: FontLike,
 ) -> None:
     # Card-style legend on the workstation panel tone — matches Settings /
     # Editor cards instead of the previous bare horizontal divider.
@@ -1199,7 +1206,7 @@ def _draw_legend(
             draw.text((col_x + 32, iy + 2), gid, fill=TEXT_COLOR, font=font_legend)
 
 
-def _load_font(size: int) -> ImageFont.ImageFont:
+def _load_font(size: int) -> FontLike:
     # Korean / multilingual fallback chain — macOS, Windows, Linux paths.
     candidates = [
         "/System/Library/Fonts/Supplemental/AppleGothic.ttf",

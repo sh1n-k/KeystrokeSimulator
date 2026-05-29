@@ -2,31 +2,40 @@ import os
 import re
 import shutil
 import threading
-import json
 import tkinter as tk
 from datetime import datetime, timezone
-from pathlib import Path
 from tkinter import ttk
-from typing import Dict, Optional
+from collections.abc import Callable, Mapping
+from typing import Any, Protocol, cast
 
 import requests
 from dotenv import load_dotenv, find_dotenv
 from loguru import logger
 from app.utils.i18n import dual_text_width, normalize_language, set_language, txt
 
+from app.storage.settings_storage import load_user_settings
 from app.ui.simulator_app import KeystrokeSimulatorApp
-from app.utils.system import WindowUtils
+from app.utils.system import WindowUtils, install_exception_hooks
 
 load_dotenv(find_dotenv())
 
 
 def _load_ui_language():
-    s_file = Path("user_settings.json")
-    try:
-        data = json.loads(s_file.read_text(encoding="utf-8")) if s_file.exists() else {}
-    except Exception:
-        data = {}
-    set_language(normalize_language(data.get("language")))
+    settings, _can_save = load_user_settings()
+    set_language(normalize_language(settings.language))
+
+
+class MainAppLike(Protocol):
+    def after(
+        self, ms: int, func: Callable[..., object] | None = None, *args: object
+    ) -> object: ...
+    def mainloop(self) -> object: ...
+    def winfo_exists(self) -> int: ...
+    def on_closing(self) -> None: ...
+
+
+def _request_url(value: str | None) -> str:
+    return cast(str, value)
 
 
 class Config:
@@ -40,10 +49,10 @@ class Config:
 
 
 class AuthService:
-    def __init__(self):
-        self.session_token: Optional[str] = None
+    def __init__(self) -> None:
+        self.session_token: str | None = None
 
-    def request_authentication(self, user_id: str) -> Dict[str, str]:
+    def request_authentication(self, user_id: str) -> dict[str, object]:
         timestamp = str(int(datetime.now(timezone.utc).timestamp()))
         payload = {
             "userId": user_id,
@@ -51,9 +60,15 @@ class AuthService:
             "appVersion": Config.APP_VERSION,
         }
         try:
-            response = requests.post(Config.AUTH_URL, json=payload, timeout=5)
+            response = requests.post(
+                _request_url(Config.AUTH_URL), json=payload, timeout=5
+            )
             response.raise_for_status()
-            return response.json()
+            response_data = response.json()
+            if not isinstance(response_data, dict):
+                raise ValueError("Authentication response must be an object")
+            raw_response = cast(Mapping[object, object], response_data)
+            return {str(k): v for k, v in raw_response.items()}
         except requests.HTTPError as e:
             logger.error(
                 f"Authentication HTTP error for user {user_id}: {e.response.status_code}"
@@ -70,11 +85,13 @@ class AuthService:
                     "서버 오류: {code}",
                     code=e.response.status_code,
                 )
-            raise Exception(error_message)
+            raise Exception(error_message) from e
         except requests.RequestException as e:
             logger.error(f"Authentication network error for user {user_id}: {str(e)}")
             # 네트워크 오류
-            raise Exception(txt("Network connection failed", "네트워크 연결에 실패했습니다"))
+            raise Exception(
+                txt("Network connection failed", "네트워크 연결에 실패했습니다")
+            ) from e
 
     def validate_session_token(self, user_id: str) -> bool:
         if not self.session_token:
@@ -85,7 +102,11 @@ class AuthService:
             "appVersion": Config.APP_VERSION,
         }
         try:
-            response = requests.post(Config.VALIDATE_URL, json=payload, timeout=5)
+            response = requests.post(
+                _request_url(Config.VALIDATE_URL),
+                json=payload,
+                timeout=5,
+            )
             response.raise_for_status()
             return True
         except requests.HTTPError as e:
@@ -101,22 +122,27 @@ class AuthService:
 
 
 class AuthUI:
-    def __init__(self, master: tk.Tk, auth_service: AuthService, on_success_callback):
+    def __init__(
+        self,
+        master: tk.Tk,
+        auth_service: AuthService,
+        on_success_callback: Callable[[], None],
+    ) -> None:
         _load_ui_language()
         self.master = master
         self.auth_service = auth_service
         self.on_success_callback = on_success_callback
         self.setup_ui()
         self.failed_attempts = 0
-        self.user_id = None
+        self.user_id = ""
 
-    def setup_ui(self):
+    def setup_ui(self) -> None:
         self.master.title(txt("Authentication", "인증"))
         self.create_widgets()
         self.setup_bindings()
         WindowUtils.center_window(self.master)
 
-    def create_widgets(self):
+    def create_widgets(self) -> None:
         self.id_label = ttk.Label(self.master, text=txt("User ID:", "사용자 ID:"))
         self.id_entry = ttk.Entry(self.master)
         self.error_label = tk.Label(
@@ -149,18 +175,18 @@ class AuthUI:
         self.ok_button.pack(side=tk.LEFT, padx=5)
         self.quit_button.pack(side=tk.LEFT, padx=5)
 
-    def setup_bindings(self):
+    def setup_bindings(self) -> None:
         self.id_entry.config(
             validate="key",
             validatecommand=(self.master.register(self.validate_user_id), "%P"),
         )
-        self.master.bind("<Escape>", lambda event: self.master.quit())
-        self.id_entry.bind("<Return>", lambda event: self.ok_button.invoke())
+        self.master.bind("<Escape>", lambda _event: self.master.quit())
+        self.id_entry.bind("<Return>", lambda _event: self.ok_button.invoke())
         self.master.after(100, self.set_window_focus)
 
-    def set_window_focus(self):
+    def set_window_focus(self) -> None:
         self.master.focus_force()
-        self.master.lift()
+        cast(Any, self.master).lift()
         self.id_entry.focus_set()
 
     def validate_user_id(self, new_value: str) -> bool:
@@ -193,24 +219,24 @@ class AuthUI:
         self.clear_error()
         return True
 
-    def show_error(self, message: str):
+    def show_error(self, message: str) -> None:
         self.error_label.config(text=message, fg="red")
         self.master.update_idletasks()
 
-    def clear_error(self):
+    def clear_error(self) -> None:
         self.error_label.config(text="")
 
-    def lock_inputs(self):
+    def lock_inputs(self) -> None:
         self.id_entry.config(state="disabled")
         self.ok_button.config(state="disabled")
 
-    def unlock_inputs(self):
+    def unlock_inputs(self) -> None:
         self.id_entry.config(state="normal")
         self.ok_button.config(state="normal")
         self.clear_error()
         self.failed_attempts = 0
 
-    def start_countdown(self, remaining_time: int, final_message: str = ""):
+    def start_countdown(self, remaining_time: int, final_message: str = "") -> None:
         if remaining_time > 0:
             self.show_error(
                 txt(
@@ -226,7 +252,7 @@ class AuthUI:
         else:
             self.unlock_inputs()
 
-    def validate_and_auth(self):
+    def validate_and_auth(self) -> None:
         self.user_id = self.id_entry.get()
         if self.validate_input():
             self.ok_button.config(state="disabled")
@@ -235,11 +261,11 @@ class AuthUI:
         else:
             logger.warning(f"Invalid input for user ID: {self.user_id}")
 
-    def request_authentication(self):
+    def request_authentication(self) -> None:
         try:
             resp_json = self.auth_service.request_authentication(self.user_id)
             session_token = resp_json.get("sessionToken")
-            if session_token:
+            if isinstance(session_token, str) and session_token.strip():
                 logger.info(f"Authentication successful for user: {self.user_id}")
                 self.auth_service.session_token = session_token
                 self.on_success_callback()
@@ -251,7 +277,7 @@ class AuthUI:
                 txt("Authentication failed: {error}", "인증 실패: {error}", error=str(e))
             )
 
-    def show_error_and_reactivate(self, message: str):
+    def show_error_and_reactivate(self, message: str) -> None:
         self.failed_attempts += 1
         if self.failed_attempts >= Config.MAX_FAILED_ATTEMPTS:
             logger.warning(
@@ -266,7 +292,7 @@ class AuthUI:
             self.master.after(100, self.set_window_focus)
 
 
-def setup_logging():
+def setup_logging() -> None:
     # Remove any existing handlers
     log_path = "logs"
     if not os.path.exists(log_path):
@@ -278,32 +304,33 @@ def setup_logging():
 
 
 class Application:
-    def __init__(self):
+    def __init__(self) -> None:
         self.root = tk.Tk()
+        install_exception_hooks(self.root)
         self.auth_service = AuthService()
         self.auth_ui = AuthUI(self.root, self.auth_service, self.on_auth_success)
-        self.main_app = None
+        self.main_app: MainAppLike | None = None
 
-    def on_auth_success(self):
+    def on_auth_success(self) -> None:
         self.root.withdraw()
         self.root.destroy()
-        self.main_app = KeystrokeSimulatorApp()
+        self.main_app = cast(MainAppLike, KeystrokeSimulatorApp())
         self.main_app.after(5 * 60 * 1000, self.check_session_and_schedule)
         self.main_app.mainloop()
         logger.info("Application terminated")
 
-    def check_session_and_schedule(self):
+    def check_session_and_schedule(self) -> None:
         threading.Thread(target=self._validate_session_worker, daemon=True).start()
 
-    def _validate_session_worker(self):
+    def _validate_session_worker(self) -> None:
         is_valid = self.auth_service.validate_session_token(self.auth_ui.user_id)
         if self.main_app:
             try:
                 self.main_app.after(0, self._on_session_checked, is_valid)
-            except Exception:
-                pass  # main_app이 닫히는 중
+            except Exception as exc:
+                logger.debug(f"Session callback skipped while app is closing: {exc}")
 
-    def _on_session_checked(self, is_valid: bool):
+    def _on_session_checked(self, is_valid: bool) -> None:
         if not (self.main_app and self.main_app.winfo_exists()):
             return
         if is_valid:
@@ -311,16 +338,17 @@ class Application:
         else:
             self.force_close_app()
 
-    def force_close_app(self):
+    def force_close_app(self) -> None:
         if self.main_app:
             self.main_app.on_closing()
 
-    def run(self):
+    def run(self) -> None:
         self.root.mainloop()
 
 
-def main():
+def main() -> None:
     setup_logging()
+    install_exception_hooks()
     app = Application()
     app.run()
 

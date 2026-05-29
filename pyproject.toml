@@ -46,6 +46,12 @@ extend-exclude = [
     "dist",
 ]
 
+[tool.ruff.lint]
+extend-select = [
+    "B",
+    "RUF012",
+]
+
 [tool.pyright]
 include = [
     "app",
@@ -61,3 +67,8 @@ exclude = [
 pythonVersion = "3.13"
 typeCheckingMode = "off"
 reportMissingModuleSource = "none"
+strict = [
+    "app",
+    "scripts/build_secure.py",
+    "scripts/verify.py",
+]
