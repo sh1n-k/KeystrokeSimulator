@@ -271,47 +271,6 @@ def _build_graph(profile: ProfileModel) -> tuple[list[GraphNode], list[GraphEdge
     return nodes, edges
 
 
-def _build_layers(  # pyright: ignore[reportUnusedFunction] - imported by graph algorithm tests.
-    nodes: list[GraphNode],
-    edges: list[GraphEdge],
-    order_map: dict[str, int] | None = None,
-) -> list[list[str]]:
-    node_ids = [n.node_id for n in nodes]
-    incoming = {n_id: 0 for n_id in node_ids}
-    adjacency: dict[str, list[str]] = {n_id: [] for n_id in node_ids}
-
-    for edge in edges:
-        if edge.src in adjacency and edge.dst in incoming:
-            adjacency[edge.src].append(edge.dst)
-            incoming[edge.dst] += 1
-
-    if order_map is None:
-        order_map = _build_order_map(node_ids, edges)
-
-    layers: list[list[str]] = []
-    visited: set[str] = set()
-
-    while True:
-        layer = [
-            n_id for n_id in node_ids if incoming[n_id] == 0 and n_id not in visited
-        ]
-        if not layer:
-            break
-        layer.sort(key=lambda n_id: order_map.get(n_id, 0))
-        layers.append(layer)
-        for n_id in layer:
-            visited.add(n_id)
-            for dst in adjacency.get(n_id, []):
-                incoming[dst] -= 1
-
-    remaining = [n_id for n_id in node_ids if n_id not in visited]
-    if remaining:
-        remaining.sort(key=lambda n_id: order_map.get(n_id, 0))
-        layers.append(remaining)
-
-    return layers
-
-
 def _optimize_layer_order(
     layers: list[list[str]],
     edges: list[GraphEdge],

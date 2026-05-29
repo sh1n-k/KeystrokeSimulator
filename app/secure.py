@@ -34,8 +34,10 @@ class MainAppLike(Protocol):
     def on_closing(self) -> None: ...
 
 
-def _request_url(value: str | None) -> str:
-    return cast(str, value)
+def _request_url(value: str | None, name: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    raise ValueError(f"{name} is not configured")
 
 
 class Config:
@@ -60,9 +62,13 @@ class AuthService:
             "appVersion": Config.APP_VERSION,
         }
         try:
-            response = requests.post(
-                _request_url(Config.AUTH_URL), json=payload, timeout=5
-            )
+            auth_url = _request_url(Config.AUTH_URL, "AUTH_URL")
+        except ValueError as e:
+            logger.error(f"Authentication configuration error for user {user_id}: {e}")
+            raise Exception(str(e)) from e
+
+        try:
+            response = requests.post(auth_url, json=payload, timeout=5)
             response.raise_for_status()
             response_data = response.json()
             if not isinstance(response_data, dict):
@@ -102,11 +108,15 @@ class AuthService:
             "appVersion": Config.APP_VERSION,
         }
         try:
-            response = requests.post(
-                _request_url(Config.VALIDATE_URL),
-                json=payload,
-                timeout=5,
+            validate_url = _request_url(Config.VALIDATE_URL, "VALIDATE_URL")
+        except ValueError as e:
+            logger.error(
+                f"Session validation configuration error for user '{user_id}': {e}"
             )
+            return False
+
+        try:
+            response = requests.post(validate_url, json=payload, timeout=5)
             response.raise_for_status()
             return True
         except requests.HTTPError as e:

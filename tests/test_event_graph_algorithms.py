@@ -10,7 +10,6 @@ from app.ui.event_graph import (
     _assign_levels,
     _build_components,
     _build_graph,
-    _build_layers,
     _bezier_point,
     _bezier_tangent,
     _calc_control_point,
@@ -261,44 +260,6 @@ class TestBuildComponents(unittest.TestCase):
         components = _build_components(["A"], [])
         self.assertEqual(len(components), 1)
         self.assertEqual(components[0], ["A"])
-
-
-class TestBuildLayers(unittest.TestCase):
-    """_build_layers: 위상 정렬 기반 레이어 생성"""
-
-    def test_linear_chain(self):
-        """A → B → C: 3개 레이어"""
-        nodes = [_make_node("A"), _make_node("B"), _make_node("C")]
-        edges = [
-            GraphEdge(src="A", dst="B", state=True),
-            GraphEdge(src="B", dst="C", state=True),
-        ]
-        layers = _build_layers(nodes, edges)
-        self.assertEqual(len(layers), 3)
-        self.assertIn("A", layers[0])
-        self.assertIn("B", layers[1])
-        self.assertIn("C", layers[2])
-
-    def test_no_edges_single_layer(self):
-        """엣지 없으면 모두 같은 레이어"""
-        nodes = [_make_node("A"), _make_node("B"), _make_node("C")]
-        layers = _build_layers(nodes, [])
-        self.assertEqual(len(layers), 1)
-        self.assertEqual(sorted(layers[0]), ["A", "B", "C"])
-
-    def test_cycle_nodes_in_final_layer(self):
-        """순환 노드는 마지막 레이어에 배치"""
-        nodes = [_make_node("A"), _make_node("B")]
-        edges = [
-            GraphEdge(src="A", dst="B", state=True),
-            GraphEdge(src="B", dst="A", state=True),
-        ]
-        layers = _build_layers(nodes, edges)
-        # 순환이므로 incoming이 0인 노드가 없음 → remaining으로 처리
-        self.assertGreaterEqual(len(layers), 1)
-        all_nodes = [n for layer in layers for n in layer]
-        self.assertIn("A", all_nodes)
-        self.assertIn("B", all_nodes)
 
 
 class TestOptimizeLayerOrder(unittest.TestCase):

@@ -304,6 +304,8 @@ class KeystrokeProcessor:
             }
 
             if evt_data["mode"] == "region":
+                if e.held_screenshot is None:
+                    continue
                 r_size = e.region_size
                 w, h = r_size if r_size else (20, 20)
                 evt_data["region_w"], evt_data["region_h"] = w, h
@@ -344,6 +346,8 @@ class KeystrokeProcessor:
                             }
                             for px, py in pts
                         ]
+                if "check_points" not in evt_data:
+                    continue
             else:
                 if e.ref_pixel_value is None:
                     continue
@@ -699,12 +703,15 @@ class KeystrokeProcessor:
         evaluated = False
         try:
             if evt["mode"] == "region":
+                check_points = evt.get("check_points")
+                if not check_points:
+                    return False
                 roi = self._extract_roi(img, evt, is_independent)
                 if roi is None:
                     return False
 
                 # 체크포인트 검증
-                for pt in evt.get("check_points", []):
+                for pt in check_points:
                     px, py = pt["pos"]
                     if py >= roi.shape[0] or px >= roi.shape[1]:
                         continue

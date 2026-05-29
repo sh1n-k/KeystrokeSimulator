@@ -565,6 +565,35 @@ class TestMainUiState(unittest.TestCase):
         self.assertEqual(snapshot["badge_text"], "Check Events")
         self.assertIn("captured coordinates", snapshot["title"])
 
+    @patch("app.ui.simulator_app.PermissionUtils.missing_macos_permissions", return_value=[])
+    @patch("app.ui.simulator_app.load_profile")
+    def test_readiness_snapshot_blocks_region_without_reference_image(
+        self, mock_load_profile, _mock_permissions
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+        mock_load_profile.return_value = ProfileModel(
+            name="Quick",
+            event_list=[
+                EventModel(
+                    event_name="MissingReference",
+                    key_to_enter="A",
+                    latest_position=(10, 10),
+                    clicked_position=(10, 10),
+                    match_mode="region",
+                    region_size=(20, 20),
+                    held_screenshot=None,
+                )
+            ],
+        )
+
+        snapshot = KeystrokeSimulatorApp._get_readiness_snapshot(app)
+
+        self.assertFalse(snapshot["can_start"])
+        self.assertEqual(snapshot["badge_text"], "Check Events")
+        self.assertIn("reference data", snapshot["title"])
+
 
 class TestRuntimeEditGuards(unittest.TestCase):
     @patch("app.ui.simulator_app.KeystrokeQuickEventEditor")

@@ -114,6 +114,11 @@ import requests  # noqa: E402
 class TestAuthServiceRequestAuthentication(unittest.TestCase):
     def setUp(self):
         self.svc = AuthService()
+        self.auth_url_patcher = patch.object(
+            Config, "AUTH_URL", "http://example.invalid/auth"
+        )
+        self.auth_url_patcher.start()
+        self.addCleanup(self.auth_url_patcher.stop)
 
     def test_auth_service_request_success(self):
         mock_resp = MagicMock()
@@ -121,6 +126,14 @@ class TestAuthServiceRequestAuthentication(unittest.TestCase):
         with patch("app.secure.requests.post", return_value=mock_resp):
             result = self.svc.request_authentication("user1")
         self.assertEqual(result["sessionToken"], "tok123")
+
+    def test_auth_service_rejects_non_object_response(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = []
+        with patch("app.secure.requests.post", return_value=mock_resp):
+            with self.assertRaises(ValueError) as ctx:
+                self.svc.request_authentication("user1")
+        self.assertIn("Authentication response must be an object", str(ctx.exception))
 
     def test_auth_service_http_error(self):
         http_err = requests.HTTPError()
@@ -145,6 +158,12 @@ class TestAuthServiceRequestAuthentication(unittest.TestCase):
                 self.svc.request_authentication("user1")
         self.assertIn("Network connection failed", str(ctx.exception))
 
+    def test_auth_service_missing_url_raises_clear_error(self):
+        with patch.object(Config, "AUTH_URL", None):
+            with self.assertRaises(Exception) as ctx:
+                self.svc.request_authentication("user1")
+        self.assertIn("AUTH_URL is not configured", str(ctx.exception))
+
 
 # ---------------------------------------------------------------------------
 # AuthService.validate_session_token tests
@@ -154,6 +173,11 @@ class TestValidateSessionToken(unittest.TestCase):
     def setUp(self):
         self.svc = AuthService()
         self.svc.session_token = "tok123"
+        self.validate_url_patcher = patch.object(
+            Config, "VALIDATE_URL", "http://example.invalid/validate"
+        )
+        self.validate_url_patcher.start()
+        self.addCleanup(self.validate_url_patcher.stop)
 
     def test_validate_session_true_on_success(self):
         mock_resp = MagicMock()
@@ -170,6 +194,11 @@ class TestValidateSessionToken(unittest.TestCase):
         mock_resp.raise_for_status.side_effect = http_err
 
         with patch("app.secure.requests.post", return_value=mock_resp):
+            result = self.svc.validate_session_token("user1")
+        self.assertFalse(result)
+
+    def test_validate_session_missing_url_returns_false(self):
+        with patch.object(Config, "VALIDATE_URL", None):
             result = self.svc.validate_session_token("user1")
         self.assertFalse(result)
 

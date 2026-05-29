@@ -270,12 +270,17 @@ class TestRegionCheckpointGeneration(unittest.TestCase):
                 err_msg=f"color mismatch at ({px},{py})"
             )
 
-    def test_no_held_screenshot_no_checkpoints(self):
-        """held_screenshot=None이면 check_points 키가 없음"""
+    def test_no_held_screenshot_skips_region_event(self):
+        """held_screenshot=None이면 region 이벤트를 실행 데이터에서 제외"""
         e = _make_region_event(200, 200, 30, 30, held_screenshot=None)
         events = self.proc._init_event_data([e])
-        self.assertEqual(len(events), 1)
-        self.assertNotIn("check_points", events[0])
+        self.assertEqual(events, [])
+
+    def test_empty_region_reference_skips_region_event(self):
+        """좌표 손상으로 체크포인트를 만들 수 없으면 실행 데이터에서 제외"""
+        e = _make_region_event(20, 20, 10, 10, clicked_position=(200, 200))
+        events = self.proc._init_event_data([e])
+        self.assertEqual(events, [])
 
     def test_asymmetric_roi_within_bounds(self):
         """직사각형(비정방) ROI에서도 모든 좌표가 유효"""

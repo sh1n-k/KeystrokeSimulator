@@ -51,7 +51,6 @@ ProfileFingerprint: TypeAlias = tuple[object, ...]
 ClickAction: TypeAlias = Literal["open", "copy", "remove"]
 SortKey: TypeAlias = Callable[[EventModel], tuple[object, ...]]
 KeySortOrder: TypeAlias = tuple[int, int, str]
-EventProvider: TypeAlias = Callable[[], EventModel | None]
 
 
 class SaveCallback(Protocol):

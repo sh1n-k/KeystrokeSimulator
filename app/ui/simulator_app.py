@@ -1015,6 +1015,8 @@ class KeystrokeSimulatorApp(tk.Tk):
                 evt.ref_pixel_value is None or len(evt.ref_pixel_value) < 3
             ):
                 continue
+            if mode == "region" and evt.held_screenshot is None:
+                continue
             ready.append(evt)
         return ready
 

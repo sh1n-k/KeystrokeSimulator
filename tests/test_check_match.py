@@ -141,6 +141,19 @@ class TestCheckMatchRegionMode(unittest.TestCase):
         }
         self.assertFalse(self.proc._check_match(img, evt, is_independent=False))
 
+    def test_region_without_checkpoints_returns_false(self):
+        """체크포인트가 없으면 빈 루프로 매칭하지 않음"""
+        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        evt = {
+            "mode": "region",
+            "rel_x": 5,
+            "rel_y": 5,
+            "region_w": 4,
+            "region_h": 4,
+            "invert": False,
+        }
+        self.assertFalse(self.proc._check_match(img, evt, is_independent=False))
+
     def test_region_invert_all_match_becomes_false(self):
         """invert=True + 모든 체크포인트 일치 → False"""
         img = np.zeros((10, 10, 3), dtype=np.uint8)
@@ -189,8 +202,8 @@ class TestCheckMatchRegionMode(unittest.TestCase):
         }
         self.assertFalse(self.proc._check_match(img, evt, is_independent=False))
 
-    def test_region_no_checkpoints_matches(self):
-        """체크포인트가 비어 있으면 for-else에 의해 True"""
+    def test_region_empty_checkpoints_returns_false(self):
+        """체크포인트가 비어 있으면 매칭하지 않음"""
         img = np.zeros((10, 10, 3), dtype=np.uint8)
         evt = {
             "mode": "region",
@@ -201,7 +214,7 @@ class TestCheckMatchRegionMode(unittest.TestCase):
             "invert": False,
             "check_points": [],
         }
-        self.assertTrue(self.proc._check_match(img, evt, is_independent=False))
+        self.assertFalse(self.proc._check_match(img, evt, is_independent=False))
 
 
 if __name__ == "__main__":
