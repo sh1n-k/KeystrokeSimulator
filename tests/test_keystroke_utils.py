@@ -1,9 +1,11 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.core.models import EventModel, ProfileModel
+from app.utils import system
 from app.utils.system import KeyUtils, PermissionUtils, StateUtils
 from app.utils.runtime_toggle import (
     active_runtime_toggle_events,
@@ -113,6 +115,12 @@ class TestKeyUtils(unittest.TestCase):
 
 
 class TestPermissionUtils(unittest.TestCase):
+    def test_quartz_symbol_uses_module_attribute_lookup(self):
+        module = SimpleNamespace(CGPreflightScreenCaptureAccess=lambda: True)
+
+        with patch("app.utils.system._platform_module", return_value=module):
+            self.assertTrue(system._quartz_symbol("CGPreflightScreenCaptureAccess")())
+
     @patch("app.utils.system.IS_MAC", True)
     @patch(
         "app.utils.system.PermissionUtils.has_screen_capture_access", return_value=False

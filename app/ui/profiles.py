@@ -35,6 +35,12 @@ UI_PAD_SM = theme.SPACE_1
 UI_PAD_MD = theme.SPACE_2
 PROFILE_WINDOW_DEFAULT_GEOMETRY = "1280x720"
 PROFILE_WINDOW_MIN_SIZE = (1120, 680)
+EVENT_NAME_COL_WIDTH = 34
+EVENT_GROUP_COL_WIDTH = 10
+EVENT_KEY_COL_WIDTH = 8
+EVENT_COND_COL_WIDTH = 6
+EVENT_EXTRA_COL_WIDTH = 7
+EVENT_ACTIONS_COL_WIDTH = 18
 
 BADGE_BG_INFO = theme.STATUS_INFO_BG
 BADGE_FG_INFO = theme.STATUS_INFO_FG
@@ -766,102 +772,97 @@ class EventRow(ttk.Frame):
         self._bound_event_id = id(event) if event else None
         self.btn_delete: ttk.Button | None = None
 
-        # Two-line cell: left color bar | (header row + meta row).
+        # Compact one-line cell:
+        # left color bar | index | use | name | group | key/condition | extra | actions.
         self.color_bar = tk.Frame(self, bg=theme.SIGNAL_BASE, width=4)
         self.color_bar.pack(side=tk.LEFT, fill="y", padx=(0, UI_PAD_SM))
         self.color_bar.pack_propagate(False)
 
-        cell_body = ttk.Frame(self)
-        cell_body.pack(side=tk.LEFT, fill="x", expand=True)
+        row_body = ttk.Frame(self)
+        row_body.pack(side=tk.LEFT, fill="x", expand=True)
+        for col, weight in [(2, 1)]:
+            row_body.grid_columnconfigure(col, weight=weight)
 
-        # ------------------------------------------------------------------
-        # Header row: index · use check · name entry · action buttons.
-        # ------------------------------------------------------------------
-        header = ttk.Frame(cell_body)
-        header.pack(fill="x")
-
-        ttk.Label(header, text=str(row_num + 1), width=2, anchor="center").pack(
-            side=tk.LEFT
+        self.lbl_index = ttk.Label(
+            row_body, text=str(row_num + 1), width=2, anchor="center"
         )
+        self.lbl_index.grid(row=0, column=0, sticky="ew", padx=(0, UI_PAD_XS))
         ttk.Checkbutton(
-            header, variable=self.use_var, command=self._on_toggle_use
-        ).pack(side=tk.LEFT)
+            row_body, variable=self.use_var, command=self._on_toggle_use
+        ).grid(row=0, column=1, sticky="w", padx=(0, UI_PAD_XS))
 
-        self.entry = ttk.Entry(header)
-        self.entry.pack(
-            side=tk.LEFT, padx=(UI_PAD_SM, UI_PAD_SM), fill=tk.X, expand=True
-        )
+        self.entry = ttk.Entry(row_body, width=EVENT_NAME_COL_WIDTH)
+        self.entry.grid(row=0, column=2, sticky="ew", padx=(0, UI_PAD_SM))
         if event:
             self.entry.insert(0, event.event_name or "")
 
-        # Action buttons live at the end of the header row.
-        button_specs: tuple[tuple[str, str, ClickAction, int], ...] = (
-            ("Edit", "편집", "open", 7),
-            ("Copy", "복사", "copy", 7),
-            ("🗑 Delete", "🗑 삭제", "remove", 9),
-        )
-        for en, ko, key, min_width in button_specs:
-            btn = ttk.Button(
-                header,
-                text=txt(en, ko),
-                width=dual_text_width(en, ko, padding=2, min_width=min_width),
-                command=lambda k=key: self._on_click(k),
-            )
-            btn.pack(side=tk.LEFT, padx=UI_PAD_XS)
-            btn.bind("<Button-3>", self._on_context_menu)
-            if key == "remove":
-                self.btn_delete = btn
-
-        # ------------------------------------------------------------------
-        # Meta row: group · key · condition badge · runtime-toggle chip.
-        # ------------------------------------------------------------------
-        meta = ttk.Frame(cell_body)
-        meta.pack(fill="x", pady=(theme.SPACE_1, 0))
-
         self.lbl_grp = ttk.Label(
-            meta,
+            row_body,
             text="",
-            width=14,
+            width=EVENT_GROUP_COL_WIDTH,
             anchor="center",
             relief="sunken",
             cursor="hand2",
             padding=(theme.SPACE_1, 0),
         )
-        self.lbl_grp.pack(side=tk.LEFT, padx=(theme.SPACE_2, theme.SPACE_1))
+        self.lbl_grp.grid(row=0, column=3, sticky="ew", padx=(0, theme.SPACE_1))
         self.lbl_grp.bind("<Button-1>", self._on_group_click)
         self._tip_grp = ToolTip(self.lbl_grp)
 
         self.lbl_key = ttk.Label(
-            meta,
+            row_body,
             text="",
-            width=12,
+            width=EVENT_KEY_COL_WIDTH,
             anchor="center",
             relief="groove",
             padding=(theme.SPACE_1, 0),
         )
-        self.lbl_key.pack(side=tk.LEFT, padx=(0, theme.SPACE_1))
+        self.lbl_key.grid(row=0, column=4, sticky="ew", padx=(0, theme.SPACE_1))
         self.lbl_key.bind("<Button-1>", self._on_open_click)
         self._tip_key = ToolTip(self.lbl_key)
 
-        self.lbl_cond = ttk.Label(meta, text="", width=9, anchor="center")
-        self.lbl_cond.pack(side=tk.LEFT, padx=(0, theme.SPACE_1))
+        self.lbl_cond = ttk.Label(
+            row_body, text="", width=EVENT_COND_COL_WIDTH, anchor="center"
+        )
+        self.lbl_cond.grid(row=0, column=5, sticky="ew", padx=(0, theme.SPACE_1))
         self._tip_cond = ToolTip(self.lbl_cond)
 
         self.chk_runtime_toggle = ttk.Checkbutton(
-            meta,
+            row_body,
             text=txt("Extra", "추가"),
             variable=self.runtime_toggle_var,
             command=self._on_toggle_runtime_member,
         )
-        self.chk_runtime_toggle.pack(side=tk.LEFT, padx=(0, theme.SPACE_1))
+        self.chk_runtime_toggle.grid(
+            row=0, column=6, sticky="w", padx=(0, theme.SPACE_1)
+        )
         self._tip_runtime_toggle = ToolTip(self.chk_runtime_toggle)
+
+        actions_frame = ttk.Frame(row_body)
+        actions_frame.grid(row=0, column=7, sticky="e")
+        button_specs: tuple[tuple[str, str, ClickAction, int], ...] = (
+            ("Edit", "편집", "open", 5),
+            ("Copy", "복사", "copy", 5),
+            ("Del", "삭제", "remove", 5),
+        )
+        for col, (en, ko, key, min_width) in enumerate(button_specs):
+            btn = ttk.Button(
+                actions_frame,
+                text=txt(en, ko),
+                width=dual_text_width(en, ko, padding=1, min_width=min_width),
+                command=lambda k=key: self._on_click(k),
+            )
+            btn.grid(row=0, column=col, padx=(UI_PAD_XS, 0), sticky="ew")
+            btn.bind("<Button-3>", self._on_context_menu)
+            if key == "remove":
+                self.btn_delete = btn
 
         # Context Menu Binding
         self.entry.bind("<Button-3>", self._on_context_menu)
         self.entry.bind("<KeyRelease>", self._on_name_changed)
         self.entry.bind("<FocusOut>", self._on_name_changed)
         self.entry.bind("<FocusIn>", self._on_select)
-        for widget in (self, self.color_bar, cell_body, header, meta, self.lbl_cond):
+        for widget in (self, self.color_bar, row_body, self.lbl_cond):
             widget.bind("<Button-1>", self._on_select, add="+")
 
         # Initial Display
@@ -932,7 +933,7 @@ class EventRow(ttk.Frame):
 
         # Group — SOT icon vocabulary prefixes the group glyph (▣).
         grp = self.event.group_id or ""
-        grp_text = grp if grp else txt("No Group", "그룹 없음")
+        grp_text = grp if grp else txt("None", "없음")
         self.lbl_grp.config(text=f"▣ {grp_text}")
         self._tip_grp.update_text(
             txt(
@@ -951,7 +952,7 @@ class EventRow(ttk.Frame):
         key = self.event.key_to_enter or ""
         invert = getattr(self.event, "invert_match", False)
         if is_cond:
-            display = txt("◐ Condition", "◐ 조건용")
+            display = txt("◐ Cond", "◐ 조건")
         else:
             key_text = key if key else txt("None", "없음")
             display = f"⌨ {key_text}"
@@ -1100,6 +1101,8 @@ class EventListFrame(ttk.Frame):
         self.graph_viewer: ProfileGraphViewer | None = None
         self.empty_state_frame: Optional[ttk.LabelFrame] = None
         self.add_event_label = txt("➕ Add Event", "➕ 이벤트 추가")
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(3, weight=1)
 
         # --- Control Buttons ---
         f_ctrl = ttk.Frame(self)
@@ -1223,6 +1226,7 @@ class EventListFrame(ttk.Frame):
         )
 
         self._create_header()
+        self._create_scroll_area()
         self._load_events()
 
     def _get_existing_groups(self) -> list[str]:
@@ -1490,12 +1494,7 @@ class EventListFrame(ttk.Frame):
             )
 
     def _create_header(self) -> None:
-        """2-라인 셀에 맞춘 가벼운 헤더 + 분리선.
-
-        새 EventRow는 좌측 컬러바 + 상단(인덱스/사용/이름/액션) +
-        하단(그룹/키/조건/추가) 두 줄로 구성된다. 헤더는 상단 줄에
-        대응되는 가이드만 한 줄로 표시한다.
-        """
+        """Compact row header aligned to EventRow's fixed grid columns."""
         header = ttk.Frame(self)
         header.grid(
             row=2,
@@ -1505,48 +1504,142 @@ class EventListFrame(ttk.Frame):
             pady=(UI_PAD_SM, 0),
             sticky="ew",
         )
+        tk.Frame(header, width=4).pack(side=tk.LEFT, fill="y", padx=(0, UI_PAD_SM))
+        header_body = ttk.Frame(header)
+        header_body.pack(side=tk.LEFT, fill="x", expand=True)
+        header_body.grid_columnconfigure(2, weight=1)
 
-        # leading spacers to align with the cell's color bar + index/check
-        ttk.Label(header, text="", width=2).pack(side=tk.LEFT)
+        ttk.Label(header_body, text="", width=2).grid(row=0, column=0, sticky="ew")
         lbl_use = ttk.Label(
-            header,
+            header_body,
             text=txt("Use", "사용"),
-            width=4,
+            width=5,
             anchor="center",
         )
-        lbl_use.pack(side=tk.LEFT)
+        lbl_use.grid(row=0, column=1, sticky="ew")
         ToolTip(
             lbl_use,
             txt("Uncheck to skip this event.", "체크 해제 시 이벤트를 건너뜁니다"),
         )
 
         lbl_name = ttk.Label(
-            header,
+            header_body,
             text=txt("Event", "이벤트"),
             anchor="w",
+            width=EVENT_NAME_COL_WIDTH,
         )
-        lbl_name.pack(side=tk.LEFT, padx=(UI_PAD_SM, UI_PAD_SM), fill=tk.X, expand=True)
+        lbl_name.grid(row=0, column=2, sticky="ew", padx=(0, UI_PAD_SM))
         ToolTip(
             lbl_name,
             txt(
-                "Top: event name. Bottom: ▣ group · ⌨ key · ◐ condition · + extra.",
-                "윗줄: 이벤트 이름. 아랫줄: ▣ 그룹 · ⌨ 입력 키 · ◐ 조건 · + 추가",
+                "Event name, group, input key or condition marker, and extra toggle.",
+                "이벤트 이름, 그룹, 입력 키 또는 조건 표시, 실행 중 추가 토글입니다.",
             ),
         )
+        ttk.Label(
+            header_body,
+            text=txt("Group", "그룹"),
+            width=EVENT_GROUP_COL_WIDTH,
+            anchor="center",
+        ).grid(row=0, column=3, sticky="ew", padx=(0, theme.SPACE_1))
+        ttk.Label(
+            header_body,
+            text=txt("Key", "키"),
+            width=EVENT_KEY_COL_WIDTH,
+            anchor="center",
+        ).grid(row=0, column=4, sticky="ew", padx=(0, theme.SPACE_1))
+        ttk.Label(
+            header_body,
+            text=txt("Cond", "조건"),
+            width=EVENT_COND_COL_WIDTH,
+            anchor="center",
+        ).grid(row=0, column=5, sticky="ew", padx=(0, theme.SPACE_1))
+        ttk.Label(
+            header_body,
+            text=txt("Extra", "추가"),
+            width=EVENT_EXTRA_COL_WIDTH,
+            anchor="center",
+        ).grid(row=0, column=6, sticky="ew", padx=(0, theme.SPACE_1))
 
         lbl_actions = ttk.Label(
-            header,
+            header_body,
             text=txt("Actions", "동작"),
-            width=22,
+            width=EVENT_ACTIONS_COL_WIDTH,
             anchor="center",
         )
-        lbl_actions.pack(side=tk.LEFT)
+        lbl_actions.grid(row=0, column=7, sticky="ew")
         ToolTip(lbl_actions, txt("Edit / Copy / Delete", "편집 / 복사 / 삭제"))
 
         # 구분선
         ttk.Separator(self, orient="horizontal").grid(
             row=2, column=0, columnspan=2, sticky="ew", pady=(20, 0), padx=UI_PAD_MD
         )
+
+    def _create_scroll_area(self) -> None:
+        self.event_canvas = tk.Canvas(
+            self,
+            borderwidth=0,
+            highlightthickness=0,
+            background=theme.SURFACE_PAPER,
+        )
+        self.event_canvas.grid(
+            row=3,
+            column=0,
+            padx=(UI_PAD_MD, 0),
+            pady=(UI_PAD_XS, 0),
+            sticky="nsew",
+        )
+        self.event_scrollbar = ttk.Scrollbar(
+            self,
+            orient="vertical",
+            command=cast(Any, self.event_canvas).yview,
+        )
+        self.event_scrollbar.grid(
+            row=3,
+            column=1,
+            padx=(UI_PAD_SM, UI_PAD_MD),
+            pady=(UI_PAD_XS, 0),
+            sticky="ns",
+        )
+        self.event_canvas.configure(yscrollcommand=self.event_scrollbar.set)
+        self.event_rows_frame = ttk.Frame(self.event_canvas)
+        self.event_rows_window = cast(Any, self.event_canvas).create_window(
+            (0, 0), window=self.event_rows_frame, anchor="nw"
+        )
+        self.event_rows_frame.grid_columnconfigure(0, weight=1)
+        self.event_rows_frame.bind("<Configure>", self._on_rows_frame_configure)
+        self.event_canvas.bind("<Configure>", self._on_event_canvas_configure)
+        self._bind_scroll_events(self.event_canvas)
+        self._bind_scroll_events(self.event_rows_frame)
+
+    def _on_rows_frame_configure(self, _event: tk.Event[tk.Misc]) -> None:
+        self.event_canvas.configure(
+            scrollregion=cast(Any, self.event_canvas).bbox("all")
+        )
+
+    def _on_event_canvas_configure(self, event: tk.Event[tk.Misc]) -> None:
+        cast(Any, self.event_canvas).itemconfigure(
+            self.event_rows_window, width=event.width
+        )
+
+    def _bind_scroll_events(self, widget: tk.Misc) -> None:
+        widget.bind("<MouseWheel>", self._on_event_mousewheel, add="+")
+        widget.bind("<Button-4>", self._on_event_mousewheel, add="+")
+        widget.bind("<Button-5>", self._on_event_mousewheel, add="+")
+        for child in widget.winfo_children():
+            self._bind_scroll_events(child)
+
+    def _on_event_mousewheel(self, event: tk.Event[tk.Misc]) -> str:
+        event_obj = cast(Any, event)
+        if getattr(event_obj, "num", None) == 4:
+            step = -1
+        elif getattr(event_obj, "num", None) == 5:
+            step = 1
+        else:
+            delta = getattr(event_obj, "delta", 0)
+            step = -1 if delta > 0 else 1
+        self.event_canvas.yview_scroll(step, "units")
+        return "break"
 
     def _load_events(self) -> None:
         for i, evt in enumerate(self.profile.event_list):
@@ -1563,13 +1656,12 @@ class EventListFrame(ttk.Frame):
 
         if not self.empty_state_frame or not self.empty_state_frame.winfo_exists():
             self.empty_state_frame = ttk.LabelFrame(
-                self, text=txt("Getting Started", "처음 시작 가이드")
+                self.event_rows_frame, text=txt("Getting Started", "처음 시작 가이드")
             )
             self.empty_state_frame.grid(
-                row=3,
+                row=0,
                 column=0,
-                columnspan=2,
-                padx=UI_PAD_MD,
+                padx=0,
                 pady=(UI_PAD_MD, UI_PAD_SM),
                 sticky="ew",
             )
@@ -1638,15 +1730,15 @@ class EventListFrame(ttk.Frame):
             "save": save_without_name_check,  # 추가
             "select": self._select_event,
         }
-        row = EventRow(self, idx, event, cbs)
+        row = EventRow(self.event_rows_frame, idx, event, cbs)
         row.grid(
-            row=idx + 3,
+            row=idx,
             column=0,
-            columnspan=2,
-            padx=UI_PAD_MD,
-            pady=(UI_PAD_XS, 1),
+            padx=0,
+            pady=(0, UI_PAD_XS),
             sticky="ew",
         )
+        self._bind_scroll_events(row)
         self.rows.append(row)
 
     def _select_event(self, event: EventModel) -> None:
@@ -1793,22 +1885,13 @@ class EventListFrame(ttk.Frame):
         """모든 행의 인덱스 라벨 업데이트"""
         for i, row in enumerate(self.rows):
             row.grid(
-                row=i + 3,
+                row=i,
                 column=0,
-                columnspan=2,
-                padx=UI_PAD_MD,
-                pady=(UI_PAD_XS, 1),
+                padx=0,
+                pady=(0, UI_PAD_XS),
                 sticky="ew",
             )
-            # Index 라벨 업데이트
-            for child in row.winfo_children():
-                if isinstance(child, ttk.Label):
-                    try:
-                        int(child.cget("text"))
-                        child.config(text=str(i + 1))
-                        break
-                    except (ValueError, tk.TclError):
-                        continue
+            row.lbl_index.config(text=str(i + 1))
 
     def _update_delete_buttons(self) -> None:
         can_delete = len(self.profile.event_list) > 1

@@ -3,6 +3,7 @@ import os
 import platform
 import ast
 import sys
+import subprocess
 import threading
 import ctypes
 import importlib
@@ -43,7 +44,7 @@ def _windows_windll() -> Any:
 
 
 def _quartz_symbol(name: str) -> Any:
-    return _platform_module("Quartz").__dict__[name]
+    return getattr(_platform_module("Quartz"), name)
 
 
 def _log_unhandled_exception(
@@ -456,6 +457,17 @@ class StateUtils:
 
 
 class PermissionUtils:
+    _MACOS_PERMISSION_SETTING_URLS: ClassVar[dict[str, str]] = {
+        "screen": (
+            "x-apple.systempreferences:"
+            "com.apple.preference.security?Privacy_ScreenCapture"
+        ),
+        "accessibility": (
+            "x-apple.systempreferences:"
+            "com.apple.preference.security?Privacy_Accessibility"
+        ),
+    }
+
     @staticmethod
     def has_screen_capture_access() -> bool:
         if not IS_MAC:
@@ -486,6 +498,22 @@ class PermissionUtils:
         if not PermissionUtils.has_accessibility_access():
             missing.append("accessibility")
         return missing
+
+    @staticmethod
+    def open_macos_permission_settings(permission: str) -> bool:
+        if not IS_MAC:
+            return False
+
+        url = PermissionUtils._MACOS_PERMISSION_SETTING_URLS.get(permission)
+        if url is None:
+            return False
+
+        try:
+            subprocess.Popen(["open", url])
+        except OSError as exc:
+            logger.warning(f"Failed to open macOS permission settings: {exc}")
+            return False
+        return True
 
 
 class ProcessCollector:

@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from tkinter import font as tkfont
 from tkinter import ttk, messagebox
-from typing import Any, ParamSpec, Protocol, TypedDict, TypeVar, cast
+from typing import Any, NotRequired, ParamSpec, Protocol, TypedDict, TypeVar, cast
 
 from loguru import logger
 import pynput.keyboard
@@ -89,6 +89,7 @@ class ReadinessSnapshot(TypedDict):
     detail: str
     bg: str
     fg: str
+    missing_permissions: NotRequired[list[str]]
 
 
 class InputListener(Protocol):
@@ -613,6 +614,22 @@ class KeystrokeSimulatorApp(tk.Tk):
             font=f["caption"],
         )
         self.lbl_hotkey_hint.pack(anchor="w", pady=(theme.SPACE_2, 0))
+        self.permission_actions_frame: tk.Frame = tk.Frame(
+            status_stack, bg=theme.SURFACE_CANVAS
+        )
+        self.btn_open_screen_permission: tk.Button = tk.Button(
+            self.permission_actions_frame,
+            command=lambda: self._open_macos_permission_setting("screen"),
+        )
+        self.btn_open_accessibility_permission: tk.Button = tk.Button(
+            self.permission_actions_frame,
+            command=lambda: self._open_macos_permission_setting("accessibility"),
+        )
+        for btn in (
+            self.btn_open_screen_permission,
+            self.btn_open_accessibility_permission,
+        ):
+            self._apply_outline_button(btn)
 
         # TOOLS card ------------------------------------------------------
         self.tools_card, tools_body = self._make_card(
@@ -885,6 +902,14 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.profile_button_frame.refresh_texts()
         if hasattr(self, "lbl_hotkey_hint"):
             self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
+        if hasattr(self, "btn_open_screen_permission"):
+            self.btn_open_screen_permission.config(
+                text=txt("Open Screen Recording Settings", "화면 기록 설정 열기")
+            )
+        if hasattr(self, "btn_open_accessibility_permission"):
+            self.btn_open_accessibility_permission.config(
+                text=txt("Open Accessibility Settings", "손쉬운 사용 설정 열기")
+            )
         if hasattr(self, "lbl_status_badge"):
             self._update_main_status()
         if hasattr(self, "lbl_app_subtitle"):
@@ -1213,6 +1238,7 @@ class KeystrokeSimulatorApp(tk.Tk):
                 ),
                 "bg": STATUS_BG_ERR,
                 "fg": STATUS_FG_ERR,
+                "missing_permissions": missing_permissions,
             }
 
         processor_ready_count = len(self._events_with_processor_inputs(runnable_events))
@@ -1272,8 +1298,43 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.lbl_status_title.config(text=snapshot["title"])
         self.lbl_status_detail.config(text=snapshot["detail"])
         self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
+        self._update_permission_actions(
+            [] if running else snapshot.get("missing_permissions", [])
+        )
         if hasattr(self, "lbl_run_status"):
             self.lbl_run_status.config(text=self._run_dock_text(snapshot, running))
+
+    def _update_permission_actions(self, missing_permissions: list[str]) -> None:
+        if not hasattr(self, "permission_actions_frame"):
+            return
+
+        buttons = {
+            "screen": self.btn_open_screen_permission,
+            "accessibility": self.btn_open_accessibility_permission,
+        }
+        visible = [
+            permission for permission in buttons if permission in missing_permissions
+        ]
+        if not visible:
+            self.permission_actions_frame.pack_forget()
+            return
+
+        self.permission_actions_frame.pack(anchor="w", pady=(theme.SPACE_2, 0))
+        for btn in buttons.values():
+            btn.grid_forget()
+        for col, permission in enumerate(visible):
+            buttons[permission].grid(row=0, column=col, padx=(0, theme.SPACE_2))
+
+    def _open_macos_permission_setting(self, permission: str) -> None:
+        if PermissionUtils.open_macos_permission_settings(permission):
+            return
+        messagebox.showinfo(
+            txt("Open Settings", "설정 열기"),
+            txt(
+                "Open macOS System Settings and grant this executable the required permission.",
+                "macOS 시스템 설정을 열어 이 실행 파일에 필요한 권한을 허용하세요.",
+            ),
+        )
 
     @staticmethod
     def _icon_for_status(bg: str, running: bool) -> str:

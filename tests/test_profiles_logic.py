@@ -470,7 +470,7 @@ class TestEventRowBadges(unittest.TestCase):
 
         self.assertEqual(row.lbl_cond.cget("text"), "◐ Cond")
         self.assertEqual(row.lbl_grp.cget("text"), "▣ G1")
-        self.assertEqual(row.lbl_key.cget("text"), "◐ Condition")
+        self.assertEqual(row.lbl_key.cget("text"), "◐ Cond")
         self.assertEqual(row.entry.cget("foreground"), "gray")
 
     def test_row_displays_invert_and_missing_key_badges(self):
