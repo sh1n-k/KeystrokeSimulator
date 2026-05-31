@@ -7,25 +7,94 @@ import random
 import re
 import threading
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from typing import NotRequired, Protocol, TypedDict, cast
 
-import numpy as np
 import mss
-from numpy.typing import NDArray
 from loguru import logger
+from mss.screenshot import ScreenShot
+from PIL import Image
 
 from app.core.models import EventModel, ModificationKeys, UserSettings
 from app.utils.system import KeyUtils, ProcessUtils
 
-ImageArray = NDArray[np.uint8]
+Pixel = tuple[int, int, int]
 Rect = dict[str, int]
 KeyAction = Callable[[int], None]
+ImageBytes = bytes | bytearray | memoryview
+
+
+@dataclass(frozen=True)
+class ImageFrame:
+    width: int
+    height: int
+    data: ImageBytes
+    row_stride: int
+    pixel_stride: int
+    offset: int = 0
+
+    @classmethod
+    def from_screenshot(cls, screenshot: ScreenShot) -> "ImageFrame":
+        return cls(
+            width=screenshot.width,
+            height=screenshot.height,
+            data=memoryview(screenshot.raw),
+            row_stride=screenshot.width * 4,
+            pixel_stride=4,
+        )
+
+    @classmethod
+    def from_rgb_image(cls, img: Image.Image) -> "ImageFrame":
+        rgb_img = img.convert("RGB")
+        return cls(
+            width=rgb_img.width,
+            height=rgb_img.height,
+            data=rgb_img.tobytes("raw", "BGR"),
+            row_stride=rgb_img.width * 3,
+            pixel_stride=3,
+        )
+
+    def crop(self, x: int, y: int, width: int, height: int) -> "ImageFrame":
+        return ImageFrame(
+            width=width,
+            height=height,
+            data=self.data,
+            row_stride=self.row_stride,
+            pixel_stride=self.pixel_stride,
+            offset=self.offset + y * self.row_stride + x * self.pixel_stride,
+        )
+
+    def pixel_bgr(self, x: int, y: int) -> Pixel:
+        idx = self.offset + y * self.row_stride + x * self.pixel_stride
+        return (
+            int(self.data[idx]),
+            int(self.data[idx + 1]),
+            int(self.data[idx + 2]),
+        )
+
+
+def _pixel_from_object(value: object) -> Pixel | None:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return None
+    sequence = cast(Sequence[object], value)
+    if len(sequence) < 3:
+        return None
+
+    channels: list[int] = []
+    for channel in sequence[:3]:
+        if not isinstance(channel, (int, float, str)):
+            return None
+        try:
+            channels.append(int(channel))
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return (channels[0], channels[1], channels[2])
 
 
 class CheckPoint(TypedDict):
     pos: tuple[int, int]
-    color: ImageArray
+    color: Pixel
 
 
 class EventData(TypedDict):
@@ -47,9 +116,9 @@ class EventData(TypedDict):
     region_h: int
     rel_x: int
     rel_y: int
-    ref_img: NotRequired[ImageArray]
+    ref_img: NotRequired[ImageFrame]
     check_points: NotRequired[list[CheckPoint]]
-    ref_bgr: NotRequired[ImageArray]
+    ref_bgr: NotRequired[Pixel]
     capture_rect: NotRequired[Rect]
 
 
@@ -311,19 +380,20 @@ class KeystrokeProcessor:
                 evt_data["region_w"], evt_data["region_h"] = w, h
 
                 if e.held_screenshot:
-                    full_img = np.array(e.held_screenshot.convert("RGB"))
+                    full_img = ImageFrame.from_rgb_image(e.held_screenshot)
                     cx, cy = clicked_position
                     y1, y2 = (
                         max(0, cy - h // 2),
-                        min(full_img.shape[0], cy + h // 2 + (h % 2)),
+                        min(full_img.height, cy + h // 2 + (h % 2)),
                     )
                     x1, x2 = (
                         max(0, cx - w // 2),
-                        min(full_img.shape[1], cx + w // 2 + (w % 2)),
+                        min(full_img.width, cx + w // 2 + (w % 2)),
                     )
-                    evt_data["ref_img"] = full_img[y1:y2, x1:x2][:, :, ::-1].copy()
+                    evt_data["ref_img"] = full_img.crop(x1, y1, x2 - x1, y2 - y1)
 
-                    rh, rw = evt_data["ref_img"].shape[:2]
+                    ref_img = evt_data["ref_img"]
+                    rh, rw = ref_img.height, ref_img.width
                     if rh > 0 and rw > 0:
                         # Target count (actual may be less after dedup for very small ROIs)
                         n = max(5, min(25, (rw * rh) // 100))
@@ -342,7 +412,7 @@ class KeystrokeProcessor:
                         evt_data["check_points"] = [
                             {
                                 "pos": (px, py),
-                                "color": cast(ImageArray, evt_data["ref_img"][py, px]),
+                                "color": ref_img.pixel_bgr(px, py),
                             }
                             for px, py in pts
                         ]
@@ -352,7 +422,11 @@ class KeystrokeProcessor:
                 if e.ref_pixel_value is None:
                     continue
                 ref_rgb = e.ref_pixel_value[:3]
-                evt_data["ref_bgr"] = np.array(ref_rgb[::-1], dtype=np.uint8)
+                evt_data["ref_bgr"] = (
+                    int(ref_rgb[2]),
+                    int(ref_rgb[1]),
+                    int(ref_rgb[0]),
+                )
 
             events_data.append(evt_data)
 
@@ -399,7 +473,7 @@ class KeystrokeProcessor:
                     cycle_started = time.perf_counter()
                     local_match_states: dict[str, bool] = {}
                     for group in self.main_capture_groups:
-                        img = cast(ImageArray, np.array(sct.grab(group["rect"])))
+                        img = ImageFrame.from_screenshot(sct.grab(group["rect"]))
                         local_match_states.update(
                             self._evaluate_capture_group(img, group["events"])
                         )
@@ -508,7 +582,7 @@ class KeystrokeProcessor:
             checkpoints = tuple(
                 (
                     tuple(pt.get("pos", (None, None))),
-                    tuple(int(v) for v in np.asarray(pt.get("color", []))[:3]),
+                    _pixel_from_object(pt.get("color")),
                 )
                 for pt in evt.get("check_points", [])
             )
@@ -520,9 +594,7 @@ class KeystrokeProcessor:
             )
         else:
             ref = evt.get("ref_bgr")
-            ref_bgr = (
-                tuple(int(v) for v in np.asarray(ref)[:3]) if ref is not None else None
-            )
+            ref_bgr = _pixel_from_object(ref) if ref is not None else None
             match_sig = ("pixel", ref_bgr)
 
         conds = evt.get("conds", {})
@@ -627,7 +699,7 @@ class KeystrokeProcessor:
         return resolved
 
     def _evaluate_capture_group(
-        self, img: ImageArray, events: list[EventData]
+        self, img: ImageFrame, events: list[EventData]
     ) -> dict[str, bool]:
         local_match_states: dict[str, bool] = {}
         for evt in events:
@@ -673,17 +745,17 @@ class KeystrokeProcessor:
         return {"top": cy, "left": cx, "width": 1, "height": 1}
 
     def _extract_roi(
-        self, img: ImageArray, evt: EventData, is_independent: bool
-    ) -> ImageArray | None:
+        self, img: ImageFrame, evt: EventData, is_independent: bool
+    ) -> ImageFrame | None:
         """이미지에서 관심 영역(ROI) 추출"""
         if is_independent:
-            return img[:, :, :3]
+            return img
 
         w, h = evt["region_w"], evt["region_h"]
         x, y = evt["rel_x"] - w // 2, evt["rel_y"] - h // 2
 
         # 경계 검사
-        if x < 0 or y < 0 or x + w > img.shape[1] or y + h > img.shape[0]:
+        if x < 0 or y < 0 or x + w > img.width or y + h > img.height:
             name = evt.get("name", "?")
             if not hasattr(self, "_roi_warn_logged"):
                 self._roi_warn_logged = set()
@@ -692,13 +764,13 @@ class KeystrokeProcessor:
                 logger.warning(
                     f"Event '{name}': ROI extraction failed — "
                     f"region_size({w}×{h}) exceeds capture area "
-                    f"({img.shape[1]}×{img.shape[0]}). Matching will always return False."
+                    f"({img.width}×{img.height}). Matching will always return False."
                 )
             return None
 
-        return img[y : y + h, x : x + w, :3]
+        return img.crop(x, y, w, h)
 
-    def _check_match(self, img: ImageArray, evt: EventData, is_independent: bool) -> bool:
+    def _check_match(self, img: ImageFrame, evt: EventData, is_independent: bool) -> bool:
         matched = False
         evaluated = False
         try:
@@ -713,10 +785,10 @@ class KeystrokeProcessor:
                 # 체크포인트 검증
                 for pt in check_points:
                     px, py = pt["pos"]
-                    if py >= roi.shape[0] or px >= roi.shape[1]:
+                    if py >= roi.height or px >= roi.width:
                         continue
                     # 색상 비교
-                    if not np.array_equal(roi[py, px], pt["color"]):
+                    if roi.pixel_bgr(px, py) != pt["color"]:
                         matched = False
                         evaluated = True
                         break
@@ -729,13 +801,13 @@ class KeystrokeProcessor:
                     return False
                 # 픽셀 모드
                 if is_independent:
-                    pixel = img[0, 0, :3]
+                    pixel = img.pixel_bgr(0, 0)
                 else:
                     py, px = evt["rel_y"], evt["rel_x"]
-                    if py >= img.shape[0] or px >= img.shape[1]:
+                    if py >= img.height or px >= img.width:
                         return False
-                    pixel = img[py, px][:3]
-                matched = bool(np.array_equal(pixel, ref_bgr))
+                    pixel = img.pixel_bgr(px, py)
+                matched = pixel == ref_bgr
                 evaluated = True
         except Exception:
             return False

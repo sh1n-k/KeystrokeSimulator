@@ -1,9 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-import numpy as np
-
-from helpers import make_processor_stub
+from app.core.processor import ImageFrame
+from helpers import fill_frame_rect, make_image_frame, make_processor_stub
 
 
 class TestExtractROI(unittest.TestCase):
@@ -14,28 +13,34 @@ class TestExtractROI(unittest.TestCase):
 
     def test_normal_extraction(self):
         """정상 좌표에서 ROI가 올바르게 추출됨"""
-        img = np.arange(100 * 100 * 4, dtype=np.uint8).reshape(100, 100, 4)
+        img = ImageFrame(
+            width=100,
+            height=100,
+            data=bytearray(i % 256 for i in range(100 * 100 * 4)),
+            row_stride=100 * 4,
+            pixel_stride=4,
+        )
         evt = {"region_w": 10, "region_h": 10, "rel_x": 50, "rel_y": 50}
 
         roi = self.proc._extract_roi(img, evt, is_independent=False)
 
         self.assertIsNotNone(roi)
-        self.assertEqual(roi.shape, (10, 10, 3))  # 알파 채널 제거됨
+        self.assertEqual((roi.width, roi.height), (10, 10))
 
     def test_roi_pixel_values(self):
         """ROI의 픽셀 값이 원본 이미지와 일치"""
-        img = np.zeros((20, 20, 3), dtype=np.uint8)
-        img[5:15, 5:15] = [100, 200, 50]
+        img = make_image_frame(20, 20)
+        fill_frame_rect(img, 5, 5, 10, 10, (100, 200, 50))
         evt = {"region_w": 10, "region_h": 10, "rel_x": 10, "rel_y": 10}
 
         roi = self.proc._extract_roi(img, evt, is_independent=False)
 
         self.assertIsNotNone(roi)
-        np.testing.assert_array_equal(roi[0, 0], [100, 200, 50])
+        self.assertEqual(roi.pixel_bgr(0, 0), (100, 200, 50))
 
     def test_out_of_bounds_returns_none(self):
         """ROI가 이미지 범위를 벗어나면 None 반환"""
-        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        img = make_image_frame(10, 10)
         evt = {"region_w": 20, "region_h": 20, "rel_x": 5, "rel_y": 5}
 
         roi = self.proc._extract_roi(img, evt, is_independent=False)
@@ -44,7 +49,7 @@ class TestExtractROI(unittest.TestCase):
 
     def test_negative_start_returns_none(self):
         """ROI 시작점이 음수면 None 반환"""
-        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        img = make_image_frame(10, 10)
         evt = {"region_w": 10, "region_h": 10, "rel_x": 2, "rel_y": 2}
 
         roi = self.proc._extract_roi(img, evt, is_independent=False)
@@ -53,18 +58,18 @@ class TestExtractROI(unittest.TestCase):
 
     def test_exact_boundary_fit(self):
         """ROI가 이미지 경계에 정확히 맞는 경우"""
-        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        img = make_image_frame(10, 10)
         # w=4, h=4, rel_x=7, rel_y=7 → x=7-2=5, y=7-2=5, 5+4=9 ≤ 10
         evt = {"region_w": 4, "region_h": 4, "rel_x": 7, "rel_y": 7}
 
         roi = self.proc._extract_roi(img, evt, is_independent=False)
 
         self.assertIsNotNone(roi)
-        self.assertEqual(roi.shape, (4, 4, 3))
+        self.assertEqual((roi.width, roi.height), (4, 4))
 
     def test_boundary_exceeded_by_one(self):
         """ROI가 이미지 경계를 1픽셀 초과하면 None"""
-        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        img = make_image_frame(10, 10)
         # w=4, h=4, rel_x=8, rel_y=8 → x=8-2=6, y=8-2=6, 6+4=10 ≤ 10 → OK
         # w=4, h=4, rel_x=9, rel_y=9 → x=9-2=7, y=9-2=7, 7+4=11 > 10 → None
         evt = {"region_w": 4, "region_h": 4, "rel_x": 9, "rel_y": 9}
@@ -75,22 +80,22 @@ class TestExtractROI(unittest.TestCase):
 
     def test_independent_mode_returns_full_image(self):
         """독립 모드에서는 전체 이미지를 반환 (알파 채널 제거)"""
-        img = np.ones((10, 10, 4), dtype=np.uint8) * 128
+        img = make_image_frame(10, 10, (128, 128, 128), channels=4)
         evt = {"region_w": 5, "region_h": 5, "rel_x": 99, "rel_y": 99}
 
         roi = self.proc._extract_roi(img, evt, is_independent=True)
 
         self.assertIsNotNone(roi)
-        self.assertEqual(roi.shape, (10, 10, 3))
+        self.assertEqual((roi.width, roi.height), (10, 10))
 
     def test_independent_mode_3_channel_image(self):
         """독립 모드: 3채널 이미지도 정상 처리"""
-        img = np.ones((5, 5, 3), dtype=np.uint8) * 50
+        img = make_image_frame(5, 5, (50, 50, 50))
         evt = {"region_w": 2, "region_h": 2, "rel_x": 0, "rel_y": 0}
 
         roi = self.proc._extract_roi(img, evt, is_independent=True)
 
-        self.assertEqual(roi.shape, (5, 5, 3))
+        self.assertEqual((roi.width, roi.height), (5, 5))
 
 
 class TestBuildCaptureRect(unittest.TestCase):
@@ -195,8 +200,8 @@ class TestCheckMatchRegionROIIntegration(unittest.TestCase):
 
     def test_region_match_with_roi_extraction(self):
         """영역 매칭: ROI 추출 → 체크포인트 검증 전체 경로"""
-        img = np.zeros((20, 20, 3), dtype=np.uint8)
-        img[3:13, 3:13] = [42, 84, 126]
+        img = make_image_frame(20, 20)
+        fill_frame_rect(img, 3, 3, 10, 10, (42, 84, 126))
 
         evt = {
             "mode": "region",
@@ -206,9 +211,9 @@ class TestCheckMatchRegionROIIntegration(unittest.TestCase):
             "region_h": 10,
             "invert": False,
             "check_points": [
-                {"pos": (0, 0), "color": np.array([42, 84, 126], dtype=np.uint8)},
-                {"pos": (4, 4), "color": np.array([42, 84, 126], dtype=np.uint8)},
-                {"pos": (9, 9), "color": np.array([42, 84, 126], dtype=np.uint8)},
+                {"pos": (0, 0), "color": (42, 84, 126)},
+                {"pos": (4, 4), "color": (42, 84, 126)},
+                {"pos": (9, 9), "color": (42, 84, 126)},
             ],
         }
 
@@ -216,8 +221,8 @@ class TestCheckMatchRegionROIIntegration(unittest.TestCase):
 
     def test_region_mismatch_with_roi(self):
         """영역 매칭: ROI 내 체크포인트 불일치"""
-        img = np.zeros((20, 20, 3), dtype=np.uint8)
-        img[3:13, 3:13] = [42, 84, 126]
+        img = make_image_frame(20, 20)
+        fill_frame_rect(img, 3, 3, 10, 10, (42, 84, 126))
 
         evt = {
             "mode": "region",
@@ -227,7 +232,7 @@ class TestCheckMatchRegionROIIntegration(unittest.TestCase):
             "region_h": 10,
             "invert": False,
             "check_points": [
-                {"pos": (0, 0), "color": np.array([99, 99, 99], dtype=np.uint8)},
+                {"pos": (0, 0), "color": (99, 99, 99)},
             ],
         }
 
@@ -245,14 +250,14 @@ class TestExtractROIWarning(unittest.TestCase):
 
     def test_warning_logged_on_first_failure(self):
         """경계 초과 최초 발생 시 logger.warning이 호출됨"""
-        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        img = make_image_frame(10, 10)
         with patch("app.core.processor.logger") as mock_log:
             self.proc._extract_roi(img, self._out_of_bounds_evt(), is_independent=False)
             mock_log.warning.assert_called_once()
 
     def test_warning_logged_only_once_per_event(self):
         """동일 이벤트명은 두 번째 호출부터 경고를 출력하지 않음"""
-        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        img = make_image_frame(10, 10)
         evt = self._out_of_bounds_evt("OnceOnly")
         with patch("app.core.processor.logger") as mock_log:
             self.proc._extract_roi(img, evt, is_independent=False)
@@ -262,7 +267,7 @@ class TestExtractROIWarning(unittest.TestCase):
 
     def test_different_events_each_warn_once(self):
         """이벤트명이 다르면 각각 1회씩 경고"""
-        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        img = make_image_frame(10, 10)
         with patch("app.core.processor.logger") as mock_log:
             self.proc._extract_roi(
                 img, self._out_of_bounds_evt("EvtA"), is_independent=False
@@ -274,7 +279,7 @@ class TestExtractROIWarning(unittest.TestCase):
 
     def test_warning_message_contains_event_name_and_sizes(self):
         """경고 메시지에 이벤트명과 크기 정보가 포함됨"""
-        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        img = make_image_frame(10, 10)
         with patch("app.core.processor.logger") as mock_log:
             self.proc._extract_roi(
                 img, self._out_of_bounds_evt("MyEvent"), is_independent=False
@@ -285,7 +290,7 @@ class TestExtractROIWarning(unittest.TestCase):
 
     def test_no_warning_on_successful_extraction(self):
         """정상 ROI 추출 시 경고 없음"""
-        img = np.zeros((100, 100, 3), dtype=np.uint8)
+        img = make_image_frame(100, 100)
         evt = {
             "name": "OkEvt",
             "region_w": 10,

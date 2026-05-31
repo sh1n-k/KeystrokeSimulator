@@ -1,6 +1,5 @@
 import unittest
 
-import numpy as np
 from PIL import Image as PilImage
 
 from app.core.models import EventModel
@@ -61,10 +60,7 @@ class TestInitEventDataFieldMapping(unittest.TestCase):
         events = proc._init_event_data([
             _make_basic_event(ref_pixel_value=(100, 150, 200))
         ])
-        np.testing.assert_array_equal(
-            events[0]["ref_bgr"],
-            np.array([200, 150, 100], dtype=np.uint8),
-        )
+        self.assertEqual(events[0]["ref_bgr"], (200, 150, 100))
 
     def test_execute_action_false_mapping(self):
         """execute_action=False → dict['exec']=False"""
@@ -166,12 +162,11 @@ class TestInitEventDataFiltering(unittest.TestCase):
 
 def _make_region_event(img_w: int, img_h: int, region_w: int, region_h: int, **overrides) -> "EventModel":
     """region mode EventModel 생성 헬퍼 (체크포인트 생성 테스트용)"""
-    np_img = np.zeros((img_h, img_w, 3), dtype=np.uint8)
+    pil_img = PilImage.new("RGB", (img_w, img_h))
     # 단순 그라디언트로 각 픽셀이 고유한 색을 갖도록
     for r in range(img_h):
         for c in range(img_w):
-            np_img[r, c] = [c % 256, r % 256, (r + c) % 256]
-    pil_img = PilImage.fromarray(np_img)
+            pil_img.putpixel((c, r), (c % 256, r % 256, (r + c) % 256))
     defaults = dict(
         event_name="RegionEvent",
         latest_position=(0, 0),
@@ -265,9 +260,10 @@ class TestRegionCheckpointGeneration(unittest.TestCase):
         self.assertIsNotNone(ref_img)
         for p in pts:
             px, py = p["pos"]
-            np.testing.assert_array_equal(
-                p["color"], ref_img[py, px],
-                err_msg=f"color mismatch at ({px},{py})"
+            self.assertEqual(
+                p["color"],
+                ref_img.pixel_bgr(px, py),
+                f"color mismatch at ({px},{py})",
             )
 
     def test_no_held_screenshot_skips_region_event(self):

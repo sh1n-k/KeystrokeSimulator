@@ -390,9 +390,13 @@ class KeystrokeQuickEventEditor:
         MAX_DISPLAY = 400
         scale = min(MAX_DISPLAY / img.width, MAX_DISPLAY / img.height, 1.0)
         if scale < 1.0:
-            return img.resize(
-                (int(img.width * scale), int(img.height * scale)),
-                Image.Resampling.LANCZOS,
+            resize = cast(Any, img).resize
+            return cast(
+                Image.Image,
+                resize(
+                    (int(img.width * scale), int(img.height * scale)),
+                    Image.Resampling.LANCZOS,
+                ),
             )
         return img
 

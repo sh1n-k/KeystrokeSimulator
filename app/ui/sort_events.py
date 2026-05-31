@@ -307,7 +307,12 @@ class KeystrokeSortEvents(tk.Toplevel):
 
         # 3. Image
         img = (
-            evt.held_screenshot.resize((SW_ROW_IMAGE_SIZE, SW_ROW_IMAGE_SIZE))
+            cast(
+                Image.Image,
+                cast(Any, evt.held_screenshot).resize(
+                    (SW_ROW_IMAGE_SIZE, SW_ROW_IMAGE_SIZE)
+                ),
+            )
             if evt.held_screenshot
             else Image.new("RGB", (SW_ROW_IMAGE_SIZE, SW_ROW_IMAGE_SIZE), SW_BG_THUMBNAIL)
         )
