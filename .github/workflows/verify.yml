@@ -3,6 +3,7 @@ name: Verify
 on:
   pull_request:
   push:
+    branches: [main]
 
 jobs:
   verify:
@@ -13,5 +14,5 @@ jobs:
         with:
           enable-cache: true
       - run: uv python install 3.13
-      - run: uv sync --all-groups
+      - run: uv sync
       - run: uv run -m scripts.verify

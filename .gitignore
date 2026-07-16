@@ -1,8 +1,5 @@
 # Python / uv
 .python-version.backup
-.env
-.env.local
-.env.*.local
 .venv/
 .venv_test/
 .uv-cache/
@@ -26,13 +23,6 @@ logs/
 profiles/
 app_state.json
 user_settings.json
-*.b64
-
-# Build outputs
-build/
-dist/
-*.spec
-
 # Editor / OS noise
 .idea/
 .vscode/
