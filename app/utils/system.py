@@ -32,7 +32,7 @@ class WindowLike(Protocol):
     def winfo_screenheight(self) -> int: ...
     def winfo_width(self) -> int: ...
     def winfo_height(self) -> int: ...
-    def geometry(self, new_geometry: str) -> object: ...
+    def geometry(self, _new_geometry: str) -> object: ...
 
 
 def _platform_module(name: str) -> Any:
@@ -109,16 +109,6 @@ class WindowUtils:
         x = (window.winfo_screenwidth() - window.winfo_width()) // 2
         y = (window.winfo_screenheight() - window.winfo_height()) // 2
         window.geometry(f"+{x}+{y}")
-
-    @staticmethod
-    def set_window_position(win: object, xp: float = 0.5, yp: float = 0.5) -> None:
-        window = cast(WindowLike, win)
-        window.update_idletasks()
-        x = int((window.winfo_screenwidth() - window.winfo_width()) * xp)
-        y = int((window.winfo_screenheight() - window.winfo_height()) * yp)
-        window.geometry(f"+{x}+{y}")
-        window.update_idletasks()
-
 
 class MonitorUtils:
     @staticmethod

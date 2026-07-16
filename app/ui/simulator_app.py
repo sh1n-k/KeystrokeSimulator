@@ -79,7 +79,6 @@ STATUS_FG_RUN = theme.STATUS_RUNNING_FG
 P = ParamSpec("P")
 R = TypeVar("R")
 VoidCallback = Callable[[], None]
-SecureCallback = Callable[[], None]
 
 
 class ReadinessSnapshot(TypedDict):
@@ -365,10 +364,9 @@ class ProfileFrame(tk.Frame):
 
 
 class ButtonFrame(tk.Frame):
-    """Tool buttons; the app remaps the visible tools to a 3-column row."""
+    """Tool buttons shown in the main tools card."""
 
     _BTN_KEYS = (
-        ("start", ("Start", "시작")),
         ("quick_events", ("Quick Events", "빠른 이벤트")),
         ("settings", ("Settings", "설정")),
         ("clear_logs", ("Clear Logs", "로그 삭제")),
@@ -377,17 +375,15 @@ class ButtonFrame(tk.Frame):
     def __init__(
         self,
         master: tk.Misc,
-        toggle_cb: VoidCallback,
         events_cb: VoidCallback,
         settings_cb: VoidCallback,
         clear_cb: VoidCallback,
         **kwargs: Any,
     ) -> None:
         super().__init__(master, **kwargs)
-        for col in range(4):
+        for col in range(3):
             self.grid_columnconfigure(col, weight=1, uniform="tools")
         commands: dict[str, VoidCallback] = {
-            "start": toggle_cb,
             "quick_events": events_cb,
             "settings": settings_cb,
             "clear_logs": clear_cb,
@@ -397,7 +393,6 @@ class ButtonFrame(tk.Frame):
             btn = tk.Button(self, text=txt(*label_pair), height=1, command=commands[key])
             btn.grid(row=0, column=col, sticky="we", padx=theme.SPACE_1)
             self.btns[key] = btn
-        self.start_stop_button = self.btns["start"]
         self.quick_events_button = self.btns["quick_events"]
         self.settings_button = self.btns["settings"]
         self.clear_logs_button = self.btns["clear_logs"]
@@ -437,7 +432,7 @@ class ProfileButtonFrame(tk.Frame):
             btn = tk.Button(self, text=txt(*label_pair), height=1, command=commands[key])
             btn.grid(row=0, column=col, sticky="we", padx=theme.SPACE_1)
             self.btns[key] = btn
-        self.settings_button = self.btns["edit_profile"]
+        self.edit_profile_button = self.btns["edit_profile"]
         self.modkeys_button = self.btns["modkeys"]
         self.sort_button = self.btns["sort_profile"]
 
@@ -447,11 +442,10 @@ class ProfileButtonFrame(tk.Frame):
 
 
 class KeystrokeSimulatorApp(tk.Tk):
-    def __init__(self, secure_callback: SecureCallback | None = None) -> None:
+    def __init__(self) -> None:
         super().__init__()
         install_exception_hooks(self)
-        self.secure_callback: SecureCallback | None = secure_callback
-        self.title("Python 3.12")
+        self.title("Keystroke Simulator")
         self.profiles_dir: str = "profiles"
         self.is_running: tk.BooleanVar = tk.BooleanVar(value=False)
         self.selected_process: tk.StringVar = tk.StringVar()
@@ -483,9 +477,9 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         self._create_ui()
         self._bind_selection_traces()
-        self._load_settings_and_state()
-        self._setup_event_handlers()
-        self._update_ui()
+        self.load_settings()
+        self.setup_event_handlers()
+        self.update_ui()
 
     def _create_ui(self) -> None:
         # Workstation theme: paper-tone root + ttk styles.
@@ -638,7 +632,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.tools_card.pack(fill="x")
         self.button_frame: ButtonFrame = ButtonFrame(
             tools_body,
-            self.toggle_start_stop,
             self.open_quick_events,
             self.open_settings,
             self.clear_local_logs,
@@ -654,32 +647,12 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_button_frame.configure(bg=theme.SURFACE_CANVAS)
         self.profile_button_frame.pack(fill="x")
 
-        # Keep the legacy start button reference for tests/callers, but make
-        # the visible primary action live in the RunDock per the SOT.
-        self._apply_accent_button(self.button_frame.start_stop_button)
-        self.button_frame.start_stop_button.grid_remove()
-        for col in range(4):
-            self.button_frame.grid_columnconfigure(
-                col,
-                weight=1 if col < 3 else 0,
-                minsize=0,
-                uniform="tools" if col < 3 else "",
-            )
-        for col, btn in enumerate(
-            (
-                self.button_frame.quick_events_button,
-                self.button_frame.settings_button,
-                self.button_frame.clear_logs_button,
-            )
-        ):
-            btn.grid_configure(column=col, padx=theme.SPACE_1, sticky="we")
-        # Mute the remaining tk.Button widgets to the outline look.
         for sec in (
             self.button_frame.quick_events_button,
             self.button_frame.settings_button,
             self.button_frame.clear_logs_button,
             self.profile_button_frame.modkeys_button,
-            self.profile_button_frame.settings_button,  # Edit Profile
+            self.profile_button_frame.edit_profile_button,
             self.profile_button_frame.sort_button,
             self.process_frame.refresh_button,
             self.profile_frame.copy_button,
@@ -844,12 +817,12 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def _bind_selection_traces(self) -> None:
         def schedule_update(*_args: object) -> None:
-            self.after_idle(self._update_ui)
+            self.after_idle(self.update_ui)
 
         for var in (self.selected_process, self.selected_profile):
             self._selection_trace_handles.append(var.trace_add("write", schedule_update))
 
-    def _load_settings_and_state(self) -> None:
+    def load_settings(self) -> None:
         # Load settings
         s_file = Path("user_settings.json")
         self.settings, can_save_settings = load_user_settings(s_file)
@@ -876,7 +849,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         prof = state.get("profile")
         if isinstance(prof, str) and prof:
             self.profile_frame.set_selected_profile(prof)
-        self._update_ui()
+        self.update_ui()
 
     def _refresh_ui_texts(self) -> None:
         self._set_card_title(
@@ -894,7 +867,6 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.profile_frame.refresh_texts()
         if hasattr(self, "button_frame"):
             self.button_frame.refresh_texts()
-            self._apply_accent_button(self.button_frame.start_stop_button)
         run_start_button = self.__dict__.get("run_start_button")
         if run_start_button is not None:
             self._apply_accent_button(run_start_button)
@@ -979,20 +951,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.runtime_toggle_active = False
         self.runtime_toggle_member_count = 0
         self.latest_runtime_scroll_time = None
-
-    def _runtime_toggle_conflicts_with_start_stop(self, toggle_key: str | None) -> bool:
-        profile = ProfileModel(
-            runtime_toggle_enabled=True,
-            runtime_toggle_key=toggle_key,
-        )
-        return bool(
-            collect_runtime_toggle_validation_errors(
-                profile,
-                [],
-                settings=getattr(self, "settings", None),
-                os_name=platform.system(),
-            )
-        )
 
     def _configure_runtime_toggle_session(
         self, profile: ProfileModel, events: list[EventModel]
@@ -1358,7 +1316,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             return txt("Ready to start.", "시작할 준비가 되었습니다.")
         return snapshot["badge_text"]
 
-    def _setup_event_handlers(self) -> None:
+    def setup_event_handlers(self) -> None:
         self.unbind_events()
         self.bind("<Escape>", self.on_closing)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -1638,7 +1596,7 @@ class KeystrokeSimulatorApp(tk.Tk):
                     self.is_running.set(True)
                     self.update_ui()
                 else:
-                    self._update_ui()
+                    self.update_ui()
             finally:
                 self.toggle_transition_in_progress = False
             return
@@ -1649,7 +1607,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         finally:
             self.toggle_transition_in_progress = False
 
-    def _start_simulation(self) -> bool:
+    def start_simulation(self) -> bool:
         if not (
             self.selected_process.get()
             and "(" in self.selected_process.get()
@@ -1696,25 +1654,25 @@ class KeystrokeSimulatorApp(tk.Tk):
         if platform.system() != "Darwin" or not self.__dict__.get(
             "ctrl_check_active", False
         ):
-            self._setup_event_handlers()
+            self.setup_event_handlers()
 
         self.keystroke_processor.start()
         self._save_latest_state()
         self.sound_player.play_start_sound()
         return True
 
-    def _stop_simulation(self) -> None:
+    def stop_simulation(self) -> None:
         if self.keystroke_processor:
             safe_call(self.keystroke_processor.stop)
             self.keystroke_processor = None
         self.terminate_event.set()
         self._reset_runtime_toggle_session()
         if platform.system() != "Darwin" or not self.settings.toggle_start_stop_mac:
-            self._setup_event_handlers()
+            self.setup_event_handlers()
 
         if safe_call(self.winfo_exists):
             self.sound_player.play_stop_sound()
-            self._update_ui()
+            self.update_ui()
 
     def toggle_runtime_event_group(self) -> bool:
         if not (
@@ -1739,9 +1697,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         return True
 
     def update_ui(self) -> None:
-        return self._update_ui()
-
-    def _update_ui(self) -> None:
         running = self.is_running.get()
         state = "disabled" if running else "normal"
         readonly_state = "disabled" if running else "readonly"
@@ -1753,24 +1708,21 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_frame.copy_button.config(state=state)
         self.profile_frame.del_button.config(state=state)
 
-        start_buttons = [self.button_frame.start_stop_button]
         run_start_button = self.__dict__.get("run_start_button")
         if run_start_button is not None:
-            start_buttons.append(run_start_button)
-        for start_btn in start_buttons:
-            start_btn.config(
+            run_start_button.config(
                 text=txt("Stop", "중지") if running else txt("Start", "시작"),
                 state="normal" if running or readiness["can_start"] else "disabled",
             )
             if running:
-                start_btn.configure(
+                run_start_button.configure(
                     bg=theme.STATUS_RUNNING_FG,
                     fg=theme.INK_INVERSE,
                     activebackground=theme.STATUS_ERROR_FG,
                     activeforeground=theme.INK_INVERSE,
                 )
             else:
-                start_btn.configure(
+                run_start_button.configure(
                     bg=theme.SIGNAL_BASE,
                     fg=theme.INK_INVERSE,
                     activebackground=theme.SIGNAL_HOVER,
@@ -1781,7 +1733,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.button_frame.clear_logs_button.config(state=state)
 
         self.profile_button_frame.modkeys_button.config(state=state)
-        self.profile_button_frame.settings_button.config(state=state)
+        self.profile_button_frame.edit_profile_button.config(state=state)
         self.profile_button_frame.sort_button.config(state=state)
         self._update_main_status()
 
@@ -1797,7 +1749,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def reload_profiles(self, new_name: str) -> None:
         self.profile_frame.load_profiles(select_name=new_name)
-        self._update_ui()
+        self.update_ui()
 
     def sort_profile_events(self) -> None:
         self.unbind_events()
@@ -1847,18 +1799,6 @@ class KeystrokeSimulatorApp(tk.Tk):
             safe_call(self.ctrl_check_thread.join, timeout=0.5)
         self.ctrl_check_thread = None
 
-    def load_settings(self) -> None:
-        self._load_settings_and_state()
-
-    def setup_event_handlers(self) -> None:
-        self._setup_event_handlers()
-
-    def start_simulation(self) -> bool:
-        return self._start_simulation()
-
-    def stop_simulation(self) -> None:
-        return self._stop_simulation()
-
     def on_closing(self, event: object | None = None) -> None:
         if getattr(self, "_is_closing", False):
             return
@@ -1866,7 +1806,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         logger.info("Shutting down...")
 
         self.terminate_event.set()
-        safe_call(self._stop_simulation)
+        safe_call(self.stop_simulation)
         safe_call(self._save_latest_state)
         safe_call(self.unbind_events)
         sound_player = getattr(self, "sound_player", None)
@@ -1874,6 +1814,3 @@ class KeystrokeSimulatorApp(tk.Tk):
             safe_call(getattr(sound_player, "close", lambda: None))
         safe_call(self.destroy)
         safe_call(self.quit)
-
-        if self.secure_callback:
-            safe_call(self.secure_callback)

@@ -12,7 +12,7 @@ from app.utils.system import install_exception_hooks
 
 class MainAppLike(Protocol):
     def after(
-        self, ms: int, func: Callable[..., object] | None = None, *args: object
+        self, _ms: int, func: Callable[..., object] | None = None, *args: object
     ) -> object: ...
     def mainloop(self) -> object: ...
     def on_closing(self) -> None: ...
@@ -33,7 +33,7 @@ def main() -> None:
 
     app: MainAppLike | None = None
 
-    def graceful_shutdown(signum: int, frame: FrameType | None) -> None:
+    def graceful_shutdown(_signum: int, _frame: FrameType | None) -> None:
         if app:
             app.after(0, app.on_closing)
 

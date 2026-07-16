@@ -1,8 +1,10 @@
 from typing import Iterable
 
 from app.core.models import EventModel
-def normalized_event_name(name: str | None) -> str:
-    return (name or "").strip()
+
+
+def normalized_event_name(name: object) -> str:
+    return str(name or "").strip()
 
 
 def find_duplicate_event_names(events: Iterable[EventModel]) -> list[str]:

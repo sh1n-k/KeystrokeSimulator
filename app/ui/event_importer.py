@@ -289,13 +289,11 @@ class EventImporter:
             capture_size=evt.capture_size,
             latest_position=evt.latest_position,
             clicked_position=evt.clicked_position,
-            latest_screenshot=None,  # not persisted; left preview is always live capture
             held_screenshot=evt.held_screenshot.copy() if evt.held_screenshot else None,
             ref_pixel_value=evt.ref_pixel_value,
             key_to_enter=evt.key_to_enter,
             press_duration_ms=evt.press_duration_ms,
             randomization_ms=evt.randomization_ms,
-            independent_thread=evt.independent_thread,
             match_mode=evt.match_mode,
             invert_match=evt.invert_match,
             region_size=evt.region_size,

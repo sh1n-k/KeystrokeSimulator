@@ -11,7 +11,6 @@ from __future__ import annotations
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
-from dataclasses import dataclass
 
 
 # ---------------------------------------------------------------------------
@@ -64,11 +63,6 @@ STATUS_INFO_BG = "#E5EAF2"
 STATUS_INFO_FG = "#1F3760"
 STATUS_INFO_ICON = "ⓘ"       # ⓘ
 
-STATUS_DISABLED_BG = "#EAE5D8"
-STATUS_DISABLED_FG = "#8A8474"
-STATUS_DISABLED_ICON = "–"   # –
-
-
 # ---------------------------------------------------------------------------
 # Semantic — condition / danger
 # ---------------------------------------------------------------------------
@@ -76,62 +70,27 @@ COND_ACTIVE_FG = SIGNAL_BASE
 COND_ACTIVE_BG = "#D6E9DC"
 COND_INACTIVE_FG = "#7A2820"
 COND_INACTIVE_BG = "#F2D9D4"
-COND_IGNORE_FG = INK_MUTED
-COND_IGNORE_BG = SURFACE_SUNKEN
-
 DANGER_BASE = "#A33627"
 
 
 # ---------------------------------------------------------------------------
 # Spacing — 4px base grid (use these instead of arbitrary padx/pady)
 # ---------------------------------------------------------------------------
-SPACE_0 = 0
 SPACE_1 = 4
 SPACE_2 = 8
 SPACE_3 = 12
-SPACE_4 = 16
-SPACE_5 = 24
-SPACE_6 = 32
 
 
 # ---------------------------------------------------------------------------
 # Icon vocabulary — unicode glyphs that render across macOS and Windows.
 # ---------------------------------------------------------------------------
-ICON_FAVORITE = "★"          # ★
-ICON_ADD = "＋"               # ＋ (fullwidth plus)
-ICON_DELETE = "✕"            # ✕
-ICON_COPY = "⧉"              # ⧉
-ICON_EDIT = "✎"              # ✎
-ICON_GRAPH = "◇"             # ◇
-ICON_SORT = "↕"              # ↕
 ICON_CONDITION = "◐"         # ◐
-ICON_GROUP = "▣"             # ▣
-ICON_KEY = "⌨"               # ⌨
 ICON_INVERTED = "⇄"          # ⇄
-ICON_STANDALONE = "⚡"        # ⚡
-ICON_COND_ACTIVE = "●"       # ●
-ICON_COND_INACTIVE = "○"     # ○
-ICON_COND_IGNORE = "–"       # –
-ICON_DRAG_HANDLE = "⠇"       # ⠇ (use vertical dots)
-ICON_INFO = "ⓘ"              # ⓘ
-ICON_WARN = "⚠"              # ⚠
-ICON_HINT = "\U0001F4A1"          # 💡 (kept for parity with existing UI)
 
 
 # ---------------------------------------------------------------------------
 # Typography — single source for font construction.
 # ---------------------------------------------------------------------------
-def _korean_font_family() -> str:
-    if sys.platform == "darwin":
-        return "AppleSDGothicNeo"
-    if sys.platform == "win32":
-        return "Malgun Gothic"
-    return "Noto Sans CJK KR"
-
-
-KOREAN_FONT_FAMILY = _korean_font_family()
-
-
 def _sans_family() -> str:
     if sys.platform == "darwin":
         return "SF Pro Text"
@@ -146,16 +105,6 @@ def _mono_family() -> str:
     if sys.platform == "win32":
         return "Consolas"
     return "DejaVu Sans Mono"
-
-
-@dataclass(frozen=True)
-class FontSpec:
-    family: str
-    size: int
-    weight: str = "normal"  # "normal" | "bold"
-
-    def as_tuple(self) -> tuple[str, int, str]:
-        return (self.family, self.size, self.weight)
 
 
 def make_fonts() -> dict[str, tkfont.Font]:
@@ -181,12 +130,6 @@ def fonts() -> dict[str, tkfont.Font]:
     if _cached_fonts is None:
         _cached_fonts = make_fonts()
     return _cached_fonts
-
-
-def reset_font_cache() -> None:
-    """Drop cached fonts (used in tests / language switching)."""
-    global _cached_fonts
-    _cached_fonts = None
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +167,6 @@ def install_styles(root: tk.Misc) -> None:
         )
     except tk.TclError:
         pass
-
     try:
         style.configure(
             "Outline.TButton",
@@ -281,27 +223,3 @@ def install_styles(root: tk.Misc) -> None:
         )
     except tk.TclError:
         pass
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatible aliases for legacy constants.
-# These keep existing references valid while the rest of the codebase
-# migrates to the token names above.
-# ---------------------------------------------------------------------------
-STATUS_BG_INFO = STATUS_INFO_BG
-STATUS_FG_INFO = STATUS_INFO_FG
-STATUS_BG_OK = STATUS_READY_BG
-STATUS_FG_OK = STATUS_READY_FG
-STATUS_BG_WARN = STATUS_WARN_BG
-STATUS_FG_WARN = STATUS_WARN_FG
-STATUS_BG_ERR = STATUS_ERROR_BG
-STATUS_FG_ERR = STATUS_ERROR_FG
-
-BADGE_BG_INFO = STATUS_INFO_BG
-BADGE_FG_INFO = STATUS_INFO_FG
-BADGE_BG_OK = STATUS_READY_BG
-BADGE_FG_OK = STATUS_READY_FG
-BADGE_BG_WARN = STATUS_WARN_BG
-BADGE_FG_WARN = STATUS_WARN_FG
-BADGE_BG_ERR = STATUS_ERROR_BG
-BADGE_FG_ERR = STATUS_ERROR_FG

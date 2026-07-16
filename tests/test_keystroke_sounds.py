@@ -87,7 +87,7 @@ class TestKeystrokeSounds(unittest.TestCase):
 
         mock_decode.assert_not_called()
         self.assertEqual(len(player._active_sounds), 1)
-        self.assertIs(player._active_sounds[0][0], samples)
+        self.assertIs(player._active_sounds[0].samples, samples)
 
     @patch("app.utils.sounds.miniaudio.PlaybackDevice")
     @patch("app.utils.sounds.miniaudio.decode")
@@ -101,8 +101,8 @@ class TestKeystrokeSounds(unittest.TestCase):
 
         self.assertEqual(list(mixed), [1, 2])
         self.assertEqual(len(player._active_sounds), 1)
-        self.assertIs(player._active_sounds[0][0], samples)
-        self.assertEqual(player._active_sounds[0][1], 2)
+        self.assertIs(player._active_sounds[0].samples, samples)
+        self.assertEqual(player._active_sounds[0].position, 2)
 
     @patch("app.utils.sounds.miniaudio.PlaybackDevice")
     @patch("app.utils.sounds.miniaudio.decode")

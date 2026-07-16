@@ -33,13 +33,6 @@ class _ActiveSound:
     samples: SampleArray
     position: int
 
-    def __getitem__(self, index: int) -> SampleArray | int:
-        if index == 0:
-            return self.samples
-        if index == 1:
-            return self.position
-        raise IndexError(index)
-
 
 class _SoundHandle:
     def __init__(self, player: "SoundPlayer", samples: SampleArray) -> None:
