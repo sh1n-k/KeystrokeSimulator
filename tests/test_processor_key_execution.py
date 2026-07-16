@@ -98,63 +98,6 @@ class TestPressKeyAsync(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("무관한 조건", log_line)
 
 
-class TestPressKeySync(unittest.TestCase):
-    def test_sync_press_key_presses_and_releases(self):
-        proc = _make_processor_stub()
-        proc._wait_until_sync = lambda _end_time, _check_interval=0.02: None
-        evt = {"name": "A_EVT", "key": "A"}
-
-        proc._sync_press_key(evt)
-
-        proc.sim.press.assert_called_once_with(65)
-        proc.sim.release.assert_called_once_with(65)
-        self.assertNotIn("A", proc.pressed_keys)
-
-    def test_sync_press_key_skips_duplicate_pressed_key(self):
-        proc = _make_processor_stub()
-        proc.pressed_keys.add("A")
-        evt = {"name": "A_EVT", "key": "A"}
-
-        proc._sync_press_key(evt)
-
-        proc.sim.press.assert_not_called()
-        proc.sim.release.assert_not_called()
-
-    def test_sync_press_key_cleans_pressed_keys_on_press_error(self):
-        proc = _make_processor_stub()
-        proc.sim.press.side_effect = RuntimeError("press failed")
-        evt = {"name": "A_EVT", "key": "A"}
-
-        with self.assertRaises(RuntimeError):
-            proc._sync_press_key(evt)
-
-        self.assertNotIn("A", proc.pressed_keys)
-
-    def test_sync_press_key_logs_referenced_conditions_from_current_states(self):
-        proc = _make_processor_stub()
-        proc._wait_until_sync = lambda _end_time, _check_interval=0.02: None
-        proc.current_states = {
-            "[조건-비활성] 채널링 중": False,
-            "[조건] 버프 준비": True,
-            "무관한 조건": True,
-        }
-        evt = {
-            "name": "A_EVT",
-            "key": "A",
-            "conds": {"[조건-비활성] 채널링 중": False, "[조건] 버프 준비": True},
-        }
-
-        with patch("app.core.processor.logger.info") as mock_info:
-            proc._sync_press_key(evt)
-
-        mock_info.assert_called_once()
-        log_line = mock_info.call_args[0][0]
-        self.assertIn("Sync Key Pressed: A", log_line)
-        self.assertIn("[조건-비활성] 채널링 중=False", log_line)
-        self.assertIn("[조건] 버프 준비=True", log_line)
-        self.assertNotIn("무관한 조건", log_line)
-
-
 class TestProcessorStart(unittest.TestCase):
     def test_start_only_starts_main_thread(self):
         proc = KeystrokeProcessor.__new__(KeystrokeProcessor)

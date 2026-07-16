@@ -18,7 +18,6 @@ from app.ui import theme
 SW_PAD_XS = theme.SPACE_1
 SW_PAD_SM = theme.SPACE_1
 SW_PAD_MD = theme.SPACE_2
-SW_PAD_LG = theme.SPACE_3
 SW_ROW_IMAGE_SIZE = 40
 
 # Workstation tones — these legacy names now alias the canonical
@@ -379,7 +378,6 @@ class KeystrokeSortEvents(tk.Toplevel):
 
         self._bind_drag_events(lbl_handle, f)
 
-    # ... (이하 기존 메서드 동일: _bind_drag_events, _drag_start, _drag_motion, _drag_end, _load_profile, save, close, _load_state) ...
     def _bind_drag_events(self, widget: tk.Widget, parent_frame: tk.Frame) -> None:
         def on_drag_start(event: tk.Event[tk.Misc]) -> None:
             self._drag_start(event, parent_frame)
@@ -395,16 +393,12 @@ class KeystrokeSortEvents(tk.Toplevel):
         widget.bind("<ButtonRelease-1>", on_drag_end)
 
     def _bind_image_preview(self, widget: tk.Widget, evt: EventModel) -> None:
-        def on_open(event: tk.Event[tk.Misc]) -> None:
-            self._open_image_preview(evt, event)
+        def on_open(_event: tk.Event[tk.Misc]) -> None:
+            self._open_image_preview(evt)
 
         widget.bind("<ButtonPress-1>", on_open)
 
-    def _open_image_preview(
-        self,
-        evt: EventModel,
-        click_event: tk.Event[tk.Misc] | None = None,
-    ) -> None:
+    def _open_image_preview(self, evt: EventModel) -> None:
         if not evt.held_screenshot:
             return
 

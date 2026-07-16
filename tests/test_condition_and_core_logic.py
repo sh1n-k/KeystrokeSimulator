@@ -63,7 +63,7 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
         pressed = []
 
         proc._check_match = (
-            lambda _img, evt, is_independent=False: match_map[evt["name"]]
+            lambda _img, evt: match_map[evt["name"]]
         )
 
         async def fake_press(evt, _local_states):
@@ -101,7 +101,7 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
         pressed = []
 
         proc._check_match = (
-            lambda _img, evt, is_independent=False: match_map[evt["name"]]
+            lambda _img, evt: match_map[evt["name"]]
         )
 
         async def fake_press(evt, _local_states):
@@ -139,7 +139,7 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
         pressed = []
 
         proc._check_match = (
-            lambda _img, evt, is_independent=False: match_map[evt["name"]]
+            lambda _img, evt: match_map[evt["name"]]
         )
 
         async def fake_press(evt, _local_states):
@@ -169,7 +169,6 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
                 "group": None,
                 "priority": 0,
                 "exec": True,
-                "independent": False,
             },
             {
                 "name": "A2",
@@ -185,14 +184,13 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
                 "group": None,
                 "priority": 0,
                 "exec": True,
-                "independent": False,
             },
         ]
         match_map = {"A1": True, "A2": True}
         pressed = []
 
         proc._check_match = (
-            lambda _img, evt, is_independent=False: match_map[evt["name"]]
+            lambda _img, evt: match_map[evt["name"]]
         )
 
         async def fake_press(evt, _local_states):
@@ -228,7 +226,6 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
                 "group": None,
                 "priority": 0,
                 "exec": True,
-                "independent": False,
             },
             {
                 "name": "A2",
@@ -244,14 +241,13 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
                 "group": None,
                 "priority": 0,
                 "exec": True,
-                "independent": False,
             },
         ]
         match_map = {"Gate": True, "A1": True, "A2": True}
         pressed = []
 
         proc._check_match = (
-            lambda _img, evt, is_independent=False: match_map[evt["name"]]
+            lambda _img, evt: match_map[evt["name"]]
         )
 
         async def fake_press(evt, _local_states):
@@ -289,7 +285,7 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
         pressed = []
 
         proc._check_match = (
-            lambda _img, evt, is_independent=False: match_map[evt["name"]]
+            lambda _img, evt: match_map[evt["name"]]
         )
 
         async def fake_press(evt, _local_states):

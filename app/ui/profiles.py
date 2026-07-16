@@ -60,7 +60,7 @@ KeySortOrder: TypeAlias = tuple[int, int, str]
 
 
 class SaveCallback(Protocol):
-    def __call__(self, check_name: bool = False, reload: bool = False) -> object: ...
+    def __call__(self, check_name: bool = False) -> object: ...
 
 
 class EventRowCallbacks(TypedDict, total=False):
@@ -102,7 +102,6 @@ def _event_fingerprint(evt: EventModel) -> EventFingerprint:
         getattr(evt, "key_to_enter", None),
         getattr(evt, "press_duration_ms", None),
         getattr(evt, "randomization_ms", None),
-        bool(getattr(evt, "independent_thread", False)),
         getattr(evt, "match_mode", "pixel"),
         bool(getattr(evt, "invert_match", False)),
         getattr(evt, "region_size", None),
@@ -1334,10 +1333,6 @@ class EventListFrame(ttk.Frame):
             ),
         )
 
-    def _sort_events(self) -> None:
-        """기존 호출 호환용: 키 순서 정렬로 연결."""
-        self._sort_events_by_key()
-
     def _manage_groups(self) -> None:
         """그룹 관리 다이얼로그"""
         if not self._get_existing_groups():
@@ -1643,7 +1638,7 @@ class EventListFrame(ttk.Frame):
 
     def _load_events(self) -> None:
         for i, evt in enumerate(self.profile.event_list):
-            self._add_row(i, evt, resize=False)
+            self._add_row(i, evt)
         self._update_delete_buttons()
         self._sync_empty_state()
 
@@ -1713,7 +1708,6 @@ class EventListFrame(ttk.Frame):
         self,
         row_num: int | None = None,
         event: EventModel | None = None,
-        resize: bool = True,
     ) -> None:
         if self.empty_state_frame and self.empty_state_frame.winfo_exists():
             self.empty_state_frame.grid_remove()
@@ -1818,7 +1812,6 @@ class EventListFrame(ttk.Frame):
                 capture_size=getattr(evt, "capture_size", (100, 100)),
                 latest_position=evt.latest_position,
                 clicked_position=evt.clicked_position,
-                latest_screenshot=None,  # not persisted; left preview is always live capture
                 held_screenshot=(
                     evt.held_screenshot.copy() if evt.held_screenshot else None
                 ),
@@ -1826,7 +1819,6 @@ class EventListFrame(ttk.Frame):
                 key_to_enter=evt.key_to_enter,
                 press_duration_ms=getattr(evt, "press_duration_ms", None),
                 randomization_ms=getattr(evt, "randomization_ms", None),
-                independent_thread=False,
                 match_mode=getattr(evt, "match_mode", "pixel"),
                 invert_match=getattr(evt, "invert_match", False),
                 region_size=getattr(evt, "region_size", None),
@@ -1916,7 +1908,7 @@ class EventListFrame(ttk.Frame):
 
         # Add new rows
         for i in range(curr, new):
-            self._add_row(i, self.profile.event_list[i], resize=False)
+            self._add_row(i, self.profile.event_list[i])
 
         # Re-grid all rows and update indices
         self._update_row_indices()
@@ -1956,7 +1948,6 @@ class KeystrokeProfiles:
     ) -> None:
         self.main_win, self.prof_name, self.ext_save_cb = main_win, prof_name, save_cb
         self.prof_dir = Path("profiles")
-        self._dirty = False
         self._autosave_after_id: str | None = None
         self._last_saved_fingerprint: ProfileFingerprint | None = None
         self._overview_status_text = ""
@@ -2633,7 +2624,6 @@ class KeystrokeProfiles:
             )
 
     def _set_dirty(self, dirty: bool) -> None:
-        self._dirty = dirty
         star = "* " if dirty else ""
         self.win.title(
             f"{star}{txt('Profile Manager', '프로필 관리자')} - {self.prof_name}"
@@ -2666,7 +2656,7 @@ class KeystrokeProfiles:
             delay_ms, lambda: self._run_autosave(check_name=check_name)
         )
 
-    def _on_changed(self, check_name: bool = False, reload: bool = False) -> None:
+    def _on_changed(self, check_name: bool = False) -> None:
         self._set_dirty(True)
         self._set_save_status("saving")
         self._schedule_autosave(check_name=check_name)

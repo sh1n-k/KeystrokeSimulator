@@ -252,8 +252,8 @@ class KeystrokeQuickEventEditor:
             tk.Label(p, text=label_text).grid(row=r, column=c * 2, padx=1, sticky=tk.E)
             e = tk.Entry(p, width=4)
             e.grid(row=r, column=c * 2 + 1, padx=4, sticky=tk.W)
-            e.bind("<Up>", lambda ev, en=e: self._adj_val(en, 1))
-            e.bind("<Down>", lambda ev, en=e: self._adj_val(en, -1))
+            e.bind("<Up>", lambda _event, en=e: self._adj_val(en, 1))
+            e.bind("<Down>", lambda _event, en=e: self._adj_val(en, -1))
             entries.append(e)
 
         for e in entries[:2]:
@@ -503,7 +503,6 @@ class KeystrokeQuickEventEditor:
                     capture_size=(self.capture_w_var.get(), self.capture_h_var.get()),
                     latest_position=self.latest_pos,
                     clicked_position=self.clicked_pos,
-                    latest_screenshot=None,  # latest_screenshot is not persisted
                     held_screenshot=self.held_img,
                     ref_pixel_value=self.ref_pixel,
                     match_mode="pixel",

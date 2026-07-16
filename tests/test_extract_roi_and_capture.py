@@ -22,7 +22,7 @@ class TestExtractROI(unittest.TestCase):
         )
         evt = {"region_w": 10, "region_h": 10, "rel_x": 50, "rel_y": 50}
 
-        roi = self.proc._extract_roi(img, evt, is_independent=False)
+        roi = self.proc._extract_roi(img, evt)
 
         self.assertIsNotNone(roi)
         self.assertEqual((roi.width, roi.height), (10, 10))
@@ -33,7 +33,7 @@ class TestExtractROI(unittest.TestCase):
         fill_frame_rect(img, 5, 5, 10, 10, (100, 200, 50))
         evt = {"region_w": 10, "region_h": 10, "rel_x": 10, "rel_y": 10}
 
-        roi = self.proc._extract_roi(img, evt, is_independent=False)
+        roi = self.proc._extract_roi(img, evt)
 
         self.assertIsNotNone(roi)
         self.assertEqual(roi.pixel_bgr(0, 0), (100, 200, 50))
@@ -43,7 +43,7 @@ class TestExtractROI(unittest.TestCase):
         img = make_image_frame(10, 10)
         evt = {"region_w": 20, "region_h": 20, "rel_x": 5, "rel_y": 5}
 
-        roi = self.proc._extract_roi(img, evt, is_independent=False)
+        roi = self.proc._extract_roi(img, evt)
 
         self.assertIsNone(roi)
 
@@ -52,7 +52,7 @@ class TestExtractROI(unittest.TestCase):
         img = make_image_frame(10, 10)
         evt = {"region_w": 10, "region_h": 10, "rel_x": 2, "rel_y": 2}
 
-        roi = self.proc._extract_roi(img, evt, is_independent=False)
+        roi = self.proc._extract_roi(img, evt)
 
         self.assertIsNone(roi)
 
@@ -62,7 +62,7 @@ class TestExtractROI(unittest.TestCase):
         # w=4, h=4, rel_x=7, rel_y=7 → x=7-2=5, y=7-2=5, 5+4=9 ≤ 10
         evt = {"region_w": 4, "region_h": 4, "rel_x": 7, "rel_y": 7}
 
-        roi = self.proc._extract_roi(img, evt, is_independent=False)
+        roi = self.proc._extract_roi(img, evt)
 
         self.assertIsNotNone(roi)
         self.assertEqual((roi.width, roi.height), (4, 4))
@@ -74,32 +74,12 @@ class TestExtractROI(unittest.TestCase):
         # w=4, h=4, rel_x=9, rel_y=9 → x=9-2=7, y=9-2=7, 7+4=11 > 10 → None
         evt = {"region_w": 4, "region_h": 4, "rel_x": 9, "rel_y": 9}
 
-        roi = self.proc._extract_roi(img, evt, is_independent=False)
+        roi = self.proc._extract_roi(img, evt)
 
         self.assertIsNone(roi)
 
-    def test_independent_mode_returns_full_image(self):
-        """독립 모드에서는 전체 이미지를 반환 (알파 채널 제거)"""
-        img = make_image_frame(10, 10, (128, 128, 128), channels=4)
-        evt = {"region_w": 5, "region_h": 5, "rel_x": 99, "rel_y": 99}
-
-        roi = self.proc._extract_roi(img, evt, is_independent=True)
-
-        self.assertIsNotNone(roi)
-        self.assertEqual((roi.width, roi.height), (10, 10))
-
-    def test_independent_mode_3_channel_image(self):
-        """독립 모드: 3채널 이미지도 정상 처리"""
-        img = make_image_frame(5, 5, (50, 50, 50))
-        evt = {"region_w": 2, "region_h": 2, "rel_x": 0, "rel_y": 0}
-
-        roi = self.proc._extract_roi(img, evt, is_independent=True)
-
-        self.assertEqual((roi.width, roi.height), (5, 5))
-
-
 class TestBuildCaptureRect(unittest.TestCase):
-    """_build_capture_rect: 독립 이벤트 캡처 영역 생성"""
+    """_build_capture_rect: 이벤트 캡처 영역 생성"""
 
     def setUp(self):
         self.proc = make_processor_stub()
@@ -217,7 +197,7 @@ class TestCheckMatchRegionROIIntegration(unittest.TestCase):
             ],
         }
 
-        self.assertTrue(self.proc._check_match(img, evt, is_independent=False))
+        self.assertTrue(self.proc._check_match(img, evt))
 
     def test_region_mismatch_with_roi(self):
         """영역 매칭: ROI 내 체크포인트 불일치"""
@@ -236,7 +216,7 @@ class TestCheckMatchRegionROIIntegration(unittest.TestCase):
             ],
         }
 
-        self.assertFalse(self.proc._check_match(img, evt, is_independent=False))
+        self.assertFalse(self.proc._check_match(img, evt))
 
 
 class TestExtractROIWarning(unittest.TestCase):
@@ -252,7 +232,7 @@ class TestExtractROIWarning(unittest.TestCase):
         """경계 초과 최초 발생 시 logger.warning이 호출됨"""
         img = make_image_frame(10, 10)
         with patch("app.core.processor.logger") as mock_log:
-            self.proc._extract_roi(img, self._out_of_bounds_evt(), is_independent=False)
+            self.proc._extract_roi(img, self._out_of_bounds_evt())
             mock_log.warning.assert_called_once()
 
     def test_warning_logged_only_once_per_event(self):
@@ -260,9 +240,9 @@ class TestExtractROIWarning(unittest.TestCase):
         img = make_image_frame(10, 10)
         evt = self._out_of_bounds_evt("OnceOnly")
         with patch("app.core.processor.logger") as mock_log:
-            self.proc._extract_roi(img, evt, is_independent=False)
-            self.proc._extract_roi(img, evt, is_independent=False)
-            self.proc._extract_roi(img, evt, is_independent=False)
+            self.proc._extract_roi(img, evt)
+            self.proc._extract_roi(img, evt)
+            self.proc._extract_roi(img, evt)
             mock_log.warning.assert_called_once()
 
     def test_different_events_each_warn_once(self):
@@ -270,10 +250,10 @@ class TestExtractROIWarning(unittest.TestCase):
         img = make_image_frame(10, 10)
         with patch("app.core.processor.logger") as mock_log:
             self.proc._extract_roi(
-                img, self._out_of_bounds_evt("EvtA"), is_independent=False
+                img, self._out_of_bounds_evt("EvtA")
             )
             self.proc._extract_roi(
-                img, self._out_of_bounds_evt("EvtB"), is_independent=False
+                img, self._out_of_bounds_evt("EvtB")
             )
             self.assertEqual(mock_log.warning.call_count, 2)
 
@@ -282,7 +262,7 @@ class TestExtractROIWarning(unittest.TestCase):
         img = make_image_frame(10, 10)
         with patch("app.core.processor.logger") as mock_log:
             self.proc._extract_roi(
-                img, self._out_of_bounds_evt("MyEvent"), is_independent=False
+                img, self._out_of_bounds_evt("MyEvent")
             )
             msg = mock_log.warning.call_args[0][0]
             self.assertIn("MyEvent", msg)
@@ -299,7 +279,7 @@ class TestExtractROIWarning(unittest.TestCase):
             "rel_y": 50,
         }
         with patch("app.core.processor.logger") as mock_log:
-            self.proc._extract_roi(img, evt, is_independent=False)
+            self.proc._extract_roi(img, evt)
             mock_log.warning.assert_not_called()
 
 

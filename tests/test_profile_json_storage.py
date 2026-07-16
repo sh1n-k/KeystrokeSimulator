@@ -23,18 +23,15 @@ from app.storage.profile_storage import (
 
 
 class TestProfileJsonStorage(unittest.TestCase):
-    def test_json_roundtrip_drops_latest_screenshot(self):
+    def test_json_roundtrip(self):
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
             held = Image.new("RGB", (3, 3), color=(10, 20, 30))
-            latest = Image.new("RGB", (3, 3), color=(1, 2, 3))
-
             evt = EventModel(
                 event_name="E1",
                 capture_size=(320, 180),
                 latest_position=(100, 200),
                 clicked_position=(10, 20),
-                latest_screenshot=latest,
                 held_screenshot=held,
                 ref_pixel_value=(10, 20, 30),
                 key_to_enter="F1",
@@ -56,11 +53,9 @@ class TestProfileJsonStorage(unittest.TestCase):
             )
             save_profile(prof_dir, p, name="P1")
 
-            # Verify JSON doesn't contain latest_screenshot.
             raw = json.loads((prof_dir / "P1.json").read_text(encoding="utf-8"))
             self.assertIn("events", raw)
             self.assertEqual(len(raw["events"]), 1)
-            self.assertNotIn("latest_screenshot", raw["events"][0])
             self.assertIn("held_screenshot", raw["events"][0])
             self.assertTrue(raw["events"][0]["runtime_toggle_member"])
             self.assertTrue(raw["profile"]["runtime_toggle_enabled"])
@@ -71,7 +66,6 @@ class TestProfileJsonStorage(unittest.TestCase):
             self.assertTrue(p2.favorite)
             self.assertEqual(len(p2.event_list), 1)
             e2 = p2.event_list[0]
-            self.assertIsNone(e2.latest_screenshot)
             self.assertIsNotNone(e2.held_screenshot)
             self.assertEqual(e2.held_screenshot.size, (3, 3))
             self.assertEqual(e2.capture_size, (320, 180))
@@ -346,7 +340,6 @@ class TestEventRoundtrip(unittest.TestCase):
             key_to_enter="B",
             press_duration_ms=200.0,
             randomization_ms=30.0,
-            independent_thread=True,
             match_mode="region",
             invert_match=True,
             region_size=(20, 30),
@@ -365,7 +358,6 @@ class TestEventRoundtrip(unittest.TestCase):
         self.assertEqual(restored.clicked_position, (5, 15))
         self.assertEqual(restored.key_to_enter, "B")
         self.assertEqual(restored.press_duration_ms, 200.0)
-        self.assertTrue(restored.independent_thread)
         self.assertEqual(restored.match_mode, "region")
         self.assertTrue(restored.invert_match)
         self.assertEqual(restored.region_size, (20, 30))
@@ -375,7 +367,6 @@ class TestEventRoundtrip(unittest.TestCase):
         self.assertEqual(restored.conditions, {"Dep": False})
         self.assertIsNotNone(restored.held_screenshot)
         self.assertEqual(restored.held_screenshot.size, (4, 4))
-        self.assertIsNone(restored.latest_screenshot)
 
     def test_none_fields_roundtrip(self):
         """None 필드 roundtrip"""

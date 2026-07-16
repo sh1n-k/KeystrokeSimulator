@@ -116,10 +116,6 @@ def normalize_runtime_toggle_trigger(trigger: str | None) -> str | None:
     return _canonical_key_name(raw)
 
 
-def is_supported_runtime_toggle_trigger(trigger: str | None) -> bool:
-    return normalize_runtime_toggle_trigger(trigger) is not None
-
-
 def is_keyboard_runtime_toggle_trigger(trigger: str | None) -> bool:
     normalized = normalize_runtime_toggle_trigger(trigger)
     return bool(normalized) and normalized not in MOUSE_TRIGGER_TOKENS
@@ -150,19 +146,6 @@ def display_runtime_toggle_trigger(trigger: str | None) -> str:
     if normalized == MOUSE_BUTTON_4_TRIGGER:
         return txt("Mouse Button 4", "마우스 버튼 4")
     return normalized or (str(trigger).strip() if trigger else "")
-
-
-def runtime_toggle_trigger_options() -> list[tuple[str, str]]:
-    options = [(name, name) for name in KeyUtils.get_key_name_list()]
-    options.extend(
-        [
-            (txt("Mouse wheel up", "마우스 휠 위"), WHEEL_UP_TRIGGER),
-            (txt("Mouse wheel down", "마우스 휠 아래"), WHEEL_DOWN_TRIGGER),
-            (txt("Mouse Button 3", "마우스 버튼 3"), MOUSE_BUTTON_3_TRIGGER),
-            (txt("Mouse Button 4", "마우스 버튼 4"), MOUSE_BUTTON_4_TRIGGER),
-        ]
-    )
-    return options
 
 
 def normalize_runtime_toggle_capture_key(

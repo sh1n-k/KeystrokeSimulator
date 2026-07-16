@@ -12,6 +12,7 @@ from loguru import logger
 from PIL import Image
 
 from app.core.models import EventModel, ModificationKeys, ProfileModel
+from app.core.validation import normalized_event_name
 from app.utils.runtime_toggle import normalize_runtime_toggle_trigger
 
 
@@ -206,10 +207,6 @@ def _to_conditions(v: object) -> dict[str, bool]:
     return conditions
 
 
-def _normalized_event_name(name: object) -> str:
-    return str(name or "").strip()
-
-
 def _next_available_event_name(base_name: str, used_names: set[str]) -> str:
     candidate = base_name
     suffix = 2
@@ -225,7 +222,7 @@ def _normalize_loaded_event_names(profile: ProfileModel) -> bool:
         return False
 
     raw_names = [
-        _normalized_event_name(getattr(evt, "event_name", None)) for evt in events
+        normalized_event_name(getattr(evt, "event_name", None)) for evt in events
     ]
     duplicates = {
         name
@@ -236,7 +233,7 @@ def _normalize_loaded_event_names(profile: ProfileModel) -> bool:
     used_names: set[str] = set()
     changed = False
     for index, evt in enumerate(events, start=1):
-        current_name = _normalized_event_name(getattr(evt, "event_name", None))
+        current_name = normalized_event_name(getattr(evt, "event_name", None))
         base_name = current_name or f"Event {index}"
         if current_name in duplicates or not current_name:
             final_name = _next_available_event_name(base_name, used_names)
@@ -257,7 +254,6 @@ def event_to_dict(evt: EventModel) -> dict[str, object]:
     if held_img is not None:
         held_payload = {"format": "png", "data_b64": _img_to_png_b64(held_img)}
 
-    # Intentionally do NOT persist latest_screenshot.
     return {
         "event_name": evt.event_name,
         "use_event": bool(evt.use_event),
@@ -268,7 +264,6 @@ def event_to_dict(evt: EventModel) -> dict[str, object]:
         "key_to_enter": evt.key_to_enter,
         "press_duration_ms": evt.press_duration_ms,
         "randomization_ms": evt.randomization_ms,
-        "independent_thread": bool(evt.independent_thread),
         "match_mode": evt.match_mode,
         "invert_match": bool(evt.invert_match),
         "region_size": list(evt.region_size or []) or None,
@@ -305,13 +300,11 @@ def event_from_dict(d: Mapping[str, object]) -> EventModel:
         capture_size=capture_size,
         latest_position=latest_pos,
         clicked_position=clicked_pos,
-        latest_screenshot=None,  # removed from persisted format
         held_screenshot=held_img,
         ref_pixel_value=ref_pixel,
         key_to_enter=_to_str_or_none(d.get("key_to_enter")),
         press_duration_ms=_to_float_or_none(d.get("press_duration_ms")),
         randomization_ms=_to_float_or_none(d.get("randomization_ms")),
-        independent_thread=bool(d.get("independent_thread", False)),
         use_event=bool(d.get("use_event", True)),
         match_mode=str(d.get("match_mode", "pixel") or "pixel"),
         invert_match=bool(d.get("invert_match", False)),
@@ -429,7 +422,6 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
         e.priority = int(e.priority or 0)
         if not e.conditions:
             e.conditions = {}
-        e.independent_thread = bool(e.independent_thread)
 
 
 def list_profile_names(profiles_dir: Path) -> list[str]:

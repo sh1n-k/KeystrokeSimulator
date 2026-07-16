@@ -15,7 +15,6 @@ from app.core.models import ProfileModel
 from app.ui import theme
 
 RGB: TypeAlias = tuple[int, int, int]
-RGBA: TypeAlias = tuple[int, int, int, int]
 Point: TypeAlias = tuple[int, int]
 FloatPoint: TypeAlias = tuple[float, float]
 Box: TypeAlias = tuple[int, int, int, int]
@@ -34,7 +33,6 @@ def _rgb(hex_color: str) -> RGB:
 # Workstation palette in RGB form, derived from app/ui/theme.py tokens.
 BACKGROUND = _rgb(theme.SURFACE_PAPER)
 PANEL_BG = _rgb(theme.SURFACE_PANEL)
-SUNKEN_BG = _rgb(theme.SURFACE_SUNKEN)
 TEXT_COLOR = _rgb(theme.INK_PRIMARY)
 TEXT_COLOR_FADE = _rgb(theme.INK_MUTED)
 EDGE_TRUE = _rgb(theme.SIGNAL_BASE)
@@ -56,7 +54,6 @@ TARGET_WIDTH = 1200
 LEGEND_TOP_PAD = 20
 LEGEND_ITEM_H = 26
 LEGEND_SWATCH_W = 30
-LEGEND_COL_GAP = 24
 LEGEND_ROW_GAP = 6
 LEGEND_FONT_SIZE = 14
 
@@ -71,7 +68,6 @@ BEZIER_SEGMENTS = 32
 
 # Badges
 BADGE_R = 8
-BADGE_OFFSET_X = NODE_W - 6
 BADGE_OFFSET_Y = -4
 
 BADGE_COLOR_MISSING = (220, 160, 40)
@@ -193,10 +189,10 @@ def render_profile_graph(profile: ProfileModel, profile_name: str) -> Image.Imag
     for node in nodes:
         if node.node_id not in positions:
             continue
-        _draw_node(draw, node, positions[node.node_id], font, font_small)
+        _draw_node(draw, node, positions[node.node_id], font)
 
     # Z4: Legend at bottom
-    _draw_legend(draw, img, nodes, content_bottom, width, font, font_legend)
+    _draw_legend(draw, nodes, content_bottom, width, font, font_legend)
 
     return img
 
@@ -578,7 +574,6 @@ def _draw_node(
     node: GraphNode,
     pos: Point,
     font: FontLike,
-    font_small: FontLike,
 ) -> None:
     x, y = pos
     x2, y2 = x + NODE_W, y + NODE_H
@@ -605,14 +600,13 @@ def _draw_node(
         draw.text((tx, ty), line, fill=text_color, font=font)
         ty += line_height
 
-    _draw_node_badges(draw, node, pos, font_small)
+    _draw_node_badges(draw, node, pos)
 
 
 def _draw_node_badges(
     draw: ImageDraw.ImageDraw,
     node: GraphNode,
     pos: Point,
-    font_small: FontLike,
 ) -> None:
     badges: list[tuple[str, RGB]] = []
     if node.missing:
@@ -1025,7 +1019,6 @@ def _profile_hash(profile: ProfileModel) -> str:
                 "priority": evt.priority,
                 "use_event": evt.use_event,
                 "execute_action": evt.execute_action,
-                "independent_thread": evt.independent_thread,
                 "conditions": evt.conditions,
             }
         )
@@ -1050,7 +1043,6 @@ def _calc_legend_height(
 
 def _draw_legend(
     draw: ImageDraw.ImageDraw,
-    img: Image.Image,
     nodes: list[GraphNode],
     legend_y: int,
     canvas_width: int,

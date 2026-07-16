@@ -69,7 +69,6 @@ class KeystrokeEventEditor:
         self.existing_events: list[EventModel] = existing_events or []
         self.temp_conditions: dict[str, bool] = {}
 
-        # UI 위젯 참조 (Phase 1-3)
         self.lbl_hidden_notice: tk.Label | None = None
         self.lbl_condition_hint: ttk.Label | None = None
         self.lbl_condition_summary: ttk.Label | None = None
@@ -209,8 +208,7 @@ class KeystrokeEventEditor:
             ind.bind("<Button-1>", lambda _e, idx=i: self._goto_step(idx))
             self._step_indicators.append(ind)
 
-        # Rail footer — meta chips reflecting current event state. Keeps
-        # context (Standalone/Inverted/Cond-only) visible from any step.
+        # Rail footer — meta chips reflecting current event state.
         tk.Frame(self.step_rail, bg=theme.SURFACE_PANEL, height=theme.SPACE_3).pack(
             fill="x"
         )
@@ -224,7 +222,6 @@ class KeystrokeEventEditor:
         ).pack(fill="x", anchor="w", padx=theme.SPACE_2)
         self._meta_chips: dict[str, tk.Label] = {}
         for key, glyph, en, ko in (
-            ("standalone", theme.ICON_STANDALONE, "Standalone", "독립"),
             ("inverted", theme.ICON_INVERTED, "Inverted", "반전"),
             ("cond_only", theme.ICON_CONDITION, "Cond-only", "조건 전용"),
         ):
@@ -330,9 +327,6 @@ class KeystrokeEventEditor:
             except tk.TclError:
                 pass
 
-        # `standalone` (independent_thread) is not exposed in the form yet —
-        # leave it idle but keep the chip for parity with SOT vocabulary.
-        _paint("standalone", False)
         try:
             invert_on = bool(self.invert_match_var.get())
         except tk.TclError:
@@ -1589,13 +1583,11 @@ class KeystrokeEventEditor:
             event_name=final_name,
             latest_position=latest_pos,
             clicked_position=clicked_pos,
-            latest_screenshot=None,  # removed from persisted format
             held_screenshot=held_img.copy(),  # 복사본
             ref_pixel_value=ref_pixel,
             key_to_enter=self.key_to_enter,
             press_duration_ms=dur,
             randomization_ms=rand,
-            independent_thread=False,
             capture_size=(cap_w, cap_h),
             match_mode=self.match_mode_var.get(),
             invert_match=self.invert_match_var.get(),

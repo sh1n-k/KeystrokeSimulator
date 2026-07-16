@@ -111,7 +111,6 @@ class EventData(TypedDict):
     priority: int
     conds: dict[str, bool]
     runtime_toggle_member: bool
-    independent: bool
     region_w: int
     region_h: int
     rel_x: int
@@ -363,9 +362,6 @@ class KeystrokeProcessor:
                 "priority": e.priority,
                 "conds": e.conditions,
                 "runtime_toggle_member": bool(e.runtime_toggle_member),
-                # independent_thread is deprecated at runtime; all events now
-                # flow through the main evaluation pipeline.
-                "independent": False,
                 "region_w": 1,
                 "region_h": 1,
                 "rel_x": 0,
@@ -601,7 +597,6 @@ class KeystrokeProcessor:
         cond_sig = tuple(sorted((str(k), bool(v)) for k, v in conds.items()))
 
         return (
-            evt.get("independent", False),
             evt.get("center_x"),
             evt.get("center_y"),
             match_sig,
@@ -626,10 +621,6 @@ class KeystrokeProcessor:
             seen.add(signature)
             deduped.append(evt)
         return deduped
-
-    def is_runtime_toggle_active(self) -> bool:
-        with self.state_lock:
-            return bool(self.runtime_toggle_active)
 
     def set_runtime_toggle_active(self, active: bool) -> bool:
         active = bool(active)
@@ -703,9 +694,7 @@ class KeystrokeProcessor:
     ) -> dict[str, bool]:
         local_match_states: dict[str, bool] = {}
         for evt in events:
-            local_match_states[evt["name"]] = self._check_match(
-                img, evt, is_independent=False
-            )
+            local_match_states[evt["name"]] = self._check_match(img, evt)
         return local_match_states
 
     async def _apply_local_match_states(
@@ -744,13 +733,8 @@ class KeystrokeProcessor:
             return {"top": cy - h // 2, "left": cx - w // 2, "width": w, "height": h}
         return {"top": cy, "left": cx, "width": 1, "height": 1}
 
-    def _extract_roi(
-        self, img: ImageFrame, evt: EventData, is_independent: bool
-    ) -> ImageFrame | None:
+    def _extract_roi(self, img: ImageFrame, evt: EventData) -> ImageFrame | None:
         """이미지에서 관심 영역(ROI) 추출"""
-        if is_independent:
-            return img
-
         w, h = evt["region_w"], evt["region_h"]
         x, y = evt["rel_x"] - w // 2, evt["rel_y"] - h // 2
 
@@ -770,7 +754,7 @@ class KeystrokeProcessor:
 
         return img.crop(x, y, w, h)
 
-    def _check_match(self, img: ImageFrame, evt: EventData, is_independent: bool) -> bool:
+    def _check_match(self, img: ImageFrame, evt: EventData) -> bool:
         matched = False
         evaluated = False
         try:
@@ -778,7 +762,7 @@ class KeystrokeProcessor:
                 check_points = evt.get("check_points")
                 if not check_points:
                     return False
-                roi = self._extract_roi(img, evt, is_independent)
+                roi = self._extract_roi(img, evt)
                 if roi is None:
                     return False
 
@@ -800,13 +784,10 @@ class KeystrokeProcessor:
                 if ref_bgr is None:
                     return False
                 # 픽셀 모드
-                if is_independent:
-                    pixel = img.pixel_bgr(0, 0)
-                else:
-                    py, px = evt["rel_y"], evt["rel_x"]
-                    if py >= img.height or px >= img.width:
-                        return False
-                    pixel = img.pixel_bgr(px, py)
+                py, px = evt["rel_y"], evt["rel_x"]
+                if py >= img.height or px >= img.width:
+                    return False
+                pixel = img.pixel_bgr(px, py)
                 matched = pixel == ref_bgr
                 evaluated = True
         except Exception:
@@ -888,14 +869,6 @@ class KeystrokeProcessor:
                 break
             await asyncio.sleep(min(check_interval, remaining))
 
-    def _wait_until_sync(self, end_time: float, check_interval: float = 0.02) -> None:
-        """절대 종료 시간까지 동기 대기"""
-        while time.time() < end_time and not self.term_event.is_set():
-            remaining = end_time - time.time()
-            if remaining <= 0:
-                break
-            time.sleep(min(check_interval, remaining))
-
     async def _press_key_async(
         self, evt: EventData, state_snapshot: dict[str, bool] | None = None
     ) -> None:
@@ -918,27 +891,6 @@ class KeystrokeProcessor:
             await self._wait_until_async(time.time() + target_duration)
             self.sim.release(code)
             self._log_key_execution("Async", evt, target_duration, state_snapshot)
-        finally:
-            with self.key_lock:
-                self.pressed_keys.discard(key)
-
-    def _sync_press_key(self, evt: EventData) -> None:
-        """동기 키 입력 실행 (독립 스레드용)"""
-        key = evt["key"]
-        if not key or not (code := self.key_codes.get(key)):
-            return
-
-        with self.key_lock:
-            if key in self.pressed_keys:
-                return
-            self.pressed_keys.add(key)
-
-        try:
-            self.sim.press(code)
-            target_duration = self._calculate_press_duration(evt)
-            self._wait_until_sync(time.time() + target_duration)
-            self.sim.release(code)
-            self._log_key_execution("Sync", evt, target_duration)
         finally:
             with self.key_lock:
                 self.pressed_keys.discard(key)
