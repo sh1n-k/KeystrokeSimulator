@@ -3,7 +3,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.core.models import EventModel, ProfileModel
-from app.ui.profiles import EventListFrame, EventRow, KeystrokeProfiles
+from app.ui import theme
+from app.ui.profile_event_list import EventListFrame, EventRow
+from app.ui.profiles import KeystrokeProfiles
 from app.utils.i18n import set_language
 
 
@@ -220,7 +222,7 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         stub.win = object()
 
         edited = EventModel(event_name="B", key_to_enter="X")
-        with patch("app.ui.profiles.messagebox.showerror") as mock_error:
+        with patch("app.ui.profile_event_list.messagebox.showerror") as mock_error:
             stub._on_editor_save(edited, is_edit=True, row=0)
 
         self.assertEqual(stub.profile.event_list[0].event_name, "A")
@@ -409,7 +411,7 @@ class TestSortEventsLogic(unittest.TestCase):
         stub.update_events = lambda: None
         stub.save_cb = lambda *args, **kwargs: None
 
-        with patch("app.ui.profiles.messagebox.showinfo") as mock_show:
+        with patch("app.ui.profile_event_list.messagebox.showinfo") as mock_show:
             stub._sort_events_by_key()
 
         mock_show.assert_called_once()
@@ -430,7 +432,7 @@ class TestSortEventsLogic(unittest.TestCase):
         stub.update_events = lambda: None
         stub.save_cb = lambda *args, **kwargs: None
 
-        with patch("app.ui.profiles.messagebox.showinfo") as mock_show:
+        with patch("app.ui.profile_event_list.messagebox.showinfo") as mock_show:
             stub._sort_events_by_name()
 
         mock_show.assert_called_once()
@@ -471,7 +473,7 @@ class TestEventRowBadges(unittest.TestCase):
         self.assertEqual(row.lbl_cond.cget("text"), "◐ Cond")
         self.assertEqual(row.lbl_grp.cget("text"), "▣ G1")
         self.assertEqual(row.lbl_key.cget("text"), "◐ Cond")
-        self.assertEqual(row.entry.cget("foreground"), "gray")
+        self.assertEqual(row.entry.cget("foreground"), theme.INK_MUTED)
 
     def test_row_displays_invert_and_missing_key_badges(self):
         evt = EventModel(
@@ -616,11 +618,14 @@ class TestProfileNavRailActions(unittest.TestCase):
         stub = KeystrokeProfiles.__new__(KeystrokeProfiles)
         stub.win = object()
         stub.e_frame = MagicMock()
+        stub.prof_dir = Path("profiles")
 
         with patch("app.ui.profiles.EventImporter") as importer:
             stub._nav_action_import()
 
-        importer.assert_called_once_with(stub.win, stub.e_frame._import)
+        importer.assert_called_once_with(
+            stub.win, stub.e_frame._import, profiles_dir=stub.prof_dir
+        )
 
 
 class TestProfileSaveValidation(unittest.TestCase):

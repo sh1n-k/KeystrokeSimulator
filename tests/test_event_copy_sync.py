@@ -55,6 +55,7 @@ class TestEventCopySync(unittest.TestCase):
             conditions={"OtherEvent": True},
         )
         evt.use_event = False
+        evt.runtime_toggle_member = True
         return evt
 
     def test_field_coverage(self):

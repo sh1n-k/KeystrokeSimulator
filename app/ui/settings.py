@@ -17,7 +17,7 @@ from app.utils.i18n import (
 )
 from app.core.models import UserSettings
 from app.storage.settings_storage import load_user_settings, save_user_settings
-from app.utils.system import WindowUtils, StateUtils
+from app.utils.window_state import StateUtils, WindowUtils
 from app.ui import theme
 
 SETTINGS_WINDOW_DEFAULT_GEOMETRY = "800x280"

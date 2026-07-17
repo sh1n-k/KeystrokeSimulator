@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from helpers import evaluate_processor_events, make_processor_stub
+from tests.helpers import evaluate_processor_events, make_processor_stub
 from app.core.processor import _normalize_key_name
 
 

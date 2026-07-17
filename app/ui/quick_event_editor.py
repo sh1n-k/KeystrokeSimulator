@@ -1,26 +1,31 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 import tkinter as tk
 import tkinter.ttk as ttk
-import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from threading import Thread
 from typing import Any, cast
 
 from PIL import Image, ImageTk
 from loguru import logger
 
 from app.utils.i18n import dual_text_width, txt
-from app.core.capturer import ScreenshotCapturer
 from app.core.models import ColorTuple, EventModel, Position
+from app.ui.capture_session import CaptureSession
 from app.storage.profile_storage import ensure_quick_profile, load_profile, save_profile
-from app.utils.system import StateUtils, WindowUtils, KeyUtils
+from app.utils.keys import KeyUtils
+from app.utils.window_state import StateUtils, WindowUtils
 from app.ui import theme
 
 
 class KeystrokeQuickEventEditor:
-    def __init__(self, settings_window: tk.Tk | tk.Toplevel):
+    def __init__(
+        self,
+        settings_window: tk.Tk | tk.Toplevel,
+        *,
+        profiles_dir: Path,
+        on_close: Callable[[], object] | None = None,
+    ) -> None:
         self.win = tk.Toplevel(settings_window)
         self.win.title(txt("Quick Event Settings", "빠른 이벤트 설정"))
         self.win.transient(settings_window)
@@ -30,13 +35,9 @@ class KeystrokeQuickEventEditor:
         self.win.bind("<Escape>", self.close)
         self.win.protocol("WM_DELETE_WINDOW", self.close)
 
+        self.capture_session = CaptureSession()
         self.event_idx = 1
         self.events: list[EventModel] = []
-        self.latest_pos: Position | None = None
-        self.clicked_pos: Position | None = None
-        self.latest_img: Image.Image | None = None
-        self.held_img: Image.Image | None = None
-        self.ref_pixel: ColorTuple | None = None
         self.saved_count = 0
 
         self.capture_w_var = tk.IntVar(value=100)
@@ -55,18 +56,61 @@ class KeystrokeQuickEventEditor:
         self.button_dock: tk.Frame
         self.button_group: tk.Frame
 
-        self.capturer = ScreenshotCapturer()
-        self.capturer.screenshot_callback = self.update_capture
-        self.prof_dir = Path("profiles")
+        self.prof_dir = profiles_dir
+        self.on_close = on_close
         ensure_quick_profile(self.prof_dir)
 
         self._create_ui()
         self._load_pos()
 
-        self.capturer.start_capture()
-        self.chk_active = True
-        self.chk_thread = Thread(target=self._check_keys, daemon=True)
-        self.chk_thread.start()
+        self._is_closing = False
+        self._capture_generation = -1
+        self._ctrl_was_pressed = False
+        self._capture_after_id: str | None = None
+        self._modifier_after_id: str | None = None
+        self.capture_session.start()
+        self._poll_capture()
+        self._check_keys()
+
+    @property
+    def latest_pos(self) -> Position | None:
+        return self.capture_session.latest_position
+
+    @latest_pos.setter
+    def latest_pos(self, value: Position | None) -> None:
+        self.capture_session.latest_position = value
+
+    @property
+    def clicked_pos(self) -> Position | None:
+        return self.capture_session.selected_position
+
+    @clicked_pos.setter
+    def clicked_pos(self, value: Position | None) -> None:
+        self.capture_session.selected_position = value
+
+    @property
+    def latest_img(self) -> Image.Image | None:
+        return self.capture_session.latest_image
+
+    @latest_img.setter
+    def latest_img(self, value: Image.Image | None) -> None:
+        self.capture_session.latest_image = value
+
+    @property
+    def held_img(self) -> Image.Image | None:
+        return self.capture_session.held_image
+
+    @held_img.setter
+    def held_img(self, value: Image.Image | None) -> None:
+        self.capture_session.held_image = value
+
+    @property
+    def ref_pixel(self) -> ColorTuple | None:
+        return self.capture_session.reference_color
+
+    @ref_pixel.setter
+    def ref_pixel(self, value: ColorTuple | None) -> None:
+        self.capture_session.reference_color = value
 
     def _create_ui(self) -> None:
         try:
@@ -132,12 +176,12 @@ class KeystrokeQuickEventEditor:
         tk.Label(
             f_img,
             text=txt("Live Preview", "실시간 미리보기"),
-            fg="#555555",
+            fg=theme.INK_SECONDARY,
         ).grid(row=0, column=0, pady=(0, 3))
         tk.Label(
             f_img,
             text=txt("Captured Target", "저장 대상"),
-            fg="#555555",
+            fg=theme.INK_SECONDARY,
         ).grid(row=0, column=1, pady=(0, 3))
         self.lbl_img1 = self._mk_lbl(f_img, "red", 1, 0)
         self.lbl_img2 = self._mk_lbl(f_img, "gray", 1, 1)
@@ -213,7 +257,7 @@ class KeystrokeQuickEventEditor:
             text="",
             anchor="center",
             justify="center",
-            foreground="#555555",
+            foreground=theme.INK_SECONDARY,
             wraplength=360,
         )
         self.lbl_feedback.pack(pady=(0, 8), fill="both")
@@ -228,7 +272,7 @@ class KeystrokeQuickEventEditor:
                 self.capture_w_var.set(w)
             if self.capture_h_var.get() != h:
                 self.capture_h_var.set(h)
-            self.capturer.set_capture_size(w, h)
+            self.capture_session.set_capture_size(w, h)
         except (ValueError, tk.TclError):
             pass
 
@@ -273,29 +317,39 @@ class KeystrokeQuickEventEditor:
 
     def _update_pos_from_entry(self, event: object | None = None) -> None:
         try:
-            self.capturer.set_current_mouse_position(
+            self.capture_session.set_position(
                 (int(self.entries[0].get()), int(self.entries[1].get()))
             )
         except ValueError:
             pass
 
     def _check_keys(self) -> None:
-        while self.chk_active:
-            if KeyUtils.mod_key_pressed("alt"):
-                self.capturer.set_current_mouse_position(self.win.winfo_pointerxy())
-            if KeyUtils.mod_key_pressed("ctrl"):
-                self.win.after(0, self.hold_image)
-                time.sleep(0.2)
-            time.sleep(0.1)
+        if self._is_closing:
+            return
+        if KeyUtils.mod_key_pressed("alt"):
+            self.capture_session.set_position(self.win.winfo_pointerxy())
+        ctrl_pressed = KeyUtils.mod_key_pressed("ctrl")
+        if ctrl_pressed and not self._ctrl_was_pressed:
+            self.hold_image()
+        self._ctrl_was_pressed = ctrl_pressed
+        self._modifier_after_id = self.win.after(100, self._check_keys)
+
+    def _poll_capture(self) -> None:
+        if self._is_closing:
+            return
+        snapshot = self.capture_session.snapshot()
+        if snapshot.generation != self._capture_generation:
+            self._capture_generation = snapshot.generation
+            if snapshot.latest_position and snapshot.latest_image:
+                self.update_capture(snapshot.latest_position, snapshot.latest_image)
+        self._capture_after_id = self.win.after(50, self._poll_capture)
 
     def update_capture(self, pos: Position, img: Image.Image) -> None:
         if pos and img:
-            self.latest_pos, self.latest_img = pos, img
             try:
                 if self.lbl_img1.winfo_exists():
-                    scaled = self._scale_for_display(img)
-                    self.win.after(0, lambda s=scaled: self._upd_img(self.lbl_img1, s))
-                    self.win.after(0, self._refresh_status_text)
+                    self._upd_img(self.lbl_img1, self._scale_for_display(img))
+                    self._refresh_status_text()
             except (tk.TclError, AttributeError):
                 pass
 
@@ -306,13 +360,17 @@ class KeystrokeQuickEventEditor:
                     "Move the mouse over the target first so the live preview can update.",
                     "먼저 대상 위로 마우스를 움직여 실시간 미리보기가 보이게 하세요.",
                 ),
-                color="#7a5b00",
+                color=theme.STATUS_WARN_FG,
             )
             self._refresh_status_text()
             return
-        self._set_entries(self.entries[:2], *self.latest_pos)
-        self.held_img = self.latest_img.copy()
-        self._upd_img(self.lbl_img2, self._scale_for_display(self.latest_img))
+        if not self.capture_session.hold() or self.held_img is None:
+            return
+        held_position = self.capture_session.held_position
+        if held_position is None:
+            return
+        self._set_entries(self.entries[:2], *held_position)
+        self._upd_img(self.lbl_img2, self._scale_for_display(self.held_img))
         if self.clicked_pos:
             self._apply_overlay(self.held_img, self.lbl_img2)
             self.save_event()
@@ -332,7 +390,7 @@ class KeystrokeQuickEventEditor:
                     "Capture the live preview first, then choose a pixel on the right image.",
                     "먼저 실시간 미리보기를 캡처한 뒤 오른쪽 이미지에서 픽셀을 고르세요.",
                 ),
-                color="#7a5b00",
+                color=theme.STATUS_WARN_FG,
             )
             return
 
@@ -341,13 +399,10 @@ class KeystrokeQuickEventEditor:
         if display_w <= 1 or display_h <= 1:
             return
 
-        w_r = self.held_img.width / display_w
-        h_r = self.held_img.height / display_h
-        ix, iy = int(event.x * w_r), int(event.y * h_r)
-
-        if 0 <= ix < self.held_img.width and 0 <= iy < self.held_img.height:
-            self.clicked_pos = (ix, iy)
-            self.ref_pixel = cast(ColorTuple, self.held_img.getpixel((ix, iy)))
+        if self.capture_session.select((event.x, event.y), (display_w, display_h)):
+            if self.clicked_pos is None or self.ref_pixel is None:
+                return
+            ix, iy = self.clicked_pos
             self._upd_img(self.lbl_ref, Image.new("RGBA", (25, 25), self.ref_pixel))
             self._set_entries(self.entries[2:], ix, iy)
             self._apply_overlay(self.held_img, self.lbl_img2)
@@ -413,7 +468,7 @@ class KeystrokeQuickEventEditor:
             ents[i].delete(0, tk.END)
             ents[i].insert(0, str(v))
 
-    def _set_feedback(self, text: str, color: str = "#555555") -> None:
+    def _set_feedback(self, text: str, color: str = theme.INK_SECONDARY) -> None:
         if self.lbl_feedback:
             self.lbl_feedback.config(text=text, foreground=color)
 
@@ -501,7 +556,7 @@ class KeystrokeQuickEventEditor:
                 EventModel(
                     event_name=str(self.event_idx),
                     capture_size=(self.capture_w_var.get(), self.capture_h_var.get()),
-                    latest_position=self.latest_pos,
+                    latest_position=self.capture_session.held_position,
                     clicked_position=self.clicked_pos,
                     held_screenshot=self.held_img,
                     ref_pixel_value=self.ref_pixel,
@@ -520,24 +575,30 @@ class KeystrokeQuickEventEditor:
                     "Quick 이벤트 #{count} 저장 완료. 다음 대상을 캡처하려면 마우스를 옮기세요.",
                     count=self.saved_count,
                 ),
-                color="#1e5f3a",
+                color=theme.STATUS_READY_FG,
             )
             self._refresh_status_text()
 
     def close(self, event: object | None = None) -> None:
-        self.chk_active = False
-        if self.chk_thread.is_alive():
-            self.chk_thread.join(0.5)
-        self.capturer.stop_capture()
-        if self.capturer.capture_thread and self.capturer.capture_thread.is_alive():
-            self.capturer.capture_thread.join(0.1)
+        if self._is_closing:
+            return
+        self._is_closing = True
+        for after_id in (self._capture_after_id, self._modifier_after_id):
+            if after_id is not None:
+                try:
+                    self.win.after_cancel(after_id)
+                except tk.TclError:
+                    pass
+        self.capture_session.stop()
 
         StateUtils.save_main_app_state(
             quick_pos=f"{self.win.winfo_x()}/{self.win.winfo_y()}",
-            quick_ptr=str(self.capturer.get_current_mouse_position()),
+            quick_ptr=str(self.capture_session.current_position()),
         )
         self.win.grab_release()
         self.win.destroy()
+        if self.on_close:
+            self.on_close()
 
     def _load_pos(self) -> None:
         s = StateUtils.load_main_app_state()
@@ -550,5 +611,5 @@ class KeystrokeQuickEventEditor:
             pt = StateUtils.parse_position_tuple(ptr)
             if pt is not None:
                 self._set_entries(self.entries[:2], *pt)
-                self.capturer.set_current_mouse_position(pt)
+                self.capture_session.set_position(pt)
         self._refresh_status_text()

@@ -1,11 +1,13 @@
 import os
 import tkinter as tk
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
 from app.core.models import ProfileModel
+from app.ui.capture_session import CaptureSession
 from app.ui.quick_event_editor import KeystrokeQuickEventEditor
 from app.utils.i18n import set_language
 
@@ -48,6 +50,7 @@ class TestQuickEventEditorStatus(unittest.TestCase):
 
     def _make_stub(self):
         stub = KeystrokeQuickEventEditor.__new__(KeystrokeQuickEventEditor)
+        stub.capture_session = CaptureSession()
         stub.saved_count = 0
         stub.latest_img = None
         stub.held_img = None
@@ -123,6 +126,22 @@ class TestQuickEventEditorStatus(unittest.TestCase):
             "1 Quick event(s) saved in this session.",
         )
 
+    def test_close_notifies_parent_once(self):
+        stub = self._make_stub()
+        stub._is_closing = False
+        stub._capture_after_id = None
+        stub._modifier_after_id = None
+        stub.capture_session.stop = MagicMock()
+        stub.capture_session.current_position = MagicMock(return_value=(0, 0))
+        stub.win = MagicMock()
+        stub.on_close = MagicMock()
+
+        with patch("app.ui.quick_event_editor.StateUtils.save_main_app_state"):
+            stub.close()
+            stub.close()
+
+        stub.on_close.assert_called_once()
+
 
 @unittest.skipUnless(_RUN_GUI_TESTS, "GUI tests require RUN_GUI_TESTS=1")
 class TestQuickEventEditorLayout(unittest.TestCase):
@@ -134,7 +153,7 @@ class TestQuickEventEditorLayout(unittest.TestCase):
 
     @patch("app.ui.quick_event_editor.KeyUtils.mod_key_pressed", return_value=False)
     @patch("app.ui.quick_event_editor.ensure_quick_profile")
-    @patch("app.ui.quick_event_editor.ScreenshotCapturer")
+    @patch("app.ui.capture_session.ScreenshotCapturer")
     @patch("app.ui.quick_event_editor.WindowUtils.center_window")
     @patch("app.ui.quick_event_editor.StateUtils.load_main_app_state", return_value={})
     @patch("app.ui.quick_event_editor.StateUtils.save_main_app_state")
@@ -150,7 +169,7 @@ class TestQuickEventEditorLayout(unittest.TestCase):
         capturer = mock_capturer_cls.return_value
         capturer.capture_thread = None
         capturer.get_current_mouse_position.return_value = (0, 0)
-        editor = KeystrokeQuickEventEditor(self.root)
+        editor = KeystrokeQuickEventEditor(self.root, profiles_dir=Path("profiles"))
 
         self.root.update()
         editor.win.update()

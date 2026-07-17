@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
@@ -11,8 +10,9 @@ from loguru import logger
 from app.utils.i18n import dual_text_width, txt
 
 from app.core.models import EventModel, ProfileModel
+from app.core.profile_events import clone_event
 from app.storage.profile_storage import list_profile_names, load_profile
-from app.utils.system import StateUtils
+from app.utils.window_state import StateUtils
 from app.ui import theme
 
 
@@ -21,6 +21,8 @@ class EventImporter:
         self,
         profiles_window: tk.Toplevel,
         confirm_callback: Callable[[list[EventModel]], None] | None = None,
+        *,
+        profiles_dir: Path,
     ) -> None:
         self.win = tk.Toplevel(profiles_window)
         self.win.title(txt("Import Events", "이벤트 가져오기"))
@@ -29,7 +31,7 @@ class EventImporter:
         cast(Any, self.win).attributes("-topmost", True)
         self.win.grab_set()
 
-        self.profile_dir = Path("profiles")
+        self.profile_dir = profiles_dir
         self.confirm_cb = confirm_callback
         self.checkboxes: list[tk.IntVar] = []
         self.current_profile_data: ProfileModel | None = None
@@ -283,27 +285,7 @@ class EventImporter:
         self._refresh_selection_summary()
 
     def _copy_event(self, evt: EventModel) -> EventModel:
-        """이벤트 깊은 복사 (PIL Image 포함) - 매우 중요"""
-        new_evt = EventModel(
-            event_name=evt.event_name,
-            capture_size=evt.capture_size,
-            latest_position=evt.latest_position,
-            clicked_position=evt.clicked_position,
-            held_screenshot=evt.held_screenshot.copy() if evt.held_screenshot else None,
-            ref_pixel_value=evt.ref_pixel_value,
-            key_to_enter=evt.key_to_enter,
-            press_duration_ms=evt.press_duration_ms,
-            randomization_ms=evt.randomization_ms,
-            match_mode=evt.match_mode,
-            invert_match=evt.invert_match,
-            region_size=evt.region_size,
-            execute_action=evt.execute_action,
-            group_id=evt.group_id,
-            priority=evt.priority,
-            conditions=copy.deepcopy(evt.conditions),
-        )
-        new_evt.use_event = evt.use_event
-        return new_evt
+        return clone_event(evt)
 
     def on_ok(self) -> None:
         if not self.current_profile_data:

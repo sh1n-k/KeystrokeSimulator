@@ -12,7 +12,7 @@ from app.utils.i18n import dual_text_width, txt
 
 from app.core.models import EventModel, ProfileModel
 from app.storage.profile_storage import load_profile, save_profile
-from app.utils.system import StateUtils, WindowUtils
+from app.utils.window_state import StateUtils, WindowUtils
 from app.ui import theme
 
 SW_PAD_XS = theme.SPACE_1
@@ -67,16 +67,18 @@ class KeystrokeSortEvents(tk.Toplevel):
         master: tk.Misc,
         profile_name: str,
         save_callback: Callable[[str], None],
+        *,
+        profiles_dir: Path,
     ) -> None:
         super().__init__(master)
         self.master, self.save_cb = master, save_callback
         self.app_master = cast(SortHost, master)
-        self.prof_dir = Path("profiles")
+        self.prof_dir = profiles_dir
         self.title(txt("Sort Events", "이벤트 정렬"))
         self.configure(bg=SW_BG_BASE)
 
         style = ttk.Style(self)
-        style.configure("SortReadonly.TEntry", fieldbackground="#fbfaf7")
+        style.configure("SortReadonly.TEntry", fieldbackground=theme.SURFACE_PAPER)
 
         self.prof_name = tk.StringVar(value=profile_name)
         self.profile: ProfileModel | None = self._load_profile(profile_name)

@@ -6,7 +6,9 @@ from unittest.mock import patch
 
 from app.core.models import EventModel, ProfileModel
 from app.utils import system
-from app.utils.system import KeyUtils, PermissionUtils, StateUtils
+from app.utils.keys import KeyUtils
+from app.utils.system import PermissionUtils
+from app.utils.window_state import StateUtils
 from app.utils.runtime_toggle import (
     active_runtime_toggle_events,
     MOUSE_BUTTON_3_TRIGGER,
@@ -119,7 +121,7 @@ class TestPermissionUtils(unittest.TestCase):
         module = SimpleNamespace(CGPreflightScreenCaptureAccess=lambda: True)
 
         with patch("app.utils.system._platform_module", return_value=module):
-            self.assertTrue(system._quartz_symbol("CGPreflightScreenCaptureAccess")())
+            self.assertTrue(system.quartz_symbol("CGPreflightScreenCaptureAccess")())
 
     @patch("app.utils.system.IS_MAC", True)
     @patch(

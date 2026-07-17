@@ -1,6 +1,11 @@
 import unittest
 
-from helpers import fill_frame_rect, make_image_frame, make_processor_stub, set_frame_pixel
+from tests.helpers import (
+    fill_frame_rect,
+    make_image_frame,
+    make_processor_stub,
+    set_frame_pixel,
+)
 
 
 class TestCheckMatchPixelMode(unittest.TestCase):

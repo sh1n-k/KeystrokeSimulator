@@ -17,7 +17,8 @@ from mss.screenshot import ScreenShot
 from PIL import Image
 
 from app.core.models import EventModel, ModificationKeys, UserSettings
-from app.utils.system import KeyUtils, ProcessUtils
+from app.utils.keys import KeyUtils
+from app.utils.system import ProcessUtils
 
 Pixel = tuple[int, int, int]
 Rect = dict[str, int]

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import copy
-import time
 import tkinter as tk
 import tkinter.ttk as ttk
 from collections.abc import Callable, Sequence
-from threading import Thread
 from tkinter import messagebox
 from typing import Any, ClassVar, TypeAlias, cast
 
@@ -13,9 +11,11 @@ from PIL import Image, ImageDraw, ImageTk
 from loguru import logger
 
 from app.utils.i18n import txt
-from app.core.capturer import ScreenshotCapturer
 from app.core.models import ColorTuple, EventModel, Position
-from app.utils.system import KeyUtils, PermissionUtils, StateUtils, WindowUtils
+from app.ui.capture_session import CaptureSession
+from app.utils.keys import KeyUtils
+from app.utils.system import PermissionUtils
+from app.utils.window_state import StateUtils, WindowUtils
 from app.ui import theme
 
 SaveCallback: TypeAlias = Callable[[EventModel, bool, int], None]
@@ -55,15 +55,9 @@ class KeystrokeEventEditor:
         self.priority_var = tk.IntVar(value=0)
 
         self.save_cb: SaveCallback | None = save_callback
-        self.capturer: ScreenshotCapturer = ScreenshotCapturer()
-        self.capturer.screenshot_callback = self.update_capture_image
+        self.capture_session = CaptureSession()
 
         self.event_name: str = ""
-        self.latest_pos: Position | None = None
-        self.clicked_pos: Position | None = None
-        self.latest_img: Image.Image | None = None
-        self.held_img: Image.Image | None = None
-        self.ref_pixel: ColorTuple | None = None
         self.key_to_enter: str | None = None
 
         self.existing_events: list[EventModel] = existing_events or []
@@ -90,12 +84,14 @@ class KeystrokeEventEditor:
         event_factory = event_function or (lambda: None)
         self.is_edit = bool(event_factory())
         self.load_stored_event(event_factory)
-        self.capturer.start_capture()
-
-        self.key_check_active: bool = True
-        self.key_check_thread = Thread(target=self.check_key_states, daemon=True)
-        self.key_check_thread.start()
         self._is_closing: bool = False
+        self._capture_generation = -1
+        self._ctrl_was_pressed = False
+        self._capture_after_id: str | None = None
+        self._modifier_after_id: str | None = None
+        self.capture_session.start()
+        self._poll_capture_frame()
+        self.check_key_states()
 
         self.load_latest_position()
 
@@ -105,6 +101,46 @@ class KeystrokeEventEditor:
         self.region_w_var.trace_add("write", self._trace_redraw_overlay)
         self.region_h_var.trace_add("write", self._trace_redraw_overlay)
         self.execute_action_var.trace_add("write", self._trace_refresh_basic_guidance)
+
+    @property
+    def latest_pos(self) -> Position | None:
+        return self.capture_session.latest_position
+
+    @latest_pos.setter
+    def latest_pos(self, value: Position | None) -> None:
+        self.capture_session.latest_position = value
+
+    @property
+    def clicked_pos(self) -> Position | None:
+        return self.capture_session.selected_position
+
+    @clicked_pos.setter
+    def clicked_pos(self, value: Position | None) -> None:
+        self.capture_session.selected_position = value
+
+    @property
+    def latest_img(self) -> Image.Image | None:
+        return self.capture_session.latest_image
+
+    @latest_img.setter
+    def latest_img(self, value: Image.Image | None) -> None:
+        self.capture_session.latest_image = value
+
+    @property
+    def held_img(self) -> Image.Image | None:
+        return self.capture_session.held_image
+
+    @held_img.setter
+    def held_img(self, value: Image.Image | None) -> None:
+        self.capture_session.held_image = value
+
+    @property
+    def ref_pixel(self) -> ColorTuple | None:
+        return self.capture_session.reference_color
+
+    @ref_pixel.setter
+    def ref_pixel(self, value: ColorTuple | None) -> None:
+        self.capture_session.reference_color = value
 
     def _trace_redraw_overlay(self, *_args: object) -> None:
         self._redraw_overlay()
@@ -602,7 +638,7 @@ class KeystrokeEventEditor:
                 self.capture_w_var.set(w)
             if self.capture_h_var.get() != h:
                 self.capture_h_var.set(h)
-            self.capturer.set_capture_size(w, h)
+            self.capture_session.set_capture_size(w, h)
         except (ValueError, tk.TclError):
             pass
 
@@ -755,7 +791,7 @@ class KeystrokeEventEditor:
                 "When disabled, no key is pressed and this event is used only as a condition for other events.",
                 "해제하면 키를 누르지 않고, 다른 이벤트의 조건으로만 사용됩니다.",
             ),
-            foreground="gray",
+            foreground=theme.INK_MUTED,
             wraplength=240,
             justify="left",
         ).pack(padx=25, pady=(0, theme.SPACE_1), anchor="w")
@@ -792,7 +828,7 @@ class KeystrokeEventEditor:
                 "Select an existing group or enter a new name. Only one action event per group runs at a time.",
                 "기존 그룹 선택 또는 새 이름 입력. 같은 그룹에서는 한 번에 실행 이벤트 1개만 동작합니다.",
             ),
-            foreground="gray",
+            foreground=theme.INK_MUTED,
             wraplength=240,
             justify="left",
         )
@@ -1051,30 +1087,30 @@ class KeystrokeEventEditor:
         return "break"
 
     def check_key_states(self) -> None:
-        """
-        Thread Safety:
-        백그라운드 스레드에서 UI 업데이트 호출 시 self.win.after 사용
-        """
-        while self.key_check_active:
-            if KeyUtils.mod_key_pressed("alt"):
-                cur_pos = self.win.winfo_pointerxy()
-                self.capturer.set_current_mouse_position(cur_pos)
+        if self._is_closing:
+            return
+        if KeyUtils.mod_key_pressed("alt"):
+            self.capture_session.set_position(self.win.winfo_pointerxy())
+            self._set_entries(
+                self.coord_entries[:2], *self.capture_session.current_position()
+            )
 
-                valid_pos = self.capturer.get_current_mouse_position()
-                if valid_pos:
-                    # Safe UI update
-                    self.win.after(
-                        0,
-                        lambda p=valid_pos: self._set_entries(
-                            self.coord_entries[:2], *p
-                        ),
-                    )
+        ctrl_pressed = KeyUtils.mod_key_pressed("ctrl")
+        if ctrl_pressed and not self._ctrl_was_pressed:
+            self.hold_image()
+        self._ctrl_was_pressed = ctrl_pressed
+        self._modifier_after_id = self.win.after(100, self.check_key_states)
 
-            if KeyUtils.mod_key_pressed("ctrl"):
-                # Safe UI update
-                self.win.after(0, self.hold_image)
-                time.sleep(0.2)
-            time.sleep(0.1)
+    def _poll_capture_frame(self) -> None:
+        if self._is_closing:
+            return
+        snapshot = self.capture_session.snapshot()
+        if snapshot.generation != self._capture_generation:
+            self._capture_generation = snapshot.generation
+            self.update_capture_image(
+                snapshot.latest_position, snapshot.latest_image
+            )
+        self._capture_after_id = self.win.after(50, self._poll_capture_frame)
 
     def bind_events(self) -> None:
         self.win.bind("<Escape>", self.close_window)
@@ -1112,8 +1148,6 @@ class KeystrokeEventEditor:
         if not pos or not img:
             return
 
-        self.latest_pos, self.latest_img = pos, img
-
         # 윈도우와 위젯이 모두 존재하는지 확인
         try:
             if (
@@ -1122,21 +1156,23 @@ class KeystrokeEventEditor:
                 and hasattr(self, "lbl_img1")
                 and self.lbl_img1.winfo_exists()
             ):
-                scaled = self._scale_for_display(img)
-                self.win.after(
-                    0, lambda s=scaled: self._safe_update_img_lbl(self.lbl_img1, s)
-                )
-                self.win.after(0, self._refresh_basic_guidance)
+                self._safe_update_img_lbl(self.lbl_img1, self._scale_for_display(img))
+                self._refresh_basic_guidance()
         except (tk.TclError, AttributeError, RuntimeError):
             # 윈도우가 이미 파괴된 경우 무시
             pass
 
     def hold_image(self) -> None:
-        if self.latest_pos and self.latest_img:
-            self._set_entries(self.coord_entries[:2], *self.latest_pos)
-            self.held_img = self.latest_img.copy()
+        if (
+            self.capture_session.hold()
+            and self.capture_session.held_position
+            and self.held_img
+        ):
+            self._set_entries(
+                self.coord_entries[:2], *self.capture_session.held_position
+            )
             self._update_img_lbl(
-                self.lbl_img2, self._scale_for_display(self.latest_img)
+                self.lbl_img2, self._scale_for_display(self.held_img)
             )
             if self.clicked_pos:
                 self._sync_region_constraints()
@@ -1153,17 +1189,15 @@ class KeystrokeEventEditor:
         ):
             return
 
-        w_ratio = self.held_img.width / self.lbl_img2.winfo_width()
-        h_ratio = self.held_img.height / self.lbl_img2.winfo_height()
-
-        ix, iy = int(event.x * w_ratio), int(event.y * h_ratio)
-
-        # 이미지 범위 내인지 최종 확인
-        if ix >= self.held_img.width or iy >= self.held_img.height:
+        if not self.capture_session.select(
+            (event.x, event.y),
+            (self.lbl_img2.winfo_width(), self.lbl_img2.winfo_height()),
+        ):
             return
-
-        self.clicked_pos = (ix, iy)
-        self._update_ref_pixel(self.held_img, (ix, iy))  # deepcopy 제거 (불필요)
+        if self.clicked_pos is None:
+            return
+        ix, iy = self.clicked_pos
+        self._update_ref_pixel(self.held_img, self.clicked_pos)
         self._set_entries(self.coord_entries[2:], ix, iy)
         self._sync_region_constraints()
         self._on_region_size_change()
@@ -1550,7 +1584,7 @@ class KeystrokeEventEditor:
             return
 
         dur, rand, rw, rh, prio = parsed
-        latest_pos = self.latest_pos
+        latest_pos = self.capture_session.held_position
         clicked_pos = self.clicked_pos
         held_img = self.held_img
         ref_pixel = self.ref_pixel
@@ -1605,20 +1639,18 @@ class KeystrokeEventEditor:
         self.close_window()
 
     def close_window(self, event: object | None = None) -> None:
-        # 콜백 비활성화를 위해 capturer 콜백을 None으로 설정
         self._is_closing = True
-        self.capturer.stop_capture()
-        self.capturer.screenshot_callback = None
-        self.key_check_active = False
-
-        if self.key_check_thread.is_alive():
-            self.key_check_thread.join(0.5)
-        if self.capturer.capture_thread and self.capturer.capture_thread.is_alive():
-            self.capturer.capture_thread.join(0.1)
+        for after_id in (self._capture_after_id, self._modifier_after_id):
+            if after_id is not None:
+                try:
+                    self.win.after_cancel(after_id)
+                except tk.TclError:
+                    pass
+        self.capture_session.stop()
 
         StateUtils.save_main_app_state(
             event_position=f"{self.win.winfo_x()}/{self.win.winfo_y()}",
-            event_pointer=str(self.capturer.get_current_mouse_position()),
+            event_pointer=str(self.capture_session.current_position()),
             clicked_position=str(self.clicked_pos),
         )
         self.win.grab_release()
@@ -1634,11 +1666,11 @@ class KeystrokeEventEditor:
         if not self.is_edit and (ptr := state.get("event_pointer")):
             point = StateUtils.parse_position_tuple(ptr)
             if point is not None:
-                self.capturer.set_current_mouse_position(point)
+                self.capture_session.set_position(point)
 
     def update_position_from_entries(self, event: object | None = None) -> None:
         try:
-            self.capturer.set_current_mouse_position(
+            self.capture_session.set_position(
                 (int(self.coord_entries[0].get()), int(self.coord_entries[1].get()))
             )
         except ValueError:
@@ -1665,7 +1697,7 @@ class KeystrokeEventEditor:
         self.entry_name.insert(0, self.event_name or "")
 
         if self.latest_pos is not None:
-            self.capturer.set_mouse_position(self.latest_pos)
+            self.capture_session.set_position(self.latest_pos, force=True)
             self._set_entries(self.coord_entries[:2], *self.latest_pos)
         if self.clicked_pos is not None:
             self._set_entries(self.coord_entries[2:], *self.clicked_pos)
@@ -1702,7 +1734,7 @@ class KeystrokeEventEditor:
         cap_size = getattr(evt, "capture_size", (100, 100)) or (100, 100)
         self.capture_w_var.set(cap_size[0])
         self.capture_h_var.set(cap_size[1])
-        self.capturer.set_capture_size(cap_size[0], cap_size[1])
+        self.capture_session.set_capture_size(cap_size[0], cap_size[1])
         if r_size := getattr(evt, "region_size", None):
             self.region_w_var.set(r_size[0])
             self.region_h_var.set(r_size[1])

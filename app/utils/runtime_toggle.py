@@ -4,7 +4,7 @@ from typing import Protocol
 
 from app.utils.i18n import txt
 from app.core.models import EventModel, ProfileModel
-from app.utils.system import KeyUtils
+from app.utils.keys import KeyUtils
 
 
 WHEEL_UP_TRIGGER = "W_UP"

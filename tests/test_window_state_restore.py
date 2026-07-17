@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from app.ui.capture_session import CaptureSession
 from app.ui.event_editor import KeystrokeEventEditor
 from app.ui.event_importer import EventImporter
 from app.ui.profiles import KeystrokeProfiles
@@ -19,7 +20,7 @@ class TestWindowStateRestore(unittest.TestCase):
         stub.win = MagicMock()
         stub.entries = [MagicMock(), MagicMock()]
         stub._set_entries = MagicMock()
-        stub.capturer = MagicMock()
+        stub.capture_session = CaptureSession(MagicMock())
         stub._refresh_status_text = MagicMock()
         mock_load_state.return_value = {"quick_pos": "bad", "quick_ptr": "(10, 20)"}
 
@@ -27,7 +28,9 @@ class TestWindowStateRestore(unittest.TestCase):
 
         mock_center.assert_called_once_with(stub.win)
         stub._set_entries.assert_called_once_with(stub.entries[:2], 10, 20)
-        stub.capturer.set_current_mouse_position.assert_called_once_with((10, 20))
+        stub.capture_session.capturer.set_current_mouse_position.assert_called_once_with(
+            (10, 20)
+        )
 
     @patch("app.ui.event_editor.WindowUtils.center_window")
     @patch("app.ui.event_editor.StateUtils.load_main_app_state")
@@ -37,13 +40,15 @@ class TestWindowStateRestore(unittest.TestCase):
         stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
         stub.win = MagicMock()
         stub.is_edit = False
-        stub.capturer = MagicMock()
+        stub.capture_session = CaptureSession(MagicMock())
         mock_load_state.return_value = {"event_position": "bad", "event_pointer": "(3, 4)"}
 
         KeystrokeEventEditor.load_latest_position(stub)
 
         mock_center.assert_called_once_with(stub.win)
-        stub.capturer.set_current_mouse_position.assert_called_once_with((3, 4))
+        stub.capture_session.capturer.set_current_mouse_position.assert_called_once_with(
+            (3, 4)
+        )
 
     @patch("app.ui.profiles.WindowUtils.center_window")
     @patch("app.ui.profiles.StateUtils.load_main_app_state")

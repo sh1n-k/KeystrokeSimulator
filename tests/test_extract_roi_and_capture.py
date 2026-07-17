@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.core.processor import ImageFrame
-from helpers import fill_frame_rect, make_image_frame, make_processor_stub
+from tests.helpers import fill_frame_rect, make_image_frame, make_processor_stub
 
 
 class TestExtractROI(unittest.TestCase):

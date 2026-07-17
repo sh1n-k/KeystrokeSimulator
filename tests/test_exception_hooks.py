@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from app.utils.system import install_exception_hooks
+from app.utils.exception_hooks import install_exception_hooks
 
 
 class TestExceptionHooks(unittest.TestCase):
@@ -25,7 +25,7 @@ class TestExceptionHooks(unittest.TestCase):
         install_exception_hooks()
         exc = RuntimeError("boom")
 
-        with patch("app.utils.system.logger") as mock_logger:
+        with patch("app.utils.exception_hooks.logger") as mock_logger:
             mock_logger.opt.return_value = mock_logger
             sys.excepthook(RuntimeError, exc, None)
 
@@ -43,7 +43,7 @@ class TestExceptionHooks(unittest.TestCase):
         )
         args.thread.name = "worker"
 
-        with patch("app.utils.system.logger") as mock_logger:
+        with patch("app.utils.exception_hooks.logger") as mock_logger:
             mock_logger.opt.return_value = mock_logger
             threading.excepthook(args)
 

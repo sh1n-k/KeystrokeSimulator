@@ -9,7 +9,7 @@ from loguru import logger
 from app.core.models import ModificationKeys
 from app.utils.i18n import dual_text_width, txt
 from app.storage.profile_storage import load_profile, save_profile
-from app.utils.system import WindowUtils
+from app.utils.window_state import WindowUtils
 from app.ui import theme
 
 ModKeyRow: TypeAlias = tuple[
@@ -27,11 +27,15 @@ ModKeyRow: TypeAlias = tuple[
 
 class ModificationKeysWindow(tk.Toplevel):
     def __init__(
-        self, master: tk.Tk | tk.Toplevel | None, profile_name: str
+        self,
+        master: tk.Tk | tk.Toplevel | None,
+        profile_name: str,
+        *,
+        profiles_dir: Path,
     ) -> None:
         super().__init__(master)
         self.prof_name = profile_name
-        self.prof_dir = Path("profiles")
+        self.prof_dir = profiles_dir
         self.title(txt("Modification Keys", "수정 키 설정"))
         if master is not None:
             self.transient(master)

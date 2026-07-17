@@ -7,7 +7,7 @@ from typing import Protocol, cast
 from loguru import logger
 
 from app.ui.simulator_app import KeystrokeSimulatorApp
-from app.utils.system import install_exception_hooks
+from app.utils.exception_hooks import install_exception_hooks
 
 
 class MainAppLike(Protocol):
@@ -29,8 +29,6 @@ def main() -> None:
         enqueue=False,
     )
     install_exception_hooks()
-    Path("profiles").mkdir(exist_ok=True)
-
     app: MainAppLike | None = None
 
     def graceful_shutdown(_signum: int, _frame: FrameType | None) -> None:
