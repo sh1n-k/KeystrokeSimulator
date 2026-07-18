@@ -13,10 +13,10 @@
 
 ## 실행
 
-요구사항은 `uv`와 Tk/Tcl을 포함한 Python 3.13입니다. 플랫폼별 패키지는 `pyproject.toml`과 `uv.lock`을 기준으로 설치됩니다.
+요구사항은 `uv`와 Tk/Tcl을 포함한 Python 3.14입니다. 플랫폼별 패키지는 `pyproject.toml`과 `uv.lock`을 기준으로 설치됩니다.
 
 ```bash
-uv python install 3.13
+uv python install 3.14
 uv sync
 uv run -m app
 ```

@@ -17,6 +17,6 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv python install 3.13
+      - run: uv python install 3.14
       - run: uv sync
       - run: uv run -m scripts.verify
