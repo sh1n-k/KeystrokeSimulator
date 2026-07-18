@@ -10,7 +10,9 @@ dependencies = [
     "pillow==12.3.0",
     "pynput==1.8.2",
     "pywin32==312; sys_platform == 'win32'",
+    "pyobjc-framework-ApplicationServices==12.2.1; sys_platform == 'darwin'",
     "pyobjc-framework-Cocoa==12.2.1; sys_platform == 'darwin'",
+    "pyobjc-framework-CoreText==12.2.1; sys_platform == 'darwin'",
     "pyobjc-framework-Quartz==12.2.1; sys_platform == 'darwin'",
     "miniaudio==1.71",
 ]

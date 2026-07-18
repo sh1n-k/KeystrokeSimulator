@@ -18,5 +18,13 @@ jobs:
         with:
           enable-cache: true
       - run: uv python install 3.14
-      - run: uv sync
+      - run: uv lock --check
+      - run: uv sync --locked
       - run: uv run -m scripts.verify
+      - if: runner.os == 'macOS'
+        env:
+          RUN_GUI_TESTS: "1"
+        run: >-
+          uv run -m unittest
+          tests.test_quick_event_editor.TestQuickEventEditorLayout
+          tests.test_keystroke_settings.TestKeystrokeSettings
