@@ -60,6 +60,15 @@ class SoundPlayer:
         self._stream: Generator[bytes | SampleArray, int, None] | None = None
         self._pack_cache: dict[str, tuple[_SoundHandle | None, _SoundHandle | None]] = {}
         self.notification_sound_pack: str = DEFAULT_NOTIFICATION_SOUND_PACK
+        # Idle stop must never run inside the miniaudio data callback. A generation
+        # token cancels stale stop workers when new audio is queued.
+        self._idle_generation: int = 0
+        self._idle_stop_pending: bool = False
+        self._idle_stop_thread: threading.Thread | None = None
+        self._starting: bool = False
+        # Serialize native device start/stop/close across threads (never hold
+        # self._lock while calling into miniaudio stop/close).
+        self._device_io = threading.Lock()
         try:
             self.runtime_toggle_on_sound = self._load_sound(RUNTIME_TOGGLE_ON_SOUND)
             self.runtime_toggle_off_sound = self._load_sound(RUNTIME_TOGGLE_OFF_SOUND)
@@ -101,22 +110,53 @@ class SoundPlayer:
             print(f"Sound load error: {e}")
             return None
 
+    def _release_device(self, device: Any | None) -> None:
+        """Stop then close a PlaybackDevice. Must not run inside the data callback."""
+        if device is None:
+            return
+        with self._device_io:
+            try:
+                stop = getattr(device, "stop", None)
+                if callable(stop):
+                    stop()
+            except Exception as exc:
+                logger.debug(f"Sound device stop failed: {exc}")
+            try:
+                device.close()
+            except Exception as exc:
+                logger.debug(f"Sound device close failed: {exc}")
+
     def _start_device(self) -> None:
         """Start the playback device if it is not already running. Caller holds no lock."""
         with self._lock:
-            if self._device is not None:
+            if self._device is not None or self._starting:
                 return
-            stream = self._mix_stream()
-            next(stream)
-            device = miniaudio.PlaybackDevice(
-                output_format=_SAMPLE_FORMAT,
-                nchannels=_CHANNELS,
-                sample_rate=_SAMPLE_RATE,
-                buffersize_msec=_BUFFER_MSEC,
-            )
-            self._stream = stream
-            self._device = device
-        device.start(stream)
+            self._starting = True
+        device: Any | None = None
+        stream: Generator[bytes | SampleArray, int, None] | None = None
+        try:
+            with self._device_io:
+                stream = self._mix_stream()
+                next(stream)
+                created = miniaudio.PlaybackDevice(
+                    output_format=_SAMPLE_FORMAT,
+                    nchannels=_CHANNELS,
+                    sample_rate=_SAMPLE_RATE,
+                    buffersize_msec=_BUFFER_MSEC,
+                )
+                device = created
+                with self._lock:
+                    self._stream = stream
+                    self._device = created
+                    self._starting = False
+                created.start(stream)
+        except Exception:
+            with self._lock:
+                self._stream = None
+                self._device = None
+                self._starting = False
+            self._release_device(device)
+            raise
 
     def close(self) -> None:
         with self._lock:
@@ -124,11 +164,10 @@ class SoundPlayer:
             self._device = None
             self._stream = None
             self._active_sounds.clear()
-        if device is not None:
-            try:
-                device.close()
-            except Exception as exc:
-                logger.debug(f"Sound device close failed: {exc}")
+            self._idle_generation += 1
+            self._idle_stop_pending = False
+            self._starting = False
+        self._release_device(device)
 
     def _disable(self) -> None:
         self.start_sound = None
@@ -145,7 +184,10 @@ class SoundPlayer:
     def queue_samples(self, samples: SampleArray) -> None:
         with self._lock:
             self._active_sounds.append(_ActiveSound(samples, 0))
-            needs_start = self._device is None
+            # Cancel any in-flight idle stop so a restart is not racing a close.
+            self._idle_generation += 1
+            self._idle_stop_pending = False
+            needs_start = self._device is None and not self._starting
         if needs_start:
             try:
                 self._start_device()
@@ -155,12 +197,42 @@ class SoundPlayer:
                     self._active_sounds.clear()
                     self._device = None
                     self._stream = None
-                if device is not None:
-                    try:
-                        device.close()
-                    except Exception as close_exc:
-                        logger.debug(f"Sound device start cleanup failed: {close_exc}")
+                    self._starting = False
+                self._release_device(device)
                 print(f"Sound device start error: {exc}")
+
+    def _arm_idle_stop(self, generation: int) -> None:
+        """Stop the device from a non-callback thread after the mix queue goes idle."""
+        thread = threading.Thread(
+            target=self._run_idle_stop,
+            args=(generation,),
+            name="sound-idle-stop",
+            daemon=True,
+        )
+        with self._lock:
+            self._idle_stop_thread = thread
+        thread.start()
+
+    def _run_idle_stop(self, generation: int) -> None:
+        with self._lock:
+            if generation != self._idle_generation:
+                return
+            if self._active_sounds:
+                self._idle_stop_pending = False
+                return
+            device = self._device
+            self._device = None
+            self._stream = None
+            self._idle_stop_pending = False
+        # stop/close outside the lock and never from the audio callback thread.
+        self._release_device(device)
+
+    def _await_idle_stop(self, timeout: float = 1.0) -> None:
+        """Join the latest idle-stop worker (tests / deterministic drain)."""
+        with self._lock:
+            thread = self._idle_stop_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=timeout)
 
     def _mix_stream(self) -> Generator[bytes | SampleArray, int, None]:
         required_frames = yield b""
@@ -194,23 +266,23 @@ class SoundPlayer:
                             self._active_sounds = remaining + self._active_sounds
             if mixed is None:
                 # Empty snapshot: re-check under the lock so a concurrent
-                # queue_samples cannot leave a live _device with a dead generator.
+                # queue_samples cannot leave work stranded while we arm idle stop.
+                schedule_generation: int | None = None
                 with self._lock:
                     if self._active_sounds:
                         # New samples arrived while we observed an empty queue.
                         continue
-                    device = self._device
-                    # Always clear device identity before ending this generator so
-                    # a later queue_samples will start a fresh PlaybackDevice.
-                    self._device = None
-                    self._stream = None
-                if device is not None:
-                    try:
-                        device.close()
-                    except Exception as exc:
-                        logger.debug(f"Sound device idle close failed: {exc}")
-                yield b"\x00" * (sample_count * _SAMPLE_WIDTH)
-                return
+                    # Keep yielding silence from this generator until a non-callback
+                    # thread stops the device. Never close/stop here: miniaudio
+                    # invokes this generator on the CoreAudio IO thread.
+                    if self._device is not None and not self._idle_stop_pending:
+                        self._idle_generation += 1
+                        self._idle_stop_pending = True
+                        schedule_generation = self._idle_generation
+                if schedule_generation is not None:
+                    self._arm_idle_stop(schedule_generation)
+                required_frames = yield b"\x00" * (sample_count * _SAMPLE_WIDTH)
+                continue
             required_frames = yield mixed
 
     def play_start_sound(self) -> None:

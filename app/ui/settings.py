@@ -31,6 +31,7 @@ SETTINGS_WINDOW_MIN_SIZE = (700, 300)
 
 class SettingsHost(Protocol):
     settings_window: object | None
+    sound_player: SoundPlayer
 
     def load_settings(self) -> None: ...
     def setup_event_handlers(self) -> None: ...
@@ -62,7 +63,10 @@ class KeystrokeSettings(tk.Toplevel):
         self.button_group: tk.Frame
         self._press_key_label = ""
         self._sound_pack_id_by_label: dict[str, str] = {}
+        # Prefer the host app's single SoundPlayer. A second PlaybackDevice in the
+        # same process races CoreAudio/miniaudio and can hard-crash on macOS.
         self._preview_player: SoundPlayer | None = None
+        self._preview_player_owned: bool = False
 
         self._load_settings()
         self.title(txt("Settings", "설정"))
@@ -393,8 +397,17 @@ class KeystrokeSettings(tk.Toplevel):
         return normalize_notification_sound_pack(pack_id)
 
     def _preview_player_instance(self) -> SoundPlayer:
-        if self._preview_player is None:
-            self._preview_player = SoundPlayer()
+        if self._preview_player is not None:
+            return self._preview_player
+        host = self.app_master
+        shared = getattr(host, "sound_player", None) if host is not None else None
+        if isinstance(shared, SoundPlayer):
+            self._preview_player = shared
+            self._preview_player_owned = False
+            return shared
+        # Fallback for hosts without a player (isolated settings tests).
+        self._preview_player = SoundPlayer()
+        self._preview_player_owned = True
         return self._preview_player
 
     def _preview_start_sound(self) -> None:
@@ -556,12 +569,14 @@ class KeystrokeSettings(tk.Toplevel):
 
     def on_close(self, event: tk.Event[tk.Misc] | None = None) -> None:
         self._save_window_position()
-        if self._preview_player is not None:
+        # Only close a player we created. Never shut down the host app player.
+        if self._preview_player is not None and self._preview_player_owned:
             try:
                 self._preview_player.close()
             except Exception:
                 pass
-            self._preview_player = None
+        self._preview_player = None
+        self._preview_player_owned = False
         if self.app_master is not None and hasattr(self.app_master, "settings_window"):
             host = cast(SettingsHost, self.app_master)
             host.settings_window = None
