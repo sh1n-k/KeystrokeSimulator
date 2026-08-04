@@ -85,6 +85,37 @@ def _image_identity(img: Image.Image | None) -> ImageIdentity:
     return (id(img), img.size, img.mode)
 
 
+# EventModel fields that participate in profile dirty/autosave detection.
+# When adding a field to EventModel, include it here and in _event_fingerprint.
+EVENT_DIRTY_FIELD_NAMES: frozenset[str] = frozenset(
+    {
+        "event_name",
+        "use_event",
+        "capture_size",
+        "latest_position",
+        "clicked_position",
+        "ref_pixel_value",
+        "key_to_enter",
+        "press_duration_ms",
+        "randomization_ms",
+        "match_mode",
+        "invert_match",
+        "region_size",
+        "execute_action",
+        "group_id",
+        "priority",
+        "conditions",
+        "runtime_toggle_member",
+        "held_screenshot",
+    }
+)
+
+
+def event_dirty_field_names() -> frozenset[str]:
+    """Return EventModel field names covered by dirty/fingerprint detection."""
+    return EVENT_DIRTY_FIELD_NAMES
+
+
 def _event_fingerprint(evt: EventModel) -> EventFingerprint:
     return (
         getattr(evt, "event_name", None),

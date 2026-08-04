@@ -87,11 +87,11 @@ class TestPressKeyAsync(unittest.IsolatedAsyncioTestCase):
             "무관한 조건": True,
         }
 
-        with patch("app.core.processor.logger.info") as mock_info:
+        with patch("app.core.processor.logger.debug") as mock_debug:
             await proc._press_key_async(evt, state_snapshot)
 
-        mock_info.assert_called_once()
-        log_line = mock_info.call_args[0][0]
+        mock_debug.assert_called_once()
+        log_line = mock_debug.call_args[0][0]
         self.assertIn("Async Key Pressed: A", log_line)
         self.assertIn("[조건-비활성] 채널링 중=False", log_line)
         self.assertIn("[조건] 버프 준비=True", log_line)

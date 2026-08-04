@@ -2,20 +2,20 @@ import array
 import unittest
 from unittest.mock import patch, MagicMock
 
-from app.utils.sounds import SoundPlayer
+from app.utils.sounds import SoundPlayer, _ActiveSound
 
 
 class TestKeystrokeSounds(unittest.TestCase):
     @patch("app.utils.sounds.miniaudio.PlaybackDevice")
     @patch("app.utils.sounds.miniaudio.decode")
-    def test_sound_player_init_success(self, mock_decode, mock_device):
+    def test_sound_player_init_does_not_start_device(self, mock_decode, mock_device):
         mock_decode.return_value.samples = array.array("h", [0, 1, -1, 0])
 
         player = SoundPlayer()
 
         self.assertEqual(mock_decode.call_count, 4)
-        mock_device.assert_called_once()
-        mock_device.return_value.start.assert_called_once()
+        mock_device.assert_not_called()
+        self.assertIsNone(player._device)
         self.assertIsNotNone(player.start_sound)
         self.assertIsNotNone(player.stop_sound)
         self.assertIsNotNone(player.runtime_toggle_on_sound)
@@ -24,8 +24,7 @@ class TestKeystrokeSounds(unittest.TestCase):
     @patch("app.utils.sounds.miniaudio.PlaybackDevice")
     @patch("app.utils.sounds.miniaudio.decode")
     def test_sound_player_init_failure_handled(self, mock_decode, mock_device):
-        mock_decode.return_value.samples = array.array("h", [0, 1, -1, 0])
-        mock_device.side_effect = Exception("No Audio Device")
+        mock_decode.side_effect = Exception("decode failed")
 
         player = SoundPlayer()
 
@@ -33,6 +32,21 @@ class TestKeystrokeSounds(unittest.TestCase):
         self.assertIsNone(player.stop_sound)
         self.assertIsNone(player.runtime_toggle_on_sound)
         self.assertIsNone(player.runtime_toggle_off_sound)
+        mock_device.assert_not_called()
+
+    @patch("app.utils.sounds.miniaudio.PlaybackDevice")
+    @patch("app.utils.sounds.miniaudio.decode")
+    def test_play_starts_device_on_demand(self, mock_decode, mock_device):
+        mock_decode.return_value.samples = array.array("h", [0, 1, -1, 0])
+        player = SoundPlayer()
+        mock_device.assert_not_called()
+
+        player.play_start_sound()
+
+        mock_device.assert_called_once()
+        mock_device.return_value.start.assert_called_once()
+        self.assertIsNotNone(player._device)
+        self.assertEqual(len(player._active_sounds), 1)
 
     @patch("app.utils.sounds.miniaudio.PlaybackDevice")
     @patch("app.utils.sounds.miniaudio.decode")
@@ -66,7 +80,6 @@ class TestKeystrokeSounds(unittest.TestCase):
         player.runtime_toggle_on_sound = None
         player.runtime_toggle_off_sound = None
 
-        # Should not raise any attribute errors
         try:
             player.play_start_sound()
             player.play_stop_sound()
@@ -97,12 +110,52 @@ class TestKeystrokeSounds(unittest.TestCase):
         player = SoundPlayer()
 
         player.play_start_sound()
+        assert player._stream is not None
         mixed = player._stream.send(1)
 
         self.assertEqual(list(mixed), [1, 2])
         self.assertEqual(len(player._active_sounds), 1)
         self.assertIs(player._active_sounds[0].samples, samples)
         self.assertEqual(player._active_sounds[0].position, 2)
+
+    @patch("app.utils.sounds.miniaudio.PlaybackDevice")
+    @patch("app.utils.sounds.miniaudio.decode")
+    def test_idle_mix_releases_device(self, mock_decode, mock_device):
+        samples = array.array("h", [1, 2])
+        mock_decode.return_value.samples = samples
+        player = SoundPlayer()
+        player.play_start_sound()
+        self.assertIsNotNone(player._device)
+        assert player._stream is not None
+
+        # Drain all samples (1 frame = 2 channels).
+        mixed = player._stream.send(1)
+        self.assertEqual(list(mixed), [1, 2])
+        self.assertEqual(player._active_sounds, [])
+
+        # Next empty cycle yields silence then stops the device.
+        silence = player._stream.send(1)
+        self.assertEqual(silence, b"\x00" * 4)
+        self.assertIsNone(player._device)
+        mock_device.return_value.close.assert_called()
+
+    @patch("app.utils.sounds.miniaudio.PlaybackDevice")
+    @patch("app.utils.sounds.miniaudio.decode")
+    def test_play_after_idle_restarts_device(self, mock_decode, mock_device):
+        samples = array.array("h", [1, 2])
+        mock_decode.return_value.samples = samples
+        player = SoundPlayer()
+        player.play_start_sound()
+        assert player._stream is not None
+        player._stream.send(1)
+        player._stream.send(1)
+        self.assertIsNone(player._device)
+        mock_device.reset_mock()
+
+        player.play_stop_sound()
+        mock_device.assert_called_once()
+        mock_device.return_value.start.assert_called_once()
+        self.assertIsNotNone(player._device)
 
     @patch("app.utils.sounds.miniaudio.PlaybackDevice")
     @patch("app.utils.sounds.miniaudio.decode")
@@ -114,9 +167,76 @@ class TestKeystrokeSounds(unittest.TestCase):
         player.close()
         player.play_stop_sound()
 
-        mock_device.return_value.close.assert_called_once()
+        self.assertGreaterEqual(mock_device.return_value.close.call_count, 1)
+        # After close, a later play starts a fresh device.
+        self.assertIsNotNone(player._device)
+        self.assertEqual(len(player._active_sounds), 1)
+
+    @patch("app.utils.sounds.miniaudio.PlaybackDevice")
+    @patch("app.utils.sounds.miniaudio.decode")
+    def test_concurrent_queue_during_empty_cycle_does_not_orphan_device(
+        self, mock_decode, mock_device
+    ):
+        """Regression for dead generator + live device after concurrent queue.
+
+        If samples arrive after an empty snapshot but before idle exit, the mix
+        loop must keep playing them (not return while leaving _device set).
+        """
+        samples = array.array("h", [1, 2])
+        concurrent = array.array("h", [5, 6])
+        mock_decode.return_value.samples = samples
+        player = SoundPlayer()
+        player.play_start_sound()
+        stream = player._stream
+        assert stream is not None
+        stream.send(1)  # drain first clip; device still running
+
+        real_lock = player._lock
+        injected = {"done": False}
+        arm = {"on": False}
+
+        class RaceLock:
+            def acquire(self, *args, **kwargs):
+                return real_lock.acquire(*args, **kwargs)
+
+            def release(self) -> bool:
+                # Inject after the empty-snapshot lock releases, before re-check.
+                if (
+                    arm["on"]
+                    and not injected["done"]
+                    and player._device is not None
+                    and not player._active_sounds
+                ):
+                    injected["done"] = True
+                    player._active_sounds.append(_ActiveSound(concurrent, 0))
+                return real_lock.release()
+
+            def __enter__(self) -> "RaceLock":
+                self.acquire()
+                return self
+
+            def __exit__(self, *exc: object) -> bool:
+                self.release()
+                return False
+
+        player._lock = RaceLock()  # type: ignore[assignment]
+        arm["on"] = True
+
+        mixed = stream.send(1)
+        self.assertTrue(injected["done"])
+        self.assertEqual(list(mixed), [5, 6])
+        self.assertIsNotNone(player._device)
+
+        # True idle then must clear device so later play restarts PlaybackDevice.
+        silence = stream.send(1)
+        self.assertEqual(silence, b"\x00" * 4)
         self.assertIsNone(player._device)
-        self.assertEqual(player._active_sounds, [])
+
+        mock_device.reset_mock()
+        player.play_start_sound()
+        mock_device.assert_called_once()
+        mock_device.return_value.start.assert_called_once()
+        self.assertIsNotNone(player._device)
 
 
 if __name__ == "__main__":
