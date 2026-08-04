@@ -133,11 +133,14 @@ class TestKeystrokeSounds(unittest.TestCase):
         self.assertEqual(list(mixed), [1, 2])
         self.assertEqual(player._active_sounds, [])
 
-        # Next empty cycle yields silence then stops the device.
+        # Empty cycle yields silence and arms a non-callback idle stop.
+        # Device must not be closed synchronously inside the mix generator.
         silence = player._stream.send(1)
         self.assertEqual(silence, b"\x00" * 4)
+        player._await_idle_stop(timeout=1.0)
         self.assertIsNone(player._device)
         mock_device.return_value.close.assert_called()
+        mock_device.return_value.stop.assert_called()
 
     @patch("app.utils.sounds.miniaudio.PlaybackDevice")
     @patch("app.utils.sounds.miniaudio.decode")
@@ -149,6 +152,7 @@ class TestKeystrokeSounds(unittest.TestCase):
         assert player._stream is not None
         player._stream.send(1)
         player._stream.send(1)
+        player._await_idle_stop(timeout=1.0)
         self.assertIsNone(player._device)
         mock_device.reset_mock()
 
@@ -156,6 +160,27 @@ class TestKeystrokeSounds(unittest.TestCase):
         mock_device.assert_called_once()
         mock_device.return_value.start.assert_called_once()
         self.assertIsNotNone(player._device)
+
+    @patch("app.utils.sounds.miniaudio.PlaybackDevice")
+    @patch("app.utils.sounds.miniaudio.decode")
+    def test_idle_mix_does_not_close_device_on_callback_thread(
+        self, mock_decode, mock_device
+    ):
+        """Regression: closing PlaybackDevice inside the generator segfaults on macOS."""
+        samples = array.array("h", [1, 2])
+        mock_decode.return_value.samples = samples
+        player = SoundPlayer()
+        player.play_start_sound()
+        assert player._stream is not None
+        player._stream.send(1)
+
+        silence = player._stream.send(1)
+        self.assertEqual(silence, b"\x00" * 4)
+        # Still inside the generator turn: close must not have run yet on this thread.
+        # Idle stop is armed asynchronously.
+        self.assertTrue(player._idle_stop_pending or player._device is None)
+        player._await_idle_stop(timeout=1.0)
+        self.assertIsNone(player._device)
 
     @patch("app.utils.sounds.miniaudio.PlaybackDevice")
     @patch("app.utils.sounds.miniaudio.decode")
@@ -227,9 +252,10 @@ class TestKeystrokeSounds(unittest.TestCase):
         self.assertEqual(list(mixed), [5, 6])
         self.assertIsNotNone(player._device)
 
-        # True idle then must clear device so later play restarts PlaybackDevice.
+        # True idle arms async stop; device clears off the mix/callback path.
         silence = stream.send(1)
         self.assertEqual(silence, b"\x00" * 4)
+        player._await_idle_stop(timeout=1.0)
         self.assertIsNone(player._device)
 
         mock_device.reset_mock()
