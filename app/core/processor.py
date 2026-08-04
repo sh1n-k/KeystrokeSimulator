@@ -232,6 +232,9 @@ class ModificationKeyHandler:
         self.event = threading.Event()
 
     async def check_and_process(self) -> bool:
+        if not self.mod_keys:
+            return False
+
         active = False
         tasks: list[Awaitable[None]] = []
 
@@ -855,7 +858,7 @@ class KeystrokeProcessor:
     ) -> None:
         condition_states = self._snapshot_condition_states(evt, state_snapshot)
         cond_suffix = self._format_condition_states(evt, condition_states)
-        logger.info(
+        logger.debug(
             f"{mode} Key Pressed: {evt['key']} Evt: '{evt['name']}' "
             f"(Duration: {target_duration:.3f}s){cond_suffix}"
         )
