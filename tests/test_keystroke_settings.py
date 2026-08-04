@@ -152,11 +152,13 @@ class TestKeystrokeSettingsNavRail(unittest.TestCase):
         stub.card_keys = MagicMock()
         stub.card_lang = MagicMock()
         stub.card_timing = MagicMock()
+        stub.card_sound = MagicMock()
         stub.warning_label = MagicMock()
         stub._settings_nav_labels = {
             "keys": MagicMock(),
             "language": MagicMock(),
             "timing": MagicMock(),
+            "sound": MagicMock(),
         }
 
         with patch(
@@ -168,6 +170,7 @@ class TestKeystrokeSettingsNavRail(unittest.TestCase):
         stub.card_keys.grid_remove.assert_called_once()
         stub.warning_label.grid_remove.assert_called_once()
         stub.card_lang.grid_remove.assert_called_once()
+        stub.card_sound.grid_remove.assert_called_once()
         stub.card_timing.grid.assert_called_once()
         stub._settings_nav_labels["timing"].config.assert_called_once()
 

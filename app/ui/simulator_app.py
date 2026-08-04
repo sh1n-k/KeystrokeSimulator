@@ -484,6 +484,12 @@ class KeystrokeSimulatorApp(tk.Tk):
         set_language(self.settings.language)
         if can_save_settings:
             save_user_settings(self.settings, s_file)
+        sound_player = getattr(self, "sound_player", None)
+        if sound_player is not None:
+            safe_call(
+                sound_player.set_notification_pack,
+                self.settings.notification_sound_pack,
+            )
         self._refresh_ui_texts()
 
         # Load state
