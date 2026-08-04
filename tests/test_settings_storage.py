@@ -71,6 +71,31 @@ class TestUserSettingsStorage(unittest.TestCase):
             self.assertEqual(loaded.language, "ko")
             self.assertEqual(loaded.key_pressed_time_min, 111)
 
+    def test_notification_sound_pack_roundtrip_and_fallback(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "user_settings.json"
+            settings = UserSettings(notification_sound_pack="soft_b")
+            save_user_settings(settings, path)
+            loaded, can_save = load_user_settings(path)
+            self.assertTrue(can_save)
+            self.assertEqual(loaded.notification_sound_pack, "soft_b")
+
+            path.write_text(
+                json.dumps({"notification_sound_pack": "not-a-pack"}),
+                encoding="utf-8",
+            )
+            loaded, can_save = load_user_settings(path)
+            self.assertTrue(can_save)
+            self.assertEqual(loaded.notification_sound_pack, "classic")
+
+            path.write_text(
+                json.dumps({"notification_sound_pack": 123}),
+                encoding="utf-8",
+            )
+            loaded, can_save = load_user_settings(path)
+            self.assertTrue(can_save)
+            self.assertEqual(loaded.notification_sound_pack, "classic")
+
 
 if __name__ == "__main__":
     unittest.main()

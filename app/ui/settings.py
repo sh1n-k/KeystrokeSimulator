@@ -17,11 +17,16 @@ from app.utils.i18n import (
 )
 from app.core.models import UserSettings
 from app.storage.settings_storage import load_user_settings, save_user_settings
+from app.utils.notification_sound_packs import (
+    notification_sound_pack_choices,
+    normalize_notification_sound_pack,
+)
+from app.utils.sounds import SoundPlayer
 from app.utils.window_state import StateUtils, WindowUtils
 from app.ui import theme
 
-SETTINGS_WINDOW_DEFAULT_GEOMETRY = "800x280"
-SETTINGS_WINDOW_MIN_SIZE = (700, 260)
+SETTINGS_WINDOW_DEFAULT_GEOMETRY = "800x340"
+SETTINGS_WINDOW_MIN_SIZE = (700, 300)
 
 
 class SettingsHost(Protocol):
@@ -48,12 +53,16 @@ class KeystrokeSettings(tk.Toplevel):
         self.card_keys: ttk.LabelFrame
         self.card_lang: ttk.LabelFrame
         self.card_timing: ttk.LabelFrame
+        self.card_sound: ttk.LabelFrame
         self.warning_label: ttk.Label
         self.start_stop_combo: ttk.Combobox
         self.language_combo: ttk.Combobox
+        self.sound_pack_combo: ttk.Combobox
         self.button_dock: tk.Frame
         self.button_group: tk.Frame
         self._press_key_label = ""
+        self._sound_pack_id_by_label: dict[str, str] = {}
+        self._preview_player: SoundPlayer | None = None
 
         self._load_settings()
         self.title(txt("Settings", "설정"))
@@ -145,6 +154,7 @@ class KeystrokeSettings(tk.Toplevel):
             ("keys", "Start / Stop", "시작 / 중지"),
             ("language", "Language", "언어"),
             ("timing", "Timing", "타이밍"),
+            ("sound", "Notification Sound", "알림음"),
         ]:
             label = tk.Label(
                 rail,
@@ -170,6 +180,7 @@ class KeystrokeSettings(tk.Toplevel):
             "keys": (self.card_keys, self.warning_label),
             "language": (self.card_lang,),
             "timing": (self.card_timing,),
+            "sound": (self.card_sound,),
         }
         for key, widgets in sections.items():
             for widget in widgets:
@@ -245,8 +256,17 @@ class KeystrokeSettings(tk.Toplevel):
         )
         self.card_timing.grid_columnconfigure((1, 2), weight=1)
 
+        self.card_sound = ttk.LabelFrame(
+            self.content, text=txt("Notification Sound", "알림음")
+        )
+        self.card_sound.grid(
+            row=3, column=0, columnspan=5, padx=theme.SPACE_2, pady=theme.SPACE_1, sticky="we"
+        )
+        self.card_sound.grid_columnconfigure(1, weight=1)
+
         self._create_key_section()
         self._create_language_section()
+        self._create_sound_section()
 
         # 2. Numeric Entries
         v_cmd = (self.register(self._validate_numeric), "%P")
@@ -265,7 +285,7 @@ class KeystrokeSettings(tk.Toplevel):
             background=theme.STATUS_WARN_BG,
             padding=(theme.SPACE_2, theme.SPACE_1),
         )
-        self.warning_label.grid(row=3, column=0, columnspan=5, padx=theme.SPACE_2, pady=theme.SPACE_1, sticky="we")
+        self.warning_label.grid(row=4, column=0, columnspan=5, padx=theme.SPACE_2, pady=theme.SPACE_1, sticky="we")
         self.warning_label.configure(wraplength=420)
         self._update_warning_text()
 
@@ -326,6 +346,66 @@ class KeystrokeSettings(tk.Toplevel):
         )
         self.language_combo.set(selected_label)
         self.language_combo.grid(row=0, column=1, padx=10, pady=5, sticky="w")
+
+    def _create_sound_section(self) -> None:
+        ttk.Label(
+            self.card_sound, text=txt("Start/Stop Sound:", "시작/종료 알림음:")
+        ).grid(row=0, column=0, padx=10, pady=5, sticky="w")
+
+        packs = notification_sound_pack_choices()
+        self._sound_pack_id_by_label = {
+            txt(pack.label_en, pack.label_ko): pack.pack_id for pack in packs
+        }
+        labels = [txt(pack.label_en, pack.label_ko) for pack in packs]
+        self.sound_pack_combo = ttk.Combobox(
+            self.card_sound, values=labels, state="readonly", width=28
+        )
+        current = normalize_notification_sound_pack(
+            self.settings.notification_sound_pack
+        )
+        selected = next(
+            (
+                txt(pack.label_en, pack.label_ko)
+                for pack in packs
+                if pack.pack_id == current
+            ),
+            labels[0],
+        )
+        self.sound_pack_combo.set(selected)
+        self.sound_pack_combo.grid(row=0, column=1, padx=10, pady=5, sticky="w")
+
+        preview_frame = ttk.Frame(self.card_sound)
+        preview_frame.grid(row=0, column=2, padx=10, pady=5, sticky="w")
+        ttk.Button(
+            preview_frame,
+            text=txt("Preview Start", "시작 미리듣기"),
+            command=self._preview_start_sound,
+        ).pack(side="left", padx=(0, 6))
+        ttk.Button(
+            preview_frame,
+            text=txt("Preview Stop", "종료 미리듣기"),
+            command=self._preview_stop_sound,
+        ).pack(side="left")
+
+    def _selected_sound_pack_id(self) -> str:
+        label = self.sound_pack_combo.get()
+        pack_id = self._sound_pack_id_by_label.get(label)
+        return normalize_notification_sound_pack(pack_id)
+
+    def _preview_player_instance(self) -> SoundPlayer:
+        if self._preview_player is None:
+            self._preview_player = SoundPlayer()
+        return self._preview_player
+
+    def _preview_start_sound(self) -> None:
+        player = self._preview_player_instance()
+        player.set_notification_pack(self._selected_sound_pack_id())
+        player.play_start_sound()
+
+    def _preview_stop_sound(self) -> None:
+        player = self._preview_player_instance()
+        player.set_notification_pack(self._selected_sound_pack_id())
+        player.play_stop_sound()
 
     def _create_buttons(self) -> None:
         # Run-dock (bottom action band) — separator above + panel-tone strip
@@ -454,6 +534,8 @@ class KeystrokeSettings(tk.Toplevel):
         except ValueError:
             return self._warn(txt("Invalid numeric input.", "숫자 입력이 올바르지 않습니다."))
 
+        self.settings.notification_sound_pack = self._selected_sound_pack_id()
+
         self._save_settings()
         self.on_close()
 
@@ -474,6 +556,12 @@ class KeystrokeSettings(tk.Toplevel):
 
     def on_close(self, event: tk.Event[tk.Misc] | None = None) -> None:
         self._save_window_position()
+        if self._preview_player is not None:
+            try:
+                self._preview_player.close()
+            except Exception:
+                pass
+            self._preview_player = None
         if self.app_master is not None and hasattr(self.app_master, "settings_window"):
             host = cast(SettingsHost, self.app_master)
             host.settings_window = None

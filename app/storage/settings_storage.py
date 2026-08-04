@@ -7,6 +7,7 @@ from loguru import logger
 
 from app.core.models import UserSettings
 from app.utils.i18n import normalize_language
+from app.utils.notification_sound_packs import normalize_notification_sound_pack
 
 USER_SETTINGS_PATH = Path("user_settings.json")
 
@@ -43,6 +44,8 @@ def _coerce_settings(raw: dict[str, Any]) -> UserSettings:
         value = raw[name]
         if name == "language":
             values[name] = normalize_language(value)
+        elif name == "notification_sound_pack":
+            values[name] = normalize_notification_sound_pack(value)
         elif isinstance(default, bool):
             values[name] = _coerce_bool(name, value, default)
         elif isinstance(default, int) or default is None:
@@ -51,6 +54,9 @@ def _coerce_settings(raw: dict[str, Any]) -> UserSettings:
             values[name] = value
     settings = UserSettings(**values)
     settings.language = normalize_language(settings.language)
+    settings.notification_sound_pack = normalize_notification_sound_pack(
+        settings.notification_sound_pack
+    )
     return settings
 
 

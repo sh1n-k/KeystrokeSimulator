@@ -19,6 +19,8 @@ class UserSettings:
     delay_between_loop_max: int = 150
     toggle_start_stop_mac: bool = True
     use_alt_shift_hotkey: bool = False
+    # Start/stop notification sound pack id (classic | soft_a | soft_b | soft_c)
+    notification_sound_pack: str = "classic"
 
 
 @dataclass

@@ -241,3 +241,75 @@ class TestKeystrokeSounds(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNotificationSoundPacks(unittest.TestCase):
+    @patch("app.utils.sounds.miniaudio.PlaybackDevice")
+    @patch("app.utils.sounds.miniaudio.decode")
+    def test_set_pack_fallback_and_selection_changes_samples(
+        self, mock_decode, mock_device
+    ):
+        # Distinct sample arrays per decode call order so pack switch is observable.
+        sample_seq = [
+            array.array("h", [1, 1]),
+            array.array("h", [2, 2]),
+            array.array("h", [3, 3]),
+            array.array("h", [4, 4]),
+            array.array("h", [5, 5]),
+            array.array("h", [6, 6]),
+            array.array("h", [7, 7]),
+            array.array("h", [8, 8]),
+            array.array("h", [9, 9]),
+            array.array("h", [10, 10]),
+            array.array("h", [11, 11]),
+            array.array("h", [12, 12]),
+        ]
+        mock_decode.side_effect = [
+            type("D", (), {"samples": s})() for s in sample_seq
+        ]
+
+        player = SoundPlayer("classic")
+        self.assertEqual(player.notification_sound_pack, "classic")
+        classic_start = player.start_sound
+        classic_stop = player.stop_sound
+        self.assertIsNotNone(classic_start)
+        self.assertIsNotNone(classic_stop)
+
+        applied = player.set_notification_pack("soft_a")
+        self.assertEqual(applied, "soft_a")
+        self.assertIsNot(player.start_sound, classic_start)
+        self.assertIsNot(player.stop_sound, classic_stop)
+        soft_start_samples = player.start_sound._samples  # type: ignore[union-attr]
+
+        applied = player.set_notification_pack("not-real")
+        self.assertEqual(applied, "classic")
+        self.assertIs(player.start_sound, classic_start)
+
+        # Re-select soft_a uses cache (no extra decode beyond initial soft pair + classic pair + toggles)
+        player.set_notification_pack("soft_a")
+        self.assertIs(player.start_sound._samples, soft_start_samples)  # type: ignore[union-attr]
+
+    @patch("app.utils.sounds.miniaudio.PlaybackDevice")
+    @patch("app.utils.sounds.miniaudio.decode")
+    def test_play_start_stop_use_selected_pack_samples(
+        self, mock_decode, mock_device
+    ):
+        samples_by_call: list[array.array] = []
+
+        def decode_side_effect(*_args, **_kwargs):
+            arr = array.array("h", [len(samples_by_call) + 1, 0])
+            samples_by_call.append(arr)
+            return type("D", (), {"samples": arr})()
+
+        mock_decode.side_effect = decode_side_effect
+        player = SoundPlayer("classic")
+        player.play_start_sound()
+        classic_queued = player._active_sounds[0].samples
+        player.close()
+
+        player = SoundPlayer("soft_b")
+        player.play_start_sound()
+        soft_queued = player._active_sounds[0].samples
+        self.assertIsNot(classic_queued, soft_queued)
+        player.play_stop_sound()
+        self.assertEqual(len(player._active_sounds), 2)
