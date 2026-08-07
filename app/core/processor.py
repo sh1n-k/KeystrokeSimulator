@@ -171,27 +171,148 @@ def _noop_key_action(_code: int) -> None:
     return None
 
 
-def _windows_key_event(code: int, flags: int) -> None:
+# user32 SendInput / MapVirtualKey constants
+_INPUT_KEYBOARD = 1
+_KEYEVENTF_EXTENDEDKEY = 0x0001
+_KEYEVENTF_KEYUP = 0x0002
+_KEYEVENTF_SCANCODE = 0x0008
+_MAPVK_VK_TO_VSC = 0
+
+# Navigation / editing VKs that require KEYEVENTF_EXTENDEDKEY on many layouts.
+_WINDOWS_EXTENDED_VKS = frozenset(
+    {
+        0x21,  # Page Up
+        0x22,  # Page Down
+        0x23,  # End
+        0x24,  # Home
+        0x25,  # Left
+        0x26,  # Up
+        0x27,  # Right
+        0x28,  # Down
+        0x2D,  # Insert
+        0x2E,  # Delete
+    }
+)
+
+_ULONG_PTR = ctypes.c_size_t
+
+
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = (
+        ("wVk", ctypes.c_ushort),
+        ("wScan", ctypes.c_ushort),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", _ULONG_PTR),
+    )
+
+
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = (
+        ("dx", ctypes.c_long),
+        ("dy", ctypes.c_long),
+        ("mouseData", ctypes.c_ulong),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", _ULONG_PTR),
+    )
+
+
+class _HARDWAREINPUT(ctypes.Structure):
+    _fields_ = (
+        ("uMsg", ctypes.c_ulong),
+        ("wParamL", ctypes.c_ushort),
+        ("wParamH", ctypes.c_ushort),
+    )
+
+
+class _INPUT_UNION(ctypes.Union):
+    _fields_ = (
+        ("ki", _KEYBDINPUT),
+        ("mi", _MOUSEINPUT),
+        ("hi", _HARDWAREINPUT),
+    )
+
+
+class _INPUT(ctypes.Structure):
+    _fields_ = (
+        ("type", ctypes.c_ulong),
+        ("union", _INPUT_UNION),
+    )
+
+
+def _windows_use_scancode_path() -> bool:
+    """Optional KEYEVENTF_SCANCODE-centric inject path (KEYSIM_WIN_SCANCODE=1)."""
+    raw = os.getenv("KEYSIM_WIN_SCANCODE", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _windows_is_extended_vk(code: int) -> bool:
+    return code in _WINDOWS_EXTENDED_VKS
+
+
+def _windows_map_vk_to_scan(code: int) -> int:
     windll = ctypes.__dict__["windll"]
-    keybd_event = cast(Callable[[int, int, int, int], None], windll.user32.keybd_event)
-    keybd_event(code, 0, flags, 0)
+    map_virtual_key = cast(
+        Callable[[int, int], int], windll.user32.MapVirtualKeyW
+    )
+    return int(map_virtual_key(code, _MAPVK_VK_TO_VSC)) & 0xFF
+
+
+def _windows_build_keybdinput(code: int, *, key_up: bool) -> _KEYBDINPUT:
+    scan = _windows_map_vk_to_scan(code)
+    flags = 0
+    if _windows_is_extended_vk(code):
+        flags |= _KEYEVENTF_EXTENDEDKEY
+    if key_up:
+        flags |= _KEYEVENTF_KEYUP
+
+    if _windows_use_scancode_path():
+        # Scan-code path for titles that ignore virtual-key-only events.
+        flags |= _KEYEVENTF_SCANCODE
+        return _KEYBDINPUT(0, scan, flags, 0, _ULONG_PTR(0))
+
+    # Default: SendInput with VK + scan code (still user32 low-level).
+    return _KEYBDINPUT(code & 0xFFFF, scan, flags, 0, _ULONG_PTR(0))
+
+
+def _windows_send_key(code: int, *, key_up: bool) -> None:
+    windll = ctypes.__dict__["windll"]
+    send_input = cast(Callable[..., int], windll.user32.SendInput)
+    inp = _INPUT(
+        type=_INPUT_KEYBOARD,
+        union=_INPUT_UNION(ki=_windows_build_keybdinput(code, key_up=key_up)),
+    )
+    sent = int(send_input(1, ctypes.byref(inp), ctypes.sizeof(_INPUT)))
+    if sent != 1:
+        logger.warning(
+            f"SendInput returned {sent} for vk=0x{code:02X} key_up={key_up}"
+        )
 
 
 def _windows_key_press(code: int) -> None:
-    _windows_key_event(code, 0)
+    _windows_send_key(code, key_up=False)
 
 
 def _windows_key_release(code: int) -> None:
-    _windows_key_event(code, 2)
+    _windows_send_key(code, key_up=True)
 
 
 def _darwin_key_event(code: int, pressed: bool) -> None:
     quartz = importlib.import_module("Quartz")
-    symbols = quartz.__dict__
-    create_event = cast(Callable[[object, int, bool], object], symbols["CGEventCreateKeyboardEvent"])
-    post_event = cast(Callable[[object, object], None], symbols["CGEventPost"])
-    event_tap = symbols["kCGHIDEventTap"]
-    post_event(event_tap, create_event(None, code, pressed))
+    source_create = cast(Callable[[object], object], quartz.CGEventSourceCreate)
+    create_event = cast(
+        Callable[[object, int, bool], object], quartz.CGEventCreateKeyboardEvent
+    )
+    post_event = cast(Callable[[object, object], None], quartz.CGEventPost)
+    source = source_create(quartz.kCGEventSourceStateHIDSystemState)
+    event = create_event(source, code, pressed)
+    if event is None:
+        logger.warning(
+            f"CGEventCreateKeyboardEvent failed for code={code} pressed={pressed}"
+        )
+        return
+    post_event(quartz.kCGHIDEventTap, event)
 
 
 def _darwin_key_press(code: int) -> None:
@@ -222,13 +343,21 @@ class ModificationKeyHandler:
         default_press_times: tuple[float, float],
         mod_keys: ModificationKeys,
         os_type: str,
+        *,
+        sim: KeySimulator | None = None,
+        key_lock: threading.Lock | None = None,
+        pressed_keys: set[str] | None = None,
+        pressed_key_codes: dict[str, int] | None = None,
     ) -> None:
         self.key_codes = key_codes
         # press_time: (min_sec, max_sec) 튜플
         self.press_time = default_press_times
         # 설정에서 enabled된 키만 필터링
         self.mod_keys = {k: v for k, v in mod_keys.items() if v.get("enabled")}
-        self.sim = KeySimulator(os_type)
+        self.sim = sim if sim is not None else KeySimulator(os_type)
+        self.key_lock = key_lock
+        self.pressed_keys = pressed_keys
+        self.pressed_key_codes = pressed_key_codes
         self.event = threading.Event()
 
     async def check_and_process(self) -> bool:
@@ -260,10 +389,47 @@ class ModificationKeyHandler:
 
     async def _sim_key(self, key_name: str) -> None:
         norm_key = _normalize_key_name(self.key_codes, key_name)
-        if norm_key and (code := self.key_codes.get(norm_key)):
+        if not norm_key:
+            return
+        code = self.key_codes.get(norm_key)
+        if code is None:
+            return
+
+        tracked = False
+        lock = self.key_lock
+        pressed_keys = self.pressed_keys
+        pressed_key_codes = self.pressed_key_codes
+        if lock is not None and pressed_keys is not None and pressed_key_codes is not None:
+            with lock:
+                if norm_key in pressed_keys:
+                    return
+                pressed_keys.add(norm_key)
+                pressed_key_codes[norm_key] = code
+            tracked = True
+
+        down = False
+        release_failed = False
+        try:
             self.sim.press(code)
+            down = True
             await asyncio.sleep(random.uniform(*self.press_time))
-            self.sim.release(code)
+        finally:
+            if down:
+                try:
+                    self.sim.release(code)
+                except Exception as exc:
+                    release_failed = True
+                    logger.warning(
+                        f"Modification key release failed for {norm_key!r}: {exc}"
+                    )
+            if tracked and lock is not None and pressed_keys is not None and pressed_key_codes is not None:
+                with lock:
+                    if release_failed:
+                        pressed_keys.add(norm_key)
+                        pressed_key_codes[norm_key] = code
+                    else:
+                        pressed_keys.discard(norm_key)
+                        pressed_key_codes.pop(norm_key, None)
 
 
 class KeystrokeProcessor:
@@ -295,18 +461,29 @@ class KeystrokeProcessor:
 
         self.key_codes = KeyUtils.get_key_list()
         self.sim = KeySimulator(self.os_type)
-        self.mod_handler = ModificationKeyHandler(
-            self.key_codes, self.default_press_times, mod_keys, self.os_type
-        )
 
         # Thread Safety & State
         self.key_lock = threading.Lock()
         self.state_lock = threading.Lock()
 
         self.pressed_keys: set[str] = set()
+        # Tracks key name → code for force-release on stop.
+        self.pressed_key_codes: dict[str, int] = {}
         self.current_states: dict[str, bool] = {}
         self.runtime_toggle_active = False
         self._roi_warn_logged: set[str] = set()
+        self._unsupported_key_warned: set[str] = set()
+
+        self.mod_handler = ModificationKeyHandler(
+            self.key_codes,
+            self.default_press_times,
+            mod_keys,
+            self.os_type,
+            sim=self.sim,
+            key_lock=self.key_lock,
+            pressed_keys=self.pressed_keys,
+            pressed_key_codes=self.pressed_key_codes,
+        )
 
         self.event_data_list: list[EventData] = self._init_event_data(events)
         self.main_capture_groups: list[CaptureGroup] = self._build_capture_groups(
@@ -326,6 +503,45 @@ class KeystrokeProcessor:
 
         if self.main_thread.is_alive():
             self.main_thread.join(timeout=1.0)
+            if self.main_thread.is_alive():
+                logger.warning(
+                    "Processor thread did not stop within timeout; force-releasing keys"
+                )
+        self._force_release_pressed_keys()
+
+    def _force_release_pressed_keys(self) -> None:
+        """Best-effort OS key-up for any keys still tracked as down."""
+        with self.key_lock:
+            pending = list(self.pressed_key_codes.items())
+            self.pressed_key_codes.clear()
+            self.pressed_keys.clear()
+
+        failed: dict[str, int] = {}
+        for key_name, code in pending:
+            try:
+                self.sim.release(code)
+                logger.debug(f"Force-released key {key_name!r} (code={code})")
+            except Exception as exc:
+                failed[key_name] = code
+                logger.warning(f"Force-release failed for {key_name!r}: {exc}")
+
+        if failed:
+            with self.key_lock:
+                self.pressed_key_codes.update(failed)
+                self.pressed_keys.update(failed)
+
+    def _warn_unsupported_key(self, event_name: str, raw_key: str) -> None:
+        if not hasattr(self, "_unsupported_key_warned"):
+            self._unsupported_key_warned = set()
+        warn_key = f"{event_name}\0{raw_key}"
+        if warn_key in self._unsupported_key_warned:
+            return
+        self._unsupported_key_warned.add(warn_key)
+        os_label = getattr(self, "os_type", platform.system())
+        logger.warning(
+            f"Event '{event_name}': unsupported key {raw_key!r} on {os_label}; "
+            "key press will be skipped"
+        )
 
     def _init_event_data(self, raw_events: list[EventModel]) -> list[EventData]:
         events_data: list[EventData] = []
@@ -346,11 +562,12 @@ class KeystrokeProcessor:
 
             center_x = latest_position[0] + clicked_position[0]
             center_y = latest_position[1] + clicked_position[1]
+            raw_key = e.key_to_enter
             key = (
-                _normalize_key_name(self.key_codes, e.key_to_enter)
-                if e.key_to_enter
-                else None
+                _normalize_key_name(self.key_codes, raw_key) if raw_key else None
             )
+            if raw_key and raw_key.strip() and key is None:
+                self._warn_unsupported_key(e.event_name or "Unknown", raw_key.strip())
 
             evt_data: EventData = {
                 "name": e.event_name or "Unknown",
@@ -881,20 +1098,38 @@ class KeystrokeProcessor:
             return
 
         key = evt["key"]
-        if not key or not (code := self.key_codes.get(key)):
+        if not key:
+            return
+        code = self.key_codes.get(key)
+        if code is None:
             return
 
         with self.key_lock:
             if key in self.pressed_keys:
                 return
             self.pressed_keys.add(key)
+            self.pressed_key_codes[key] = code
 
+        down = False
+        release_failed = False
         try:
             self.sim.press(code)
+            down = True
             target_duration = self._calculate_press_duration(evt)
             await self._wait_until_async(time.time() + target_duration)
-            self.sim.release(code)
             self._log_key_execution("Async", evt, target_duration, state_snapshot)
         finally:
+            if down:
+                try:
+                    self.sim.release(code)
+                except Exception as exc:
+                    release_failed = True
+                    logger.warning(f"Key release failed for {key!r}: {exc}")
             with self.key_lock:
-                self.pressed_keys.discard(key)
+                if release_failed:
+                    # Keep tracking so stop()/force-release can retry key-up.
+                    self.pressed_keys.add(key)
+                    self.pressed_key_codes[key] = code
+                else:
+                    self.pressed_keys.discard(key)
+                    self.pressed_key_codes.pop(key, None)

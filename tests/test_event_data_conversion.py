@@ -113,6 +113,22 @@ class TestInitEventDataFieldMapping(unittest.TestCase):
         ])
         self.assertIsNone(events[0]["key"])
 
+    def test_unsupported_key_warns_and_maps_to_none(self):
+        """현재 플랫폼 맵에 없는 키는 경고 후 key=None으로 로드"""
+        from unittest.mock import patch
+
+        proc = _make_processor_with_key_codes()
+        proc.os_type = "Darwin"
+        with patch("app.core.processor.logger.warning") as mock_warning:
+            events = proc._init_event_data(
+                [_make_basic_event(key_to_enter="NotARealKey")]
+            )
+        self.assertEqual(len(events), 1)
+        self.assertIsNone(events[0]["key"])
+        mock_warning.assert_called()
+        self.assertIn("unsupported key", mock_warning.call_args[0][0])
+        self.assertIn("NotARealKey", mock_warning.call_args[0][0])
+
 
 class TestInitEventDataFiltering(unittest.TestCase):
     """_init_event_data: 이벤트 필터링 및 분류"""
