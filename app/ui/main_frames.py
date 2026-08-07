@@ -330,7 +330,7 @@ class ProfileButtonFrame(tk.Frame):
     """Profile tools share the same 3-column rhythm as the main tools."""
 
     _BTN_KEYS = (
-        ("modkeys", ("ModKeys", "수정키")),
+        ("modkeys", ("Profile ModKeys", "이 프로필 수정키")),
         ("edit_profile", ("Edit Profile", "프로필 편집")),
         ("sort_profile", ("Sort Profile", "프로필 정렬")),
     )
@@ -344,6 +344,7 @@ class ProfileButtonFrame(tk.Frame):
         **kwargs: Any,
     ) -> None:
         super().__init__(master, **kwargs)
+        self._mod_cb = mod_cb
         for col in range(3):
             self.grid_columnconfigure(col, weight=1, uniform="tools")
         commands: dict[str, VoidCallback] = {
@@ -359,6 +360,43 @@ class ProfileButtonFrame(tk.Frame):
         self.edit_profile_button = self.btns["edit_profile"]
         self.modkeys_button = self.btns["modkeys"]
         self.sort_button = self.btns["sort_profile"]
+
+        # Read-only summary of the selected profile's modification keys.
+        self.modkeys_summary_var = tk.StringVar(value="")
+        self.modkeys_summary_label = tk.Label(
+            self,
+            textvariable=self.modkeys_summary_var,
+            anchor="w",
+            cursor="hand2",
+            bg=theme.SURFACE_SUNKEN,
+            fg=theme.INK_SECONDARY,
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_1,
+        )
+        self.modkeys_summary_label.grid(
+            row=1,
+            column=0,
+            columnspan=3,
+            sticky="we",
+            padx=theme.SPACE_1,
+            pady=(theme.SPACE_1, 0),
+        )
+        self.modkeys_summary_label.bind("<Button-1>", self._on_summary_clicked)
+        self._summary_enabled = True
+
+    def _on_summary_clicked(self, _event: object | None = None) -> None:
+        if self._summary_enabled:
+            self._mod_cb()
+
+    def set_modkeys_summary(self, summary: str) -> None:
+        self.modkeys_summary_var.set(summary)
+
+    def set_modkeys_summary_enabled(self, enabled: bool) -> None:
+        self._summary_enabled = enabled
+        self.modkeys_summary_label.config(
+            cursor="hand2" if enabled else "arrow",
+            fg=theme.INK_SECONDARY if enabled else theme.INK_MUTED,
+        )
 
     def refresh_texts(self) -> None:
         for key, label_pair in self._BTN_KEYS:

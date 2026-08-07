@@ -397,13 +397,10 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
             str(runtime_toggle_key).strip() if runtime_toggle_key else None
         )
 
-    # Ensure modification_keys default: all keys enabled with Pass mode
+    # Ensure modification_keys default: all keys enabled with Pass mode.
+    # Do not coerce partial maps here — missing keys mean "not polled" at runtime.
     if not getattr(p, "modification_keys", None):
-        p.modification_keys = {
-            "alt": {"enabled": True, "value": "Pass", "pass": True},
-            "ctrl": {"enabled": True, "value": "Pass", "pass": True},
-            "shift": {"enabled": True, "value": "Pass", "pass": True},
-        }
+        p.modification_keys = default_modification_keys()
 
     if getattr(p, "event_list", None) is None:
         p.event_list = []
@@ -450,6 +447,67 @@ def load_profile_favorites(profiles_dir: Path, names: list[str]) -> dict[str, bo
     return {
         name: _load_profile_meta_favorite_cached(profiles_dir, name) for name in names
     }
+
+
+def default_modification_keys() -> ModificationKeys:
+    return {
+        "alt": {"enabled": True, "value": "Pass", "pass": True},
+        "ctrl": {"enabled": True, "value": "Pass", "pass": True},
+        "shift": {"enabled": True, "value": "Pass", "pass": True},
+    }
+
+
+def coerce_modification_keys(raw: object) -> ModificationKeys:
+    """Normalize stored modification_keys; invalid/missing entries fall back to defaults."""
+    result = default_modification_keys()
+    root = _as_object_dict(raw)
+    if root is None:
+        return result
+    for key in ("alt", "ctrl", "shift"):
+        item = _as_object_dict(root.get(key))
+        if item is None:
+            continue
+        enabled = bool(item.get("enabled", True))
+        pass_through = bool(item.get("pass", False))
+        raw_value = item.get("value", "Pass")
+        value = (
+            "Pass"
+            if pass_through
+            else str(raw_value if raw_value is not None else "Pass")
+        )
+        if not value:
+            value = "Pass"
+        result[key] = {
+            "enabled": enabled,
+            "value": value,
+            "pass": pass_through,
+        }
+    return result
+
+
+def load_profile_meta_modification_keys(
+    profiles_dir: Path, name: str
+) -> ModificationKeys:
+    """Load modification_keys from profile JSON without decoding event images."""
+    jpath = _json_path(Path(profiles_dir), name)
+    if not jpath.exists():
+        return default_modification_keys()
+    try:
+        with open(jpath, "r", encoding="utf-8") as f:
+            raw_data: object = json.load(f)
+    except Exception as exc:
+        logger.warning(f"Profile modification_keys load failed for {jpath}: {exc}")
+        return default_modification_keys()
+    if not isinstance(raw_data, dict):
+        return default_modification_keys()
+    data = _as_object_dict(cast(object, raw_data))
+    if data is None:
+        return default_modification_keys()
+    raw_meta: object = data.get("profile") or {}
+    meta = _as_object_dict(raw_meta)
+    if meta is None:
+        return default_modification_keys()
+    return coerce_modification_keys(meta.get("modification_keys"))
 
 
 def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> ProfileModel:

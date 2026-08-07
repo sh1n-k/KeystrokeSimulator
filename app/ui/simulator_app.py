@@ -21,8 +21,10 @@ from app.core.models import EventModel, ProfileModel, UserSettings
 from app.ui.modkeys import ModificationKeysWindow
 from app.ui.main_frames import ButtonFrame, ProcessFrame, ProfileButtonFrame, ProfileFrame
 from app.ui.input_listener_session import InputListener, InputListenerSession
+from app.storage.profile_display import format_modification_keys_summary
 from app.storage.profile_storage import (
     load_profile,
+    load_profile_meta_modification_keys,
 )
 from app.storage.settings_storage import load_user_settings, save_user_settings
 from app.core.processor import KeystrokeProcessor
@@ -532,6 +534,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self._apply_accent_button(run_start_button)
         if hasattr(self, "profile_button_frame"):
             self.profile_button_frame.refresh_texts()
+        self._refresh_modkeys_summary()
         if hasattr(self, "lbl_hotkey_hint"):
             self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
         if hasattr(self, "btn_open_screen_permission"):
@@ -876,6 +879,10 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "fg": STATUS_FG_WARN,
             }
 
+        profile_name = self.selected_profile.get()
+        modkeys_summary = format_modification_keys_summary(
+            getattr(profile, "modification_keys", None)
+        )
         return {
             "can_start": True,
             "badge_text": txt("Ready", "준비 완료"),
@@ -884,14 +891,34 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "모니터링을 시작할 준비가 끝났습니다.",
             ),
             "detail": txt(
-                "Profile '{name}' has {count} runnable event(s).",
-                "프로필 '{name}'에 실행 가능한 이벤트가 {count}개 있습니다.",
-                name=self.selected_profile.get(),
+                "Profile '{name}' selected · ModKeys: {modkeys}\n{count} runnable event(s).",
+                "프로필 '{name}' 선택 · 수정키: {modkeys}\n실행 가능한 이벤트 {count}개.",
+                name=profile_name,
+                modkeys=modkeys_summary,
                 count=runnable_count,
             ),
             "bg": STATUS_BG_INFO,
             "fg": STATUS_FG_INFO,
         }
+
+    def _status_detail_with_profile_modkeys(self, detail: str) -> str:
+        """Ensure selected-profile ModKeys appear in status when profile is set."""
+        profile_name = self.selected_profile.get()
+        if not profile_name:
+            return detail
+        # Ready snapshot already embeds the summary.
+        if "ModKeys:" in detail or "수정키:" in detail:
+            return detail
+        summary = self._current_modkeys_summary()
+        if not summary:
+            return detail
+        line = txt(
+            "Profile '{name}' selected · ModKeys: {modkeys}",
+            "프로필 '{name}' 선택 · 수정키: {modkeys}",
+            name=profile_name,
+            modkeys=summary,
+        )
+        return f"{detail}\n{line}" if detail else line
 
     def _update_main_status(self) -> None:
         if not hasattr(self, "lbl_status_badge"):
@@ -914,7 +941,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         if hasattr(self, "status_color_bar"):
             self.status_color_bar.config(bg=fg)
         self.lbl_status_title.config(text=snapshot["title"])
-        self.lbl_status_detail.config(text=snapshot["detail"])
+        self.lbl_status_detail.config(
+            text=self._status_detail_with_profile_modkeys(snapshot["detail"])
+        )
         self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
         self._update_permission_actions(
             [] if running else snapshot.get("missing_permissions", [])
@@ -1395,15 +1424,74 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_button_frame.modkeys_button.config(state=state)
         self.profile_button_frame.edit_profile_button.config(state=state)
         self.profile_button_frame.sort_button.config(state=state)
+        self.profile_button_frame.set_modkeys_summary_enabled(not running)
+        self._refresh_modkeys_summary()
         self._update_main_status()
+
+    def _current_modkeys_summary(self) -> str:
+        profile_name = self.selected_profile.get()
+        if not profile_name:
+            self._modkeys_summary_cache = ("", "")
+            return ""
+        cached = cast(
+            tuple[str, str] | None, self.__dict__.get("_modkeys_summary_cache")
+        )
+        if (
+            cached is not None
+            and cached[0] == profile_name
+        ):
+            return cached[1]
+        try:
+            keys = load_profile_meta_modification_keys(self.profiles_dir, profile_name)
+            summary = format_modification_keys_summary(keys)
+        except Exception as exc:
+            logger.warning(f"ModKeys summary load failed for '{profile_name}': {exc}")
+            summary = ""
+        self._modkeys_summary_cache = (profile_name, summary)
+        return summary
+
+    def _invalidate_modkeys_summary_cache(self) -> None:
+        self._modkeys_summary_cache = None
+
+    def _refresh_modkeys_summary(self) -> None:
+        # Always reload after explicit refresh (profile change, dialog close, language).
+        self._invalidate_modkeys_summary_cache()
+        frame = self.__dict__.get("profile_button_frame")
+        summary = self._current_modkeys_summary()
+        profile_name = self.selected_profile.get()
+        if frame is None:
+            return
+        if profile_name and summary:
+            frame.set_modkeys_summary(
+                txt(
+                    "This profile · {summary}",
+                    "이 프로필 · {summary}",
+                    summary=summary,
+                )
+            )
+        elif profile_name:
+            frame.set_modkeys_summary(
+                txt("This profile · (unavailable)", "이 프로필 · (확인 불가)")
+            )
+        else:
+            frame.set_modkeys_summary(
+                txt("Select a profile to view ModKeys", "수정키를 보려면 프로필을 선택하세요")
+            )
 
     def open_modkeys(self) -> None:
         if self.is_running.get():
             return
-        if self.selected_profile.get():
-            ModificationKeysWindow(
-                self, self.selected_profile.get(), profiles_dir=self.profiles_dir
-            )
+        profile_name = self.selected_profile.get()
+        if not profile_name:
+            return
+        win = ModificationKeysWindow(
+            self, profile_name, profiles_dir=self.profiles_dir
+        )
+        # Only block when a real Tk interpreter is attached (skip unit stubs).
+        if "tk" in self.__dict__:
+            safe_call(self.wait_window, win)
+        self._refresh_modkeys_summary()
+        self._update_main_status()
 
     def open_profile(self) -> None:
         if self.selected_profile.get():

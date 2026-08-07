@@ -8,7 +8,11 @@ from typing import ClassVar, TypeAlias
 from loguru import logger
 from app.core.models import ModificationKeys
 from app.utils.i18n import dual_text_width, txt
-from app.storage.profile_storage import load_profile, save_profile
+from app.storage.profile_storage import (
+    default_modification_keys,
+    load_profile,
+    save_profile,
+)
 from app.utils.window_state import WindowUtils
 from app.ui import theme
 
@@ -36,7 +40,13 @@ class ModificationKeysWindow(tk.Toplevel):
         super().__init__(master)
         self.prof_name = profile_name
         self.prof_dir = profiles_dir
-        self.title(txt("Modification Keys", "수정 키 설정"))
+        self.title(
+            txt(
+                "Modifier Keys — {name}",
+                "수정 키 — {name}",
+                name=profile_name,
+            )
+        )
         if master is not None:
             self.transient(master)
         self.grab_set()
@@ -69,20 +79,26 @@ class ModificationKeysWindow(tk.Toplevel):
             padx=theme.SPACE_3,
             pady=theme.SPACE_2,
         )
+        title_col = tk.Frame(bar, bg=theme.SURFACE_PANEL)
+        title_col.pack(side="left", fill="x", expand=True)
         tk.Label(
-            bar,
+            title_col,
             text=txt("Modifier Keys", "수정 키"),
             bg=theme.SURFACE_PANEL,
             fg=theme.INK_PRIMARY,
             font=f["heading"],
-        ).pack(side="left")
+        ).pack(anchor="w")
         tk.Label(
-            bar,
-            text=self.prof_name,
+            title_col,
+            text=txt(
+                "Profile: {name} · saved only for this profile",
+                "프로필: {name} · 이 프로필에만 저장됩니다",
+                name=self.prof_name,
+            ),
             bg=theme.SURFACE_PANEL,
             fg=theme.INK_MUTED,
             font=f["caption"],
-        ).pack(side="left", padx=(theme.SPACE_3, 0))
+        ).pack(anchor="w", pady=(theme.SPACE_1, 0))
         return bar
 
     def _setup_ui(self) -> None:
@@ -227,10 +243,7 @@ class ModificationKeysWindow(tk.Toplevel):
 
             # Default initialization if missing
             if not getattr(p, "modification_keys", None):
-                p.modification_keys = {
-                    label.lower(): {"enabled": True, "value": "Pass", "pass": True}
-                    for label in self.labels
-                }
+                p.modification_keys = default_modification_keys()
                 save_profile(self.prof_dir, p, name=self.prof_name)
 
             mod_keys = p.modification_keys or {}

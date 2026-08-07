@@ -667,6 +667,44 @@ class TestReadinessSnapshotSideEffects(unittest.TestCase):
             app, "Quick", profiles_dir=app.profiles_dir
         )
 
+    @patch("app.ui.simulator_app.ModificationKeysWindow")
+    def test_open_modkeys_refreshes_summary_after_close(self, mock_modkeys):
+        app = _make_app_stub()
+        app.is_running = FakeVar(False)
+        app.selected_profile = FakeVar("Quick")
+        app._refresh_modkeys_summary = MagicMock()
+        # _update_main_status is already MagicMock on the stub
+
+        KeystrokeSimulatorApp.open_modkeys(app)
+
+        app._refresh_modkeys_summary.assert_called_once_with()
+        app._update_main_status.assert_called()
+
+    def test_status_detail_appends_profile_modkeys_once(self):
+        app = _make_app_stub()
+        app.selected_profile = FakeVar("Dungeon")
+        app._current_modkeys_summary = MagicMock(
+            return_value="⎇ Pass · ⌃ Pass · ⇧ Pass"
+        )
+
+        first = KeystrokeSimulatorApp._status_detail_with_profile_modkeys(
+            app, "Pick a process."
+        )
+        self.assertIn("Dungeon", first)
+        self.assertIn("ModKeys:", first)
+        self.assertIn("⎇ Pass", first)
+
+        second = KeystrokeSimulatorApp._status_detail_with_profile_modkeys(app, first)
+        self.assertEqual(second, first)
+
+    def test_status_detail_skips_when_no_profile(self):
+        app = _make_app_stub()
+        app.selected_profile = FakeVar("")
+        detail = KeystrokeSimulatorApp._status_detail_with_profile_modkeys(
+            app, "Nothing selected."
+        )
+        self.assertEqual(detail, "Nothing selected.")
+
     @patch("app.ui.simulator_app.KeystrokeSettings")
     def test_open_settings_opens_when_missing(self, mock_settings):
         app = _make_app_stub()

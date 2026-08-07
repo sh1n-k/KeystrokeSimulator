@@ -4,6 +4,7 @@ from app.storage.profile_display import (
     FAVORITE_PREFIX,
     QUICK_PROFILE_NAME,
     build_profile_display_values,
+    format_modification_keys_summary,
     get_favorite_prefix,
     to_profile_display_name,
 )
@@ -63,6 +64,41 @@ class TestBuildProfileDisplayValues(unittest.TestCase):
             ),
             ["Fast", f"{get_favorite_prefix()}A"],
         )
+
+
+class TestFormatModificationKeysSummary(unittest.TestCase):
+    def test_defaults_when_missing(self):
+        self.assertEqual(
+            format_modification_keys_summary(None),
+            "⎇ Pass · ⌃ Pass · ⇧ Pass",
+        )
+        self.assertEqual(
+            format_modification_keys_summary({}),
+            "⎇ Pass · ⌃ Pass · ⇧ Pass",
+        )
+
+    def test_mixed_enabled_pass_and_key(self):
+        summary = format_modification_keys_summary(
+            {
+                "alt": {"enabled": True, "value": "Pass", "pass": True},
+                "ctrl": {"enabled": True, "value": "A", "pass": False},
+                "shift": {"enabled": False, "value": "B", "pass": False},
+            }
+        )
+        self.assertEqual(summary, "⎇ Pass · ⌃ A · ⇧ off")
+
+    def test_clamps_long_or_multiline_values(self):
+        summary = format_modification_keys_summary(
+            {
+                "alt": {
+                    "enabled": True,
+                    "value": "ABCDEFGHIJ\nZZZ",
+                    "pass": False,
+                },
+            }
+        )
+        self.assertIn("⎇ ABCDEFGH", summary)
+        self.assertNotIn("\n", summary)
 
 
 if __name__ == "__main__":
