@@ -52,6 +52,17 @@ _TARGET_ACTION_MIN = 56
 _TARGET_ACTION_COLS = 4  # columns 2..5
 
 
+def _ellipsize_display(text: str, max_chars: int = _TARGET_COMBO_CHARS) -> str:
+    """Keep combobox labels within a fixed character budget (stable window width)."""
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    if max_chars == 1:
+        return "…"
+    return text[: max_chars - 1] + "…"
+
+
 def _configure_target_row_grid(frame: tk.Frame) -> None:
     frame.grid_columnconfigure(0, weight=0, minsize=_TARGET_LABEL_MIN)
     frame.grid_columnconfigure(1, weight=0)
@@ -382,8 +393,12 @@ class RunSetFrame(tk.Frame):
             state="readonly",
             width=_TARGET_COMBO_CHARS,
         )
+        # sticky=w + fixed width: selection text must not resize the target card.
         self.sets_combobox.grid(row=0, column=1, sticky="w", padx=(0, 6))
         self.sets_combobox.bind("<<ComboboxSelected>>", self._on_set_selected)
+        self.sets_combobox.bind("<Enter>", self._show_full_name_tooltip)
+        self.sets_combobox.bind("<Leave>", self._hide_full_name_tooltip)
+        self._tooltip: tk.Toplevel | None = None
         self.edit_button: tk.Button = tk.Button(self, command=self.open_editor)
         self.edit_button.grid(row=0, column=2, sticky="we", padx=(0, 6))
         self.copy_button: tk.Button = tk.Button(self, command=self.copy_set)
@@ -435,29 +450,79 @@ class RunSetFrame(tk.Frame):
         named = list_run_set_names(self.sets_path)
         self.set_ids = [CURRENT_RUN_SET_ID] + named
         self.id_to_index = {sid: i for i, sid in enumerate(self.set_ids)}
-        self.sets_combobox.configure(values=self._display_values())
+        self._apply_combo_values()
         target = select_id or self.selected_var.get() or CURRENT_RUN_SET_ID
         if not self.set_selected_set(target):
             self.set_selected_set(CURRENT_RUN_SET_ID)
 
+    def _apply_combo_values(self) -> None:
+        """Re-set values and width so long names never grow the combobox."""
+        self.sets_combobox.configure(
+            values=self._display_values(),
+            width=_TARGET_COMBO_CHARS,
+        )
+
     def _display_values(self) -> list[str]:
         return [self._display_for_id(sid) for sid in self.set_ids]
 
-    def _display_for_id(self, set_id: str) -> str:
+    def _full_label_for_id(self, set_id: str) -> str:
         if is_current_run_set(set_id):
             current = (self._current_profile_getter() or "").strip()
             base = txt("Current profile", "현재 프로필")
             return f"{base} ({current})" if current else base
         return set_id
 
+    def _display_for_id(self, set_id: str) -> str:
+        # Combo stays short: virtual entry omits profile name; long set names ellipsize.
+        if is_current_run_set(set_id):
+            return txt("Current profile", "현재 프로필")
+        return _ellipsize_display(set_id, _TARGET_COMBO_CHARS)
+
     def _refresh_display_value(self) -> None:
         idx = self.sets_combobox.current()
         if 0 <= idx < len(self.set_ids):
-            self.display_var.set(self._display_for_id(self.set_ids[idx]))
-            # Keep combobox values in sync when current profile name changes.
-            self.sets_combobox.configure(values=self._display_values())
+            self._apply_combo_values()
             if 0 <= idx < len(self.set_ids):
                 self.sets_combobox.current(idx)
+            self.display_var.set(self._display_for_id(self.set_ids[idx]))
+
+    def _show_full_name_tooltip(self, _event: object | None = None) -> None:
+        self._hide_full_name_tooltip()
+        set_id = self.get_selected_set_id()
+        full = self._full_label_for_id(set_id)
+        short = self._display_for_id(set_id)
+        if full == short:
+            return
+        tip = tk.Toplevel(self)
+        tip.wm_overrideredirect(True)
+        tip.configure(bg=theme.INK_PRIMARY)
+        lbl = tk.Label(
+            tip,
+            text=full,
+            bg=theme.INK_PRIMARY,
+            fg=theme.INK_INVERSE,
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_1,
+            font=theme.fonts()["caption"],
+        )
+        lbl.pack()
+        try:
+            x = self.sets_combobox.winfo_rootx()
+            y = self.sets_combobox.winfo_rooty() + self.sets_combobox.winfo_height() + 2
+            tip.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            tip.destroy()
+            return
+        self._tooltip = tip
+
+    def _hide_full_name_tooltip(self, _event: object | None = None) -> None:
+        tip = self._tooltip
+        self._tooltip = None
+        if tip is not None:
+            try:
+                tip.destroy()
+            except tk.TclError:
+                pass
 
     def _on_set_selected(self, _event: object | None = None) -> None:
         idx = self.sets_combobox.current()

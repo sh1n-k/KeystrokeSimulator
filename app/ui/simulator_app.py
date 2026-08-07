@@ -21,7 +21,6 @@ from app.core.models import EventModel, ProfileModel, UserSettings
 from app.core.run_composition import (
     ComposedRunSession,
     compose_run_session,
-    format_run_profile_summary,
 )
 from app.ui.dialogs import ask_confirm
 from app.ui.modkeys import ModificationKeysWindow
@@ -739,6 +738,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         return [selected] if selected else []
 
     def _run_set_status_label(self) -> str:
+        """Short label for status lines (avoids resizing the main window)."""
         frame = self.__dict__.get("run_set_frame")
         set_id = (
             frame.get_selected_set_id()
@@ -746,13 +746,24 @@ class KeystrokeSimulatorApp(tk.Tk):
             else self.selected_run_set.get()
         )
         if is_current_run_set(set_id):
-            current = self.selected_profile.get() or "—"
-            return txt(
-                "Current profile ({profile})",
-                "현재 프로필 ({profile})",
-                profile=current,
-            )
-        return set_id or "—"
+            return txt("Current profile", "현재 프로필")
+        return (set_id or "—").strip() or "—"
+
+    def _run_set_members_status_label(self, profile_names: list[str] | None = None) -> str:
+        """Compact member summary: profile name, count, or em dash."""
+        names = profile_names
+        if names is None:
+            names = self._get_run_profile_names()
+        cleaned = [n for n in names if n]
+        if not cleaned:
+            return "—"
+        if len(cleaned) == 1:
+            return cleaned[0]
+        return txt(
+            "{count} profiles",
+            "프로필 {count}개",
+            count=len(cleaned),
+        )
 
     def _load_profiles_for_run(
         self, names: list[str], *, migrate: bool
@@ -1049,7 +1060,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             }
 
         set_label = self._run_set_status_label()
-        members_summary = format_run_profile_summary(list(session.profile_names))
+        members_label = self._run_set_members_status_label(list(session.profile_names))
         modkey_set_name = self.selected_modkey_set.get() or DEFAULT_MODKEY_SET_NAME
         return {
             "can_start": True,
@@ -1059,10 +1070,10 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "모니터링을 시작할 준비가 끝났습니다.",
             ),
             "detail": txt(
-                "Run set '{run_set}' [{members}] · ModKey set '{modkey_set}' · {count} runnable event(s).",
-                "실행 세트 '{run_set}' [{members}] · 수정키 세트 '{modkey_set}' · 실행 가능한 이벤트 {count}개.",
+                "Run set {run_set} · {members} · ModKey {modkey_set} · {count} event(s).",
+                "실행 세트 {run_set} · {members} · 수정키 {modkey_set} · 이벤트 {count}개.",
                 run_set=set_label,
-                members=members_summary,
+                members=members_label,
                 modkey_set=modkey_set_name,
                 count=runnable_count,
             ),
@@ -1076,13 +1087,20 @@ class KeystrokeSimulatorApp(tk.Tk):
         modkey_set_name = (self.selected_modkey_set.get() or "").strip()
         if not profile_name and not modkey_set_name:
             return detail
-        if "ModKey set" in detail or "수정키 세트" in detail:
+        if (
+            "ModKey set" in detail
+            or "ModKey " in detail
+            or "수정키 세트" in detail
+            or "수정키 " in detail
+        ):
             return detail
         set_label = self._run_set_status_label()
+        members_label = self._run_set_members_status_label()
         line = txt(
-            "Run set '{run_set}' · ModKey set '{modkey_set}'",
-            "실행 세트 '{run_set}' · 수정키 세트 '{modkey_set}'",
+            "Run set {run_set} · {members} · ModKey {modkey_set}",
+            "실행 세트 {run_set} · {members} · 수정키 {modkey_set}",
             run_set=set_label or "—",
+            members=members_label,
             modkey_set=modkey_set_name or "—",
         )
         return f"{detail}\n{line}" if detail else line

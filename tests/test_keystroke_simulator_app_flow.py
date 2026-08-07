@@ -760,7 +760,8 @@ class TestReadinessSnapshotSideEffects(unittest.TestCase):
         )
         self.assertIn("Dungeon", first)
         self.assertIn("Combat", first)
-        self.assertIn("ModKey set", first)
+        self.assertIn("ModKey", first)
+        self.assertIn("Current profile", first)
 
         second = KeystrokeSimulatorApp._status_detail_with_selection(app, first)
         self.assertEqual(second, first)

@@ -12,6 +12,7 @@ from app.storage.run_sets_storage import (
     load_run_sets,
     upsert_run_set,
 )
+from app.ui.main_frames import _ellipsize_display
 
 
 class TestRunSetsStorage(unittest.TestCase):
@@ -49,6 +50,13 @@ class TestRunSetsStorage(unittest.TestCase):
     def test_is_current(self) -> None:
         self.assertTrue(is_current_run_set(CURRENT_RUN_SET_ID))
         self.assertFalse(is_current_run_set("Combat"))
+
+    def test_ellipsize_display_keeps_short_names(self) -> None:
+        self.assertEqual(_ellipsize_display("short", 18), "short")
+        long_name = "a" * 30
+        out = _ellipsize_display(long_name, 18)
+        self.assertEqual(len(out), 18)
+        self.assertTrue(out.endswith("…"))
 
 
 if __name__ == "__main__":
