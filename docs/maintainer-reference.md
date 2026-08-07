@@ -43,7 +43,8 @@
 - 프로필의 canonical 저장 형식은 `profiles/*.json`이다.
 - `held_screenshot`은 base64 PNG로 저장한다.
 - 알 수 없는 JSON 항목은 로딩 실패로 앱 전체를 중단시키지 않으며, 손상된 원본을 자동 덮어쓰지 않는다.
-- 수정키 세트는 `modkey_sets.json`에 프로필과 분리 저장한다. 프로필 JSON의 legacy `modification_keys`는 로드 시 무시하고 저장하지 않는다.
+- 수정키 세트는 `modkey_sets.json`에 프로필과 분리 저장한다.
+- 프로필 JSON의 미사용/legacy 키(`modification_keys`, `independent_thread` 등)는 로드 시 무시하고, `load_profile(migrate=True)` 시 canonical 스키마로 다시 저장해 디스크에서 제거한다.
 - 즐겨찾기 장식 문자열은 표시 전용이며 파일 작업에는 canonical 프로필 이름을 사용한다.
 
 ## 변경 체크리스트

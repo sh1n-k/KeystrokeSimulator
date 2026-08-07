@@ -21,6 +21,35 @@ _PNG_B64_ATTR = "_ks_png_b64"
 _PNG_IDENTITY_ATTR = "_ks_png_identity"
 _PROFILE_META_CACHE: dict[Path, tuple[tuple[int, int], bool]] = {}
 
+# Canonical keys written by profile_to_dict / event_to_dict. Anything else is legacy.
+_PROFILE_ROOT_KEYS = frozenset({"schema_version", "profile", "events"})
+_PROFILE_META_KEYS = frozenset(
+    {"name", "favorite", "runtime_toggle_enabled", "runtime_toggle_key"}
+)
+_EVENT_KEYS = frozenset(
+    {
+        "event_name",
+        "use_event",
+        "capture_size",
+        "latest_position",
+        "clicked_position",
+        "ref_pixel_value",
+        "key_to_enter",
+        "press_duration_ms",
+        "randomization_ms",
+        "match_mode",
+        "invert_match",
+        "region_size",
+        "execute_action",
+        "group_id",
+        "priority",
+        "conditions",
+        "runtime_toggle_member",
+        "held_screenshot",
+    }
+)
+_HELD_SCREENSHOT_KEYS = frozenset({"format", "data_b64"})
+
 
 def _as_object_dict(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
@@ -338,6 +367,45 @@ def profile_to_dict(profile: ProfileModel) -> dict[str, object]:
     }
 
 
+def raw_profile_has_unused_data(data: Mapping[str, object]) -> bool:
+    """True when on-disk JSON contains keys no longer part of the save contract."""
+    root_keys = {str(k) for k in data.keys()}
+    if not root_keys.issubset(_PROFILE_ROOT_KEYS):
+        return True
+    if "schema_version" not in data:
+        return True
+
+    raw_meta = data.get("profile")
+    if raw_meta is None:
+        return False
+    meta = _as_object_dict(raw_meta)
+    if meta is None:
+        return True
+    if not set(meta.keys()).issubset(_PROFILE_META_KEYS):
+        return True
+
+    events_raw = data.get("events")
+    if events_raw is None:
+        return False
+    if not isinstance(events_raw, list):
+        return True
+    for event_data in cast(list[object], events_raw):
+        event_dict = _as_object_dict(event_data)
+        if event_dict is None:
+            return True
+        if not set(event_dict.keys()).issubset(_EVENT_KEYS):
+            return True
+        held = event_dict.get("held_screenshot")
+        if held is None:
+            continue
+        held_dict = _as_object_dict(held)
+        if held_dict is None:
+            return True
+        if not set(held_dict.keys()).issubset(_HELD_SCREENSHOT_KEYS):
+            return True
+    return False
+
+
 def profile_from_dict(d: Mapping[str, object]) -> ProfileModel:
     if not isinstance(d, dict):
         raise ValueError(f"Profile root must be an object, got {type(d).__name__}")
@@ -365,8 +433,8 @@ def profile_from_dict(d: Mapping[str, object]) -> ProfileModel:
         except Exception as exc:
             logger.warning(f"Ignoring invalid event #{index}: {exc}")
             ignored_invalid_data = True
-    # Legacy profile.modification_keys are discarded; sets live in modkey_sets.json.
-    # Do not log per load — callers rewrite the file once via load_profile(migrate=True).
+    # Unknown/legacy fields (e.g. modification_keys, independent_thread) are ignored.
+    # load_profile(migrate=True) rewrites the file to the canonical schema.
     p = ProfileModel(
         name=_to_str_or_none(meta.get("name")),
         event_list=events,
@@ -450,14 +518,12 @@ def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> Profile
         try:
             with open(jpath, "r", encoding="utf-8") as f:
                 data: object = json.load(f)
-            had_legacy_modkeys = False
+            has_unused_data = False
             if data is None:
                 profile = profile_from_dict({})
             elif isinstance(data, dict):
                 data_dict = cast(dict[str, object], data)
-                raw_meta = data_dict.get("profile")
-                if isinstance(raw_meta, Mapping) and "modification_keys" in raw_meta:
-                    had_legacy_modkeys = True
+                has_unused_data = raw_profile_has_unused_data(data_dict)
                 profile = profile_from_dict(data_dict)
             else:
                 raise ValueError(
@@ -472,8 +538,8 @@ def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> Profile
             _log_perf(f"load_profile[{name}]", started)
             return profile
         changed = _normalize_loaded_event_names(profile)
-        # Rewrite once to drop legacy modification_keys from disk (and other migrations).
-        needs_rewrite = bool(changed or had_legacy_modkeys)
+        # Rewrite once to drop unused/legacy keys and normalize event names.
+        needs_rewrite = bool(changed or has_unused_data)
         if migrate and needs_rewrite and not profile.load_ignored_invalid_data:
             save_profile(profiles_dir, profile, name=name)
         elif migrate and needs_rewrite:

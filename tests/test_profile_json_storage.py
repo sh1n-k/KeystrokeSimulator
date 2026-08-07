@@ -20,6 +20,7 @@ from app.storage.profile_storage import (
     load_profile,
     load_profile_favorites,
     load_profile_meta_favorite,
+    raw_profile_has_unused_data,
     rename_profile_files,
     save_profile,
 )
@@ -562,6 +563,47 @@ class TestProfileDiscardsModificationKeys(unittest.TestCase):
             self.assertIsNone(loaded.modification_keys)
             raw_after = json.loads(path.read_text(encoding="utf-8"))
             self.assertNotIn("modification_keys", raw_after.get("profile", {}))
+
+    def test_load_migrate_strips_legacy_event_fields_from_disk(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            payload = {
+                "schema_version": 1,
+                "profile": {
+                    "name": "E",
+                    "favorite": False,
+                    "runtime_toggle_enabled": False,
+                    "runtime_toggle_key": None,
+                },
+                "events": [
+                    {
+                        "event_name": "A",
+                        "use_event": True,
+                        "capture_size": [100, 100],
+                        "key_to_enter": "1",
+                        "independent_thread": False,
+                        "match_mode": "pixel",
+                        "conditions": {},
+                        "runtime_toggle_member": False,
+                    }
+                ],
+            }
+            path = prof_dir / "E.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            self.assertTrue(raw_profile_has_unused_data(payload))
+            load_profile(prof_dir, "E", migrate=True)
+            raw_after = json.loads(path.read_text(encoding="utf-8"))
+            self.assertFalse(raw_profile_has_unused_data(raw_after))
+            self.assertNotIn("independent_thread", raw_after["events"][0])
+
+    def test_raw_profile_has_unused_data_detects_extra_root_key(self):
+        payload = {
+            "schema_version": 1,
+            "profile": {"name": "X", "favorite": False},
+            "events": [],
+            "legacy_blob": True,
+        }
+        self.assertTrue(raw_profile_has_unused_data(payload))
 
     def test_coerce_fills_missing_slots(self):
         coerced = coerce_modification_keys(
