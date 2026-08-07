@@ -366,8 +366,7 @@ def profile_from_dict(d: Mapping[str, object]) -> ProfileModel:
             logger.warning(f"Ignoring invalid event #{index}: {exc}")
             ignored_invalid_data = True
     # Legacy profile.modification_keys are discarded; sets live in modkey_sets.json.
-    if "modification_keys" in meta:
-        logger.debug("Ignoring legacy profile modification_keys (moved to modkey sets)")
+    # Do not log per load — callers rewrite the file once via load_profile(migrate=True).
     p = ProfileModel(
         name=_to_str_or_none(meta.get("name")),
         event_list=events,
@@ -451,10 +450,15 @@ def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> Profile
         try:
             with open(jpath, "r", encoding="utf-8") as f:
                 data: object = json.load(f)
+            had_legacy_modkeys = False
             if data is None:
                 profile = profile_from_dict({})
             elif isinstance(data, dict):
-                profile = profile_from_dict(cast(dict[str, object], data))
+                data_dict = cast(dict[str, object], data)
+                raw_meta = data_dict.get("profile")
+                if isinstance(raw_meta, Mapping) and "modification_keys" in raw_meta:
+                    had_legacy_modkeys = True
+                profile = profile_from_dict(data_dict)
             else:
                 raise ValueError(
                     f"Profile root must be an object, got {type(data).__name__}"
@@ -468,9 +472,11 @@ def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> Profile
             _log_perf(f"load_profile[{name}]", started)
             return profile
         changed = _normalize_loaded_event_names(profile)
-        if migrate and changed and not profile.load_ignored_invalid_data:
+        # Rewrite once to drop legacy modification_keys from disk (and other migrations).
+        needs_rewrite = bool(changed or had_legacy_modkeys)
+        if migrate and needs_rewrite and not profile.load_ignored_invalid_data:
             save_profile(profiles_dir, profile, name=name)
-        elif migrate and changed:
+        elif migrate and needs_rewrite:
             logger.warning(
                 f"Skipped profile migration for {name}: invalid data was ignored"
             )

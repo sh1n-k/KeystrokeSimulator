@@ -536,6 +536,32 @@ class TestProfileDiscardsModificationKeys(unittest.TestCase):
             )
             loaded = load_profile(prof_dir, "M", migrate=False)
             self.assertIsNone(loaded.modification_keys)
+            # Legacy field still on disk when migrate=False.
+            raw_after = json.loads((prof_dir / "M.json").read_text(encoding="utf-8"))
+            self.assertIn("modification_keys", raw_after.get("profile", {}))
+
+    def test_load_migrate_strips_legacy_modification_keys_from_disk(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            payload = {
+                "schema_version": 1,
+                "profile": {
+                    "name": "Legacy",
+                    "favorite": False,
+                    "modification_keys": {
+                        "alt": {"enabled": True, "value": "Q", "pass": False},
+                    },
+                    "runtime_toggle_enabled": False,
+                    "runtime_toggle_key": None,
+                },
+                "events": [],
+            }
+            path = prof_dir / "Legacy.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            loaded = load_profile(prof_dir, "Legacy", migrate=True)
+            self.assertIsNone(loaded.modification_keys)
+            raw_after = json.loads(path.read_text(encoding="utf-8"))
+            self.assertNotIn("modification_keys", raw_after.get("profile", {}))
 
     def test_coerce_fills_missing_slots(self):
         coerced = coerce_modification_keys(
