@@ -17,7 +17,7 @@ Windows system/hotkey 동작을 변경했다면 Windows 실환경 검증은 필�
 - 적용 변경: 프로필 경로·저장, 이벤트 편집·복사/import, 캡처 UI
 - 대상 OS: macOS 또는 Windows
 
-1. 앱을 실행해 Process, Profile, Start, Quick Events, Settings, ModKeys, Edit Profile 버튼을 확인하고, Edit Profile을 열어 Graph 버튼을 확인한다.
+1. 앱을 실행해 Process, Profile, ModKeys 세트 콤보, Start, Quick Events, Settings, Edit Profile 버튼을 확인하고, Edit Profile을 열어 Graph 버튼을 확인한다.
 2. 프로필을 복사한 뒤 복사본을 삭제하고 유효한 프로필로 선택이 복구되는지 확인한다.
 3. 이벤트를 추가·수정하고 창과 앱을 다시 열어 JSON 저장 결과가 유지되는지 확인한다.
 4. `Quick Events`에서 좌표와 이미지를 캡처하고 `Quick` 프로필에 반영되는지 확인한다.
@@ -54,7 +54,7 @@ Windows system/hotkey 동작을 변경했다면 Windows 실환경 검증은 필�
 - 대상 OS: macOS 또는 Windows. Windows system/hotkey 설정 변경은 Windows 필수
 
 1. 언어, key pressed time, loop delay를 변경하고 재실행 후 복원되는지 확인한다.
-2. ModKeys 설정을 변경해 실제 키 입력에 반영되는지 확인한다.
+2. 수정키 세트를 선택·편집·복사·삭제한 뒤 Start 시 해당 세트가 실제 키 입력에 반영되는지 확인한다.
 3. 보조 창 위치를 변경하고 다시 열었을 때 화면 밖으로 벗어나지 않는지 확인한다.
 
 ## 기록

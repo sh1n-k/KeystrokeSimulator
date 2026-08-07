@@ -12,6 +12,13 @@ from typing import Any
 
 from loguru import logger
 
+from app.storage.modkey_sets_storage import (
+    DEFAULT_MODKEY_SET_NAME,
+    copy_modkey_set,
+    delete_modkey_set,
+    ensure_default_modkey_set,
+    list_modkey_set_names,
+)
 from app.storage.profile_storage import (
     copy_profile as copy_profile_storage,
     delete_profile_files,
@@ -326,11 +333,171 @@ class ButtonFrame(tk.Frame):
             self.btns[key].config(text=txt(*label_pair))
 
 
+class ModKeySetFrame(tk.Frame):
+    """Independent ModKey set selector (profile-style dropdown + manage actions)."""
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        textvariable: tk.StringVar,
+        *,
+        sets_path: Path,
+        edit_cb: VoidCallback,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(master, **kwargs)
+        self.sets_path = Path(sets_path)
+        self.selected_var = textvariable
+        self._edit_cb = edit_cb
+        self.set_names: list[str] = []
+        self.name_to_index: dict[str, int] = {}
+
+        self.grid_columnconfigure(0, weight=0, minsize=80)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(2, weight=0, minsize=72)
+        self.grid_columnconfigure(3, weight=0, minsize=72)
+        self.grid_columnconfigure(4, weight=0, minsize=72)
+
+        self.lbl_sets: tk.Label = tk.Label(self, anchor="w", width=8)
+        self.lbl_sets.grid(row=0, column=0, sticky="w", padx=(0, 6))
+        self.sets_combobox: ttk.Combobox = ttk.Combobox(
+            self, textvariable=self.selected_var, state="readonly"
+        )
+        self.sets_combobox.grid(row=0, column=1, sticky="we", padx=(0, 6))
+        self.sets_combobox.bind("<<ComboboxSelected>>", self._on_set_selected)
+        self.edit_button: tk.Button = tk.Button(self, command=self._edit_cb)
+        self.edit_button.grid(row=0, column=2, sticky="we", padx=(0, 6))
+        self.copy_button: tk.Button = tk.Button(self, command=self.copy_set)
+        self.copy_button.grid(row=0, column=3, sticky="we", padx=(0, 6))
+        self.del_button: tk.Button = tk.Button(self, command=self.delete_set)
+        self.del_button.grid(row=0, column=4, sticky="we")
+        self.refresh_texts()
+        self.load_sets()
+
+    def _on_set_selected(self, _event: object | None = None) -> None:
+        idx = self.sets_combobox.current()
+        if not (0 <= idx < len(self.set_names)):
+            return
+        self.selected_var.set(self.set_names[idx])
+
+    def set_selected_set(self, set_name: str) -> bool:
+        idx = self.name_to_index.get(set_name)
+        if idx is None:
+            return False
+        self.sets_combobox.current(idx)
+        self._on_set_selected()
+        return True
+
+    def get_selected_set_name(self) -> str:
+        idx = self.sets_combobox.current()
+        if 0 <= idx < len(self.set_names):
+            return self.set_names[idx]
+        return self.selected_var.get()
+
+    def load_sets(self, select_name: str | None = None) -> None:
+        ensure_default_modkey_set(self.sets_path)
+        names = list_modkey_set_names(self.sets_path)
+        self.set_names = names
+        self.name_to_index = {name: idx for idx, name in enumerate(names)}
+        self.sets_combobox.configure(values=names)
+        if not names:
+            self.selected_var.set("")
+            return
+        target = select_name or self.selected_var.get() or DEFAULT_MODKEY_SET_NAME
+        if not self.set_selected_set(target):
+            self.sets_combobox.current(0)
+            self._on_set_selected()
+
+    def refresh_texts(self) -> None:
+        self.lbl_sets.config(text=txt("ModKeys:", "수정키:"))
+        self.edit_button.config(text=txt("Edit", "편집"))
+        self.copy_button.config(text=txt("Copy", "복사"))
+        self.del_button.config(text=txt("Delete", "삭제"))
+
+    def copy_set(self) -> None:
+        curr = self.get_selected_set_name()
+        if not curr:
+            return
+        dst_name = f"{curr} - Copied"
+        if dst_name in self.name_to_index:
+            messagebox.showwarning(
+                txt("Warning", "경고"),
+                txt(
+                    "ModKey set '{name}' already exists.",
+                    "수정키 세트 '{name}'이(가) 이미 존재합니다.",
+                    name=dst_name,
+                ),
+                parent=self,
+            )
+            return
+        try:
+            copy_modkey_set(curr, dst_name, self.sets_path)
+            self.load_sets(select_name=dst_name)
+            messagebox.showinfo(
+                txt("ModKey Set Copied", "수정키 세트 복사 완료"),
+                txt(
+                    "Copied '{src}' to '{dst}' and selected it.",
+                    "'{src}' 세트를 '{dst}'(으)로 복사하고 선택했습니다.",
+                    src=curr,
+                    dst=dst_name,
+                ),
+                parent=self,
+            )
+        except Exception as e:
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt("Copy failed: {error}", "복사 실패: {error}", error=e),
+                parent=self,
+            )
+
+    def delete_set(self) -> None:
+        curr = self.get_selected_set_name()
+        if not curr:
+            return
+        if len(self.set_names) <= 1:
+            messagebox.showinfo(
+                txt("Info", "안내"),
+                txt(
+                    "The last ModKey set cannot be deleted.",
+                    "마지막 수정키 세트는 삭제할 수 없습니다.",
+                ),
+                parent=self,
+            )
+            return
+        if not messagebox.askokcancel(
+            txt("Warning", "경고"),
+            txt(
+                "Delete ModKey set '{name}'?",
+                "수정키 세트 '{name}'을(를) 삭제하시겠습니까?",
+                name=curr,
+            ),
+            parent=self,
+        ):
+            return
+        try:
+            next_name = delete_modkey_set(curr, self.sets_path)
+            self.load_sets(select_name=next_name)
+            messagebox.showinfo(
+                txt("ModKey Set Deleted", "수정키 세트 삭제 완료"),
+                txt(
+                    "Deleted '{name}'.",
+                    "'{name}' 세트를 삭제했습니다.",
+                    name=curr,
+                ),
+                parent=self,
+            )
+        except Exception as e:
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt("Delete failed: {error}", "삭제 실패: {error}", error=e),
+                parent=self,
+            )
+
+
 class ProfileButtonFrame(tk.Frame):
-    """Profile tools share the same 3-column rhythm as the main tools."""
+    """Profile tools share a 2-column rhythm under the main tools."""
 
     _BTN_KEYS = (
-        ("modkeys", ("Profile ModKeys", "이 프로필 수정키")),
         ("edit_profile", ("Edit Profile", "프로필 편집")),
         ("sort_profile", ("Sort Profile", "프로필 정렬")),
     )
@@ -338,17 +505,14 @@ class ProfileButtonFrame(tk.Frame):
     def __init__(
         self,
         master: tk.Misc,
-        mod_cb: VoidCallback,
         edit_cb: VoidCallback,
         sort_cb: VoidCallback,
         **kwargs: Any,
     ) -> None:
         super().__init__(master, **kwargs)
-        self._mod_cb = mod_cb
-        for col in range(3):
-            self.grid_columnconfigure(col, weight=1, uniform="tools")
+        for col in range(2):
+            self.grid_columnconfigure(col, weight=1, uniform="profile_tools")
         commands: dict[str, VoidCallback] = {
-            "modkeys": mod_cb,
             "edit_profile": edit_cb,
             "sort_profile": sort_cb,
         }
@@ -358,45 +522,7 @@ class ProfileButtonFrame(tk.Frame):
             btn.grid(row=0, column=col, sticky="we", padx=theme.SPACE_1)
             self.btns[key] = btn
         self.edit_profile_button = self.btns["edit_profile"]
-        self.modkeys_button = self.btns["modkeys"]
         self.sort_button = self.btns["sort_profile"]
-
-        # Read-only summary of the selected profile's modification keys.
-        self.modkeys_summary_var = tk.StringVar(value="")
-        self.modkeys_summary_label = tk.Label(
-            self,
-            textvariable=self.modkeys_summary_var,
-            anchor="w",
-            cursor="hand2",
-            bg=theme.SURFACE_SUNKEN,
-            fg=theme.INK_SECONDARY,
-            padx=theme.SPACE_2,
-            pady=theme.SPACE_1,
-        )
-        self.modkeys_summary_label.grid(
-            row=1,
-            column=0,
-            columnspan=3,
-            sticky="we",
-            padx=theme.SPACE_1,
-            pady=(theme.SPACE_1, 0),
-        )
-        self.modkeys_summary_label.bind("<Button-1>", self._on_summary_clicked)
-        self._summary_enabled = True
-
-    def _on_summary_clicked(self, _event: object | None = None) -> None:
-        if self._summary_enabled:
-            self._mod_cb()
-
-    def set_modkeys_summary(self, summary: str) -> None:
-        self.modkeys_summary_var.set(summary)
-
-    def set_modkeys_summary_enabled(self, enabled: bool) -> None:
-        self._summary_enabled = enabled
-        self.modkeys_summary_label.config(
-            cursor="hand2" if enabled else "arrow",
-            fg=theme.INK_SECONDARY if enabled else theme.INK_MUTED,
-        )
 
     def refresh_texts(self) -> None:
         for key, label_pair in self._BTN_KEYS:

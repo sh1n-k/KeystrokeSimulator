@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import tkinter as tk
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from typing import ClassVar, TypeAlias
 
 from loguru import logger
 from app.core.models import ModificationKeys
-from app.utils.i18n import dual_text_width, txt
-from app.storage.profile_storage import (
+from app.storage.modkey_sets_storage import (
     default_modification_keys,
-    load_profile,
-    save_profile,
+    get_modkey_set,
+    upsert_modkey_set,
 )
-from app.utils.window_state import WindowUtils
 from app.ui import theme
+from app.utils.i18n import dual_text_width, txt
+from app.utils.window_state import WindowUtils
 
 ModKeyRow: TypeAlias = tuple[
     tk.BooleanVar,
@@ -33,18 +33,18 @@ class ModificationKeysWindow(tk.Toplevel):
     def __init__(
         self,
         master: tk.Tk | tk.Toplevel | None,
-        profile_name: str,
+        set_name: str,
         *,
-        profiles_dir: Path,
+        sets_path: Path,
     ) -> None:
         super().__init__(master)
-        self.prof_name = profile_name
-        self.prof_dir = profiles_dir
+        self.set_name = set_name
+        self.sets_path = Path(sets_path)
         self.title(
             txt(
                 "Modifier Keys — {name}",
                 "수정 키 — {name}",
-                name=profile_name,
+                name=set_name,
             )
         )
         if master is not None:
@@ -91,9 +91,9 @@ class ModificationKeysWindow(tk.Toplevel):
         tk.Label(
             title_col,
             text=txt(
-                "Profile: {name} · saved only for this profile",
-                "프로필: {name} · 이 프로필에만 저장됩니다",
-                name=self.prof_name,
+                "Set: {name} · independent of profiles",
+                "세트: {name} · 프로필과 무관합니다",
+                name=self.set_name,
             ),
             bg=theme.SURFACE_PANEL,
             fg=theme.INK_MUTED,
@@ -234,19 +234,8 @@ class ModificationKeysWindow(tk.Toplevel):
         ).pack(side="right")
 
     def _load_data(self) -> None:
-        if not (self.prof_dir / f"{self.prof_name}.json").exists():
-            logger.warning(f"Profile '{self.prof_name}' missing.")
-            return self.destroy()
-
         try:
-            p = load_profile(self.prof_dir, self.prof_name, migrate=True)
-
-            # Default initialization if missing
-            if not getattr(p, "modification_keys", None):
-                p.modification_keys = default_modification_keys()
-                save_profile(self.prof_dir, p, name=self.prof_name)
-
-            mod_keys = p.modification_keys or {}
+            mod_keys = get_modkey_set(self.set_name, self.sets_path) or default_modification_keys()
             for i, lbl in enumerate(self.labels):
                 if d := mod_keys.get(lbl.lower()):
                     r = self.rows[i]
@@ -259,7 +248,7 @@ class ModificationKeysWindow(tk.Toplevel):
                     r[3].set(pass_through)
                     if pass_through:
                         self._toggle_pass(i)
-            logger.info(f"Loaded keys for '{self.prof_name}'")
+            logger.info(f"Loaded modkey set '{self.set_name}'")
         except Exception as e:
             logger.error(f"Load failed: {e}")
 
@@ -311,10 +300,17 @@ class ModificationKeysWindow(tk.Toplevel):
         }
 
         try:
-            p = load_profile(self.prof_dir, self.prof_name, migrate=True)
-            p.modification_keys = data
-            save_profile(self.prof_dir, p, name=self.prof_name)
-            logger.info(f"Saved keys for '{self.prof_name}'")
+            upsert_modkey_set(self.set_name, data, self.sets_path)
+            logger.info(f"Saved modkey set '{self.set_name}'")
             self.destroy()
         except Exception as e:
             logger.error(f"Save failed: {e}")
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt(
+                    "Failed to save ModKey set: {error}",
+                    "수정키 세트 저장 실패: {error}",
+                    error=e,
+                ),
+                parent=self,
+            )

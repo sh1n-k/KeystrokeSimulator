@@ -58,6 +58,8 @@ class EventModel:
 class ProfileModel:
     name: str | None = None
     event_list: list[EventModel] = field(default_factory=lambda: [])
+    # Deprecated: kept only for type compatibility; load/save always clear this.
+    # Runtime modkeys come from modkey_sets.json.
     modification_keys: ModificationKeys | None = None
     favorite: bool = False
     runtime_toggle_enabled: bool = False

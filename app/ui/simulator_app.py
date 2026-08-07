@@ -19,12 +19,22 @@ from app.utils.i18n import normalize_language, set_language, txt
 from app.core.validation import find_duplicate_event_names
 from app.core.models import EventModel, ProfileModel, UserSettings
 from app.ui.modkeys import ModificationKeysWindow
-from app.ui.main_frames import ButtonFrame, ProcessFrame, ProfileButtonFrame, ProfileFrame
+from app.ui.main_frames import (
+    ButtonFrame,
+    ModKeySetFrame,
+    ProcessFrame,
+    ProfileButtonFrame,
+    ProfileFrame,
+)
 from app.ui.input_listener_session import InputListener, InputListenerSession
-from app.storage.profile_display import format_modification_keys_summary
+from app.storage.modkey_sets_storage import (
+    DEFAULT_MODKEY_SET_NAME,
+    DEFAULT_MODKEY_SETS_PATH,
+    default_modification_keys,
+    get_modkey_set,
+)
 from app.storage.profile_storage import (
     load_profile,
-    load_profile_meta_modification_keys,
 )
 from app.storage.settings_storage import load_user_settings, save_user_settings
 from app.core.processor import KeystrokeProcessor
@@ -100,9 +110,13 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.title("Keystroke Simulator")
         self.profiles_dir = Path("profiles")
         self.profiles_dir.mkdir(exist_ok=True)
+        self.modkey_sets_path = Path(DEFAULT_MODKEY_SETS_PATH)
         self.is_running: tk.BooleanVar = tk.BooleanVar(value=False)
         self.selected_process: tk.StringVar = tk.StringVar()
         self.selected_profile: tk.StringVar = tk.StringVar()
+        self.selected_modkey_set: tk.StringVar = tk.StringVar(
+            value=DEFAULT_MODKEY_SET_NAME
+        )
         self.keystroke_processor: KeystrokeProcessor | None = None
         self.terminate_event: threading.Event = threading.Event()
         self.settings: UserSettings = UserSettings()
@@ -210,7 +224,15 @@ class KeystrokeSimulatorApp(tk.Tk):
             target_body, self.selected_profile, self.profiles_dir
         )
         self.profile_frame.configure(bg=theme.SURFACE_CANVAS)
-        self.profile_frame.pack(fill="x")
+        self.profile_frame.pack(fill="x", pady=(0, theme.SPACE_1))
+        self.modkey_set_frame: ModKeySetFrame = ModKeySetFrame(
+            target_body,
+            self.selected_modkey_set,
+            sets_path=self.modkey_sets_path,
+            edit_cb=self.open_modkeys,
+        )
+        self.modkey_set_frame.configure(bg=theme.SURFACE_CANVAS)
+        self.modkey_set_frame.pack(fill="x")
 
         # STATE card ------------------------------------------------------
         self.status_frame, status_body = self._make_card(
@@ -296,7 +318,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.button_frame.pack(fill="x", pady=(0, theme.SPACE_1))
         self.profile_button_frame: ProfileButtonFrame = ProfileButtonFrame(
             tools_body,
-            self.open_modkeys,
             self.open_profile,
             self.sort_profile_events,
         )
@@ -307,17 +328,23 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.button_frame.quick_events_button,
             self.button_frame.settings_button,
             self.button_frame.clear_logs_button,
-            self.profile_button_frame.modkeys_button,
             self.profile_button_frame.edit_profile_button,
             self.profile_button_frame.sort_button,
             self.process_frame.refresh_button,
             self.profile_frame.copy_button,
             self.profile_frame.del_button,
+            self.modkey_set_frame.edit_button,
+            self.modkey_set_frame.copy_button,
+            self.modkey_set_frame.del_button,
         ):
             self._apply_outline_button(sec)
 
-        # Calm labels inside Process/Profile rows to the canvas tone.
-        for w in (self.process_frame.lbl_process, self.profile_frame.lbl_profiles):
+        # Calm labels inside Process/Profile/ModKeys rows to the canvas tone.
+        for w in (
+            self.process_frame.lbl_process,
+            self.profile_frame.lbl_profiles,
+            self.modkey_set_frame.lbl_sets,
+        ):
             w.configure(
                 bg=theme.SURFACE_CANVAS,
                 fg=theme.INK_SECONDARY,
@@ -475,7 +502,11 @@ class KeystrokeSimulatorApp(tk.Tk):
         def schedule_update(*_args: object) -> None:
             self.after_idle(self.update_ui)
 
-        for var in (self.selected_process, self.selected_profile):
+        for var in (
+            self.selected_process,
+            self.selected_profile,
+            self.selected_modkey_set,
+        ):
             self._selection_trace_handles.append(var.trace_add("write", schedule_update))
 
     def load_settings(self) -> None:
@@ -511,6 +542,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         prof = state.get("profile")
         if isinstance(prof, str) and prof:
             self.profile_frame.set_selected_profile(prof)
+        modkey_set = state.get("modkey_set")
+        if isinstance(modkey_set, str) and modkey_set:
+            self.modkey_set_frame.set_selected_set(modkey_set)
         self.update_ui()
 
     def _refresh_ui_texts(self) -> None:
@@ -527,6 +561,8 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.process_frame.refresh_texts()
         if hasattr(self, "profile_frame"):
             self.profile_frame.refresh_texts()
+        if hasattr(self, "modkey_set_frame"):
+            self.modkey_set_frame.refresh_texts()
         if hasattr(self, "button_frame"):
             self.button_frame.refresh_texts()
         run_start_button = self.__dict__.get("run_start_button")
@@ -534,7 +570,6 @@ class KeystrokeSimulatorApp(tk.Tk):
             self._apply_accent_button(run_start_button)
         if hasattr(self, "profile_button_frame"):
             self.profile_button_frame.refresh_texts()
-        self._refresh_modkeys_summary()
         if hasattr(self, "lbl_hotkey_hint"):
             self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
         if hasattr(self, "btn_open_screen_permission"):
@@ -669,8 +704,8 @@ class KeystrokeSimulatorApp(tk.Tk):
     def _get_readiness_snapshot(self) -> ReadinessSnapshot:
         if self.is_running.get():
             detail = txt(
-                "Stop first if you want to change process, profile, or event settings.",
-                "프로세스, 프로필, 이벤트 설정을 바꾸려면 먼저 중지하세요.",
+                "Stop first if you want to change process, profile, ModKey set, or event settings.",
+                "프로세스, 프로필, 수정키 세트, 이벤트 설정을 바꾸려면 먼저 중지하세요.",
             )
             if self.runtime_toggle_enabled and self.runtime_toggle_key:
                 detail = txt(
@@ -880,9 +915,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             }
 
         profile_name = self.selected_profile.get()
-        modkeys_summary = format_modification_keys_summary(
-            getattr(profile, "modification_keys", None)
-        )
+        modkey_set_name = self.selected_modkey_set.get() or DEFAULT_MODKEY_SET_NAME
         return {
             "can_start": True,
             "badge_text": txt("Ready", "준비 완료"),
@@ -891,32 +924,29 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "모니터링을 시작할 준비가 끝났습니다.",
             ),
             "detail": txt(
-                "Profile '{name}' selected · ModKeys: {modkeys}\n{count} runnable event(s).",
-                "프로필 '{name}' 선택 · 수정키: {modkeys}\n실행 가능한 이벤트 {count}개.",
-                name=profile_name,
-                modkeys=modkeys_summary,
+                "Profile '{profile}' · ModKey set '{modkey_set}' · {count} runnable event(s).",
+                "프로필 '{profile}' · 수정키 세트 '{modkey_set}' · 실행 가능한 이벤트 {count}개.",
+                profile=profile_name,
+                modkey_set=modkey_set_name,
                 count=runnable_count,
             ),
             "bg": STATUS_BG_INFO,
             "fg": STATUS_FG_INFO,
         }
 
-    def _status_detail_with_profile_modkeys(self, detail: str) -> str:
-        """Ensure selected-profile ModKeys appear in status when profile is set."""
+    def _status_detail_with_selection(self, detail: str) -> str:
+        """Append profile + modkey-set selection when not already present."""
         profile_name = self.selected_profile.get()
-        if not profile_name:
+        modkey_set_name = self.selected_modkey_set.get()
+        if not profile_name and not modkey_set_name:
             return detail
-        # Ready snapshot already embeds the summary.
-        if "ModKeys:" in detail or "수정키:" in detail:
-            return detail
-        summary = self._current_modkeys_summary()
-        if not summary:
+        if "ModKey set" in detail or "수정키 세트" in detail:
             return detail
         line = txt(
-            "Profile '{name}' selected · ModKeys: {modkeys}",
-            "프로필 '{name}' 선택 · 수정키: {modkeys}",
-            name=profile_name,
-            modkeys=summary,
+            "Profile '{profile}' · ModKey set '{modkey_set}'",
+            "프로필 '{profile}' · 수정키 세트 '{modkey_set}'",
+            profile=profile_name or "—",
+            modkey_set=modkey_set_name or "—",
         )
         return f"{detail}\n{line}" if detail else line
 
@@ -942,7 +972,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.status_color_bar.config(bg=fg)
         self.lbl_status_title.config(text=snapshot["title"])
         self.lbl_status_detail.config(
-            text=self._status_detail_with_profile_modkeys(snapshot["detail"])
+            text=self._status_detail_with_selection(snapshot["detail"])
         )
         self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
         self._update_permission_actions(
@@ -1326,12 +1356,19 @@ class KeystrokeSimulatorApp(tk.Tk):
             return False
         self._configure_runtime_toggle_session(profile, events)
 
+        set_name = self.selected_modkey_set.get() or DEFAULT_MODKEY_SET_NAME
+        try:
+            mod_keys = get_modkey_set(set_name, self.modkey_sets_path)
+        except Exception as exc:
+            logger.warning(f"ModKey set load failed for '{set_name}': {exc}")
+            mod_keys = default_modification_keys()
+
         self.terminate_event.clear()
         self.keystroke_processor = KeystrokeProcessor(
             self,
             self.selected_process.get(),
             events,
-            profile.modification_keys or {},
+            mod_keys,
             self.terminate_event,
         )
         if not self.keystroke_processor.event_data_list:
@@ -1396,6 +1433,12 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_frame.profile_combobox.config(state=readonly_state)
         self.profile_frame.copy_button.config(state=state)
         self.profile_frame.del_button.config(state=state)
+        modkey_frame = self.__dict__.get("modkey_set_frame")
+        if modkey_frame is not None:
+            modkey_frame.sets_combobox.config(state=readonly_state)
+            modkey_frame.edit_button.config(state=state)
+            modkey_frame.copy_button.config(state=state)
+            modkey_frame.del_button.config(state=state)
 
         run_start_button = self.__dict__.get("run_start_button")
         if run_start_button is not None:
@@ -1421,76 +1464,22 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.button_frame.settings_button.config(state=state)
         self.button_frame.clear_logs_button.config(state=state)
 
-        self.profile_button_frame.modkeys_button.config(state=state)
         self.profile_button_frame.edit_profile_button.config(state=state)
         self.profile_button_frame.sort_button.config(state=state)
-        self.profile_button_frame.set_modkeys_summary_enabled(not running)
-        self._refresh_modkeys_summary()
         self._update_main_status()
-
-    def _current_modkeys_summary(self) -> str:
-        profile_name = self.selected_profile.get()
-        if not profile_name:
-            self._modkeys_summary_cache = ("", "")
-            return ""
-        cached = cast(
-            tuple[str, str] | None, self.__dict__.get("_modkeys_summary_cache")
-        )
-        if (
-            cached is not None
-            and cached[0] == profile_name
-        ):
-            return cached[1]
-        try:
-            keys = load_profile_meta_modification_keys(self.profiles_dir, profile_name)
-            summary = format_modification_keys_summary(keys)
-        except Exception as exc:
-            logger.warning(f"ModKeys summary load failed for '{profile_name}': {exc}")
-            summary = ""
-        self._modkeys_summary_cache = (profile_name, summary)
-        return summary
-
-    def _invalidate_modkeys_summary_cache(self) -> None:
-        self._modkeys_summary_cache = None
-
-    def _refresh_modkeys_summary(self) -> None:
-        # Always reload after explicit refresh (profile change, dialog close, language).
-        self._invalidate_modkeys_summary_cache()
-        frame = self.__dict__.get("profile_button_frame")
-        summary = self._current_modkeys_summary()
-        profile_name = self.selected_profile.get()
-        if frame is None:
-            return
-        if profile_name and summary:
-            frame.set_modkeys_summary(
-                txt(
-                    "This profile · {summary}",
-                    "이 프로필 · {summary}",
-                    summary=summary,
-                )
-            )
-        elif profile_name:
-            frame.set_modkeys_summary(
-                txt("This profile · (unavailable)", "이 프로필 · (확인 불가)")
-            )
-        else:
-            frame.set_modkeys_summary(
-                txt("Select a profile to view ModKeys", "수정키를 보려면 프로필을 선택하세요")
-            )
 
     def open_modkeys(self) -> None:
         if self.is_running.get():
             return
-        profile_name = self.selected_profile.get()
-        if not profile_name:
+        set_name = self.selected_modkey_set.get()
+        if not set_name:
             return
         win = ModificationKeysWindow(
-            self, profile_name, profiles_dir=self.profiles_dir
+            self, set_name, sets_path=self.modkey_sets_path
         )
         # Only block when a real Tk interpreter is attached (skip unit stubs).
         if "tk" in self.__dict__:
             safe_call(self.wait_window, win)
-        self._refresh_modkeys_summary()
         self._update_main_status()
 
     def open_profile(self) -> None:
@@ -1542,6 +1531,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         StateUtils.save_main_app_state(
             process=self.selected_process.get().split(" (")[0],
             profile=self.selected_profile.get(),
+            modkey_set=self.selected_modkey_set.get(),
         )
 
     def unbind_events(self) -> None:

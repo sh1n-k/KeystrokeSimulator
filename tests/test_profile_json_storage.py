@@ -7,10 +7,11 @@ from unittest.mock import patch
 from PIL import Image
 
 from app.core.models import EventModel, ProfileModel
-from app.storage.profile_storage import (
+from app.storage.modkey_sets_storage import (
     coerce_modification_keys,
+)
+from app.storage.profile_storage import (
     copy_profile,
-    default_modification_keys,
     delete_profile_files,
     ensure_quick_profile,
     event_from_dict,
@@ -19,7 +20,6 @@ from app.storage.profile_storage import (
     load_profile,
     load_profile_favorites,
     load_profile_meta_favorite,
-    load_profile_meta_modification_keys,
     rename_profile_files,
     save_profile,
 )
@@ -513,13 +513,13 @@ class TestLoadProfileMetaFavorite(unittest.TestCase):
             )
 
 
-class TestLoadProfileMetaModificationKeys(unittest.TestCase):
-    def test_loads_saved_modification_keys(self):
+class TestProfileDiscardsModificationKeys(unittest.TestCase):
+    def test_save_omits_and_load_ignores_legacy_modification_keys(self):
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
             keys = {
                 "alt": {"enabled": True, "value": "Q", "pass": False},
-                "ctrl": {"enabled": False, "value": "Pass", "pass": True},
+                "ctrl": {"enabled": True, "value": "Pass", "pass": True},
                 "shift": {"enabled": True, "value": "Pass", "pass": True},
             }
             save_profile(
@@ -527,17 +527,15 @@ class TestLoadProfileMetaModificationKeys(unittest.TestCase):
                 ProfileModel(name="M", event_list=[], modification_keys=keys),
                 name="M",
             )
-            loaded = load_profile_meta_modification_keys(prof_dir, "M")
-            self.assertEqual(loaded["alt"]["value"], "Q")
-            self.assertFalse(loaded["ctrl"]["enabled"])
-            self.assertTrue(loaded["shift"]["pass"])
-
-    def test_missing_file_returns_defaults(self):
-        with tempfile.TemporaryDirectory() as td:
-            self.assertEqual(
-                load_profile_meta_modification_keys(Path(td), "Missing"),
-                default_modification_keys(),
+            raw = json.loads((prof_dir / "M.json").read_text(encoding="utf-8"))
+            self.assertNotIn("modification_keys", raw.get("profile", {}))
+            # Inject legacy field and ensure load discards it.
+            raw["profile"]["modification_keys"] = keys
+            (prof_dir / "M.json").write_text(
+                json.dumps(raw, ensure_ascii=False), encoding="utf-8"
             )
+            loaded = load_profile(prof_dir, "M", migrate=False)
+            self.assertIsNone(loaded.modification_keys)
 
     def test_coerce_fills_missing_slots(self):
         coerced = coerce_modification_keys(

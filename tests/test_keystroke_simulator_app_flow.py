@@ -30,8 +30,10 @@ class FakeVar:
 def _make_app_stub() -> KeystrokeSimulatorApp:
     app = KeystrokeSimulatorApp.__new__(KeystrokeSimulatorApp)
     app.profiles_dir = "profiles"
+    app.modkey_sets_path = Path("modkey_sets.json")
     app.selected_process = FakeVar("")
     app.selected_profile = FakeVar("")
+    app.selected_modkey_set = FakeVar("Default")
     app.is_running = FakeVar(False)
     app.keystroke_processor = None
     app.terminate_event = MagicMock()
@@ -97,14 +99,19 @@ class TestStartSimulation(unittest.TestCase):
 
         self.assertFalse(KeystrokeSimulatorApp.start_simulation(app))
 
+    @patch("app.ui.simulator_app.get_modkey_set")
     @patch("app.ui.simulator_app.KeystrokeProcessor")
     @patch("app.ui.simulator_app.load_profile")
     def test_start_simulation_filters_events_and_starts_processor(
-        self, mock_load_profile, mock_processor_cls
+        self, mock_load_profile, mock_processor_cls, mock_get_modkey_set
     ):
         app = _make_app_stub()
         app.selected_process.set("Dummy Process (1234)")
         app.selected_profile.set("Quick")
+        app.selected_modkey_set.set("Combat")
+        mock_get_modkey_set.return_value = {
+            "alt": {"enabled": True, "pass": True, "value": "Pass"}
+        }
 
         profile = ProfileModel(
             name="Quick",
@@ -124,7 +131,6 @@ class TestStartSimulation(unittest.TestCase):
                 ),
                 EventModel(event_name="Disabled", use_event=False, key_to_enter="B"),
             ],
-            modification_keys={"alt": {"enabled": True, "pass": True, "value": "Pass"}},
         )
         mock_load_profile.return_value = profile
         mock_processor = MagicMock()
@@ -137,6 +143,10 @@ class TestStartSimulation(unittest.TestCase):
         app._save_latest_state.assert_called_once()
         app.sound_player.play_start_sound.assert_called_once()
         mock_processor.start.assert_called_once()
+        mock_get_modkey_set.assert_called_once_with("Combat", app.modkey_sets_path)
+        self.assertEqual(
+            mock_processor_cls.call_args.args[3], mock_get_modkey_set.return_value
+        )
 
         passed_events = mock_processor_cls.call_args.args[2]
         self.assertEqual(
@@ -424,6 +434,12 @@ class TestMainUiState(unittest.TestCase):
         app.profile_frame.copy_button = MagicMock()
         app.profile_frame.del_button = MagicMock()
 
+        app.modkey_set_frame = MagicMock()
+        app.modkey_set_frame.sets_combobox = MagicMock()
+        app.modkey_set_frame.edit_button = MagicMock()
+        app.modkey_set_frame.copy_button = MagicMock()
+        app.modkey_set_frame.del_button = MagicMock()
+
         app.button_frame = MagicMock()
         app.run_start_button = MagicMock()
         app.button_frame.quick_events_button = MagicMock()
@@ -431,7 +447,6 @@ class TestMainUiState(unittest.TestCase):
         app.button_frame.clear_logs_button = MagicMock()
 
         app.profile_button_frame = MagicMock()
-        app.profile_button_frame.modkeys_button = MagicMock()
         app.profile_button_frame.edit_profile_button = MagicMock()
         app.profile_button_frame.sort_button = MagicMock()
         app._get_readiness_snapshot = MagicMock(
@@ -447,7 +462,7 @@ class TestMainUiState(unittest.TestCase):
         app._update_main_status = MagicMock()
         return app
 
-    def test_update_ui_disables_quick_events_and_modkeys_when_running(self):
+    def test_update_ui_disables_quick_events_and_modkey_set_when_running(self):
         app = self._make_ui_stub(running=True)
 
         KeystrokeSimulatorApp.update_ui(app)
@@ -455,11 +470,14 @@ class TestMainUiState(unittest.TestCase):
         app.button_frame.quick_events_button.config.assert_called_once_with(
             state="disabled"
         )
-        app.profile_button_frame.modkeys_button.config.assert_called_once_with(
+        app.modkey_set_frame.sets_combobox.config.assert_called_once_with(
+            state="disabled"
+        )
+        app.modkey_set_frame.edit_button.config.assert_called_once_with(
             state="disabled"
         )
 
-    def test_update_ui_enables_quick_events_and_modkeys_when_stopped(self):
+    def test_update_ui_enables_quick_events_and_modkey_set_when_stopped(self):
         app = self._make_ui_stub(running=False)
 
         KeystrokeSimulatorApp.update_ui(app)
@@ -467,9 +485,7 @@ class TestMainUiState(unittest.TestCase):
         app.button_frame.quick_events_button.config.assert_called_once_with(
             state="normal"
         )
-        app.profile_button_frame.modkeys_button.config.assert_called_once_with(
-            state="normal"
-        )
+        app.modkey_set_frame.edit_button.config.assert_called_once_with(state="normal")
 
     def test_update_ui_updates_start_button_label_for_running_state(self):
         app = self._make_ui_stub(running=True)
@@ -649,7 +665,7 @@ class TestReadinessSnapshotSideEffects(unittest.TestCase):
     def test_open_modkeys_noop_when_running(self, mock_modkeys):
         app = _make_app_stub()
         app.is_running = FakeVar(True)
-        app.selected_profile = FakeVar("Quick")
+        app.selected_modkey_set = FakeVar("Default")
 
         KeystrokeSimulatorApp.open_modkeys(app)
 
@@ -659,48 +675,44 @@ class TestReadinessSnapshotSideEffects(unittest.TestCase):
     def test_open_modkeys_opens_when_stopped(self, mock_modkeys):
         app = _make_app_stub()
         app.is_running = FakeVar(False)
-        app.selected_profile = FakeVar("Quick")
+        app.selected_modkey_set = FakeVar("Combat")
 
         KeystrokeSimulatorApp.open_modkeys(app)
 
         mock_modkeys.assert_called_once_with(
-            app, "Quick", profiles_dir=app.profiles_dir
+            app, "Combat", sets_path=app.modkey_sets_path
         )
 
     @patch("app.ui.simulator_app.ModificationKeysWindow")
-    def test_open_modkeys_refreshes_summary_after_close(self, mock_modkeys):
+    def test_open_modkeys_refreshes_status_after_close(self, mock_modkeys):
         app = _make_app_stub()
         app.is_running = FakeVar(False)
-        app.selected_profile = FakeVar("Quick")
-        app._refresh_modkeys_summary = MagicMock()
-        # _update_main_status is already MagicMock on the stub
+        app.selected_modkey_set = FakeVar("Default")
 
         KeystrokeSimulatorApp.open_modkeys(app)
 
-        app._refresh_modkeys_summary.assert_called_once_with()
         app._update_main_status.assert_called()
 
-    def test_status_detail_appends_profile_modkeys_once(self):
+    def test_status_detail_appends_selection_once(self):
         app = _make_app_stub()
         app.selected_profile = FakeVar("Dungeon")
-        app._current_modkeys_summary = MagicMock(
-            return_value="⎇ Pass · ⌃ Pass · ⇧ Pass"
-        )
+        app.selected_modkey_set = FakeVar("Combat")
 
-        first = KeystrokeSimulatorApp._status_detail_with_profile_modkeys(
+        first = KeystrokeSimulatorApp._status_detail_with_selection(
             app, "Pick a process."
         )
         self.assertIn("Dungeon", first)
-        self.assertIn("ModKeys:", first)
-        self.assertIn("⎇ Pass", first)
+        self.assertIn("Combat", first)
+        self.assertIn("ModKey set", first)
 
-        second = KeystrokeSimulatorApp._status_detail_with_profile_modkeys(app, first)
+        second = KeystrokeSimulatorApp._status_detail_with_selection(app, first)
         self.assertEqual(second, first)
 
-    def test_status_detail_skips_when_no_profile(self):
+    def test_status_detail_skips_when_no_selection(self):
         app = _make_app_stub()
         app.selected_profile = FakeVar("")
-        detail = KeystrokeSimulatorApp._status_detail_with_profile_modkeys(
+        app.selected_modkey_set = FakeVar("")
+        detail = KeystrokeSimulatorApp._status_detail_with_selection(
             app, "Nothing selected."
         )
         self.assertEqual(detail, "Nothing selected.")
@@ -821,7 +833,11 @@ class TestSaveLatestState(unittest.TestCase):
 
         KeystrokeSimulatorApp._save_latest_state(app)
 
-        mock_save_state.assert_called_once_with(process="SomeProcess", profile="Quick")
+        mock_save_state.assert_called_once_with(
+            process="SomeProcess",
+            profile="Quick",
+            modkey_set="Default",
+        )
 
 
 class TestRuntimeToggleMouseHandlers(unittest.TestCase):

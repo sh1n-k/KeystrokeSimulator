@@ -15,6 +15,7 @@
 | `app/core/capturer.py` | 화면 캡처 스레드 |
 | `app/ui/capture_session.py` | 캡처 스레드와 편집 UI 사이의 상태 경계 |
 | `app/storage/profile_storage.py` | `profiles/*.json` 직렬화와 호환 로딩 |
+| `app/storage/modkey_sets_storage.py` | `modkey_sets.json` 수정키 세트 저장 |
 | `app/ui/event_editor.py` | 상세 이벤트 편집 |
 | `app/ui/quick_event_editor.py` | Quick 프로필 캡처 |
 | `app/core/profile_events.py` | 이벤트 복사·조건 참조·정렬 연산 |
@@ -42,7 +43,7 @@
 - 프로필의 canonical 저장 형식은 `profiles/*.json`이다.
 - `held_screenshot`은 base64 PNG로 저장한다.
 - 알 수 없는 JSON 항목은 로딩 실패로 앱 전체를 중단시키지 않으며, 손상된 원본을 자동 덮어쓰지 않는다.
-- 새 프로필과 fallback 프로필은 유효한 `modification_keys` 기본값을 가진다.
+- 수정키 세트는 `modkey_sets.json`에 프로필과 분리 저장한다. 프로필 JSON의 legacy `modification_keys`는 로드 시 무시하고 저장하지 않는다.
 - 즐겨찾기 장식 문자열은 표시 전용이며 파일 작업에는 canonical 프로필 이름을 사용한다.
 
 ## 변경 체크리스트
