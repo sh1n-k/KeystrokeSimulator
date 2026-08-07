@@ -484,16 +484,38 @@ class RunSetFrame(tk.Frame):
             self.set_run_profiles(chosen, notify=True)
             win.destroy()
 
-        def cancel() -> None:
+        def cancel(_event: object | None = None) -> None:
             win.destroy()
 
-        tk.Button(btn_row, text=txt("Cancel", "취소"), command=cancel).pack(
-            side=tk.RIGHT, padx=(theme.SPACE_1, 0)
-        )
-        tk.Button(btn_row, text=txt("Apply", "적용"), command=apply_and_close).pack(
-            side=tk.RIGHT
-        )
+        def _style_dialog_button(btn: tk.Button) -> None:
+            # Flat outline keeps macOS Aqua from drawing multicolored focus rings.
+            btn.configure(
+                bg=theme.SURFACE_CANVAS,
+                fg=theme.INK_PRIMARY,
+                activebackground=theme.SURFACE_SUNKEN,
+                activeforeground=theme.INK_PRIMARY,
+                disabledforeground=theme.INK_MUTED,
+                relief="flat",
+                borderwidth=1,
+                highlightthickness=1,
+                highlightbackground=theme.SURFACE_DIVIDER,
+                highlightcolor=theme.SURFACE_DIVIDER,
+                padx=theme.SPACE_3,
+                pady=theme.SPACE_1,
+                cursor="hand2",
+            )
 
+        btn_cancel = tk.Button(btn_row, text=txt("Cancel", "취소"), command=cancel)
+        btn_apply = tk.Button(
+            btn_row, text=txt("Apply", "적용"), command=apply_and_close
+        )
+        for btn in (btn_cancel, btn_apply):
+            _style_dialog_button(btn)
+        btn_cancel.pack(side=tk.RIGHT, padx=(theme.SPACE_1, 0))
+        btn_apply.pack(side=tk.RIGHT)
+
+        win.bind("<Escape>", cancel)
+        win.protocol("WM_DELETE_WINDOW", cancel)
         WindowUtils.center_window(win)
         try:
             win.grab_set()

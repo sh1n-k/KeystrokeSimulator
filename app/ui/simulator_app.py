@@ -233,14 +233,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         self.profile_frame.configure(bg=theme.SURFACE_CANVAS)
         self.profile_frame.pack(fill="x", pady=(0, theme.SPACE_1))
-        self.run_set_frame: RunSetFrame = RunSetFrame(
-            target_body,
-            self.profiles_dir,
-            on_change=self._on_run_profiles_changed,
-        )
-        self.run_set_frame.configure(bg=theme.SURFACE_CANVAS)
-        self.run_set_frame.pack(fill="x", pady=(0, theme.SPACE_1))
-        self._sync_run_set_available()
         self.modkey_set_frame: ModKeySetFrame = ModKeySetFrame(
             target_body,
             self.selected_modkey_set,
@@ -248,7 +240,15 @@ class KeystrokeSimulatorApp(tk.Tk):
             edit_cb=self.open_modkeys,
         )
         self.modkey_set_frame.configure(bg=theme.SURFACE_CANVAS)
-        self.modkey_set_frame.pack(fill="x")
+        self.modkey_set_frame.pack(fill="x", pady=(0, theme.SPACE_1))
+        self.run_set_frame: RunSetFrame = RunSetFrame(
+            target_body,
+            self.profiles_dir,
+            on_change=self._on_run_profiles_changed,
+        )
+        self.run_set_frame.configure(bg=theme.SURFACE_CANVAS)
+        self.run_set_frame.pack(fill="x")
+        self._sync_run_set_available()
 
         # STATE card ------------------------------------------------------
         self.status_frame, status_body = self._make_card(
