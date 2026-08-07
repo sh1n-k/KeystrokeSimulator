@@ -18,6 +18,7 @@ from app.utils.i18n import normalize_language, set_language, txt
 
 from app.core.validation import find_duplicate_event_names
 from app.core.models import EventModel, ProfileModel, UserSettings
+from app.ui.dialogs import ask_confirm
 from app.ui.modkeys import ModificationKeysWindow
 from app.ui.main_frames import (
     ButtonFrame,
@@ -1210,41 +1211,55 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def clear_local_logs(self) -> None:
         log_dir = Path("logs")
-        if not messagebox.askokcancel(
-            txt("Confirm", "확인"),
-            txt("Delete old log files?", "오래된 로그 파일을 삭제하시겠습니까?"),
-        ):
-            return
-        if not log_dir.exists():
-            messagebox.showinfo(
-                txt("Info", "안내"), txt("No logs.", "로그가 없습니다.")
-            )
+        confirmed = ask_confirm(
+            self if "tk" in self.__dict__ else None,
+            title=txt("Confirm", "확인"),
+            message=txt(
+                "Delete old log files?",
+                "오래된 로그 파일을 삭제하시겠습니까?",
+            ),
+            ok_text=txt("OK", "확인"),
+            cancel_text=txt("Cancel", "취소"),
+        )
+        if not confirmed:
             return
 
         deleted_size, count = 0, 0
-        for p in log_dir.glob("*"):
-            if p.name != "keysym.log" and p.is_file():
-                try:
-                    deleted_size += p.stat().st_size
-                    p.unlink()
-                    count += 1
-                except Exception as e:
-                    logger.warning(f"Del failed {p}: {e}")
+        if log_dir.exists():
+            for p in log_dir.glob("*"):
+                if p.name != "keysym.log" and p.is_file():
+                    try:
+                        deleted_size += p.stat().st_size
+                        p.unlink()
+                        count += 1
+                    except Exception as e:
+                        logger.warning(f"Del failed {p}: {e}")
 
-        msg = (
-            txt(
-                "{count} files cleared.\nSaved: {size:.2f} MB",
-                "{count}개 파일을 정리했습니다.\n확보 용량: {size:.2f} MB",
+        # No follow-up dialog (Cancel or OK) — keep feedback in logs/status only.
+        if count:
+            logger.info(
+                "Cleared {count} old log files ({size:.2f} MB)",
                 count=count,
                 size=deleted_size / 1048576,
             )
-            if count
-            else txt("No old logs to clear.", "정리할 오래된 로그가 없습니다.")
-        )
-        messagebox.showinfo(
-            txt("Success", "완료") if count else txt("Info", "안내"),
-            msg,
-        )
+        else:
+            logger.info("No old log files to clear")
+        run_status = self.__dict__.get("lbl_run_status")
+        if run_status is not None:
+            run_status.config(
+                text=(
+                    txt(
+                        "Cleared {count} old log file(s).",
+                        "오래된 로그 {count}개 삭제했습니다.",
+                        count=count,
+                    )
+                    if count
+                    else txt(
+                        "No old logs to clear.",
+                        "정리할 오래된 로그가 없습니다.",
+                    )
+                )
+            )
 
     def toggle_start_stop(self, event: object | None = None) -> None:
         if self.toggle_transition_in_progress:
