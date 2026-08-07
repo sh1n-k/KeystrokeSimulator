@@ -62,6 +62,39 @@ def _make_event_list_frame_stub():
     return stub
 
 
+class TestEventListDialogParent(unittest.TestCase):
+    def test_resolve_dialog_parent_prefers_host_window(self):
+        packing = object()
+        host = object()
+        self.assertIs(
+            EventListFrame.resolve_dialog_parent(packing, host),  # type: ignore[arg-type]
+            host,
+        )
+
+    def test_resolve_dialog_parent_falls_back_to_packing_parent(self):
+        packing = object()
+        self.assertIs(
+            EventListFrame.resolve_dialog_parent(packing, None),  # type: ignore[arg-type]
+            packing,
+        )
+
+
+class TestProfileGraphViewerGrabOwner(unittest.TestCase):
+    def test_only_toplevel_parents_own_grab(self):
+        from app.ui.profile_graph_viewer import ProfileGraphViewer
+
+        viewer = ProfileGraphViewer.__new__(ProfileGraphViewer)
+        viewer.parent = object()
+        self.assertFalse(ProfileGraphViewer._parent_can_own_grab(viewer))
+
+        class FakeTop:
+            pass
+
+        # isinstance check against real Tk types: non-Tk objects are false.
+        viewer.parent = FakeTop()
+        self.assertFalse(ProfileGraphViewer._parent_can_own_grab(viewer))
+
+
 class TestGetKeySortOrder(unittest.TestCase):
     """EventListFrame._get_key_sort_order: 키 정렬 순서"""
 

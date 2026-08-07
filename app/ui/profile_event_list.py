@@ -427,6 +427,13 @@ class EventRow(ttk.Frame):
 
 class EventListFrame(ttk.Frame):
     # 특수 키 정렬 순서 (클래스 상수)
+    @staticmethod
+    def resolve_dialog_parent(
+        packing_parent: tk.Misc, host_window: tk.Misc | None
+    ) -> tk.Misc:
+        """Dialog/grab owner must be the Profile Toplevel, not an inner Frame."""
+        return host_window if host_window is not None else packing_parent
+
     def __init__(
         self,
         win: tk.Misc,
@@ -437,9 +444,14 @@ class EventListFrame(ttk.Frame):
         select_cb: Optional[Callable[[EventModel], None]] = None,
         *,
         profiles_dir: Path,
+        host_window: tk.Misc | None = None,
     ) -> None:
+        # `win` is the packing parent (often an inner workspace Frame).
+        # Dialogs and grab handoff must use the Profile Toplevel host instead.
         super().__init__(win)
-        self.win, self.profile, self.save_cb = win, profile, save_cb
+        self.profile = profile
+        self.save_cb = save_cb
+        self.win = self.resolve_dialog_parent(win, host_window)
         self.rows: list[EventRow] = []
         self.ctx_row: int | None = None
         self.profile_name_getter = name_getter

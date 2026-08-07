@@ -1,5 +1,6 @@
 import ast
 import json
+import tkinter as tk
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, cast
@@ -24,6 +25,22 @@ class WindowUtils:
         x = (window.winfo_screenwidth() - window.winfo_width()) // 2
         y = (window.winfo_screenheight() - window.winfo_height()) // 2
         window.geometry(f"+{x}+{y}")
+
+    @staticmethod
+    def can_own_modal_grab(widget: object | None) -> bool:
+        return isinstance(widget, (tk.Tk, tk.Toplevel))
+
+    @staticmethod
+    def restore_modal_grab(parent: object | None) -> None:
+        """Re-apply modal grab to a parent window after a child dialog closes."""
+        if not WindowUtils.can_own_modal_grab(parent):
+            return
+        window = cast(tk.Misc, parent)
+        try:
+            if window.winfo_exists():
+                window.grab_set()
+        except tk.TclError:
+            pass
 
 
 class StateUtils:

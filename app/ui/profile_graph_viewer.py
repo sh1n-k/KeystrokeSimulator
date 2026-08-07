@@ -44,10 +44,11 @@ class ProfileGraphViewer:
 
         self.win.bind("<Escape>", on_escape)
         self.win.focus_force()
-        try:
-            self.parent.grab_release()
-        except tk.TclError:
-            pass
+        if self._parent_can_own_grab():
+            try:
+                self.parent.grab_release()
+            except tk.TclError:
+                pass
         try:
             self.win.grab_set()
         except tk.TclError:
@@ -166,16 +167,17 @@ class ProfileGraphViewer:
         WindowUtils.center_window(self.win)
         self._auto_sized = True
 
+    def _parent_can_own_grab(self) -> bool:
+        """Only real windows should hold modal grab (not inner Frames)."""
+        return WindowUtils.can_own_modal_grab(self.parent)
+
     def _close(self) -> None:
         try:
             self.win.grab_release()
         except tk.TclError:
             pass
-        if self.parent and self.parent.winfo_exists():
-            try:
-                self.parent.grab_set()
-            except tk.TclError:
-                pass
+        parent = self.parent
         if self.on_close:
             self.on_close()
         self.win.destroy()
+        WindowUtils.restore_modal_grab(parent)

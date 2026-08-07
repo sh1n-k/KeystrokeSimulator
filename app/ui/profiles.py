@@ -260,6 +260,7 @@ class KeystrokeProfiles:
             status_cb=self._show_temp_status,
             select_cb=self._set_inspector_event,
             profiles_dir=self.prof_dir,
+            host_window=self.win,
         )
         self.e_frame.pack(side=tk.LEFT, fill="both", expand=True)
 

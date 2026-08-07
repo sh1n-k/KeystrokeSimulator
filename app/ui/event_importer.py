@@ -12,7 +12,7 @@ from app.utils.i18n import dual_text_width, txt
 from app.core.models import EventModel, ProfileModel
 from app.core.profile_events import clone_event
 from app.storage.profile_storage import list_profile_names, load_profile
-from app.utils.window_state import StateUtils
+from app.utils.window_state import StateUtils, WindowUtils
 from app.ui import theme
 
 
@@ -24,6 +24,7 @@ class EventImporter:
         *,
         profiles_dir: Path,
     ) -> None:
+        self.parent_window = profiles_window
         self.win = tk.Toplevel(profiles_window)
         self.win.title(txt("Import Events", "이벤트 가져오기"))
         self.win.transient(profiles_window)  # 부모창 위에 뜨도록 설정
@@ -310,6 +311,7 @@ class EventImporter:
         )
         self.win.grab_release()
         self.win.destroy()
+        WindowUtils.restore_modal_grab(self.parent_window)
 
     def load_pos(self) -> None:
         pos = StateUtils.parse_slash_int_pair(

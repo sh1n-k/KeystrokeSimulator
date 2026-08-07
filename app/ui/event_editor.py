@@ -31,6 +31,7 @@ class KeystrokeEventEditor:
         event_function: EventFactory | None,
         existing_events: list[EventModel] | None = None,
     ) -> None:
+        self.parent_window = profiles_window
         self.win = tk.Toplevel(profiles_window)
         self.win.title(
             txt(
@@ -1655,6 +1656,7 @@ class KeystrokeEventEditor:
         )
         self.win.grab_release()
         self.win.destroy()
+        WindowUtils.restore_modal_grab(self.parent_window)
 
     def load_latest_position(self) -> None:
         state = StateUtils.load_main_app_state() or {}

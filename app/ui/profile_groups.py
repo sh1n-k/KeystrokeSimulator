@@ -7,6 +7,7 @@ from typing import Any, Optional, cast
 
 from app.ui import theme
 from app.utils.i18n import txt
+from app.utils.window_state import WindowUtils
 
 UI_PAD_SM = theme.SPACE_1
 UI_PAD_MD = theme.SPACE_2
@@ -22,6 +23,7 @@ class GroupSelector(tk.Toplevel):
         callback: Callable[[str | None], object],
     ) -> None:
         super().__init__(master)
+        self.parent_window = master
         self.callback = callback
         self.result: str | None = None
         self.none_label = txt("(None)", "(없음)")
@@ -97,6 +99,16 @@ class GroupSelector(tk.Toplevel):
 
         self.bind("<Escape>", on_escape)
         self.bind("<Return>", on_return)
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def destroy(self) -> None:  # type: ignore[override]
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
+        parent = self.parent_window
+        super().destroy()
+        WindowUtils.restore_modal_grab(parent)
 
     def _on_select(self) -> None:
         listbox = cast(Any, self.listbox)
@@ -155,6 +167,7 @@ class GroupManagerDialog(tk.Toplevel):
         clear_cb: Callable[[str], int],
     ) -> None:
         super().__init__(master)
+        self.parent_window = master
         self.get_group_counts = get_group_counts
         self.rename_cb = rename_cb
         self.clear_cb = clear_cb
@@ -205,12 +218,22 @@ class GroupManagerDialog(tk.Toplevel):
 
         self.listbox.bind("<Double-Button-1>", on_listbox_double_click)
         self.bind("<Escape>", on_escape)
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
         self._reload_groups()
 
         self.update_idletasks()
         x = master.winfo_rootx() + 60
         y = master.winfo_rooty() + 60
         self.geometry(f"+{x}+{y}")
+
+    def destroy(self) -> None:  # type: ignore[override]
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
+        parent = self.parent_window
+        super().destroy()
+        WindowUtils.restore_modal_grab(parent)
 
     def _reload_groups(self, selected_name: Optional[str] = None) -> None:
         data = self.get_group_counts()
