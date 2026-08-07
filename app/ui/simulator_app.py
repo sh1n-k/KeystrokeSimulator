@@ -371,12 +371,15 @@ class KeystrokeSimulatorApp(tk.Tk):
             anchor="w",
         )
         self.lbl_run_status.pack(side=tk.LEFT)
-        self.run_start_button: tk.Button = tk.Button(
+        # Label (not tk.Button): Aqua ignores Button bg/fg, so solid fill never shows.
+        self.run_start_button: tk.Label = tk.Label(
             self.run_dock,
             text=txt("Start", "시작"),
-            command=self.toggle_start_stop,
+            cursor="hand2",
         )
+        self._run_start_enabled = True
         self._apply_accent_button(self.run_start_button)
+        self.run_start_button.bind("<Button-1>", self._on_run_start_clicked)
         self.run_start_button.pack(side=tk.RIGHT)
 
         style = ttk.Style(self)
@@ -417,29 +420,58 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         return outer, body
 
+    def _on_run_start_clicked(self, _event: object | None = None) -> None:
+        if not getattr(self, "_run_start_enabled", False):
+            return
+        self.toggle_start_stop()
+
     @staticmethod
-    def _apply_accent_button(btn: tk.Button) -> None:
-        # Pure white on solid green keeps Start/Stop readable on macOS Aqua.
-        btn.configure(
-            bg=theme.SIGNAL_BASE,
-            fg="#FFFFFF",
-            activebackground=theme.SIGNAL_HOVER,
-            activeforeground="#FFFFFF",
-            disabledforeground="#D0D0D0",
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=1,
-            highlightbackground=theme.SIGNAL_BASE,
-            highlightcolor=theme.SIGNAL_BASE,
-            padx=theme.SPACE_3,
-            pady=theme.SPACE_2,
-            cursor="hand2",
-        )
+    def _style_run_control(
+        btn: tk.Misc,
+        *,
+        bg: str,
+        fg: str,
+        cursor: str = "hand2",
+    ) -> None:
+        """Color the Start/Stop control (Label on Aqua; Button elsewhere)."""
+        widget = cast(Any, btn)
         try:
-            btn.configure(font=theme.fonts()["body_bold"])
+            widget.configure(
+                bg=bg,
+                fg=fg,
+                relief="flat",
+                borderwidth=0,
+                highlightthickness=0,
+                padx=theme.SPACE_3,
+                pady=theme.SPACE_2,
+                cursor=cursor,
+            )
+        except tk.TclError:
+            try:
+                widget.configure(bg=bg, fg=fg)
+            except tk.TclError:
+                pass
+        try:
+            widget.configure(font=theme.fonts()["body_bold"])
         except Exception:
-            # Unit stubs may call update_ui without a Tk root for fonts.
             pass
+
+    @classmethod
+    def _apply_accent_button(cls, btn: tk.Misc) -> None:
+        """Solid green + white text (Label preferred: Aqua ignores Button bg/fg)."""
+        cls._style_run_control(btn, bg=theme.SIGNAL_BASE, fg="#FFFFFF")
+
+    @classmethod
+    def _apply_run_stop_button(cls, btn: tk.Misc) -> None:
+        """Running-state Start→Stop control (amber fill, white text)."""
+        cls._style_run_control(btn, bg=theme.STATUS_RUNNING_FG, fg="#FFFFFF")
+
+    @classmethod
+    def _apply_run_disabled_button(cls, btn: tk.Misc) -> None:
+        """Muted control when start is not available."""
+        cls._style_run_control(
+            btn, bg=theme.SURFACE_SUNKEN, fg=theme.INK_MUTED, cursor="arrow"
+        )
 
     @staticmethod
     def _apply_outline_button(btn: tk.Button) -> None:
@@ -1500,21 +1532,25 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         run_start_button = self.__dict__.get("run_start_button")
         if run_start_button is not None:
-            run_start_button.config(
-                text=txt("Stop", "중지") if running else txt("Start", "시작"),
-                state="normal" if running or readiness["can_start"] else "disabled",
-            )
+            can_press = bool(running or readiness["can_start"])
+            self._run_start_enabled = can_press
+            label = txt("Stop", "중지") if running else txt("Start", "시작")
+            start_state = "normal" if can_press else "disabled"
+            # Prefer single config() for Button/mocks; Label ignores state=.
+            try:
+                run_start_button.config(text=label, state=start_state)  # type: ignore[attr-defined]
+            except tk.TclError:
+                try:
+                    run_start_button.configure(text=label)  # type: ignore[attr-defined]
+                except tk.TclError:
+                    pass
+            # Label-based control: colors encode enablement (Aqua ignores Button bg/fg).
             if running:
-                run_start_button.configure(
-                    bg=theme.STATUS_RUNNING_FG,
-                    fg="#FFFFFF",
-                    activebackground=theme.STATUS_ERROR_FG,
-                    activeforeground="#FFFFFF",
-                    highlightbackground=theme.STATUS_RUNNING_FG,
-                    highlightcolor=theme.STATUS_RUNNING_FG,
-                )
-            else:
+                self._apply_run_stop_button(run_start_button)
+            elif can_press:
                 self._apply_accent_button(run_start_button)
+            else:
+                self._apply_run_disabled_button(run_start_button)
         self.button_frame.quick_events_button.config(state=state)
         self.button_frame.settings_button.config(state=state)
         self.button_frame.clear_logs_button.config(state=state)
