@@ -115,6 +115,13 @@ class TestKeyUtils(unittest.TestCase):
         code = KeyUtils.get_keycode("Q")
         self.assertEqual(KeyUtils.get_key_name_for_keycode(code), "Q")
 
+    def test_platform_map_includes_shared_navigation_keys(self):
+        """Win/Mac 공통 편집·방향 키 이름이 현재 플랫폼 맵에 존재"""
+        names = set(KeyUtils.get_key_name_list())
+        for key in ("Enter", "Left", "Right", "Up", "Down", "Home", "End"):
+            self.assertIn(key, names, msg=f"missing {key} on this platform")
+            self.assertIsNotNone(KeyUtils.get_keycode(key))
+
 
 class TestPermissionUtils(unittest.TestCase):
     def test_quartz_symbol_uses_module_attribute_lookup(self):
