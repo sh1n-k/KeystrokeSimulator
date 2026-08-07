@@ -498,6 +498,9 @@ class ModificationKeyHandler:
 
 class KeystrokeProcessor:
     PID_REGEX = re.compile(r"\((\d+)\)")
+    # While Pass/mod is held, skip capture but poll often so release leads
+    # promptly into a fresh grab/match (not an extra 100ms back-off).
+    MOD_ACTIVE_POLL_INTERVAL = 0.02
 
     def __init__(
         self,
@@ -748,7 +751,7 @@ class KeystrokeProcessor:
                     continue
 
                 if await self.mod_handler.check_and_process():
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(self.MOD_ACTIVE_POLL_INTERVAL)
                     continue
 
                 try:
