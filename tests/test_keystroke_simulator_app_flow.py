@@ -27,7 +27,20 @@ class FakeVar:
         self._value = value
 
 
-def _make_app_stub() -> KeystrokeSimulatorApp:
+
+class FakeRunSetFrame:
+    def __init__(self, names=None):
+        self._names = list(names or [])
+        self.select_button = MagicMock()
+
+    def get_run_profiles(self):
+        return list(self._names)
+
+    def set_run_profiles(self, names, *, notify=True):
+        self._names = list(names or [])
+
+
+def _make_app_stub(run_profiles=None) -> KeystrokeSimulatorApp:
     app = KeystrokeSimulatorApp.__new__(KeystrokeSimulatorApp)
     app.profiles_dir = "profiles"
     app.modkey_sets_path = Path("modkey_sets.json")
@@ -70,6 +83,7 @@ def _make_app_stub() -> KeystrokeSimulatorApp:
             "start_stop_key": "DISABLED",
         },
     )()
+    app.run_set_frame = FakeRunSetFrame(list(run_profiles or []))
     return app
 
 
@@ -150,7 +164,8 @@ class TestStartSimulation(unittest.TestCase):
 
         passed_events = mock_processor_cls.call_args.args[2]
         self.assertEqual(
-            [e.event_name for e in passed_events], ["Action", "ConditionOnly"]
+            [e.event_name for e in passed_events],
+            ["Quick/Action", "Quick/ConditionOnly"],
         )
 
     @patch("app.ui.simulator_app.KeystrokeProcessor")
@@ -313,6 +328,40 @@ class TestStartSimulation(unittest.TestCase):
         app.selected_profile.set("Quick")
 
         self.assertFalse(KeystrokeSimulatorApp.start_simulation(app))
+
+
+
+    @patch("app.ui.simulator_app.get_modkey_set")
+    @patch("app.ui.simulator_app.KeystrokeProcessor")
+    @patch("app.ui.simulator_app.load_profile")
+    def test_start_simulation_merges_multiple_run_profiles(
+        self, mock_load_profile, mock_processor_cls, mock_get_modkey_set
+    ):
+        app = _make_app_stub(run_profiles=["Rot", "Util"])
+        app.selected_process.set("Dummy Process (1234)")
+        mock_get_modkey_set.return_value = {
+            "alt": {"enabled": True, "pass": True, "value": "Pass"}
+        }
+
+        def _load(_dir, name, migrate=False):
+            return ProfileModel(
+                name=name,
+                event_list=[
+                    EventModel(event_name="Skill", use_event=True, key_to_enter="1"),
+                ],
+            )
+
+        mock_load_profile.side_effect = _load
+        mock_processor_cls.return_value = MagicMock()
+
+        result = KeystrokeSimulatorApp.start_simulation(app)
+
+        self.assertTrue(result)
+        self.assertEqual(mock_load_profile.call_count, 2)
+        passed = mock_processor_cls.call_args.args[2]
+        self.assertEqual(
+            [e.event_name for e in passed], ["Rot/Skill", "Util/Skill"]
+        )
 
 
 class TestToggleAndStopSimulation(unittest.TestCase):
@@ -820,6 +869,7 @@ class TestSaveLatestState(unittest.TestCase):
         mock_save_state.assert_called_once_with(
             process="SomeProcess",
             profile="Quick",
+            run_profiles=["Quick"],
             modkey_set="Default",
         )
 

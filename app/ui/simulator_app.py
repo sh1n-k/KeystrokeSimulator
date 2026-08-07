@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import platform
 import re
 import sys
@@ -16,8 +17,12 @@ import pynput.keyboard
 import pynput.mouse
 from app.utils.i18n import normalize_language, set_language, txt
 
-from app.core.validation import find_duplicate_event_names
 from app.core.models import EventModel, ProfileModel, UserSettings
+from app.core.run_composition import (
+    ComposedRunSession,
+    compose_run_session,
+    format_run_profile_summary,
+)
 from app.ui.dialogs import ask_confirm
 from app.ui.modkeys import ModificationKeysWindow
 from app.ui.main_frames import (
@@ -25,6 +30,7 @@ from app.ui.main_frames import (
     ModKeySetFrame,
     ProcessFrame,
     ProfileFrame,
+    RunSetFrame,
 )
 from app.ui.input_listener_session import InputListener, InputListenerSession
 from app.storage.modkey_sets_storage import (
@@ -54,7 +60,6 @@ from app.utils.runtime_toggle import (
     is_keyboard_runtime_toggle_trigger,
     is_mouse_button_runtime_toggle_trigger,
     is_wheel_runtime_toggle_trigger,
-    collect_runtime_toggle_validation_errors,
     normalize_runtime_toggle_listener_key,
     normalize_runtime_toggle_trigger,
     runtime_toggle_member_count,
@@ -224,9 +229,18 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.profiles_dir,
             edit_cb=self.open_profile,
             sort_cb=self.sort_profile_events,
+            list_changed_cb=self._sync_run_set_available,
         )
         self.profile_frame.configure(bg=theme.SURFACE_CANVAS)
         self.profile_frame.pack(fill="x", pady=(0, theme.SPACE_1))
+        self.run_set_frame: RunSetFrame = RunSetFrame(
+            target_body,
+            self.profiles_dir,
+            on_change=self._on_run_profiles_changed,
+        )
+        self.run_set_frame.configure(bg=theme.SURFACE_CANVAS)
+        self.run_set_frame.pack(fill="x", pady=(0, theme.SPACE_1))
+        self._sync_run_set_available()
         self.modkey_set_frame: ModKeySetFrame = ModKeySetFrame(
             target_body,
             self.selected_modkey_set,
@@ -328,6 +342,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.profile_frame.copy_button,
             self.profile_frame.del_button,
             self.profile_frame.sort_button,
+            self.run_set_frame.select_button,
             self.modkey_set_frame.edit_button,
             self.modkey_set_frame.copy_button,
             self.modkey_set_frame.del_button,
@@ -338,6 +353,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         for w in (
             self.process_frame.lbl_process,
             self.profile_frame.lbl_profiles,
+            self.run_set_frame.lbl_run_set,
             self.modkey_set_frame.lbl_sets,
         ):
             w.configure(
@@ -486,6 +502,26 @@ class KeystrokeSimulatorApp(tk.Tk):
         prof = state.get("profile")
         if isinstance(prof, str) and prof:
             self.profile_frame.set_selected_profile(prof)
+        self._sync_run_set_available()
+        run_profiles_raw = state.get("run_profiles")
+        run_profiles: list[str] = []
+        if isinstance(run_profiles_raw, list):
+            run_profiles = [
+                str(item)
+                for item in cast(list[object], run_profiles_raw)
+                if isinstance(item, str) and item
+            ]
+        elif isinstance(run_profiles_raw, str) and run_profiles_raw:
+            run_profiles = [run_profiles_raw]
+        if run_profiles:
+            self.run_set_frame.set_run_profiles(run_profiles, notify=False)
+        else:
+            fallback = (
+                prof
+                if isinstance(prof, str) and prof
+                else self.selected_profile.get()
+            )
+            self.run_set_frame.ensure_default_from_profile(fallback or "")
         modkey_set = state.get("modkey_set")
         if isinstance(modkey_set, str) and modkey_set:
             self.modkey_set_frame.set_selected_set(modkey_set)
@@ -505,6 +541,8 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.process_frame.refresh_texts()
         if hasattr(self, "profile_frame"):
             self.profile_frame.refresh_texts()
+        if hasattr(self, "run_set_frame"):
+            self.run_set_frame.refresh_texts()
         if hasattr(self, "modkey_set_frame"):
             self.modkey_set_frame.refresh_texts()
         if hasattr(self, "button_frame"):
@@ -593,27 +631,115 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.latest_runtime_scroll_time = None
 
     def _configure_runtime_toggle_session(
-        self, profile: ProfileModel, events: list[EventModel]
+        self,
+        *,
+        enabled: bool,
+        toggle_key: str | None,
+        events: list[EventModel],
     ) -> None:
         self._reset_runtime_toggle_session()
-        toggle_key = normalize_runtime_toggle_trigger(
-            getattr(profile, "runtime_toggle_key", None)
-        )
+        key = normalize_runtime_toggle_trigger(toggle_key)
         member_count = runtime_toggle_member_count(events)
-        enabled = bool(
-            getattr(profile, "runtime_toggle_enabled", False)
-            and toggle_key
-            and member_count > 0
-            and not collect_runtime_toggle_validation_errors(
-                profile,
-                events,
-                settings=getattr(self, "settings", None),
-                os_name=platform.system(),
-            )
+        self.runtime_toggle_enabled = bool(enabled and key and member_count > 0)
+        self.runtime_toggle_key = key if self.runtime_toggle_enabled else None
+        self.runtime_toggle_member_count = (
+            member_count if self.runtime_toggle_enabled else 0
         )
-        self.runtime_toggle_enabled = enabled
-        self.runtime_toggle_key = toggle_key
-        self.runtime_toggle_member_count = member_count
+
+    def _sync_run_set_available(self) -> None:
+        frame = self.__dict__.get("run_set_frame")
+        profile_frame = self.__dict__.get("profile_frame")
+        if frame is None or profile_frame is None:
+            return
+        names = list(getattr(profile_frame, "profile_names", []) or [])
+        frame.set_available_profiles(names)
+
+    def _on_run_profiles_changed(self, _names: list[str]) -> None:
+        if not self.is_running.get():
+            self.update_ui()
+
+    def _get_run_profile_names(self) -> list[str]:
+        frame = self.__dict__.get("run_set_frame")
+        if frame is not None:
+            names = frame.get_run_profiles()
+            if names:
+                return names
+        selected = self.selected_profile.get()
+        return [selected] if selected else []
+
+    def _load_profiles_for_run(
+        self, names: list[str], *, migrate: bool
+    ) -> tuple[list[tuple[str, ProfileModel]], list[str]]:
+        loaded: list[tuple[str, ProfileModel]] = []
+        load_errors: list[str] = []
+        profiles_dir = Path(self.profiles_dir)
+        for name in names:
+            jpath = profiles_dir / f"{name}.json"
+            # When the file is on disk, fail closed on corrupt/non-object JSON so a
+            # broken run-set member is not silently treated as an empty profile.
+            # (Unit tests that mock load_profile without files skip this gate.)
+            if jpath.is_file():
+                try:
+                    raw: object = json.loads(jpath.read_text(encoding="utf-8"))
+                    if not isinstance(raw, dict):
+                        raise ValueError(
+                            f"Profile root must be an object, got {type(raw).__name__}"
+                        )
+                except Exception as exc:
+                    load_errors.append(
+                        txt(
+                            "Profile '{profile}' could not be loaded: {error}",
+                            "프로필 '{profile}'을(를) 불러오지 못했습니다: {error}",
+                            profile=name,
+                            error=exc,
+                        )
+                    )
+                    continue
+            try:
+                profile = load_profile(profiles_dir, name, migrate=migrate)
+            except Exception as exc:
+                load_errors.append(
+                    txt(
+                        "Profile '{profile}' could not be loaded: {error}",
+                        "프로필 '{profile}'을(를) 불러오지 못했습니다: {error}",
+                        profile=name,
+                        error=exc,
+                    )
+                )
+                continue
+            loaded.append((name, profile))
+        return loaded, load_errors
+
+    def _compose_selected_run(
+        self, *, migrate: bool
+    ) -> tuple[ComposedRunSession | None, list[str]]:
+        names = self._get_run_profile_names()
+        if not names:
+            return None, [
+                txt(
+                    "Select at least one profile to run.",
+                    "실행할 프로필을 하나 이상 선택하세요.",
+                )
+            ]
+        loaded, load_errors = self._load_profiles_for_run(names, migrate=migrate)
+        if load_errors and not loaded:
+            return None, load_errors
+        if not loaded:
+            return None, load_errors or [
+                txt(
+                    "Select at least one profile to run.",
+                    "실행할 프로필을 하나 이상 선택하세요.",
+                )
+            ]
+        session = compose_run_session(
+            loaded,
+            settings=self.__dict__.get("settings"),
+            os_name=platform.system(),
+        )
+        errors = list(load_errors) + list(session.errors)
+        if errors:
+            return session, errors
+        return session, []
 
     @staticmethod
     def _runnable_events(events: list[EventModel]) -> list[EventModel]:
@@ -687,63 +813,61 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "fg": STATUS_FG_WARN,
             }
 
-        if not self.selected_profile.get():
+        run_names = self._get_run_profile_names()
+        if not run_names:
             return {
                 "can_start": False,
                 "badge_text": txt("Select Profile", "프로필 선택"),
                 "title": txt(
-                    "Select a profile with saved events.",
-                    "저장된 이벤트가 있는 프로필을 선택하세요.",
+                    "Select one or more profiles to run.",
+                    "실행할 프로필을 하나 이상 선택하세요.",
                 ),
                 "detail": txt(
-                    "Use Quick for fast capture or open Profile Manager to edit events.",
-                    "빠른 캡처는 Quick을, 상세 편집은 프로필 편집을 사용하세요.",
+                    "Use Run set to choose profiles. Edit profiles separately from the Profiles row.",
+                    "실행 세트에서 프로필을 고르세요. 프로필 행에서는 편집 대상을 고릅니다.",
                 ),
                 "bg": STATUS_BG_WARN,
                 "fg": STATUS_FG_WARN,
             }
 
-        try:
-            profile = load_profile(
-                self.profiles_dir, self.selected_profile.get(), migrate=False
+        session, compose_errors = self._compose_selected_run(migrate=False)
+        if compose_errors:
+            first = compose_errors[0]
+            badge = txt("Profile Error", "프로필 오류")
+            title = txt(
+                "The run set could not be prepared.",
+                "실행 세트를 준비하지 못했습니다.",
             )
-        except Exception as exc:
+            lower = first.lower()
+            if "duplicate" in lower or "중복" in first:
+                badge = txt("Duplicate Events", "중복 이벤트")
+                title = txt(
+                    "Duplicate event names were found in a run profile.",
+                    "실행 프로필에서 중복 이벤트 이름이 발견되었습니다.",
+                )
+            elif (
+                "toggle" in lower
+                or "토글" in first
+                or "runtime event group" in lower
+                or "추가 이벤트 묶음" in first
+            ):
+                badge = txt("Toggle Conflict", "토글 충돌")
+                title = txt(
+                    "Runtime Event Group trigger settings need attention.",
+                    "실행 중 추가 이벤트 묶음의 트리거 설정을 확인해야 합니다.",
+                )
             return {
                 "can_start": False,
-                "badge_text": txt("Profile Error", "프로필 오류"),
-                "title": txt(
-                    "The selected profile could not be loaded.",
-                    "선택한 프로필을 불러오지 못했습니다.",
-                ),
-                "detail": txt(
-                    "Open the profile again or choose another profile.\nError: {error}",
-                    "프로필을 다시 열거나 다른 프로필을 선택하세요.\n오류: {error}",
-                    error=exc,
-                ),
+                "badge_text": badge,
+                "title": title,
+                "detail": first,
                 "bg": STATUS_BG_ERR,
                 "fg": STATUS_FG_ERR,
             }
 
-        events = list(profile.event_list or [])
+        assert session is not None
+        events = list(session.events)
         runnable_events = self._runnable_events(events)
-        duplicate_names = find_duplicate_event_names(events)
-        if duplicate_names:
-            dup_text = ", ".join(duplicate_names)
-            return {
-                "can_start": False,
-                "badge_text": txt("Duplicate Events", "중복 이벤트"),
-                "title": txt(
-                    "Duplicate event names were found in this profile.",
-                    "이 프로필에서 중복 이벤트 이름이 발견되었습니다.",
-                ),
-                "detail": txt(
-                    "Rename duplicated event names before starting.\nDuplicates: {names}",
-                    "시작하기 전에 중복 이벤트 이름을 변경하세요.\n중복: {names}",
-                    names=dup_text,
-                ),
-                "bg": STATUS_BG_ERR,
-                "fg": STATUS_FG_ERR,
-            }
         enabled_count = sum(1 for evt in events if getattr(evt, "use_event", True))
         runnable_count = len(runnable_events)
 
@@ -752,8 +876,8 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "can_start": False,
                 "badge_text": txt("Add Events", "이벤트 추가"),
                 "title": txt(
-                    "This profile has no events yet.",
-                    "이 프로필에는 아직 이벤트가 없습니다.",
+                    "The run set has no events yet.",
+                    "실행 세트에 아직 이벤트가 없습니다.",
                 ),
                 "detail": txt(
                     "Open Profile Manager or Quick Events and save at least one event first.",
@@ -768,8 +892,8 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "can_start": False,
                 "badge_text": txt("Enable Event", "이벤트 활성화"),
                 "title": txt(
-                    "All events in this profile are disabled.",
-                    "이 프로필의 모든 이벤트가 비활성화되어 있습니다.",
+                    "All events in the run set are disabled.",
+                    "실행 세트의 모든 이벤트가 비활성화되어 있습니다.",
                 ),
                 "detail": txt(
                     "Turn on at least one event in Profile Manager before starting.",
@@ -793,25 +917,6 @@ class KeystrokeSimulatorApp(tk.Tk):
                 ),
                 "bg": STATUS_BG_WARN,
                 "fg": STATUS_FG_WARN,
-            }
-
-        toggle_validation_errors = collect_runtime_toggle_validation_errors(
-            profile,
-            events,
-            settings=getattr(self, "settings", None),
-            os_name=platform.system(),
-        )
-        if toggle_validation_errors:
-            return {
-                "can_start": False,
-                "badge_text": txt("Toggle Conflict", "토글 충돌"),
-                "title": txt(
-                    "Runtime Event Group trigger settings need attention.",
-                    "실행 중 추가 이벤트 묶음의 트리거 설정을 확인해야 합니다.",
-                ),
-                "detail": toggle_validation_errors[0],
-                "bg": STATUS_BG_ERR,
-                "fg": STATUS_FG_ERR,
             }
 
         missing_permissions = PermissionUtils.missing_macos_permissions()
@@ -856,7 +961,7 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "fg": STATUS_FG_WARN,
             }
 
-        profile_name = self.selected_profile.get()
+        profile_summary = format_run_profile_summary(list(session.profile_names))
         modkey_set_name = self.selected_modkey_set.get() or DEFAULT_MODKEY_SET_NAME
         return {
             "can_start": True,
@@ -866,9 +971,9 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "모니터링을 시작할 준비가 끝났습니다.",
             ),
             "detail": txt(
-                "Profile '{profile}' · ModKey set '{modkey_set}' · {count} runnable event(s).",
-                "프로필 '{profile}' · 수정키 세트 '{modkey_set}' · 실행 가능한 이벤트 {count}개.",
-                profile=profile_name,
+                "Run set '{profiles}' · ModKey set '{modkey_set}' · {count} runnable event(s).",
+                "실행 세트 '{profiles}' · 수정키 세트 '{modkey_set}' · 실행 가능한 이벤트 {count}개.",
+                profiles=profile_summary,
                 modkey_set=modkey_set_name,
                 count=runnable_count,
             ),
@@ -877,20 +982,21 @@ class KeystrokeSimulatorApp(tk.Tk):
         }
 
     def _status_detail_with_selection(self, detail: str) -> str:
-        """Append profile + modkey-set selection when not already present."""
-        profile_name = self.selected_profile.get()
+        """Append run-set + modkey-set selection when not already present."""
+        run_summary = format_run_profile_summary(self._get_run_profile_names())
         modkey_set_name = self.selected_modkey_set.get()
-        if not profile_name and not modkey_set_name:
+        if run_summary == "—" and not modkey_set_name:
             return detail
         if "ModKey set" in detail or "수정키 세트" in detail:
             return detail
         line = txt(
-            "Profile '{profile}' · ModKey set '{modkey_set}'",
-            "프로필 '{profile}' · 수정키 세트 '{modkey_set}'",
-            profile=profile_name or "—",
+            "Run set '{profiles}' · ModKey set '{modkey_set}'",
+            "실행 세트 '{profiles}' · 수정키 세트 '{modkey_set}'",
+            profiles=run_summary,
             modkey_set=modkey_set_name or "—",
         )
         return f"{detail}\n{line}" if detail else line
+
 
     def _update_main_status(self) -> None:
         if not hasattr(self, "lbl_status_badge"):
@@ -1286,31 +1392,22 @@ class KeystrokeSimulatorApp(tk.Tk):
         if not (
             self.selected_process.get()
             and "(" in self.selected_process.get()
-            and self.selected_profile.get()
+            and self._get_run_profile_names()
         ):
             return False
 
-        try:
-            profile = load_profile(
-                self.profiles_dir, self.selected_profile.get(), migrate=True
-            )
-        except Exception:
-            profile = ProfileModel()
+        session, compose_errors = self._compose_selected_run(migrate=True)
+        if compose_errors or session is None:
+            return False
 
-        profile_events = list(profile.event_list or [])
-        if find_duplicate_event_names(profile_events):
-            return False
-        if collect_runtime_toggle_validation_errors(
-            profile,
-            profile_events,
-            settings=getattr(self, "settings", None),
-            os_name=platform.system(),
-        ):
-            return False
-        events = self._runnable_events(profile_events)
+        events = self._runnable_events(list(session.events))
         if not events:
             return False
-        self._configure_runtime_toggle_session(profile, events)
+        self._configure_runtime_toggle_session(
+            enabled=bool(session.runtime_toggle_enabled),
+            toggle_key=session.runtime_toggle_key,
+            events=events,
+        )
 
         set_name = self.selected_modkey_set.get() or DEFAULT_MODKEY_SET_NAME
         try:
@@ -1391,6 +1488,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_frame.copy_button.config(state=state)
         self.profile_frame.del_button.config(state=state)
         self.profile_frame.sort_button.config(state=state)
+        run_set_frame = self.__dict__.get("run_set_frame")
+        if run_set_frame is not None:
+            run_set_frame.select_button.config(state=state)
         modkey_frame = self.__dict__.get("modkey_set_frame")
         if modkey_frame is not None:
             modkey_frame.sets_combobox.config(state=readonly_state)
@@ -1447,6 +1547,7 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def reload_profiles(self, new_name: str) -> None:
         self.profile_frame.load_profiles(select_name=new_name)
+        self._sync_run_set_available()
         self.update_ui()
 
     def sort_profile_events(self) -> None:
@@ -1487,6 +1588,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         StateUtils.save_main_app_state(
             process=self.selected_process.get().split(" (")[0],
             profile=self.selected_profile.get(),
+            run_profiles=self._get_run_profile_names(),
             modkey_set=self.selected_modkey_set.get(),
         )
 

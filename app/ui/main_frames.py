@@ -27,12 +27,18 @@ from app.storage.profile_storage import (
     load_profile_favorites,
     load_profile_meta_favorite,
 )
+from app.core.run_composition import (
+    format_run_profile_summary,
+    normalize_run_profile_list,
+)
 from app.storage.profile_display import QUICK_PROFILE_NAME, build_profile_display_values
 from app.ui import theme
 from app.utils.i18n import txt
 from app.utils.system import ProcessCollector
+from app.utils.window_state import WindowUtils
 
 VoidCallback = Callable[[], None]
+RunProfilesChanged = Callable[[list[str]], None]
 
 # Shared Target-card grid: equal-width narrow combos + aligned action columns.
 _TARGET_LABEL_MIN = 80
@@ -110,6 +116,7 @@ class ProfileFrame(tk.Frame):
         profiles_dir: str | Path,
         edit_cb: VoidCallback | None = None,
         sort_cb: VoidCallback | None = None,
+        list_changed_cb: VoidCallback | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(master, **kwargs)
@@ -121,6 +128,7 @@ class ProfileFrame(tk.Frame):
         self.favorite_names: set[str] = set()
         self._edit_cb = edit_cb
         self._sort_cb = sort_cb
+        self._list_changed_cb = list_changed_cb
 
         self._normal_font = tkfont.nametofont("TkTextFont").copy()
         self._bold_font = tkfont.nametofont("TkTextFont").copy()
@@ -249,6 +257,8 @@ class ProfileFrame(tk.Frame):
         if not self.set_selected_profile(target_name):
             self.profile_combobox.current(0)
             self._on_profile_selected()
+        if self._list_changed_cb is not None:
+            self._list_changed_cb()
         if os.getenv("KEYSIM_PROFILE_PERF") == "1":
             print(
                 f"[perf] load_profiles: {(time.perf_counter() - started) * 1000.0:.3f}ms"
@@ -330,6 +340,166 @@ class ProfileFrame(tk.Frame):
                 ),
                 parent=self,
             )
+
+
+class RunSetFrame(tk.Frame):
+    """Multi-profile run selection (edit profile stays on ProfileFrame)."""
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        profiles_dir: str | Path,
+        *,
+        on_change: RunProfilesChanged | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(master, **kwargs)
+        self.profiles_dir = Path(profiles_dir)
+        self._on_change = on_change
+        self._run_profiles: list[str] = []
+        self._available: list[str] = []
+
+        _configure_target_row_grid(self)
+
+        self.lbl_run_set: tk.Label = tk.Label(self, anchor="w", width=8)
+        self.lbl_run_set.grid(row=0, column=0, sticky="w", padx=(0, 6))
+        self.summary_var: tk.StringVar = tk.StringVar(value="—")
+        self.summary_entry: ttk.Entry = ttk.Entry(
+            self,
+            textvariable=self.summary_var,
+            state="readonly",
+            width=_TARGET_COMBO_CHARS,
+        )
+        self.summary_entry.grid(row=0, column=1, sticky="w", padx=(0, 6))
+        self.select_button: tk.Button = tk.Button(self, command=self.open_selector)
+        self.select_button.grid(
+            row=0,
+            column=2,
+            columnspan=_TARGET_ACTION_COLS,
+            sticky="we",
+        )
+        self.refresh_texts()
+
+    def get_run_profiles(self) -> list[str]:
+        return list(self._run_profiles)
+
+    def set_available_profiles(self, names: list[str]) -> None:
+        self._available = list(names)
+        self.set_run_profiles(self._run_profiles, notify=False)
+
+    def set_run_profiles(
+        self, names: list[str] | None, *, notify: bool = True
+    ) -> None:
+        cleaned = normalize_run_profile_list(names, self._available)
+        if not cleaned and self._available:
+            fallback = (
+                QUICK_PROFILE_NAME
+                if QUICK_PROFILE_NAME in self._available
+                else self._available[0]
+            )
+            cleaned = [fallback]
+        self._run_profiles = cleaned
+        self._refresh_summary()
+        if notify and self._on_change is not None:
+            self._on_change(list(self._run_profiles))
+
+    def ensure_default_from_profile(self, profile_name: str) -> None:
+        if self._run_profiles:
+            return
+        if profile_name and profile_name in self._available:
+            self.set_run_profiles([profile_name], notify=False)
+        else:
+            self.set_run_profiles([], notify=False)
+
+    def _refresh_summary(self) -> None:
+        self.summary_var.set(format_run_profile_summary(self._run_profiles))
+
+    def refresh_texts(self) -> None:
+        self.lbl_run_set.config(text=txt("Run set:", "실행 세트:"))
+        self.select_button.config(text=txt("Select…", "선택…"))
+
+    def open_selector(self) -> None:
+        if not self._available:
+            messagebox.showinfo(
+                txt("Info", "안내"),
+                txt("No profiles available.", "사용 가능한 프로필이 없습니다."),
+                parent=self,
+            )
+            return
+
+        win = tk.Toplevel(self)
+        win.title(txt("Select Run Profiles", "실행 프로필 선택"))
+        win.configure(bg=theme.SURFACE_PAPER)
+        win.transient(self.winfo_toplevel())
+        body = tk.Frame(
+            win, bg=theme.SURFACE_PAPER, padx=theme.SPACE_3, pady=theme.SPACE_3
+        )
+        body.pack(fill="both", expand=True)
+        tk.Label(
+            body,
+            text=txt(
+                "Check profiles to run together at Start.",
+                "시작 시 함께 실행할 프로필을 선택하세요.",
+            ),
+            bg=theme.SURFACE_PAPER,
+            fg=theme.INK_SECONDARY,
+            anchor="w",
+            justify="left",
+        ).pack(fill="x", pady=(0, theme.SPACE_2))
+
+        list_frame = tk.Frame(body, bg=theme.SURFACE_CANVAS, height=220)
+        list_frame.pack(fill="both", expand=True)
+        list_frame.pack_propagate(False)
+        vars_by_name: dict[str, tk.BooleanVar] = {}
+        selected = set(self._run_profiles)
+        for name in self._available:
+            var = tk.BooleanVar(value=name in selected)
+            vars_by_name[name] = var
+            tk.Checkbutton(
+                list_frame,
+                text=name,
+                variable=var,
+                anchor="w",
+                bg=theme.SURFACE_CANVAS,
+                activebackground=theme.SURFACE_CANVAS,
+                fg=theme.INK_PRIMARY,
+                selectcolor=theme.SURFACE_PAPER,
+            ).pack(fill="x", padx=theme.SPACE_1, pady=1)
+
+        btn_row = tk.Frame(body, bg=theme.SURFACE_PAPER)
+        btn_row.pack(fill="x", pady=(theme.SPACE_3, 0))
+
+        def apply_and_close() -> None:
+            chosen = [n for n in self._available if vars_by_name[n].get()]
+            if not chosen:
+                messagebox.showwarning(
+                    txt("Warning", "경고"),
+                    txt(
+                        "Select at least one profile.",
+                        "프로필을 하나 이상 선택하세요.",
+                    ),
+                    parent=win,
+                )
+                return
+            self.set_run_profiles(chosen, notify=True)
+            win.destroy()
+
+        def cancel() -> None:
+            win.destroy()
+
+        tk.Button(btn_row, text=txt("Cancel", "취소"), command=cancel).pack(
+            side=tk.RIGHT, padx=(theme.SPACE_1, 0)
+        )
+        tk.Button(btn_row, text=txt("Apply", "적용"), command=apply_and_close).pack(
+            side=tk.RIGHT
+        )
+
+        WindowUtils.center_window(win)
+        try:
+            win.grab_set()
+        except tk.TclError:
+            pass
+        win.focus_force()
 
 
 class ButtonFrame(tk.Frame):
