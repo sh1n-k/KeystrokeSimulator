@@ -9,7 +9,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import NotRequired, Protocol, TypedDict, cast
+from typing import Any, NotRequired, Protocol, TypedDict, cast
 
 import mss
 from loguru import logger
@@ -194,35 +194,43 @@ _WINDOWS_EXTENDED_VKS = frozenset(
     }
 )
 
-_ULONG_PTR = ctypes.c_size_t
+# Fixed Win32 widths so MSVC layout holds on both LLP64 (Windows) and LP64 hosts.
+_WIN_WORD = ctypes.c_uint16
+_WIN_DWORD = ctypes.c_uint32
+_WIN_LONG = ctypes.c_int32
+_WIN_ULONG_PTR = (
+    ctypes.c_uint64 if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_uint32
+)
+
+_win_user32_ready = False
 
 
 class _KEYBDINPUT(ctypes.Structure):
     _fields_ = (
-        ("wVk", ctypes.c_ushort),
-        ("wScan", ctypes.c_ushort),
-        ("dwFlags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", _ULONG_PTR),
+        ("wVk", _WIN_WORD),
+        ("wScan", _WIN_WORD),
+        ("dwFlags", _WIN_DWORD),
+        ("time", _WIN_DWORD),
+        ("dwExtraInfo", _WIN_ULONG_PTR),
     )
 
 
 class _MOUSEINPUT(ctypes.Structure):
     _fields_ = (
-        ("dx", ctypes.c_long),
-        ("dy", ctypes.c_long),
-        ("mouseData", ctypes.c_ulong),
-        ("dwFlags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", _ULONG_PTR),
+        ("dx", _WIN_LONG),
+        ("dy", _WIN_LONG),
+        ("mouseData", _WIN_DWORD),
+        ("dwFlags", _WIN_DWORD),
+        ("time", _WIN_DWORD),
+        ("dwExtraInfo", _WIN_ULONG_PTR),
     )
 
 
 class _HARDWAREINPUT(ctypes.Structure):
     _fields_ = (
-        ("uMsg", ctypes.c_ulong),
-        ("wParamL", ctypes.c_ushort),
-        ("wParamH", ctypes.c_ushort),
+        ("uMsg", _WIN_DWORD),
+        ("wParamL", _WIN_WORD),
+        ("wParamH", _WIN_WORD),
     )
 
 
@@ -236,7 +244,7 @@ class _INPUT_UNION(ctypes.Union):
 
 class _INPUT(ctypes.Structure):
     _fields_ = (
-        ("type", ctypes.c_ulong),
+        ("type", _WIN_DWORD),
         ("union", _INPUT_UNION),
     )
 
@@ -251,42 +259,80 @@ def _windows_is_extended_vk(code: int) -> bool:
     return code in _WINDOWS_EXTENDED_VKS
 
 
+def _windows_expected_input_sizeof() -> int:
+    """MSVC sizeof(INPUT): 40 on 64-bit, 28 on 32-bit."""
+    return 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28
+
+
+def _windows_user32() -> Any:
+    return ctypes.__dict__["windll"].user32
+
+
+def _configure_windows_input_apis() -> None:
+    """Bind SendInput/MapVirtualKey prototypes once."""
+    global _win_user32_ready
+    if _win_user32_ready:
+        return
+    user32 = _windows_user32()
+    map_virtual_key = user32.MapVirtualKeyW
+    send_input = user32.SendInput
+    map_virtual_key.argtypes = [ctypes.c_uint, ctypes.c_uint]
+    map_virtual_key.restype = ctypes.c_uint
+    send_input.argtypes = [ctypes.c_uint, ctypes.POINTER(_INPUT), ctypes.c_int]
+    send_input.restype = ctypes.c_uint
+    _win_user32_ready = True
+
+
 def _windows_map_vk_to_scan(code: int) -> int:
-    windll = ctypes.__dict__["windll"]
+    _configure_windows_input_apis()
     map_virtual_key = cast(
-        Callable[[int, int], int], windll.user32.MapVirtualKeyW
+        Callable[[int, int], int], _windows_user32().MapVirtualKeyW
     )
-    return int(map_virtual_key(code, _MAPVK_VK_TO_VSC)) & 0xFF
+    return int(map_virtual_key(int(code) & 0xFFFF, _MAPVK_VK_TO_VSC)) & 0xFF
 
 
 def _windows_build_keybdinput(code: int, *, key_up: bool) -> _KEYBDINPUT:
-    scan = _windows_map_vk_to_scan(code)
+    vk = int(code) & 0xFFFF
+    scan = _windows_map_vk_to_scan(vk)
     flags = 0
-    if _windows_is_extended_vk(code):
+    if _windows_is_extended_vk(vk):
         flags |= _KEYEVENTF_EXTENDEDKEY
     if key_up:
         flags |= _KEYEVENTF_KEYUP
 
-    if _windows_use_scancode_path():
+    prefer_scancode = _windows_use_scancode_path()
+    if prefer_scancode and scan == 0:
+        logger.warning(
+            f"MapVirtualKey returned 0 for vk=0x{vk:02X}; falling back to VK path"
+        )
+        prefer_scancode = False
+
+    if prefer_scancode:
         # Scan-code path for titles that ignore virtual-key-only events.
         flags |= _KEYEVENTF_SCANCODE
-        return _KEYBDINPUT(0, scan, flags, 0, _ULONG_PTR(0))
+        return _KEYBDINPUT(0, scan, flags, 0, 0)
 
     # Default: SendInput with VK + scan code (still user32 low-level).
-    return _KEYBDINPUT(code & 0xFFFF, scan, flags, 0, _ULONG_PTR(0))
+    return _KEYBDINPUT(vk, scan, flags, 0, 0)
 
 
 def _windows_send_key(code: int, *, key_up: bool) -> None:
-    windll = ctypes.__dict__["windll"]
-    send_input = cast(Callable[..., int], windll.user32.SendInput)
+    _configure_windows_input_apis()
+    send_input = cast(Callable[..., int], _windows_user32().SendInput)
     inp = _INPUT(
         type=_INPUT_KEYBOARD,
         union=_INPUT_UNION(ki=_windows_build_keybdinput(code, key_up=key_up)),
     )
-    sent = int(send_input(1, ctypes.byref(inp), ctypes.sizeof(_INPUT)))
+    cb_size = ctypes.sizeof(_INPUT)
+    expected = _windows_expected_input_sizeof()
+    if cb_size != expected:
+        logger.error(
+            f"INPUT sizeof mismatch: got {cb_size}, expected {expected} for this pointer width"
+        )
+    sent = int(send_input(1, ctypes.byref(inp), cb_size))
     if sent != 1:
         logger.warning(
-            f"SendInput returned {sent} for vk=0x{code:02X} key_up={key_up}"
+            f"SendInput returned {sent} for vk=0x{int(code) & 0xFFFF:02X} key_up={key_up}"
         )
 
 
@@ -348,6 +394,7 @@ class ModificationKeyHandler:
         key_lock: threading.Lock | None = None,
         pressed_keys: set[str] | None = None,
         pressed_key_codes: dict[str, int] | None = None,
+        term_event: threading.Event | None = None,
     ) -> None:
         self.key_codes = key_codes
         # press_time: (min_sec, max_sec) 튜플
@@ -358,6 +405,7 @@ class ModificationKeyHandler:
         self.key_lock = key_lock
         self.pressed_keys = pressed_keys
         self.pressed_key_codes = pressed_key_codes
+        self.term_event = term_event
         self.event = threading.Event()
 
     async def check_and_process(self) -> bool:
@@ -412,7 +460,7 @@ class ModificationKeyHandler:
         try:
             self.sim.press(code)
             down = True
-            await asyncio.sleep(random.uniform(*self.press_time))
+            await self._wait_hold_async(random.uniform(*self.press_time))
         finally:
             if down:
                 try:
@@ -430,6 +478,22 @@ class ModificationKeyHandler:
                     else:
                         pressed_keys.discard(norm_key)
                         pressed_key_codes.pop(norm_key, None)
+
+    async def _wait_hold_async(
+        self, duration: float, check_interval: float = 0.02
+    ) -> None:
+        """Hold duration, aborting early when processor term_event is set."""
+        if duration <= 0:
+            return
+        end_time = time.time() + duration
+        term = self.term_event
+        while time.time() < end_time:
+            if term is not None and term.is_set():
+                break
+            remaining = end_time - time.time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(check_interval, remaining))
 
 
 class KeystrokeProcessor:
@@ -483,6 +547,7 @@ class KeystrokeProcessor:
             key_lock=self.key_lock,
             pressed_keys=self.pressed_keys,
             pressed_key_codes=self.pressed_key_codes,
+            term_event=self.term_event,
         )
 
         self.event_data_list: list[EventData] = self._init_event_data(events)

@@ -198,7 +198,7 @@ class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
     async def test_sim_key_releases_if_sleep_fails(self):
         handler = ModificationKeyHandler(
             key_codes={"A": 65},
-            default_press_times=(0.0, 0.0),
+            default_press_times=(0.05, 0.05),
             mod_keys={},
             os_type="Darwin",
         )
@@ -211,6 +211,30 @@ class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 await handler._sim_key("A")
 
+        handler.sim.press.assert_called_once_with(65)
+        handler.sim.release.assert_called_once_with(65)
+
+    async def test_sim_key_aborts_hold_on_term_event(self):
+        term = threading.Event()
+        handler = ModificationKeyHandler(
+            key_codes={"A": 65},
+            default_press_times=(1.0, 1.0),
+            mod_keys={},
+            os_type="Darwin",
+            term_event=term,
+        )
+        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
+        sleep_calls = 0
+
+        async def fake_sleep(_seconds):
+            nonlocal sleep_calls
+            sleep_calls += 1
+            term.set()
+
+        with patch("app.core.processor.asyncio.sleep", side_effect=fake_sleep):
+            await handler._sim_key("A")
+
+        self.assertGreaterEqual(sleep_calls, 1)
         handler.sim.press.assert_called_once_with(65)
         handler.sim.release.assert_called_once_with(65)
 
@@ -274,6 +298,26 @@ class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
         handler.sim.press.assert_called_once_with(0)
         handler.sim.release.assert_called_once_with(0)
 
+    async def test_sim_key_honors_term_event_during_hold(self):
+        term = threading.Event()
+        handler = ModificationKeyHandler(
+            key_codes={"A": 65},
+            default_press_times=(1.0, 1.0),
+            mod_keys={},
+            os_type="Darwin",
+            term_event=term,
+        )
+        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
+        term.set()
+
+        started = __import__("asyncio").get_running_loop().time()
+        await handler._sim_key("A")
+        elapsed = __import__("asyncio").get_running_loop().time() - started
+
+        self.assertLess(elapsed, 0.2)
+        handler.sim.press.assert_called_once_with(65)
+        handler.sim.release.assert_called_once_with(65)
+
 
 class TestWindowsSendInputHelpers(unittest.TestCase):
     def test_extended_vk_detection(self):
@@ -328,6 +372,109 @@ class TestWindowsSendInputHelpers(unittest.TestCase):
             ki.dwFlags & processor_module._KEYEVENTF_EXTENDEDKEY,
             processor_module._KEYEVENTF_EXTENDEDKEY,
         )
+
+    def test_build_keybdinput_scancode_path_falls_back_when_scan_zero(self):
+        with (
+            patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": "1"}, clear=False),
+            patch(
+                "app.core.processor._windows_map_vk_to_scan", return_value=0
+            ),
+            patch("app.core.processor.logger.warning") as mock_warning,
+        ):
+            ki = processor_module._windows_build_keybdinput(0x41, key_up=False)
+
+        self.assertEqual(ki.wVk, 0x41)
+        self.assertEqual(ki.wScan, 0)
+        self.assertEqual(ki.dwFlags & processor_module._KEYEVENTF_SCANCODE, 0)
+        mock_warning.assert_called()
+
+    def test_scancode_path_plus_extended_flag(self):
+        with (
+            patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": "1"}, clear=False),
+            patch(
+                "app.core.processor._windows_map_vk_to_scan", return_value=0x4B
+            ),
+        ):
+            ki = processor_module._windows_build_keybdinput(0x25, key_up=False)
+
+        self.assertEqual(ki.wVk, 0)
+        flags = ki.dwFlags
+        self.assertEqual(
+            flags & processor_module._KEYEVENTF_SCANCODE,
+            processor_module._KEYEVENTF_SCANCODE,
+        )
+        self.assertEqual(
+            flags & processor_module._KEYEVENTF_EXTENDEDKEY,
+            processor_module._KEYEVENTF_EXTENDEDKEY,
+        )
+
+    def test_input_struct_matches_msvc_layout(self):
+        import ctypes
+
+        self.assertEqual(
+            ctypes.sizeof(processor_module._INPUT),
+            processor_module._windows_expected_input_sizeof(),
+        )
+        if ctypes.sizeof(ctypes.c_void_p) == 8:
+            self.assertEqual(ctypes.sizeof(processor_module._KEYBDINPUT), 24)
+            self.assertEqual(ctypes.sizeof(processor_module._MOUSEINPUT), 32)
+            self.assertEqual(ctypes.sizeof(processor_module._INPUT), 40)
+            self.assertEqual(processor_module._KEYBDINPUT.dwFlags.offset, 4)
+            self.assertEqual(processor_module._KEYBDINPUT.dwExtraInfo.offset, 16)
+            self.assertEqual(processor_module._INPUT.union.offset, 8)
+
+    def test_configure_user32_sets_argtypes_once(self):
+        import ctypes
+
+        send = MagicMock()
+        mapvk = MagicMock()
+        user32 = SimpleNamespace(SendInput=send, MapVirtualKeyW=mapvk)
+        windll = SimpleNamespace(user32=user32)
+        processor_module._win_user32_ready = False
+
+        with patch.dict(ctypes.__dict__, {"windll": windll}, clear=False):
+            processor_module._configure_windows_input_apis()
+            processor_module._configure_windows_input_apis()
+
+        self.assertEqual(send.argtypes[0], ctypes.c_uint)
+        self.assertIs(send.restype, ctypes.c_uint)
+        self.assertEqual(mapvk.argtypes, [ctypes.c_uint, ctypes.c_uint])
+        self.assertTrue(processor_module._win_user32_ready)
+        self.assertEqual(
+            send.argtypes,
+            [ctypes.c_uint, ctypes.POINTER(processor_module._INPUT), ctypes.c_int],
+        )
+        processor_module._win_user32_ready = False
+
+    def test_windows_send_key_invokes_sendinput_with_struct_size(self):
+        import ctypes
+
+        sent_sizes: list[int] = []
+        sent_counts: list[int] = []
+
+        def fake_send_input(n: int, _ptr: object, cb: int) -> int:
+            sent_counts.append(n)
+            sent_sizes.append(cb)
+            return n
+
+        fake_user32 = SimpleNamespace(
+            MapVirtualKeyW=lambda _vk, _mode: 0x1E,
+            SendInput=fake_send_input,
+        )
+        fake_windll = SimpleNamespace(user32=fake_user32)
+
+        with (
+            patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": ""}, clear=False),
+            patch.dict(ctypes.__dict__, {"windll": fake_windll}, clear=False),
+        ):
+            processor_module._win_user32_ready = False
+            processor_module._windows_send_key(0x41, key_up=False)
+            processor_module._windows_send_key(0x41, key_up=True)
+            processor_module._win_user32_ready = False
+
+        self.assertEqual(sent_counts, [1, 1])
+        expected = processor_module._windows_expected_input_sizeof()
+        self.assertEqual(sent_sizes, [expected, expected])
 
 
 class TestDarwinKeyEventSource(unittest.TestCase):
