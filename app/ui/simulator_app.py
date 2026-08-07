@@ -39,6 +39,12 @@ from app.storage.modkey_sets_storage import (
     default_modification_keys,
     get_modkey_set,
 )
+from app.storage.run_sets_storage import (
+    CURRENT_RUN_SET_ID,
+    DEFAULT_RUN_SETS_PATH,
+    is_current_run_set,
+    upsert_run_set,
+)
 from app.storage.profile_storage import (
     load_profile,
 )
@@ -122,6 +128,8 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.selected_modkey_set: tk.StringVar = tk.StringVar(
             value=DEFAULT_MODKEY_SET_NAME
         )
+        self.selected_run_set: tk.StringVar = tk.StringVar(value=CURRENT_RUN_SET_ID)
+        self.run_sets_path = Path(DEFAULT_RUN_SETS_PATH)
         self.keystroke_processor: KeystrokeProcessor | None = None
         self.terminate_event: threading.Event = threading.Event()
         self.settings: UserSettings = UserSettings()
@@ -243,7 +251,10 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.modkey_set_frame.pack(fill="x", pady=(0, theme.SPACE_1))
         self.run_set_frame: RunSetFrame = RunSetFrame(
             target_body,
-            self.profiles_dir,
+            self.selected_run_set,
+            sets_path=self.run_sets_path,
+            profiles_dir=self.profiles_dir,
+            current_profile_getter=lambda: self.selected_profile.get(),
             on_change=self._on_run_profiles_changed,
         )
         self.run_set_frame.configure(bg=theme.SURFACE_CANVAS)
@@ -342,7 +353,9 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.profile_frame.copy_button,
             self.profile_frame.del_button,
             self.profile_frame.sort_button,
-            self.run_set_frame.select_button,
+            self.run_set_frame.edit_button,
+            self.run_set_frame.copy_button,
+            self.run_set_frame.del_button,
             self.modkey_set_frame.edit_button,
             self.modkey_set_frame.copy_button,
             self.modkey_set_frame.del_button,
@@ -498,6 +511,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.selected_process,
             self.selected_profile,
             self.selected_modkey_set,
+            self.selected_run_set,
         ):
             self._selection_trace_handles.append(var.trace_add("write", schedule_update))
 
@@ -535,25 +549,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         if isinstance(prof, str) and prof:
             self.profile_frame.set_selected_profile(prof)
         self._sync_run_set_available()
-        run_profiles_raw = state.get("run_profiles")
-        run_profiles: list[str] = []
-        if isinstance(run_profiles_raw, list):
-            run_profiles = [
-                str(item)
-                for item in cast(list[object], run_profiles_raw)
-                if isinstance(item, str) and item
-            ]
-        elif isinstance(run_profiles_raw, str) and run_profiles_raw:
-            run_profiles = [run_profiles_raw]
-        if run_profiles:
-            self.run_set_frame.set_run_profiles(run_profiles, notify=False)
-        else:
-            fallback = (
-                prof
-                if isinstance(prof, str) and prof
-                else self.selected_profile.get()
-            )
-            self.run_set_frame.ensure_default_from_profile(fallback or "")
+        self._restore_run_set_selection(state, prof if isinstance(prof, str) else None)
         modkey_set = state.get("modkey_set")
         if isinstance(modkey_set, str) and modkey_set:
             self.modkey_set_frame.set_selected_set(modkey_set)
@@ -690,6 +686,49 @@ class KeystrokeSimulatorApp(tk.Tk):
         if not self.is_running.get():
             self.update_ui()
 
+    def _restore_run_set_selection(
+        self, state: dict[str, object], profile_name: str | None
+    ) -> None:
+        """Restore named run set or migrate legacy run_profiles list."""
+        frame = self.__dict__.get("run_set_frame")
+        if frame is None:
+            return
+        run_set = state.get("run_set")
+        if isinstance(run_set, str) and run_set.strip():
+            frame.set_selected_set(run_set.strip())
+            return
+        # Legacy: run_profiles list from earlier multi-select UI.
+        run_profiles_raw = state.get("run_profiles")
+        run_profiles: list[str] = []
+        if isinstance(run_profiles_raw, list):
+            run_profiles = [
+                str(item)
+                for item in cast(list[object], run_profiles_raw)
+                if isinstance(item, str) and item
+            ]
+        elif isinstance(run_profiles_raw, str) and run_profiles_raw:
+            run_profiles = [run_profiles_raw]
+        if len(run_profiles) >= 2:
+            migrated = "Migrated"
+            try:
+                # Avoid clobbering an existing user set name if present.
+                existing = set(frame.set_ids)
+                name = migrated
+                n = 2
+                while name in existing and name != CURRENT_RUN_SET_ID:
+                    name = f"{migrated} {n}"
+                    n += 1
+                upsert_run_set(name, run_profiles, self.run_sets_path)
+                frame.load_sets(select_id=name)
+            except Exception:
+                frame.set_selected_set(CURRENT_RUN_SET_ID)
+            return
+        if len(run_profiles) == 1 and profile_name and run_profiles[0] != profile_name:
+            # Single different profile → named one-member set is overkill; use current.
+            frame.set_selected_set(CURRENT_RUN_SET_ID)
+            return
+        frame.set_selected_set(CURRENT_RUN_SET_ID)
+
     def _get_run_profile_names(self) -> list[str]:
         frame = self.__dict__.get("run_set_frame")
         if frame is not None:
@@ -698,6 +737,22 @@ class KeystrokeSimulatorApp(tk.Tk):
                 return names
         selected = self.selected_profile.get()
         return [selected] if selected else []
+
+    def _run_set_status_label(self) -> str:
+        frame = self.__dict__.get("run_set_frame")
+        set_id = (
+            frame.get_selected_set_id()
+            if frame is not None
+            else self.selected_run_set.get()
+        )
+        if is_current_run_set(set_id):
+            current = self.selected_profile.get() or "—"
+            return txt(
+                "Current profile ({profile})",
+                "현재 프로필 ({profile})",
+                profile=current,
+            )
+        return set_id or "—"
 
     def _load_profiles_for_run(
         self, names: list[str], *, migrate: bool
@@ -993,7 +1048,8 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "fg": STATUS_FG_WARN,
             }
 
-        profile_summary = format_run_profile_summary(list(session.profile_names))
+        set_label = self._run_set_status_label()
+        members_summary = format_run_profile_summary(list(session.profile_names))
         modkey_set_name = self.selected_modkey_set.get() or DEFAULT_MODKEY_SET_NAME
         return {
             "can_start": True,
@@ -1003,9 +1059,10 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "모니터링을 시작할 준비가 끝났습니다.",
             ),
             "detail": txt(
-                "Run set '{profiles}' · ModKey set '{modkey_set}' · {count} runnable event(s).",
-                "실행 세트 '{profiles}' · 수정키 세트 '{modkey_set}' · 실행 가능한 이벤트 {count}개.",
-                profiles=profile_summary,
+                "Run set '{run_set}' [{members}] · ModKey set '{modkey_set}' · {count} runnable event(s).",
+                "실행 세트 '{run_set}' [{members}] · 수정키 세트 '{modkey_set}' · 실행 가능한 이벤트 {count}개.",
+                run_set=set_label,
+                members=members_summary,
                 modkey_set=modkey_set_name,
                 count=runnable_count,
             ),
@@ -1015,16 +1072,17 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def _status_detail_with_selection(self, detail: str) -> str:
         """Append run-set + modkey-set selection when not already present."""
-        run_summary = format_run_profile_summary(self._get_run_profile_names())
-        modkey_set_name = self.selected_modkey_set.get()
-        if run_summary == "—" and not modkey_set_name:
+        profile_name = (self.selected_profile.get() or "").strip()
+        modkey_set_name = (self.selected_modkey_set.get() or "").strip()
+        if not profile_name and not modkey_set_name:
             return detail
         if "ModKey set" in detail or "수정키 세트" in detail:
             return detail
+        set_label = self._run_set_status_label()
         line = txt(
-            "Run set '{profiles}' · ModKey set '{modkey_set}'",
-            "실행 세트 '{profiles}' · 수정키 세트 '{modkey_set}'",
-            profiles=run_summary,
+            "Run set '{run_set}' · ModKey set '{modkey_set}'",
+            "실행 세트 '{run_set}' · 수정키 세트 '{modkey_set}'",
+            run_set=set_label or "—",
             modkey_set=modkey_set_name or "—",
         )
         return f"{detail}\n{line}" if detail else line
@@ -1522,7 +1580,15 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profile_frame.sort_button.config(state=state)
         run_set_frame = self.__dict__.get("run_set_frame")
         if run_set_frame is not None:
-            run_set_frame.select_button.config(state=state)
+            run_set_frame.sets_combobox.config(state=readonly_state)
+            if running:
+                run_set_frame.edit_button.config(state="disabled")
+                run_set_frame.copy_button.config(state="disabled")
+                run_set_frame.del_button.config(state="disabled")
+            else:
+                run_set_frame._update_action_states()
+            # Keep "current profile" label in sync with profile combobox.
+            run_set_frame._refresh_display_value()
         modkey_frame = self.__dict__.get("modkey_set_frame")
         if modkey_frame is not None:
             modkey_frame.sets_combobox.config(state=readonly_state)
@@ -1624,7 +1690,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         StateUtils.save_main_app_state(
             process=self.selected_process.get().split(" (")[0],
             profile=self.selected_profile.get(),
-            run_profiles=self._get_run_profile_names(),
+            run_set=self.selected_run_set.get() or CURRENT_RUN_SET_ID,
             modkey_set=self.selected_modkey_set.get(),
         )
 

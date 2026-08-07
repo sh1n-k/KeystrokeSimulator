@@ -27,11 +27,16 @@ from app.storage.profile_storage import (
     load_profile_favorites,
     load_profile_meta_favorite,
 )
-from app.core.run_composition import (
-    format_run_profile_summary,
-    normalize_run_profile_list,
-)
 from app.storage.profile_display import QUICK_PROFILE_NAME, build_profile_display_values
+from app.storage.run_sets_storage import (
+    CURRENT_RUN_SET_ID,
+    copy_run_set,
+    delete_run_set,
+    get_run_set,
+    is_current_run_set,
+    list_run_set_names,
+    upsert_run_set,
+)
 from app.ui import theme
 from app.utils.i18n import txt
 from app.utils.system import ProcessCollector
@@ -343,82 +348,156 @@ class ProfileFrame(tk.Frame):
 
 
 class RunSetFrame(tk.Frame):
-    """Multi-profile run selection (edit profile stays on ProfileFrame)."""
+    """Named run-set selector + virtual 'current profile' entry."""
 
     def __init__(
         self,
         master: tk.Misc,
-        profiles_dir: str | Path,
+        textvariable: tk.StringVar,
         *,
+        sets_path: Path,
+        profiles_dir: str | Path,
+        current_profile_getter: Callable[[], str],
         on_change: RunProfilesChanged | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(master, **kwargs)
+        self.sets_path = Path(sets_path)
         self.profiles_dir = Path(profiles_dir)
+        self.selected_var = textvariable
+        self._current_profile_getter = current_profile_getter
         self._on_change = on_change
-        self._run_profiles: list[str] = []
         self._available: list[str] = []
+        self.set_ids: list[str] = []
+        self.id_to_index: dict[str, int] = {}
 
         _configure_target_row_grid(self)
 
         self.lbl_run_set: tk.Label = tk.Label(self, anchor="w", width=8)
         self.lbl_run_set.grid(row=0, column=0, sticky="w", padx=(0, 6))
-        self.summary_var: tk.StringVar = tk.StringVar(value="—")
-        self.summary_entry: ttk.Entry = ttk.Entry(
+        self.display_var: tk.StringVar = tk.StringVar()
+        self.sets_combobox: ttk.Combobox = ttk.Combobox(
             self,
-            textvariable=self.summary_var,
+            textvariable=self.display_var,
             state="readonly",
             width=_TARGET_COMBO_CHARS,
         )
-        self.summary_entry.grid(row=0, column=1, sticky="w", padx=(0, 6))
-        self.select_button: tk.Button = tk.Button(self, command=self.open_selector)
-        self.select_button.grid(
-            row=0,
-            column=2,
-            columnspan=_TARGET_ACTION_COLS,
-            sticky="we",
-        )
+        self.sets_combobox.grid(row=0, column=1, sticky="w", padx=(0, 6))
+        self.sets_combobox.bind("<<ComboboxSelected>>", self._on_set_selected)
+        self.edit_button: tk.Button = tk.Button(self, command=self.open_editor)
+        self.edit_button.grid(row=0, column=2, sticky="we", padx=(0, 6))
+        self.copy_button: tk.Button = tk.Button(self, command=self.copy_set)
+        self.copy_button.grid(row=0, column=3, sticky="we", padx=(0, 6))
+        self.del_button: tk.Button = tk.Button(self, command=self.delete_set)
+        self.del_button.grid(row=0, column=4, sticky="we", padx=(0, 6))
         self.refresh_texts()
-
-    def get_run_profiles(self) -> list[str]:
-        return list(self._run_profiles)
+        self.load_sets(select_id=CURRENT_RUN_SET_ID)
 
     def set_available_profiles(self, names: list[str]) -> None:
         self._available = list(names)
-        self.set_run_profiles(self._run_profiles, notify=False)
+        # Refresh current-profile display label and prune named sets visually.
+        self.load_sets(select_id=self.get_selected_set_id())
 
-    def set_run_profiles(
-        self, names: list[str] | None, *, notify: bool = True
-    ) -> None:
-        cleaned = normalize_run_profile_list(names, self._available)
-        if not cleaned and self._available:
-            fallback = (
-                QUICK_PROFILE_NAME
-                if QUICK_PROFILE_NAME in self._available
-                else self._available[0]
-            )
-            cleaned = [fallback]
-        self._run_profiles = cleaned
-        self._refresh_summary()
-        if notify and self._on_change is not None:
-            self._on_change(list(self._run_profiles))
+    def get_selected_set_id(self) -> str:
+        idx = self.sets_combobox.current()
+        if 0 <= idx < len(self.set_ids):
+            return self.set_ids[idx]
+        raw = self.selected_var.get() or CURRENT_RUN_SET_ID
+        return raw if raw else CURRENT_RUN_SET_ID
 
-    def ensure_default_from_profile(self, profile_name: str) -> None:
-        if self._run_profiles:
+    def get_run_profiles(self) -> list[str]:
+        set_id = self.get_selected_set_id()
+        if is_current_run_set(set_id):
+            current = (self._current_profile_getter() or "").strip()
+            return [current] if current else []
+        members = get_run_set(set_id, self.sets_path)
+        available = set(self._available)
+        if available:
+            return [n for n in members if n in available]
+        return list(members)
+
+    def set_selected_set(self, set_id: str) -> bool:
+        target = CURRENT_RUN_SET_ID if is_current_run_set(set_id) else set_id
+        idx = self.id_to_index.get(target)
+        if idx is None and not is_current_run_set(target):
+            # Unknown named set → fall back to current.
+            idx = self.id_to_index.get(CURRENT_RUN_SET_ID)
+            target = CURRENT_RUN_SET_ID
+        if idx is None:
+            return False
+        self.sets_combobox.current(idx)
+        self.selected_var.set(target)
+        self._refresh_display_value()
+        self._update_action_states()
+        return True
+
+    def load_sets(self, select_id: str | None = None) -> None:
+        named = list_run_set_names(self.sets_path)
+        self.set_ids = [CURRENT_RUN_SET_ID] + named
+        self.id_to_index = {sid: i for i, sid in enumerate(self.set_ids)}
+        self.sets_combobox.configure(values=self._display_values())
+        target = select_id or self.selected_var.get() or CURRENT_RUN_SET_ID
+        if not self.set_selected_set(target):
+            self.set_selected_set(CURRENT_RUN_SET_ID)
+
+    def _display_values(self) -> list[str]:
+        return [self._display_for_id(sid) for sid in self.set_ids]
+
+    def _display_for_id(self, set_id: str) -> str:
+        if is_current_run_set(set_id):
+            current = (self._current_profile_getter() or "").strip()
+            base = txt("Current profile", "현재 프로필")
+            return f"{base} ({current})" if current else base
+        return set_id
+
+    def _refresh_display_value(self) -> None:
+        idx = self.sets_combobox.current()
+        if 0 <= idx < len(self.set_ids):
+            self.display_var.set(self._display_for_id(self.set_ids[idx]))
+            # Keep combobox values in sync when current profile name changes.
+            self.sets_combobox.configure(values=self._display_values())
+            if 0 <= idx < len(self.set_ids):
+                self.sets_combobox.current(idx)
+
+    def _on_set_selected(self, _event: object | None = None) -> None:
+        idx = self.sets_combobox.current()
+        if not (0 <= idx < len(self.set_ids)):
             return
-        if profile_name and profile_name in self._available:
-            self.set_run_profiles([profile_name], notify=False)
-        else:
-            self.set_run_profiles([], notify=False)
+        self.selected_var.set(self.set_ids[idx])
+        self._refresh_display_value()
+        self._update_action_states()
+        if self._on_change is not None:
+            self._on_change(self.get_run_profiles())
 
-    def _refresh_summary(self) -> None:
-        self.summary_var.set(format_run_profile_summary(self._run_profiles))
+    def _update_action_states(self) -> None:
+        is_virtual = is_current_run_set(self.get_selected_set_id())
+        # Virtual entry: edit disabled (save-as via copy). Delete disabled.
+        edit_state = "disabled" if is_virtual else "normal"
+        del_state = "disabled" if is_virtual else "normal"
+        self.edit_button.config(state=edit_state)
+        self.del_button.config(state=del_state)
+        self.copy_button.config(state="normal")
 
     def refresh_texts(self) -> None:
         self.lbl_run_set.config(text=txt("Run set:", "실행 세트:"))
-        self.select_button.config(text=txt("Select…", "선택…"))
+        self.edit_button.config(text=txt("Edit", "편집"))
+        self.copy_button.config(text=txt("Copy", "복사"))
+        self.del_button.config(text=txt("Delete", "삭제"))
+        self._refresh_display_value()
+        self._update_action_states()
 
-    def open_selector(self) -> None:
+    def open_editor(self) -> None:
+        set_id = self.get_selected_set_id()
+        if is_current_run_set(set_id):
+            messagebox.showinfo(
+                txt("Info", "안내"),
+                txt(
+                    "Current profile tracks the Profiles row. Copy it to create a named run set.",
+                    "현재 프로필은 프로필 행을 따릅니다. 이름 있는 실행 세트를 만들려면 복사하세요.",
+                ),
+                parent=self,
+            )
+            return
         if not self._available:
             messagebox.showinfo(
                 txt("Info", "안내"),
@@ -426,20 +505,170 @@ class RunSetFrame(tk.Frame):
                 parent=self,
             )
             return
+        members = get_run_set(set_id, self.sets_path)
+        self._open_member_dialog(
+            title=txt("Edit Run Set", "실행 세트 편집"),
+            initial_name=set_id,
+            initial_members=members,
+            rename_allowed=True,
+            on_save=lambda name, profiles: self._save_edited_set(
+                set_id, name, profiles
+            ),
+        )
 
+    def _save_edited_set(
+        self, original_id: str, new_name: str, profiles: list[str]
+    ) -> None:
+        cleaned_name = new_name.strip()
+        if not cleaned_name:
+            raise ValueError(txt("Name is required.", "이름이 필요합니다."))
+        if is_current_run_set(cleaned_name):
+            raise ValueError(
+                txt("That name is reserved.", "예약된 이름입니다.")
+            )
+        if cleaned_name != original_id and cleaned_name in list_run_set_names(
+            self.sets_path
+        ):
+            raise FileExistsError(
+                txt(
+                    "Run set '{name}' already exists.",
+                    "실행 세트 '{name}'이(가) 이미 존재합니다.",
+                    name=cleaned_name,
+                )
+            )
+        if cleaned_name != original_id:
+            # Rename by delete+upsert to keep a single write path simple.
+            delete_run_set(original_id, self.sets_path)
+        upsert_run_set(cleaned_name, profiles, self.sets_path)
+        self.load_sets(select_id=cleaned_name)
+        if self._on_change is not None:
+            self._on_change(self.get_run_profiles())
+
+    def copy_set(self) -> None:
+        set_id = self.get_selected_set_id()
+        if is_current_run_set(set_id):
+            current = (self._current_profile_getter() or "").strip()
+            if not current:
+                messagebox.showwarning(
+                    txt("Warning", "경고"),
+                    txt("No profile selected.", "선택된 프로필이 없습니다."),
+                    parent=self,
+                )
+                return
+            src_profiles = [current]
+            base_name = current
+        else:
+            src_profiles = get_run_set(set_id, self.sets_path)
+            base_name = set_id
+        if not src_profiles:
+            messagebox.showwarning(
+                txt("Warning", "경고"),
+                txt("Source run set is empty.", "원본 실행 세트가 비어 있습니다."),
+                parent=self,
+            )
+            return
+        dst_name = f"{base_name} - Copied"
+        n = 2
+        existing = set(list_run_set_names(self.sets_path))
+        while dst_name in existing:
+            dst_name = f"{base_name} - Copied {n}"
+            n += 1
+        try:
+            if is_current_run_set(set_id):
+                upsert_run_set(dst_name, src_profiles, self.sets_path)
+            else:
+                copy_run_set(set_id, dst_name, self.sets_path)
+            self.load_sets(select_id=dst_name)
+            if self._on_change is not None:
+                self._on_change(self.get_run_profiles())
+            messagebox.showinfo(
+                txt("Run Set Copied", "실행 세트 복사 완료"),
+                txt(
+                    "Created '{name}' and selected it.",
+                    "'{name}' 세트를 만들고 선택했습니다.",
+                    name=dst_name,
+                ),
+                parent=self,
+            )
+        except Exception as e:
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt("Copy failed: {error}", "복사 실패: {error}", error=e),
+                parent=self,
+            )
+
+    def delete_set(self) -> None:
+        set_id = self.get_selected_set_id()
+        if is_current_run_set(set_id):
+            return
+        if not messagebox.askokcancel(
+            txt("Warning", "경고"),
+            txt(
+                "Delete run set '{name}'?",
+                "실행 세트 '{name}'을(를) 삭제하시겠습니까?",
+                name=set_id,
+            ),
+            parent=self,
+        ):
+            return
+        try:
+            next_id = delete_run_set(set_id, self.sets_path)
+            self.load_sets(select_id=next_id or CURRENT_RUN_SET_ID)
+            if self._on_change is not None:
+                self._on_change(self.get_run_profiles())
+            messagebox.showinfo(
+                txt("Run Set Deleted", "실행 세트 삭제 완료"),
+                txt(
+                    "Deleted '{name}'.",
+                    "'{name}' 세트를 삭제했습니다.",
+                    name=set_id,
+                ),
+                parent=self,
+            )
+        except Exception as e:
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt("Delete failed: {error}", "삭제 실패: {error}", error=e),
+                parent=self,
+            )
+
+    def _open_member_dialog(
+        self,
+        *,
+        title: str,
+        initial_name: str,
+        initial_members: list[str],
+        rename_allowed: bool,
+        on_save: Callable[[str, list[str]], None],
+    ) -> None:
         win = tk.Toplevel(self)
-        win.title(txt("Select Run Profiles", "실행 프로필 선택"))
+        win.title(title)
         win.configure(bg=theme.SURFACE_PAPER)
         win.transient(self.winfo_toplevel())
         body = tk.Frame(
             win, bg=theme.SURFACE_PAPER, padx=theme.SPACE_3, pady=theme.SPACE_3
         )
         body.pack(fill="both", expand=True)
+
+        name_row = tk.Frame(body, bg=theme.SURFACE_PAPER)
+        name_row.pack(fill="x", pady=(0, theme.SPACE_2))
+        tk.Label(
+            name_row,
+            text=txt("Name:", "이름:"),
+            bg=theme.SURFACE_PAPER,
+            fg=theme.INK_SECONDARY,
+        ).pack(side=tk.LEFT)
+        name_var = tk.StringVar(value=initial_name)
+        name_entry = ttk.Entry(name_row, textvariable=name_var, width=28)
+        name_entry.pack(side=tk.LEFT, padx=(theme.SPACE_1, 0), fill="x", expand=True)
+        if not rename_allowed:
+            name_entry.configure(state="readonly")
+
         tk.Label(
             body,
             text=txt(
-                "Check profiles to run together at Start.",
-                "시작 시 함께 실행할 프로필을 선택하세요.",
+                "Check profiles included in this run set.",
+                "이 실행 세트에 포함할 프로필을 선택하세요.",
             ),
             bg=theme.SURFACE_PAPER,
             fg=theme.INK_SECONDARY,
@@ -451,7 +680,7 @@ class RunSetFrame(tk.Frame):
         list_frame.pack(fill="both", expand=True)
         list_frame.pack_propagate(False)
         vars_by_name: dict[str, tk.BooleanVar] = {}
-        selected = set(self._run_profiles)
+        selected = set(initial_members)
         for name in self._available:
             var = tk.BooleanVar(value=name in selected)
             vars_by_name[name] = var
@@ -481,14 +710,21 @@ class RunSetFrame(tk.Frame):
                     parent=win,
                 )
                 return
-            self.set_run_profiles(chosen, notify=True)
+            try:
+                on_save(name_var.get(), chosen)
+            except Exception as e:
+                messagebox.showerror(
+                    txt("Error", "오류"),
+                    txt("Save failed: {error}", "저장 실패: {error}", error=e),
+                    parent=win,
+                )
+                return
             win.destroy()
 
         def cancel(_event: object | None = None) -> None:
             win.destroy()
 
         def _style_dialog_button(btn: tk.Button) -> None:
-            # Flat outline keeps macOS Aqua from drawing multicolored focus rings.
             btn.configure(
                 bg=theme.SURFACE_CANVAS,
                 fg=theme.INK_PRIMARY,

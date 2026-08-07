@@ -29,24 +29,48 @@ class FakeVar:
 
 
 class FakeRunSetFrame:
-    def __init__(self, names=None):
+    def __init__(self, names=None, set_id="__current__"):
         self._names = list(names or [])
-        self.select_button = MagicMock()
+        self._set_id = set_id
+        self.sets_combobox = MagicMock()
+        self.edit_button = MagicMock()
+        self.copy_button = MagicMock()
+        self.del_button = MagicMock()
+        self.set_ids = ["__current__"]
 
     def get_run_profiles(self):
         return list(self._names)
 
-    def set_run_profiles(self, names, *, notify=True):
-        self._names = list(names or [])
+    def get_selected_set_id(self):
+        return self._set_id
+
+    def set_selected_set(self, set_id):
+        self._set_id = set_id
+        return True
+
+    def set_available_profiles(self, names):
+        pass
+
+    def load_sets(self, select_id=None):
+        if select_id is not None:
+            self._set_id = select_id
+
+    def _update_action_states(self):
+        pass
+
+    def _refresh_display_value(self):
+        pass
 
 
 def _make_app_stub(run_profiles=None) -> KeystrokeSimulatorApp:
     app = KeystrokeSimulatorApp.__new__(KeystrokeSimulatorApp)
     app.profiles_dir = "profiles"
     app.modkey_sets_path = Path("modkey_sets.json")
+    app.run_sets_path = Path("run_sets.json")
     app.selected_process = FakeVar("")
     app.selected_profile = FakeVar("")
     app.selected_modkey_set = FakeVar("Default")
+    app.selected_run_set = FakeVar("__current__")
     app.is_running = FakeVar(False)
     app.keystroke_processor = None
     app.terminate_event = MagicMock()
@@ -869,7 +893,7 @@ class TestSaveLatestState(unittest.TestCase):
         mock_save_state.assert_called_once_with(
             process="SomeProcess",
             profile="Quick",
-            run_profiles=["Quick"],
+            run_set="__current__",
             modkey_set="Default",
         )
 
