@@ -431,8 +431,10 @@ class TestMainUiState(unittest.TestCase):
 
         app.profile_frame = MagicMock()
         app.profile_frame.profile_combobox = MagicMock()
+        app.profile_frame.edit_button = MagicMock()
         app.profile_frame.copy_button = MagicMock()
         app.profile_frame.del_button = MagicMock()
+        app.profile_frame.sort_button = MagicMock()
 
         app.modkey_set_frame = MagicMock()
         app.modkey_set_frame.sets_combobox = MagicMock()
@@ -446,9 +448,6 @@ class TestMainUiState(unittest.TestCase):
         app.button_frame.settings_button = MagicMock()
         app.button_frame.clear_logs_button = MagicMock()
 
-        app.profile_button_frame = MagicMock()
-        app.profile_button_frame.edit_profile_button = MagicMock()
-        app.profile_button_frame.sort_button = MagicMock()
         app._get_readiness_snapshot = MagicMock(
             return_value={
                 "can_start": not running,
@@ -476,6 +475,8 @@ class TestMainUiState(unittest.TestCase):
         app.modkey_set_frame.edit_button.config.assert_called_once_with(
             state="disabled"
         )
+        app.profile_frame.edit_button.config.assert_called_once_with(state="disabled")
+        app.profile_frame.sort_button.config.assert_called_once_with(state="disabled")
 
     def test_update_ui_enables_quick_events_and_modkey_set_when_stopped(self):
         app = self._make_ui_stub(running=False)
@@ -486,6 +487,8 @@ class TestMainUiState(unittest.TestCase):
             state="normal"
         )
         app.modkey_set_frame.edit_button.config.assert_called_once_with(state="normal")
+        app.profile_frame.edit_button.config.assert_called_once_with(state="normal")
+        app.profile_frame.sort_button.config.assert_called_once_with(state="normal")
 
     def test_update_ui_updates_start_button_label_for_running_state(self):
         app = self._make_ui_stub(running=True)
@@ -507,25 +510,6 @@ class TestMainUiState(unittest.TestCase):
             text="Start",
             state="disabled",
         )
-
-    def test_profile_nav_focus_opens_profile_combobox(self):
-        app = self._make_ui_stub(running=False)
-
-        KeystrokeSimulatorApp._focus_profile_selector(app)
-
-        app.profile_frame.profile_combobox.focus_set.assert_called_once()
-        app.profile_frame.profile_combobox.tk.call.assert_called_once_with(
-            "ttk::combobox::Post", app.profile_frame.profile_combobox
-        )
-
-    def test_tools_nav_focuses_tools_section_without_opening_settings(self):
-        app = self._make_ui_stub(running=False)
-        app.open_settings = MagicMock()
-
-        KeystrokeSimulatorApp._focus_tools_section(app)
-
-        app.button_frame.quick_events_button.focus_set.assert_called_once()
-        app.open_settings.assert_not_called()
 
     @patch("app.ui.simulator_app.load_profile")
     def test_readiness_snapshot_reports_runtime_toggle_conflict(

@@ -23,7 +23,6 @@ from app.ui.main_frames import (
     ButtonFrame,
     ModKeySetFrame,
     ProcessFrame,
-    ProfileButtonFrame,
     ProfileFrame,
 )
 from app.ui.input_listener_session import InputListener, InputListenerSession
@@ -204,10 +203,8 @@ class KeystrokeSimulatorApp(tk.Tk):
             pady=theme.SPACE_3,
         )
         self.body.pack(fill="both", expand=True, side="top")
-        self.nav_rail: tk.Frame = self._build_main_nav_rail(self.body)
-        self.nav_rail.pack(side=tk.LEFT, fill="y", padx=(0, theme.SPACE_3))
         self.workspace: tk.Frame = tk.Frame(self.body, bg=theme.SURFACE_PAPER)
-        self.workspace.pack(side=tk.LEFT, fill="both", expand=True)
+        self.workspace.pack(side=tk.TOP, fill="both", expand=True)
 
         # TARGET card -----------------------------------------------------
         self.target_card: tk.Frame
@@ -221,7 +218,11 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.process_frame.configure(bg=theme.SURFACE_CANVAS)
         self.process_frame.pack(fill="x", pady=(0, theme.SPACE_1))
         self.profile_frame: ProfileFrame = ProfileFrame(
-            target_body, self.selected_profile, self.profiles_dir
+            target_body,
+            self.selected_profile,
+            self.profiles_dir,
+            edit_cb=self.open_profile,
+            sort_cb=self.sort_profile_events,
         )
         self.profile_frame.configure(bg=theme.SURFACE_CANVAS)
         self.profile_frame.pack(fill="x", pady=(0, theme.SPACE_1))
@@ -315,24 +316,17 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.clear_local_logs,
         )
         self.button_frame.configure(bg=theme.SURFACE_CANVAS)
-        self.button_frame.pack(fill="x", pady=(0, theme.SPACE_1))
-        self.profile_button_frame: ProfileButtonFrame = ProfileButtonFrame(
-            tools_body,
-            self.open_profile,
-            self.sort_profile_events,
-        )
-        self.profile_button_frame.configure(bg=theme.SURFACE_CANVAS)
-        self.profile_button_frame.pack(fill="x")
+        self.button_frame.pack(fill="x")
 
         for sec in (
             self.button_frame.quick_events_button,
             self.button_frame.settings_button,
             self.button_frame.clear_logs_button,
-            self.profile_button_frame.edit_profile_button,
-            self.profile_button_frame.sort_button,
             self.process_frame.refresh_button,
+            self.profile_frame.edit_button,
             self.profile_frame.copy_button,
             self.profile_frame.del_button,
+            self.profile_frame.sort_button,
             self.modkey_set_frame.edit_button,
             self.modkey_set_frame.copy_button,
             self.modkey_set_frame.del_button,
@@ -376,64 +370,6 @@ class KeystrokeSimulatorApp(tk.Tk):
     # ---------------------------------------------------------------
     # Helpers used by _create_ui
     # ---------------------------------------------------------------
-    def _build_main_nav_rail(self, parent: tk.Misc) -> tk.Frame:
-        f = theme.fonts()
-        rail = tk.Frame(
-            parent,
-            bg=theme.SURFACE_PANEL,
-            padx=theme.SPACE_2,
-            pady=theme.SPACE_3,
-            width=88,
-        )
-        rail.pack_propagate(False)
-
-        def make_item(icon: str, en: str, ko: str, command: VoidCallback) -> None:
-            item = tk.Label(
-                rail,
-                text=f"{icon}\n{txt(en, ko)}",
-                bg=theme.SURFACE_PANEL,
-                fg=theme.INK_SECONDARY,
-                font=f["caption"],
-                justify="center",
-                cursor="hand2",
-                padx=theme.SPACE_1,
-                pady=theme.SPACE_2,
-            )
-            item.pack(fill="x", pady=(0, theme.SPACE_2))
-            item.bind("<Button-1>", lambda _e: command())
-
-        make_item("▣", "Process", "프로세스", self._focus_process_selector)
-        make_item("◇", "Profile", "프로필", self._focus_profile_selector)
-        make_item("▤", "Tools", "도구", self._focus_tools_section)
-        return rail
-
-    def _focus_process_selector(self) -> None:
-        widget = getattr(getattr(self, "process_frame", None), "process_combobox", None)
-        self._focus_combobox(widget)
-
-    def _focus_profile_selector(self) -> None:
-        widget = getattr(getattr(self, "profile_frame", None), "profile_combobox", None)
-        if widget is not None:
-            self._focus_combobox(widget)
-
-    @staticmethod
-    def _focus_combobox(widget: ttk.Combobox | None) -> None:
-        if widget is None:
-            return
-        widget.focus_set()
-        try:
-            widget.tk.call("ttk::combobox::Post", widget)
-        except (AttributeError, tk.TclError):
-            try:
-                widget.event_generate("<Button-1>")
-            except (AttributeError, tk.TclError):
-                pass
-
-    def _focus_tools_section(self) -> None:
-        widget = getattr(getattr(self, "button_frame", None), "quick_events_button", None)
-        if widget is not None:
-            widget.focus_set()
-
     def _make_card(self, parent: tk.Misc, title: str) -> tuple[tk.Frame, tk.Frame]:
         """Create a workstation-style card with a thin divider title."""
         f = theme.fonts()
@@ -466,20 +402,27 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     @staticmethod
     def _apply_accent_button(btn: tk.Button) -> None:
-        f = theme.fonts()
+        # Pure white on solid green keeps Start/Stop readable on macOS Aqua.
         btn.configure(
             bg=theme.SIGNAL_BASE,
-            fg=theme.INK_INVERSE,
+            fg="#FFFFFF",
             activebackground=theme.SIGNAL_HOVER,
-            activeforeground=theme.INK_INVERSE,
-            disabledforeground=theme.SURFACE_PAPER,
+            activeforeground="#FFFFFF",
+            disabledforeground="#D0D0D0",
             relief="flat",
             borderwidth=0,
-            highlightthickness=0,
-            font=f["body_bold"],
+            highlightthickness=1,
+            highlightbackground=theme.SIGNAL_BASE,
+            highlightcolor=theme.SIGNAL_BASE,
             padx=theme.SPACE_3,
-            pady=theme.SPACE_1,
+            pady=theme.SPACE_2,
+            cursor="hand2",
         )
+        try:
+            btn.configure(font=theme.fonts()["body_bold"])
+        except Exception:
+            # Unit stubs may call update_ui without a Tk root for fonts.
+            pass
 
     @staticmethod
     def _apply_outline_button(btn: tk.Button) -> None:
@@ -568,8 +511,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         run_start_button = self.__dict__.get("run_start_button")
         if run_start_button is not None:
             self._apply_accent_button(run_start_button)
-        if hasattr(self, "profile_button_frame"):
-            self.profile_button_frame.refresh_texts()
         if hasattr(self, "lbl_hotkey_hint"):
             self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
         if hasattr(self, "btn_open_screen_permission"):
@@ -1431,8 +1372,10 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.process_frame.process_combobox.config(state=readonly_state)
         self.process_frame.refresh_button.config(state=state)
         self.profile_frame.profile_combobox.config(state=readonly_state)
+        self.profile_frame.edit_button.config(state=state)
         self.profile_frame.copy_button.config(state=state)
         self.profile_frame.del_button.config(state=state)
+        self.profile_frame.sort_button.config(state=state)
         modkey_frame = self.__dict__.get("modkey_set_frame")
         if modkey_frame is not None:
             modkey_frame.sets_combobox.config(state=readonly_state)
@@ -1449,23 +1392,17 @@ class KeystrokeSimulatorApp(tk.Tk):
             if running:
                 run_start_button.configure(
                     bg=theme.STATUS_RUNNING_FG,
-                    fg=theme.INK_INVERSE,
+                    fg="#FFFFFF",
                     activebackground=theme.STATUS_ERROR_FG,
-                    activeforeground=theme.INK_INVERSE,
+                    activeforeground="#FFFFFF",
+                    highlightbackground=theme.STATUS_RUNNING_FG,
+                    highlightcolor=theme.STATUS_RUNNING_FG,
                 )
             else:
-                run_start_button.configure(
-                    bg=theme.SIGNAL_BASE,
-                    fg=theme.INK_INVERSE,
-                    activebackground=theme.SIGNAL_HOVER,
-                    activeforeground=theme.INK_INVERSE,
-                )
+                self._apply_accent_button(run_start_button)
         self.button_frame.quick_events_button.config(state=state)
         self.button_frame.settings_button.config(state=state)
         self.button_frame.clear_logs_button.config(state=state)
-
-        self.profile_button_frame.edit_profile_button.config(state=state)
-        self.profile_button_frame.sort_button.config(state=state)
         self._update_main_status()
 
     def open_modkeys(self) -> None:
@@ -1483,6 +1420,8 @@ class KeystrokeSimulatorApp(tk.Tk):
         self._update_main_status()
 
     def open_profile(self) -> None:
+        if self.is_running.get():
+            return
         if self.selected_profile.get():
             KeystrokeProfiles(
                 self,
@@ -1496,6 +1435,8 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.update_ui()
 
     def sort_profile_events(self) -> None:
+        if self.is_running.get():
+            return
         self.unbind_events()
         if self.selected_profile.get():
             KeystrokeSortEvents(

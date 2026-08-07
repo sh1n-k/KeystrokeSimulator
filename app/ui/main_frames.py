@@ -34,6 +34,21 @@ from app.utils.system import ProcessCollector
 
 VoidCallback = Callable[[], None]
 
+# Shared Target-card grid: equal-width narrow combos + aligned action columns.
+_TARGET_LABEL_MIN = 80
+_TARGET_COMBO_CHARS = 18
+_TARGET_ACTION_MIN = 56
+_TARGET_ACTION_COLS = 4  # columns 2..5
+
+
+def _configure_target_row_grid(frame: tk.Frame) -> None:
+    frame.grid_columnconfigure(0, weight=0, minsize=_TARGET_LABEL_MIN)
+    frame.grid_columnconfigure(1, weight=0)
+    for col in range(2, 2 + _TARGET_ACTION_COLS):
+        frame.grid_columnconfigure(
+            col, weight=1, minsize=_TARGET_ACTION_MIN, uniform="target_actions"
+        )
+
 
 class ProcessFrame(tk.Frame):
     def __init__(
@@ -44,25 +59,27 @@ class ProcessFrame(tk.Frame):
         **kwargs: Any,
     ) -> None:
         super().__init__(master, *args, **kwargs)
-        # 4-column grid keeps Process/Profile/Tools rows visually aligned.
-        # col 0: label (fixed width)
-        # col 1: combobox (stretches)
-        # col 2..: buttons (fixed width)
-        self.grid_columnconfigure(0, weight=0, minsize=80)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_columnconfigure(2, weight=0, minsize=120)
-        self.grid_columnconfigure(3, weight=0, minsize=120)
+        # col0 label | col1 fixed combo | col2-5 refresh (fills remaining)
+        _configure_target_row_grid(self)
 
         self.lbl_process: tk.Label = tk.Label(self, anchor="w", width=8)
         self.lbl_process.grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.process_combobox: ttk.Combobox = ttk.Combobox(
-            self, textvariable=textvariable, state="readonly"
+            self,
+            textvariable=textvariable,
+            state="readonly",
+            width=_TARGET_COMBO_CHARS,
         )
-        self.process_combobox.grid(row=0, column=1, sticky="we", padx=(0, 6))
+        self.process_combobox.grid(row=0, column=1, sticky="w", padx=(0, 6))
         self.refresh_button: tk.Button = tk.Button(
             self, command=self.refresh_processes
         )
-        self.refresh_button.grid(row=0, column=2, sticky="we", padx=(0, 6))
+        self.refresh_button.grid(
+            row=0,
+            column=2,
+            columnspan=_TARGET_ACTION_COLS,
+            sticky="we",
+        )
         self.refresh_texts()
         self.refresh_processes()
 
@@ -91,43 +108,62 @@ class ProfileFrame(tk.Frame):
         master: tk.Misc,
         textvariable: tk.StringVar,
         profiles_dir: str | Path,
-        *args: Any,
+        edit_cb: VoidCallback | None = None,
+        sort_cb: VoidCallback | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(master, *args, **kwargs)
+        super().__init__(master, **kwargs)
         self.profiles_dir = Path(profiles_dir)
         self.selected_profile_var = textvariable
         self.profile_display_var: tk.StringVar = tk.StringVar()
         self.profile_names: list[str] = []
         self.name_to_index: dict[str, int] = {}
         self.favorite_names: set[str] = set()
+        self._edit_cb = edit_cb
+        self._sort_cb = sort_cb
 
         self._normal_font = tkfont.nametofont("TkTextFont").copy()
         self._bold_font = tkfont.nametofont("TkTextFont").copy()
         self._bold_font.configure(weight="bold")
 
-        # Same 4-column grid as ProcessFrame so labels/combos/buttons line up.
-        self.grid_columnconfigure(0, weight=0, minsize=80)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_columnconfigure(2, weight=0, minsize=120)
-        self.grid_columnconfigure(3, weight=0, minsize=120)
+        # col0 label | col1 fixed combo | edit | copy | delete | sort
+        _configure_target_row_grid(self)
 
         self.lbl_profiles: tk.Label = tk.Label(self, anchor="w", width=8)
         self.lbl_profiles.grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.profile_combobox: ttk.Combobox = ttk.Combobox(
-            self, textvariable=self.profile_display_var, state="readonly"
+            self,
+            textvariable=self.profile_display_var,
+            state="readonly",
+            width=_TARGET_COMBO_CHARS,
         )
-        self.profile_combobox.grid(row=0, column=1, sticky="we", padx=(0, 6))
+        self.profile_combobox.grid(row=0, column=1, sticky="w", padx=(0, 6))
         self.profile_combobox.bind(
             "<<ComboboxSelected>>",
             self._on_profile_selected,
         )
+        self.edit_button: tk.Button = tk.Button(
+            self, command=self._on_edit_clicked
+        )
+        self.edit_button.grid(row=0, column=2, sticky="we", padx=(0, 6))
         self.copy_button: tk.Button = tk.Button(self, command=self.copy_profile)
-        self.copy_button.grid(row=0, column=2, sticky="we", padx=(0, 6))
+        self.copy_button.grid(row=0, column=3, sticky="we", padx=(0, 6))
         self.del_button: tk.Button = tk.Button(self, command=self.delete_profile)
-        self.del_button.grid(row=0, column=3, sticky="we")
+        self.del_button.grid(row=0, column=4, sticky="we", padx=(0, 6))
+        self.sort_button: tk.Button = tk.Button(
+            self, command=self._on_sort_clicked
+        )
+        self.sort_button.grid(row=0, column=5, sticky="we")
         self.refresh_texts()
         self.load_profiles()
+
+    def _on_edit_clicked(self) -> None:
+        if self._edit_cb is not None:
+            self._edit_cb()
+
+    def _on_sort_clicked(self) -> None:
+        if self._sort_cb is not None:
+            self._sort_cb()
 
     def _apply_selected_profile_font(self, profile_name: str) -> None:
         font = (
@@ -220,8 +256,10 @@ class ProfileFrame(tk.Frame):
 
     def refresh_texts(self) -> None:
         self.lbl_profiles.config(text=txt("Profiles:", "프로필:"))
+        self.edit_button.config(text=txt("Edit", "편집"))
         self.copy_button.config(text=txt("Copy", "복사"))
         self.del_button.config(text=txt("Delete", "삭제"))
+        self.sort_button.config(text=txt("Sort", "정렬"))
 
     def copy_profile(self) -> None:
         if not (curr := self.get_selected_profile_name()):
@@ -352,25 +390,25 @@ class ModKeySetFrame(tk.Frame):
         self.set_names: list[str] = []
         self.name_to_index: dict[str, int] = {}
 
-        self.grid_columnconfigure(0, weight=0, minsize=80)
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_columnconfigure(2, weight=0, minsize=72)
-        self.grid_columnconfigure(3, weight=0, minsize=72)
-        self.grid_columnconfigure(4, weight=0, minsize=72)
+        # col0 label | col1 fixed combo | edit | copy | delete | (empty slot)
+        _configure_target_row_grid(self)
 
         self.lbl_sets: tk.Label = tk.Label(self, anchor="w", width=8)
         self.lbl_sets.grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.sets_combobox: ttk.Combobox = ttk.Combobox(
-            self, textvariable=self.selected_var, state="readonly"
+            self,
+            textvariable=self.selected_var,
+            state="readonly",
+            width=_TARGET_COMBO_CHARS,
         )
-        self.sets_combobox.grid(row=0, column=1, sticky="we", padx=(0, 6))
+        self.sets_combobox.grid(row=0, column=1, sticky="w", padx=(0, 6))
         self.sets_combobox.bind("<<ComboboxSelected>>", self._on_set_selected)
         self.edit_button: tk.Button = tk.Button(self, command=self._edit_cb)
         self.edit_button.grid(row=0, column=2, sticky="we", padx=(0, 6))
         self.copy_button: tk.Button = tk.Button(self, command=self.copy_set)
         self.copy_button.grid(row=0, column=3, sticky="we", padx=(0, 6))
         self.del_button: tk.Button = tk.Button(self, command=self.delete_set)
-        self.del_button.grid(row=0, column=4, sticky="we")
+        self.del_button.grid(row=0, column=4, sticky="we", padx=(0, 6))
         self.refresh_texts()
         self.load_sets()
 
@@ -494,36 +532,3 @@ class ModKeySetFrame(tk.Frame):
             )
 
 
-class ProfileButtonFrame(tk.Frame):
-    """Profile tools share a 2-column rhythm under the main tools."""
-
-    _BTN_KEYS = (
-        ("edit_profile", ("Edit Profile", "프로필 편집")),
-        ("sort_profile", ("Sort Profile", "프로필 정렬")),
-    )
-
-    def __init__(
-        self,
-        master: tk.Misc,
-        edit_cb: VoidCallback,
-        sort_cb: VoidCallback,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(master, **kwargs)
-        for col in range(2):
-            self.grid_columnconfigure(col, weight=1, uniform="profile_tools")
-        commands: dict[str, VoidCallback] = {
-            "edit_profile": edit_cb,
-            "sort_profile": sort_cb,
-        }
-        self.btns: dict[str, tk.Button] = {}
-        for col, (key, label_pair) in enumerate(self._BTN_KEYS):
-            btn = tk.Button(self, text=txt(*label_pair), height=1, command=commands[key])
-            btn.grid(row=0, column=col, sticky="we", padx=theme.SPACE_1)
-            self.btns[key] = btn
-        self.edit_profile_button = self.btns["edit_profile"]
-        self.sort_button = self.btns["sort_profile"]
-
-    def refresh_texts(self) -> None:
-        for key, label_pair in self._BTN_KEYS:
-            self.btns[key].config(text=txt(*label_pair))
