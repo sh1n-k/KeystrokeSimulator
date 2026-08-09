@@ -2,8 +2,8 @@
 
 **목적:** 다른 세션/에이전트가 이 논의를 이어서 설계·구현할 수 있도록 맥락·결정·자료 위치를 고정한다.  
 **작성 기준일:** 2026-08-03  
-**관련 앱:** KeystrokeSimulator (`~/PersonalProjects/KeystrokeSimulator`)  
-**SimC 스냅샷:** `~/PersonalProjects/simc-apl-research/`
+**관련 앱:** KeystrokeSimulator (`~/Projects/KeystrokeSimulator`)  
+**SimC 스냅샷:** `~/Projects/simc-apl-research/`
 
 ---
 
@@ -101,14 +101,14 @@ Hekili **전면 대체**가 아니라, 어시스트 필러 + 제한된 예외 �
 ### 5.1 자료 위치
 
 ```
-~/PersonalProjects/simc-apl-research/
+~/Projects/simc-apl-research/
   SOURCE.txt                 # midnight 커밋·fetch 시각
-  default/*.simc             # SimC 최적 APL 33종
-  assisted_combat/*.simc     # 게임 Assist APL 33종
-  notes/apl_metrics.csv
-  notes/SELECTION_REPORT.md  # 기술 상세
-  notes/FINAL_CONCLUSION_KO.md
+  default/*.simc             # SimC 최적 APL
+  assisted_combat/*.simc     # 게임 Assist APL
+  notes/INVENTORY.md         # 파일 목록 (이번 스냅샷)
   README.md
+  # 이전 세션 분석 노트(apl_metrics.csv, SELECTION_REPORT.md,
+  # FINAL_CONCLUSION_KO.md)는 이 머신에 원본 없음 → 필요 시 재생성
 ```
 
 - 소스: `https://github.com/simulationcraft/simc` branch **`midnight`**
@@ -230,10 +230,10 @@ WW, Havoc, Feral, Arcane, Outlaw, Sub, Assa, Aff, Enhance(Stormbringer)
 | 경로 | 내용 |
 | --- | --- |
 | `docs/midnight-rotation-handoff.md` | **이 파일** (세션 핸드오프) |
-| `~/PersonalProjects/simc-apl-research/README.md` | SimC 스냅샷 안내 |
-| `.../notes/FINAL_CONCLUSION_KO.md` | 쉬운 최종 결론 |
-| `.../notes/SELECTION_REPORT.md` | 스펙별 APL 상세 |
-| `.../notes/apl_metrics.csv` | 복잡도 수치 |
+| `~/Projects/simc-apl-research/README.md` | SimC 스냅샷 안내 |
+| `~/Projects/simc-apl-research/SOURCE.txt` | midnight 커밋·fetch 메타 |
+| `~/Projects/simc-apl-research/notes/INVENTORY.md` | default/assisted 파일 목록 |
+| `.../notes/FINAL_CONCLUSION_KO.md` 등 | 이전 분석 노트 — 미포함, 재생성 대상 |
 | `docs/maintainer-reference.md` | KeySim 모듈 경계 |
 
 ---

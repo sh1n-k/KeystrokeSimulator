@@ -598,8 +598,8 @@ class KeystrokeProfiles:
         if runtime_members:
             meta_lines.append(
                 txt(
-                    f"Runtime extra: {runtime_members}",
-                    f"실행 중 추가: {runtime_members}개",
+                    f"Toggle set: {runtime_members}",
+                    f"토글 세트: {runtime_members}개",
                 )
             )
         self.lbl_inspector_meta.config(text="\n".join(meta_lines))
@@ -767,8 +767,8 @@ class KeystrokeProfiles:
         if condition_only_count:
             if toggle_member_count:
                 self._overview_status_text = txt(
-                    "Condition-only events: {cond_count}. Runtime extra events: {toggle_count}.",
-                    "조건 전용 이벤트: {cond_count}개. 실행 중 추가 이벤트: {toggle_count}개.",
+                    "Condition-only events: {cond_count}. Toggle set events: {toggle_count}.",
+                    "조건 전용 이벤트: {cond_count}개. 토글 세트 이벤트: {toggle_count}개.",
                     cond_count=condition_only_count,
                     toggle_count=toggle_member_count,
                 )
@@ -780,8 +780,8 @@ class KeystrokeProfiles:
                 )
         elif toggle_member_count:
             self._overview_status_text = txt(
-                "Runtime extra events are configured: {count}.",
-                "실행 중 추가 이벤트가 {count}개 설정되어 있습니다.",
+                "Toggle set events are configured: {count}.",
+                "토글 세트 이벤트가 {count}개 설정되어 있습니다.",
                 count=toggle_member_count,
             )
         else:

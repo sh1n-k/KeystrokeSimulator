@@ -158,8 +158,8 @@ def compose_run_session(
         if missing_key_profiles:
             errors.append(
                 txt(
-                    "Runtime Event Group toggle trigger is missing in: {profiles}",
-                    "실행 중 추가 이벤트 묶음 토글 트리거가 비어 있습니다: {profiles}",
+                    "Toggle set trigger is missing in: {profiles}",
+                    "토글 세트 트리거가 비어 있습니다: {profiles}",
                     profiles=", ".join(missing_key_profiles),
                 )
             )
@@ -171,8 +171,8 @@ def compose_run_session(
             ]
             errors.append(
                 txt(
-                    "Runtime Event Group toggle triggers differ across profiles: {detail}",
-                    "프로필 간 실행 중 추가 이벤트 묶음 토글 트리거가 다릅니다: {detail}",
+                    "Toggle set triggers differ across profiles: {detail}",
+                    "프로필 간 토글 세트 트리거가 다릅니다: {detail}",
                     detail="; ".join(detail_parts),
                 )
             )

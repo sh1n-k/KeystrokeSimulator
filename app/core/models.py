@@ -50,7 +50,7 @@ class EventModel:
     priority: int = 0
     # 조건 목록: { '다른_이벤트_이름': True/False } (True: 활성 기대, False: 비활성 기대)
     conditions: dict[str, bool] = field(default_factory=lambda: {})
-    # 실행 중 토글되는 추가 이벤트 묶음에 포함되는지 여부
+    # 토글 세트(실행 중 ON/OFF)에 포함되는지 여부
     runtime_toggle_member: bool = False
 
 

@@ -32,6 +32,8 @@ from app.ui.main_frames import (
     RunSetFrame,
 )
 from app.ui.input_listener_session import InputListener, InputListenerSession
+from app.ui.mac_hotkey_tap import MacHotkeyTapListener
+from app.ui.mac_key_poll import MacKeyPollListener
 from app.storage.modkey_sets_storage import (
     DEFAULT_MODKEY_SET_NAME,
     DEFAULT_MODKEY_SETS_PATH,
@@ -74,7 +76,6 @@ from app.utils.system import (
     PermissionUtils,
 )
 from app.utils.exception_hooks import install_exception_hooks
-from app.utils.keys import KeyUtils
 from app.utils.window_state import StateUtils, WindowUtils
 from app.ui import theme
 
@@ -88,6 +89,12 @@ STATUS_BG_ERR = theme.STATUS_ERROR_BG
 STATUS_FG_ERR = theme.STATUS_ERROR_FG
 STATUS_BG_RUN = theme.STATUS_RUNNING_BG
 STATUS_FG_RUN = theme.STATUS_RUNNING_FG
+
+# macOS Option+Shift: prefer CGEventTap (consume + CFRunLoop); poll is fallback.
+MAC_POLL_INTERVAL_MS = 10
+MAC_ALT_SHIFT_DEBOUNCE_SECONDS = 0.2
+# Poll-only hold filter (tap fires on chord rising edge, no hold delay).
+MAC_ALT_SHIFT_HOLD_SECONDS = 0.015
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -145,9 +152,8 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.shift_pressed: bool = False
         self.last_alt_shift_toggle_time: float = 0
         self.ctrl_check_active: bool = False
-        self._mac_poll_after_id: str | None = None
-        self._mac_alt_shift_state = False
-        self._mac_runtime_toggle_state = False
+        self._mac_hotkey_tap_listener: MacHotkeyTapListener | None = None
+        self._mac_key_poll_listener: MacKeyPollListener | None = None
         self._selection_trace_handles: list[str] = []
         self.runtime_toggle_enabled: bool = False
         self.runtime_toggle_key: str | None = None
@@ -156,6 +162,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.last_runtime_toggle_time: float = 0
         self.latest_runtime_scroll_time: float | None = None
         self.toggle_transition_in_progress: bool = False
+        self._pending_start_stop_toggle: bool = False
 
         self._create_ui()
         self._bind_selection_traces()
@@ -631,8 +638,8 @@ class KeystrokeSimulatorApp(tk.Tk):
                 txt("ON", "켜짐") if self.runtime_toggle_active else txt("OFF", "꺼짐")
             )
             hint = txt(
-                "{base}\nRuntime extra group: {trigger} ({state})",
-                "{base}\n실행 중 추가 이벤트 묶음: {trigger} ({state})",
+                "{base}\nToggle set: {trigger} ({state})",
+                "{base}\n토글 세트: {trigger} ({state})",
                 base=hint,
                 trigger=display_runtime_toggle_trigger(self.runtime_toggle_key),
                 state=toggle_state,
@@ -875,8 +882,8 @@ class KeystrokeSimulatorApp(tk.Tk):
             )
             if self.runtime_toggle_enabled and self.runtime_toggle_key:
                 detail = txt(
-                    "{detail}\nExtra group: {trigger} ({state})",
-                    "{detail}\n추가 이벤트 묶음: {trigger} ({state})",
+                    "{detail}\nToggle set: {trigger} ({state})",
+                    "{detail}\n토글 세트: {trigger} ({state})",
                     detail=detail,
                     trigger=display_runtime_toggle_trigger(self.runtime_toggle_key),
                     state=txt("ON", "켜짐")
@@ -947,12 +954,14 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "toggle" in lower
                 or "토글" in first
                 or "runtime event group" in lower
+                or "toggle set" in lower
                 or "추가 이벤트 묶음" in first
+                or "토글 세트" in first
             ):
                 badge = txt("Toggle Conflict", "토글 충돌")
                 title = txt(
-                    "Runtime Event Group trigger settings need attention.",
-                    "실행 중 추가 이벤트 묶음의 트리거 설정을 확인해야 합니다.",
+                    "Toggle set trigger settings need attention.",
+                    "토글 세트 트리거 설정을 확인해야 합니다.",
                 )
             return {
                 "can_start": False,
@@ -1200,16 +1209,15 @@ class KeystrokeSimulatorApp(tk.Tk):
         runtime_toggle_trigger = normalize_runtime_toggle_trigger(
             self.runtime_toggle_key
         )
-        use_mac_polling = platform.system() == "Darwin" and (
+        use_mac_hotkeys = platform.system() == "Darwin" and (
             self.settings.toggle_start_stop_mac
             or (
                 self.runtime_toggle_enabled
                 and is_keyboard_runtime_toggle_trigger(runtime_toggle_trigger)
             )
         )
-        if use_mac_polling:
-            self.ctrl_check_active = True
-            self._check_for_long_alt_shift()
+        if use_mac_hotkeys:
+            self._start_mac_hotkeys()
 
         key = self.settings.start_stop_key
         if key.startswith("W_"):
@@ -1250,7 +1258,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             or (platform.system() == "Windows" and self.settings.use_alt_shift_hotkey)
             or (key != "DISABLED" and not key.startswith("W_"))
         )
-        if should_listen_keyboard and not use_mac_polling:
+        if should_listen_keyboard and not use_mac_hotkeys:
             self.keyboard_listener = cast(
                 InputListener,
                 pynput.keyboard.Listener(
@@ -1319,42 +1327,86 @@ class KeystrokeSimulatorApp(tk.Tk):
             and self._target_process_is_active()
         )
 
-    def _check_for_long_alt_shift(self) -> None:
+    def _start_mac_hotkeys(self) -> None:
+        """Arm macOS Option+Shift / runtime key via CGEventTap; poll fallback."""
+        self.ctrl_check_active = True
+        self.input_listener_session.begin_responsiveness()
+        tap = MacHotkeyTapListener(
+            self.input_listener_session,
+            debounce_seconds=MAC_ALT_SHIFT_DEBOUNCE_SECONDS,
+            runtime_debounce_seconds=RUNTIME_TOGGLE_DEBOUNCE_SECONDS,
+            start_stop_enabled=self._mac_start_stop_enabled_for_poll,
+            runtime_toggle_enabled=self._mac_runtime_toggle_enabled_for_poll,
+            runtime_key_provider=self._mac_runtime_key_for_poll,
+            on_start_stop=self._on_mac_start_stop_chord,
+            on_runtime_toggle=self._on_mac_runtime_toggle_chord,
+        )
+        tap.start()
+        if tap.is_active:
+            self._mac_hotkey_tap_listener = tap
+            self.input_listener_session.add(tap, started=True)
+            logger.info("macOS hotkeys: CGEventTap active (events consumed)")
+            return
+        # No Accessibility / tap install failure: observe-only poll (no consume).
+        try:
+            tap.stop()
+        except Exception:
+            pass
+        logger.warning(
+            "macOS hotkeys: CGEventTap unavailable; falling back to key-state poll "
+            "(Option+Shift will still reach the focused app)"
+        )
+        self._start_mac_key_polling()
+
+    def _start_mac_key_polling(self) -> None:
+        """Fallback: detect Option+Shift on a bg thread without consuming events."""
+        self.ctrl_check_active = True
+        listener = MacKeyPollListener(
+            self.input_listener_session,
+            interval_ms=MAC_POLL_INTERVAL_MS,
+            hold_seconds=MAC_ALT_SHIFT_HOLD_SECONDS,
+            debounce_seconds=MAC_ALT_SHIFT_DEBOUNCE_SECONDS,
+            runtime_debounce_seconds=RUNTIME_TOGGLE_DEBOUNCE_SECONDS,
+            start_stop_enabled=self._mac_start_stop_enabled_for_poll,
+            runtime_toggle_enabled=self._mac_runtime_toggle_enabled_for_poll,
+            runtime_key_provider=self._mac_runtime_key_for_poll,
+            on_start_stop=self._on_mac_start_stop_chord,
+            on_runtime_toggle=self._on_mac_runtime_toggle_chord,
+        )
+        self._mac_key_poll_listener = listener
+        self.input_listener_session.add(listener)
+
+    def _mac_start_stop_enabled_for_poll(self) -> bool:
+        return bool(getattr(self.settings, "toggle_start_stop_mac", False))
+
+    def _mac_runtime_toggle_enabled_for_poll(self) -> bool:
+        if not self.runtime_toggle_enabled or not self.is_running.get():
+            return False
+        if not self._target_process_is_active():
+            return False
+        return is_keyboard_runtime_toggle_trigger(self.runtime_toggle_key)
+
+    def _mac_runtime_key_for_poll(self) -> str | None:
+        if not self.runtime_toggle_enabled:
+            return None
+        trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
+        if not is_keyboard_runtime_toggle_trigger(trigger):
+            return None
+        return trigger
+
+    def _on_mac_start_stop_chord(self) -> None:
+        """Main-thread: Option+Shift chord accepted by bg poller."""
         if not self.ctrl_check_active:
             return
-        curr_time = time.time()
-        try:
-            start_stop_enabled = bool(
-                platform.system() == "Darwin"
-                and getattr(self.settings, "toggle_start_stop_mac", False)
-            )
-            curr_state = (
-                start_stop_enabled
-                and KeyUtils.mod_key_pressed("alt")
-                and KeyUtils.mod_key_pressed("shift")
-            )
-            if start_stop_enabled and curr_state and not self._mac_alt_shift_state:
-                self.toggle_start_stop()
-            self._mac_alt_shift_state = curr_state
+        self.last_alt_shift_toggle_time = time.time()
+        self.toggle_start_stop()
 
-            runtime_toggle_pressed = (
-                self.runtime_toggle_enabled
-                and self.is_running.get()
-                and self._target_process_is_active()
-                and is_keyboard_runtime_toggle_trigger(self.runtime_toggle_key)
-                and KeyUtils.key_pressed(self.runtime_toggle_key)
-            )
-            if (
-                runtime_toggle_pressed
-                and not self._mac_runtime_toggle_state
-                and curr_time - self.last_runtime_toggle_time
-                >= RUNTIME_TOGGLE_DEBOUNCE_SECONDS
-            ):
-                self.last_runtime_toggle_time = curr_time
-                self.toggle_runtime_event_group()
-            self._mac_runtime_toggle_state = bool(runtime_toggle_pressed)
-        finally:
-            self._mac_poll_after_id = self.after(50, self._check_for_long_alt_shift)
+    def _on_mac_runtime_toggle_chord(self) -> None:
+        """Main-thread: runtime toggle key accepted by bg poller."""
+        if not self.ctrl_check_active:
+            return
+        self.last_runtime_toggle_time = time.time()
+        self.toggle_runtime_event_group()
 
     def _on_mouse_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
         pid_match = re.search(r"\((\d+)\)", self.selected_process.get())
@@ -1476,25 +1528,31 @@ class KeystrokeSimulatorApp(tk.Tk):
             )
 
     def toggle_start_stop(self, event: object | None = None) -> None:
+        # Start/stop can take hundreds of ms (processor + UI + sound). A second
+        # Option+Shift during that window must not be dropped silently.
         if self.toggle_transition_in_progress:
+            self._pending_start_stop_toggle = True
             return
         self.toggle_transition_in_progress = True
-        if not self.is_running.get():
-            try:
+        try:
+            if not self.is_running.get():
                 if self.start_simulation():
                     self.is_running.set(True)
                     self.update_ui()
                 else:
                     self.update_ui()
-            finally:
-                self.toggle_transition_in_progress = False
-            return
-
-        try:
-            self.is_running.set(False)
-            self.stop_simulation()
+            else:
+                self.is_running.set(False)
+                self.stop_simulation()
         finally:
             self.toggle_transition_in_progress = False
+            if getattr(self, "_pending_start_stop_toggle", False):
+                self._pending_start_stop_toggle = False
+                # Defer so we do not recurse inside the input drain stack.
+                try:
+                    self.after(0, self.toggle_start_stop)
+                except Exception:
+                    self.toggle_start_stop()
 
     def start_simulation(self) -> bool:
         if not (
@@ -1537,7 +1595,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self._reset_runtime_toggle_session()
             return False
 
-        # Keep the macOS Tk polling loop alive while Option+Shift is still held.
+        # Keep the macOS bg key poller alive while Option+Shift may still be held.
         if platform.system() != "Darwin" or not self.__dict__.get(
             "ctrl_check_active", False
         ):
@@ -1720,9 +1778,8 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.runtime_toggle_mouse_listener = None
 
         self.ctrl_check_active = False
-        if self._mac_poll_after_id is not None:
-            safe_call(self.after_cancel, self._mac_poll_after_id)
-            self._mac_poll_after_id = None
+        self._mac_hotkey_tap_listener = None
+        self._mac_key_poll_listener = None
 
     def on_closing(self, event: object | None = None) -> None:
         if getattr(self, "_is_closing", False):

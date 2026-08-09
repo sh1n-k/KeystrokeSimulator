@@ -296,6 +296,27 @@ class TestLivePreviewUpdates(unittest.TestCase):
         self.assertEqual(editor._safe_update_img_lbl.call_count, 2)
 
 
+class TestOverlayBounds(unittest.TestCase):
+    def test_draw_overlay_clears_stale_pixel_outside_image(self):
+        """Capture shrink / stale pixel must not IndexError on overlay."""
+        editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        editor.capture_session = CaptureSession()
+        interp = tk.Tcl()
+        editor.match_mode_var = tk.StringVar(master=interp, value="pixel")
+        editor.clicked_pos = (265, 70)  # outside 135x100
+        editor.lbl_img2 = object()
+        editor._update_img_lbl = MagicMock()
+
+        img = Image.new("RGB", (135, 100), color=(0, 0, 0))
+        with patch.object(
+            KeystrokeEventEditor, "_scale_for_display", side_effect=lambda im: im
+        ):
+            KeystrokeEventEditor._draw_overlay(editor, img, editor.lbl_img2)
+
+        self.assertIsNone(editor.clicked_pos)
+        editor._update_img_lbl.assert_called_once()
+
+
 class TestBasicGuidanceSafety(unittest.TestCase):
     def test_refresh_basic_guidance_ignores_destroyed_label(self):
         editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)

@@ -245,15 +245,15 @@ def collect_runtime_toggle_validation_errors(
     if not trigger_raw:
         errors.append(
             txt(
-                "Runtime Event Group toggle trigger is missing.",
-                "실행 중 추가 이벤트 묶음의 토글 트리거가 비어 있습니다.",
+                "Toggle set trigger is missing.",
+                "토글 세트 트리거가 비어 있습니다.",
             )
         )
     elif not trigger:
         errors.append(
             txt(
-                "Runtime Event Group toggle trigger is invalid: {trigger}",
-                "실행 중 추가 이벤트 묶음의 토글 트리거가 올바르지 않습니다: {trigger}",
+                "Toggle set trigger is invalid: {trigger}",
+                "토글 세트 트리거가 올바르지 않습니다: {trigger}",
                 trigger=trigger_raw,
             )
         )
@@ -261,8 +261,8 @@ def collect_runtime_toggle_validation_errors(
     if runtime_toggle_member_count(active_events) == 0:
         errors.append(
             txt(
-                "Runtime Event Group has no selected events.",
-                "실행 중 추가 이벤트 묶음에 선택된 이벤트가 없습니다.",
+                "Toggle set has no selected events.",
+                "토글 세트에 선택된 이벤트가 없습니다.",
             )
         )
 
@@ -278,8 +278,8 @@ def collect_runtime_toggle_validation_errors(
     if invalid_member_events:
         errors.append(
             txt(
-                "Runtime Event Group member is missing an input key. Events: {names}",
-                "실행 중 추가 이벤트 묶음 멤버에 입력 키가 없습니다. 이벤트: {names}",
+                "Toggle set member is missing an input key. Events: {names}",
+                "토글 세트 멤버에 입력 키가 없습니다. 이벤트: {names}",
                 names=", ".join(invalid_member_events),
             )
         )
@@ -291,24 +291,24 @@ def collect_runtime_toggle_validation_errors(
     if start_stop_trigger == "ALT_SHIFT_MAC" and trigger in {"Option", "Shift"}:
         errors.append(
             txt(
-                "Runtime Event Group toggle trigger conflicts with Start/Stop: {trigger}",
-                "실행 중 추가 이벤트 묶음의 토글 트리거가 시작/중지와 충돌합니다: {trigger}",
+                "Toggle set trigger conflicts with Start/Stop: {trigger}",
+                "토글 세트 트리거가 시작/중지와 충돌합니다: {trigger}",
                 trigger=display_runtime_toggle_trigger(trigger),
             )
         )
     elif start_stop_trigger == "ALT_SHIFT_WIN" and trigger in {"Alt", "Shift"}:
         errors.append(
             txt(
-                "Runtime Event Group toggle trigger conflicts with Start/Stop: {trigger}",
-                "실행 중 추가 이벤트 묶음의 토글 트리거가 시작/중지와 충돌합니다: {trigger}",
+                "Toggle set trigger conflicts with Start/Stop: {trigger}",
+                "토글 세트 트리거가 시작/중지와 충돌합니다: {trigger}",
                 trigger=display_runtime_toggle_trigger(trigger),
             )
         )
     elif start_stop_trigger and start_stop_trigger == trigger:
         errors.append(
             txt(
-                "Runtime Event Group toggle trigger conflicts with Start/Stop: {trigger}",
-                "실행 중 추가 이벤트 묶음의 토글 트리거가 시작/중지와 충돌합니다: {trigger}",
+                "Toggle set trigger conflicts with Start/Stop: {trigger}",
+                "토글 세트 트리거가 시작/중지와 충돌합니다: {trigger}",
                 trigger=display_runtime_toggle_trigger(trigger),
             )
         )
@@ -328,8 +328,8 @@ def collect_runtime_toggle_validation_errors(
         if conflicting_events:
             errors.append(
                 txt(
-                    "Runtime Event Group toggle trigger conflicts with event input key '{trigger}'. Events: {names}",
-                    "실행 중 추가 이벤트 묶음의 토글 트리거가 이벤트 입력 키 '{trigger}' 와 충돌합니다. 이벤트: {names}",
+                    "Toggle set trigger conflicts with event input key '{trigger}'. Events: {names}",
+                    "토글 세트 트리거가 이벤트 입력 키 '{trigger}' 와 충돌합니다. 이벤트: {names}",
                     trigger=display_runtime_toggle_trigger(trigger),
                     names=", ".join(conflicting_events),
                 )

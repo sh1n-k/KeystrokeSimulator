@@ -391,24 +391,17 @@ class KeystrokeEventEditor:
         ttk.Label(
             left, text=txt("Captured", "캡처본"), foreground=theme.INK_MUTED
         ).grid(row=0, column=1, padx=theme.SPACE_2, sticky="w")
-        self.lbl_img1: tk.Label = tk.Label(
-            left,
-            width=18,
-            height=9,
-            bg=theme.SURFACE_SUNKEN,
-            highlightthickness=1,
-            highlightbackground=theme.SURFACE_DIVIDER,
+        # macOS Tk draws a light L-box/cross inside PhotoImage previews when a
+        # Label uses highlightthickness>0 together with configure(width=…,
+        # height=…). Keep highlight off and put a 1px Frame border around it.
+        self.lbl_img1 = self._make_preview_label(left)
+        cast(tk.Frame, self.lbl_img1.master).grid(
+            row=1, column=0, padx=theme.SPACE_2
         )
-        self.lbl_img1.grid(row=1, column=0, padx=theme.SPACE_2)
-        self.lbl_img2: tk.Label = tk.Label(
-            left,
-            width=18,
-            height=9,
-            bg=theme.SURFACE_SUNKEN,
-            highlightthickness=1,
-            highlightbackground=theme.SURFACE_DIVIDER,
+        self.lbl_img2 = self._make_preview_label(left)
+        cast(tk.Frame, self.lbl_img2.master).grid(
+            row=1, column=1, padx=theme.SPACE_2
         )
-        self.lbl_img2.grid(row=1, column=1, padx=theme.SPACE_2)
         for seq in ("<Button-1>", "<B1-Motion>"):
             self.lbl_img2.bind(seq, self.get_coordinates_of_held_image)
 
@@ -1175,11 +1168,16 @@ class KeystrokeEventEditor:
             self._update_img_lbl(
                 self.lbl_img2, self._scale_for_display(self.held_img)
             )
+            if self.clicked_pos and not self._clicked_pos_in_image(self.held_img):
+                # Capture size shrank or stale pixel from a previous frame.
+                self.clicked_pos = None
+                self.ref_pixel = None
             if self.clicked_pos:
                 self._sync_region_constraints()
                 self._on_region_size_change()
                 self._draw_overlay(self.held_img, self.lbl_img2)
-                self._update_ref_pixel(self.held_img, self.clicked_pos)
+                if self.clicked_pos:
+                    self._update_ref_pixel(self.held_img, self.clicked_pos)
             self._refresh_basic_guidance()
 
     def get_coordinates_of_held_image(self, event: tk.Event[tk.Label]) -> None:
@@ -1205,8 +1203,20 @@ class KeystrokeEventEditor:
         self._draw_overlay(self.held_img, self.lbl_img2)
         self._refresh_basic_guidance()
 
+    def _clicked_pos_in_image(self, img: Image.Image) -> bool:
+        if not self.clicked_pos:
+            return False
+        cx, cy = self.clicked_pos
+        w, h = img.size
+        return 0 <= cx < w and 0 <= cy < h
+
     def _draw_overlay(self, img: Image.Image, lbl: tk.Label) -> None:
         if not self.clicked_pos:
+            return
+        if not self._clicked_pos_in_image(img):
+            # e.g. pixel (265, y) after capture width shrank below 265
+            self.clicked_pos = None
+            self._update_img_lbl(lbl, self._scale_for_display(img))
             return
 
         res_img = img.copy()  # copy.deepcopy → copy()
@@ -1279,6 +1289,19 @@ class KeystrokeEventEditor:
     def _redraw_overlay(self) -> None:
         if self.held_img and self.clicked_pos:
             self._draw_overlay(self.held_img, self.lbl_img2)
+
+    @staticmethod
+    def _make_preview_label(parent: tk.Misc) -> tk.Label:
+        """Image preview label safe on macOS Tk (no interior L-box artifact)."""
+        border = tk.Frame(parent, bg=theme.SURFACE_DIVIDER, padx=1, pady=1)
+        label = tk.Label(
+            border,
+            bg=theme.SURFACE_SUNKEN,
+            highlightthickness=0,
+            bd=0,
+        )
+        label.pack()
+        return label
 
     @staticmethod
     def _scale_for_display(img: Image.Image) -> Image.Image:
@@ -1776,6 +1799,8 @@ class KeystrokeEventEditor:
 
     @staticmethod
     def _update_img_lbl(lbl: tk.Label, img: Image.Image) -> None:
-        photo = ImageTk.PhotoImage(img)
+        # master=lbl keeps the PhotoImage on the same Tk interp; avoid
+        # character-era size leftovers by sizing only from the image pixels.
+        photo = ImageTk.PhotoImage(img.convert("RGB"), master=lbl)
         lbl.configure(image=photo, width=img.width, height=img.height)
         cast(Any, lbl).image = photo

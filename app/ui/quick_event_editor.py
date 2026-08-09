@@ -277,16 +277,17 @@ class KeystrokeQuickEventEditor:
             pass
 
     def _mk_lbl(self, p: tk.Misc, _bg: str, r: int, c: int) -> tk.Label:
-        # Larger previews so users can actually verify what was captured.
+        # macOS Tk: Label highlightthickness>0 + configure(width/height) draws
+        # a light L-box inside PhotoImage previews. Border via outer Frame.
+        border = tk.Frame(p, bg=theme.SURFACE_DIVIDER, padx=1, pady=1)
+        border.grid(row=r, column=c, padx=5)
         label = tk.Label(
-            p,
-            width=18,
-            height=9,
+            border,
             bg=theme.SURFACE_SUNKEN,
-            highlightthickness=1,
-            highlightbackground=theme.SURFACE_DIVIDER,
+            highlightthickness=0,
+            bd=0,
         )
-        label.grid(row=r, column=c, padx=5)
+        label.pack()
         return label
 
     def _mk_entries(self, p: tk.Frame, labels: Sequence[str]) -> list[tk.Entry]:
@@ -419,10 +420,14 @@ class KeystrokeQuickEventEditor:
         if not self.clicked_pos:
             return
         cx, cy = self.clicked_pos
+        w, h = img.size
+        if not (0 <= cx < w and 0 <= cy < h):
+            self.clicked_pos = None
+            self._upd_img(lbl, self._scale_for_display(img))
+            return
 
         res = img.copy()
         pixels = cast(Any, res.load())
-        w, h = res.size
         for x in range(w):
             pixels[x, cy] = self._inverted_pixel(pixels[x, cy])
         for y in range(h):

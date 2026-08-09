@@ -92,12 +92,20 @@ def _make_app_stub(run_profiles=None) -> KeystrokeSimulatorApp:
     app.runtime_toggle_member_count = 0
     app.runtime_toggle_mouse_listener = None
     app.input_listener_session = MagicMock()
-    app.input_listener_session.add.side_effect = lambda listener: (
-        listener.start() or listener
-    )
+
+    def _session_add(listener, started=False):
+        if not started:
+            listener.start()
+        return listener
+
+    app.input_listener_session.add.side_effect = _session_add
     app.last_runtime_toggle_time = 0
     app.latest_runtime_scroll_time = None
     app.toggle_transition_in_progress = False
+    app._pending_start_stop_toggle = False
+    app.ctrl_check_active = False
+    app._mac_hotkey_tap_listener = None
+    app._mac_key_poll_listener = None
     app.settings = type(
         "SettingsStub",
         (),
@@ -424,16 +432,33 @@ class TestToggleAndStopSimulation(unittest.TestCase):
         self.assertFalse(app.is_running.get())
         app.stop_simulation.assert_called_once()
 
-    def test_toggle_start_stop_ignores_reentrant_requests(self):
+    def test_toggle_start_stop_queues_reentrant_requests(self):
         app = _make_app_stub()
         app.toggle_transition_in_progress = True
         app.start_simulation = MagicMock()
         app.stop_simulation = MagicMock()
+        app.after = MagicMock()
 
         KeystrokeSimulatorApp.toggle_start_stop(app)
 
         app.start_simulation.assert_not_called()
         app.stop_simulation.assert_not_called()
+        self.assertTrue(app._pending_start_stop_toggle)
+
+    def test_toggle_start_stop_runs_pending_after_transition(self):
+        app = _make_app_stub()
+        app.is_running.set(False)
+        app.start_simulation = MagicMock(return_value=True)
+        app.stop_simulation = MagicMock()
+        app.after = MagicMock()
+        app._pending_start_stop_toggle = True
+
+        KeystrokeSimulatorApp.toggle_start_stop(app)
+
+        self.assertTrue(app.is_running.get())
+        self.assertFalse(app._pending_start_stop_toggle)
+        app.after.assert_called_once()
+        self.assertEqual(app.after.call_args[0][0], 0)
 
     def test_stop_simulation_stops_processor_and_updates_ui(self):
         app = _make_app_stub()
@@ -789,22 +814,51 @@ class TestReadinessSnapshotSideEffects(unittest.TestCase):
 
 
 class TestEventHandlerSetup(unittest.TestCase):
+    @patch("app.ui.simulator_app.MacKeyPollListener")
+    @patch("app.ui.simulator_app.MacHotkeyTapListener")
     @patch("app.ui.simulator_app.platform.system", return_value="Darwin")
     @patch("app.ui.simulator_app.pynput.keyboard.Listener")
-    def test_setup_event_handlers_uses_mac_polling_without_keyboard_listener(
-        self, mock_keyboard_listener, _mock_system
+    def test_setup_event_handlers_uses_mac_tap_without_keyboard_listener(
+        self, mock_keyboard_listener, _mock_system, mock_mac_tap, mock_mac_poll
     ):
         app = _make_app_stub()
         app.runtime_toggle_enabled = True
         app.settings.toggle_start_stop_mac = True
         app.settings.start_stop_key = "`"
         app.start_stop_mouse_listener = None
-        app._check_for_long_alt_shift = MagicMock()
+        tap = MagicMock()
+        tap.is_active = True
+        mock_mac_tap.return_value = tap
 
         KeystrokeSimulatorApp.setup_event_handlers(app)
 
-        app._check_for_long_alt_shift.assert_called_once()
+        self.assertTrue(app.ctrl_check_active)
+        mock_mac_tap.assert_called_once()
+        tap.start.assert_called_once()
+        app.input_listener_session.add.assert_called()
+        app.input_listener_session.begin_responsiveness.assert_called_once()
+        mock_mac_poll.assert_not_called()
         mock_keyboard_listener.assert_not_called()
+
+    @patch("app.ui.simulator_app.MacKeyPollListener")
+    @patch("app.ui.simulator_app.MacHotkeyTapListener")
+    @patch("app.ui.simulator_app.platform.system", return_value="Darwin")
+    def test_setup_event_handlers_falls_back_to_poll_when_tap_inactive(
+        self, _mock_system, mock_mac_tap, mock_mac_poll
+    ):
+        app = _make_app_stub()
+        app.settings.toggle_start_stop_mac = True
+        tap = MagicMock()
+        tap.is_active = False
+        mock_mac_tap.return_value = tap
+        mock_mac_poll.return_value = MagicMock()
+
+        KeystrokeSimulatorApp.setup_event_handlers(app)
+
+        self.assertTrue(app.ctrl_check_active)
+        tap.start.assert_called_once()
+        tap.stop.assert_called_once()
+        mock_mac_poll.assert_called_once()
 
     @patch("app.ui.simulator_app.pynput.mouse.Listener")
     @patch("app.ui.simulator_app.platform.system", return_value="Windows")
@@ -820,37 +874,49 @@ class TestEventHandlerSetup(unittest.TestCase):
         self.assertEqual(mock_mouse_listener.call_count, 1)
         mock_mouse_listener.return_value.start.assert_called_once()
 
+    @patch("app.ui.simulator_app.MacKeyPollListener")
+    @patch("app.ui.simulator_app.MacHotkeyTapListener")
     @patch("app.ui.simulator_app.pynput.mouse.Listener")
     @patch("app.ui.simulator_app.platform.system", return_value="Darwin")
-    def test_setup_event_handlers_keeps_mac_polling_and_runtime_mouse_listener(
-        self, _mock_system, mock_mouse_listener
+    def test_setup_event_handlers_keeps_mac_tap_and_runtime_mouse_listener(
+        self, _mock_system, mock_mouse_listener, mock_mac_tap, mock_mac_poll
     ):
         app = _make_app_stub()
         app.runtime_toggle_enabled = True
         app.runtime_toggle_key = MOUSE_BUTTON_3_TRIGGER
         app.settings.toggle_start_stop_mac = True
-        app._check_for_long_alt_shift = MagicMock()
+        tap = MagicMock()
+        tap.is_active = True
+        mock_mac_tap.return_value = tap
 
         KeystrokeSimulatorApp.setup_event_handlers(app)
 
-        app._check_for_long_alt_shift.assert_called_once()
+        self.assertTrue(app.ctrl_check_active)
+        mock_mac_tap.assert_called_once()
+        mock_mac_poll.assert_not_called()
         mock_mouse_listener.assert_called_once()
         mock_mouse_listener.return_value.start.assert_called_once()
 
+    @patch("app.ui.simulator_app.MacKeyPollListener")
+    @patch("app.ui.simulator_app.MacHotkeyTapListener")
     @patch("app.ui.simulator_app.platform.system", return_value="Darwin")
     @patch("app.ui.simulator_app.pynput.keyboard.Listener")
-    def test_setup_event_handlers_uses_mac_polling_for_runtime_keyboard_trigger_only(
-        self, mock_keyboard_listener, _mock_system
+    def test_setup_event_handlers_uses_mac_tap_for_runtime_keyboard_trigger_only(
+        self, mock_keyboard_listener, _mock_system, mock_mac_tap, mock_mac_poll
     ):
         app = _make_app_stub()
         app.runtime_toggle_enabled = True
         app.runtime_toggle_key = "Q"
         app.settings.toggle_start_stop_mac = False
-        app._check_for_long_alt_shift = MagicMock()
+        tap = MagicMock()
+        tap.is_active = True
+        mock_mac_tap.return_value = tap
 
         KeystrokeSimulatorApp.setup_event_handlers(app)
 
-        app._check_for_long_alt_shift.assert_called_once()
+        self.assertTrue(app.ctrl_check_active)
+        mock_mac_tap.assert_called_once()
+        mock_mac_poll.assert_not_called()
         mock_keyboard_listener.assert_not_called()
 
     def test_open_settings_reuses_existing_window(self):
@@ -982,29 +1048,257 @@ class TestRuntimeToggleKeyHandling(unittest.TestCase):
         self.assertEqual(app.last_runtime_toggle_time, 100.0)
 
 
-class TestMacPollingBehavior(unittest.TestCase):
-    @patch("app.ui.simulator_app.KeyUtils.key_pressed", return_value=False)
-    @patch("app.ui.simulator_app.KeyUtils.mod_key_pressed", side_effect=[True, True])
-    @patch("app.ui.simulator_app.time.time", side_effect=[100.0, 100.0])
-    @patch("app.ui.simulator_app.platform.system", return_value="Darwin")
-    def test_mac_polling_does_not_toggle_start_stop_when_disabled(
-        self,
-        _mock_system,
-        _mock_time,
-        _mock_mod_pressed,
-        _mock_key_pressed,
-    ):
-        app = _make_app_stub()
-        app.after = MagicMock()
-        app.ctrl_check_active = True
-        app.settings.toggle_start_stop_mac = False
-        app.runtime_toggle_enabled = True
-        app.runtime_toggle_key = "Q"
+class TestMacKeyPollListener(unittest.TestCase):
+    def _make_listener(self, **kwargs):
+        from app.ui.mac_key_poll import MacKeyPollListener
 
-        KeystrokeSimulatorApp._check_for_long_alt_shift(app)
+        session = MagicMock()
+        posted: list = []
+        session.post.side_effect = lambda action: posted.append(action)
+        start_stop = MagicMock()
+        runtime = MagicMock()
+        listener = MacKeyPollListener(
+            session,
+            interval_ms=10,
+            hold_seconds=0.015,
+            debounce_seconds=0.2,
+            runtime_debounce_seconds=0.25,
+            start_stop_enabled=kwargs.get("start_stop_enabled", lambda: True),
+            runtime_toggle_enabled=kwargs.get("runtime_toggle_enabled", lambda: False),
+            runtime_key_provider=kwargs.get("runtime_key_provider", lambda: None),
+            on_start_stop=start_stop,
+            on_runtime_toggle=runtime,
+        )
+        return listener, session, posted, start_stop, runtime
 
-        app.toggle_start_stop.assert_not_called()
-        app.after.assert_called_once()
+    def test_requires_hold_duration_before_posting_start_stop(self) -> None:
+        listener, _session, posted, start_stop, _runtime = self._make_listener()
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ), patch("app.ui.mac_key_poll.KeyUtils.key_pressed", return_value=False):
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+                listener._tick()
+            self.assertEqual(posted, [])
+
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.01):
+                listener._tick()
+            self.assertEqual(posted, [])
+
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.02):
+                listener._tick()
+
+        self.assertEqual(len(posted), 1)
+        posted[0]()
+        start_stop.assert_called_once()
+        self.assertTrue(listener._latched)
+
+    def test_disabled_start_stop_never_posts(self) -> None:
+        listener, _session, posted, start_stop, _runtime = self._make_listener(
+            start_stop_enabled=lambda: False
+        )
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ), patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+            listener._tick()
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ), patch("app.ui.mac_key_poll.time.time", return_value=100.05):
+            listener._tick()
+        self.assertEqual(posted, [])
+        start_stop.assert_not_called()
+
+    def test_partial_release_rearms_chord_for_next_press(self) -> None:
+        """Either key up breaks the chord and must allow the next Option+Shift."""
+        listener, _session, posted, start_stop, _runtime = self._make_listener()
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ):
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+                listener._tick()
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.04):
+                listener._tick()
+        self.assertEqual(len(posted), 1)
+
+        def only_option(key: str, **_kwargs: object) -> bool:
+            return key == "alt"
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", side_effect=only_option
+        ), patch("app.ui.mac_key_poll.time.time", return_value=100.5):
+            listener._tick()
+        self.assertFalse(listener._latched)
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ):
+            with patch("app.ui.mac_key_poll.time.time", return_value=101.0):
+                listener._tick()
+            with patch("app.ui.mac_key_poll.time.time", return_value=101.04):
+                listener._tick()
+        self.assertEqual(len(posted), 2)
+        posted[0]()
+        posted[1]()
+        self.assertEqual(start_stop.call_count, 2)
+
+    def test_uses_physical_only_mod_query(self) -> None:
+        listener, _session, posted, start_stop, _runtime = self._make_listener()
+        calls: list[tuple] = []
+
+        def track(key: str, **kwargs: object) -> bool:
+            calls.append((key, kwargs.get("physical_only")))
+            return True
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", side_effect=track
+        ), patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+            listener._tick()
+        self.assertEqual(calls[0], ("alt", True))
+        self.assertEqual(calls[1], ("shift", True))
+
+    def test_full_release_rearms_for_next_chord(self) -> None:
+        listener, _session, posted, start_stop, _runtime = self._make_listener()
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ):
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+                listener._tick()
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.04):
+                listener._tick()
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=False
+        ), patch("app.ui.mac_key_poll.time.time", return_value=100.5):
+            listener._tick()
+        self.assertFalse(listener._latched)
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ):
+            with patch("app.ui.mac_key_poll.time.time", return_value=101.0):
+                listener._tick()
+            with patch("app.ui.mac_key_poll.time.time", return_value=101.04):
+                listener._tick()
+
+        self.assertEqual(len(posted), 2)
+        posted[0]()
+        posted[1]()
+        self.assertEqual(start_stop.call_count, 2)
+
+    def test_debounce_blocks_rapid_rearm(self) -> None:
+        listener, _session, posted, start_stop, _runtime = self._make_listener()
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ):
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+                listener._tick()
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.04):
+                listener._tick()
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=False
+        ), patch("app.ui.mac_key_poll.time.time", return_value=100.05):
+            listener._tick()
+
+        # Re-arm attempt still inside 0.2s debounce from first fire at 100.04.
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ):
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.10):
+                listener._tick()
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.20):
+                listener._tick()
+        self.assertEqual(len(posted), 1)
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ):
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.30):
+                listener._tick()
+            with patch("app.ui.mac_key_poll.time.time", return_value=100.34):
+                listener._tick()
+        self.assertEqual(len(posted), 2)
+        posted[0]()
+        posted[1]()
+        self.assertEqual(start_stop.call_count, 2)
+
+    def test_does_not_flood_queue_while_chord_held(self) -> None:
+        """Regression: continuous samples must not enqueue every poll tick."""
+        listener, _session, posted, start_stop, _runtime = self._make_listener()
+
+        with patch(
+            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ):
+            t = 100.0
+            for _ in range(40):
+                with patch("app.ui.mac_key_poll.time.time", return_value=t):
+                    listener._tick()
+                t += 0.015
+
+        # One fire after hold, then latched: no further posts while still held.
+        self.assertEqual(len(posted), 1)
+        posted[0]()
+        start_stop.assert_called_once()
+
+    def test_listener_stop_joins_thread(self) -> None:
+        from app.ui.mac_key_poll import MacKeyPollListener
+
+        session = MagicMock()
+        session.post = MagicMock()
+        listener = MacKeyPollListener(
+            session,
+            interval_ms=50,
+            start_stop_enabled=lambda: False,
+            on_start_stop=lambda: None,
+        )
+        listener.start()
+        self.assertIsNotNone(listener._thread)
+        self.assertTrue(listener._thread.is_alive())
+        listener.stop()
+        self.assertIsNone(listener._thread)
+
+
+class TestMacModKeyPressed(unittest.TestCase):
+    @patch("app.utils.keys.IS_MAC", True)
+    @patch("app.utils.keys.IS_WIN", False)
+    def test_mod_key_pressed_uses_left_or_right_physical_codes(self):
+        calls: list[int] = []
+
+        def fake_symbol(name: str):
+            if name == "CGEventSourceKeyState":
+                def key_state(_hid: object, code: int) -> bool:
+                    calls.append(code)
+                    return code == 61  # right Option
+
+                return key_state
+            if name == "kCGEventSourceStateHIDSystemState":
+                return "HID"
+            # Flag fallback symbols should not be needed when key-state hits.
+            return 0
+
+        with patch("app.utils.keys.quartz_symbol", side_effect=fake_symbol):
+            self.assertTrue(KeyUtils.mod_key_pressed("alt"))
+        self.assertIn(58, calls)
+        self.assertIn(61, calls)
+
+    @patch("app.utils.keys.IS_MAC", True)
+    @patch("app.utils.keys.IS_WIN", False)
+    def test_physical_only_skips_sticky_flag_fallback(self):
+        def fake_symbol(name: str):
+            if name == "CGEventSourceKeyState":
+                return lambda _hid, _code: False
+            if name == "kCGEventSourceStateHIDSystemState":
+                return "HID"
+            if name == "CGEventSourceFlagsState":
+                return lambda _hid: 0xFFFFFFFF  # all flags set
+            return 1
+
+        with patch("app.utils.keys.quartz_symbol", side_effect=fake_symbol):
+            self.assertFalse(KeyUtils.mod_key_pressed("shift", physical_only=True))
+            self.assertTrue(KeyUtils.mod_key_pressed("shift", physical_only=False))
 
 
 if __name__ == "__main__":

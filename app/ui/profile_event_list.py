@@ -192,7 +192,7 @@ class EventRow(ttk.Frame):
 
         self.chk_runtime_toggle = ttk.Checkbutton(
             row_body,
-            text=txt("Extra", "추가"),
+            text=txt("Toggle", "토글"),
             variable=self.runtime_toggle_var,
             command=self._on_toggle_runtime_member,
         )
@@ -258,13 +258,13 @@ class EventRow(ttk.Frame):
             if runtime_toggle_tip is not None:
                 runtime_toggle_tip.update_text(
                     txt(
-                        "This event joins the runtime extra group.",
-                        "이 이벤트를 실행 중 추가 이벤트 묶음에 포함합니다.",
+                        "This event is in the toggle set (starts off until toggled on).",
+                        "이 이벤트는 토글 세트에 포함됩니다(시작 시 꺼짐, 토글로 켬).",
                     )
                     if runtime_toggle_var.get()
                     else txt(
-                        "Leave unchecked to keep this event always active.",
-                        "체크하지 않으면 이 이벤트는 항상 기본 묶음으로 유지됩니다.",
+                        "Leave unchecked to keep this event always in the base set.",
+                        "체크하지 않으면 이 이벤트는 항상 기본 세트로 유지됩니다.",
                     )
                 )
 
@@ -844,8 +844,8 @@ class EventListFrame(ttk.Frame):
         ToolTip(
             lbl_name,
             txt(
-                "Event name, group, input key or condition marker, and extra toggle.",
-                "이벤트 이름, 그룹, 입력 키 또는 조건 표시, 실행 중 추가 토글입니다.",
+                "Event name, group, input key or condition marker, and toggle set membership.",
+                "이벤트 이름, 그룹, 입력 키 또는 조건 표시, 토글 세트 포함 여부입니다.",
             ),
         )
         ttk.Label(
@@ -868,7 +868,7 @@ class EventListFrame(ttk.Frame):
         ).grid(row=0, column=5, sticky="ew", padx=(0, theme.SPACE_1))
         ttk.Label(
             header_body,
-            text=txt("Extra", "추가"),
+            text=txt("Toggle", "토글"),
             width=EVENT_EXTRA_COL_WIDTH,
             anchor="center",
         ).grid(row=0, column=6, sticky="ew", padx=(0, theme.SPACE_1))

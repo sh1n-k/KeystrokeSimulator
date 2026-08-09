@@ -91,7 +91,7 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         on_change: Optional[Callable[[], None]] = None,
     ) -> None:
         super().__init__(
-            master, text=txt("Runtime Event Group", "실행 중 추가 이벤트 묶음")
+            master, text=txt("Toggle set", "토글 세트")
         )
         self.on_change = on_change
         initial_trigger = normalize_runtime_toggle_trigger(
@@ -168,8 +168,8 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         self.lbl_help = ttk.Label(
             self,
             text=txt(
-                "Checked events start disabled and can be toggled while the target app is active. Click Capture, then press a key or scroll the mouse wheel.",
-                "체크된 이벤트는 시작 시 비활성이고, 대상 앱이 활성일 때 토글할 수 있습니다. 입력 받기를 누른 뒤 키를 누르거나 마우스 휠을 움직이세요.",
+                "Checked events start off. While running, press the toggle key to enable or disable them together (CDs, optional skills, etc.). Click Capture, then press a key or scroll the mouse wheel.",
+                "체크한 이벤트는 시작 시 꺼져 있습니다. 실행 중 토글 키로 한 번에 켜고 끕니다(쿨기·옵션 스킬 등). 입력 받기를 누른 뒤 키를 누르거나 마우스 휠을 움직이세요.",
             ),
             foreground=theme.INK_MUTED,
         )

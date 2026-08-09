@@ -25,6 +25,57 @@ def quartz_symbol(name: str) -> Any:
     return getattr(_platform_module("Quartz"), name)
 
 
+class ResponsivenessActivity:
+    """Hold an NSProcessInfo activity so background hotkeys are not App-Napped.
+
+    Tk `after()` callbacks are delayed when the app is occluded (game focus).
+    A user-initiated activity keeps the process eligible for timely timers.
+    """
+
+    def __init__(self) -> None:
+        self._activity: Any = None
+        self._depth = 0
+
+    def begin(self) -> None:
+        if not IS_MAC:
+            return
+        self._depth += 1
+        if self._activity is not None:
+            return
+        try:
+            appkit = _platform_module("AppKit")
+            process_info = appkit.NSProcessInfo.processInfo()
+            options = getattr(
+                appkit,
+                "NSActivityUserInitiatedAllowingIdleSystemSleep",
+                getattr(appkit, "NSActivityUserInitiated", 0x00EFFFFF),
+            )
+            self._activity = process_info.beginActivityWithOptions_reason_(
+                options,
+                "KeystrokeSimulator hotkey responsiveness",
+            )
+        except Exception as exc:
+            logger.debug(f"Failed to begin responsiveness activity: {exc}")
+            self._activity = None
+
+    def end(self) -> None:
+        if not IS_MAC:
+            return
+        if self._depth > 0:
+            self._depth -= 1
+        if self._depth > 0:
+            return
+        activity = self._activity
+        self._activity = None
+        if activity is None:
+            return
+        try:
+            appkit = _platform_module("AppKit")
+            appkit.NSProcessInfo.processInfo().endActivity_(activity)
+        except Exception as exc:
+            logger.debug(f"Failed to end responsiveness activity: {exc}")
+
+
 class MonitorUtils:
     @staticmethod
     def get_primary_size() -> tuple[int, int]:
