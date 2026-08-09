@@ -1,5 +1,4 @@
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -53,7 +52,7 @@ class TestSimulatorEventNameValidation(unittest.TestCase):
         )
 
         with patch("app.ui.simulator_app.load_profile", return_value=profile):
-            result = app._start_simulation()
+            result = app.start_simulation()
 
         self.assertFalse(result)
 

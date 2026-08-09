@@ -20,6 +20,30 @@ class FakeVar:
         return self.value
 
 
+class FakeRow:
+    def __init__(self, event: EventModel, y: int, height: int = 20):
+        self._event_model = event
+        self._y = y
+        self._height = height
+
+    def configure(self, **_kwargs):
+        pass
+
+    def winfo_y(self):
+        return self._y
+
+    def winfo_height(self):
+        return self._height
+
+
+class FakeRowContainer:
+    def __init__(self, children):
+        self.children = children
+
+    def winfo_children(self):
+        return self.children
+
+
 class TestSortWindowFormatting(unittest.TestCase):
     def setUp(self):
         set_language("en")
@@ -59,7 +83,27 @@ class TestSortWindowFormatting(unittest.TestCase):
         text = stub._build_summary_text()
 
         self.assertIn("2 event(s)", text)
-        self.assertIn("Drag a row", text)
+        self.assertIn("Drag the handle", text)
+
+    def test_drag_end_uses_bound_event_instead_of_first_child_label(self):
+        events = [
+            EventModel(event_name="A"),
+            EventModel(event_name="B"),
+            EventModel(event_name="C"),
+        ]
+        moving = FakeRow(events[0], y=100)
+        row_b = FakeRow(events[1], y=20)
+        row_c = FakeRow(events[2], y=60)
+        stub = KeystrokeSortEvents.__new__(KeystrokeSortEvents)
+        stub.events = events[:]
+        stub.f_events = FakeRowContainer([moving, row_b, row_c])
+        stub._drag_data = {"frame": moving}
+        stub._refresh_list = lambda: None
+
+        KeystrokeSortEvents._drag_end(stub, None, moving)
+
+        self.assertEqual([evt.event_name for evt in stub.events], ["B", "C", "A"])
+        self.assertFalse(hasattr(stub, "_drag_data"))
 
 
 class TestSortWindowMessages(unittest.TestCase):

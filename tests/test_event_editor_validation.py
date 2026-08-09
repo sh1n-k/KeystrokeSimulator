@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 import tkinter as tk
 from PIL import Image
 
+from app.ui.capture_session import CaptureSession
 from app.ui.event_editor import KeystrokeEventEditor
 from app.core.models import EventModel
 
@@ -170,6 +171,7 @@ class TestUniqueEventNameValidation(unittest.TestCase):
 class TestRegionSizeClamp(unittest.TestCase):
     def test_on_region_size_change_allows_20x20(self):
         stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        stub.capture_session = CaptureSession()
         interp = tk.Tcl()
         stub.region_w_var = tk.IntVar(master=interp, value=10)
         stub.region_h_var = tk.IntVar(master=interp, value=15)
@@ -186,6 +188,7 @@ class TestRegionSizeClamp(unittest.TestCase):
 
     def test_on_region_size_change_clamps_to_available_bounds(self):
         stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        stub.capture_session = CaptureSession()
         interp = tk.Tcl()
         stub.region_w_var = tk.IntVar(master=interp, value=80)
         stub.region_h_var = tk.IntVar(master=interp, value=70)
@@ -204,6 +207,7 @@ class TestRegionSizeClamp(unittest.TestCase):
         self,
     ):
         stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        stub.capture_session = CaptureSession()
         interp = tk.Tcl()
         stub.match_mode_var = tk.StringVar(master=interp, value="region")
         stub.held_img = Image.new("RGB", (100, 100))
@@ -222,6 +226,7 @@ class TestRegionBoundsValidation(unittest.TestCase):
         self, clicked_position=(50, 50), image_size=(100, 100), mode="region"
     ):
         stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        stub.capture_session = CaptureSession()
         interp = tk.Tcl()
         stub.match_mode_var = tk.StringVar(master=interp, value=mode)
         stub.clicked_pos = clicked_position
@@ -268,6 +273,7 @@ class TestLivePreviewUpdates(unittest.TestCase):
         self,
     ):
         editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        editor.capture_session = CaptureSession()
         editor.win = SimpleNamespace(
             winfo_exists=lambda: True, after=lambda _delay, cb: cb()
         )
@@ -275,6 +281,7 @@ class TestLivePreviewUpdates(unittest.TestCase):
         editor.latest_pos = None
         editor.latest_img = None
         editor._safe_update_img_lbl = MagicMock()
+        editor._refresh_basic_guidance = MagicMock()
 
         img1 = Image.new("RGB", (20, 20), color=(0, 0, 0))
         img2 = Image.new("RGB", (20, 20), color=(0, 0, 0))
@@ -292,6 +299,7 @@ class TestLivePreviewUpdates(unittest.TestCase):
 class TestBasicGuidanceSafety(unittest.TestCase):
     def test_refresh_basic_guidance_ignores_destroyed_label(self):
         editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        editor.capture_session = CaptureSession()
         interp = tk.Tcl()
         editor._is_closing = False
         editor.lbl_basic_step = MagicMock(

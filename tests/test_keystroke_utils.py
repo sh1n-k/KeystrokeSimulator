@@ -1,11 +1,14 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.core.models import EventModel, ProfileModel
-from app.utils.system import KeyUtils, PermissionUtils, StateUtils
+from app.utils import system
+from app.utils.keys import KeyUtils
+from app.utils.system import PermissionUtils
+from app.utils.window_state import StateUtils
 from app.utils.runtime_toggle import (
     active_runtime_toggle_events,
     MOUSE_BUTTON_3_TRIGGER,
@@ -44,6 +47,13 @@ class TestStateUtils(unittest.TestCase):
         data = StateUtils.load_main_app_state()
         self.assertEqual(data, {})
 
+    def test_load_non_object_json_returns_empty(self):
+        StateUtils.path.write_text("[]", encoding="utf-8")
+
+        data = StateUtils.load_main_app_state()
+
+        self.assertEqual(data, {})
+
     def test_merge_behavior(self):
         """기존 데이터와 병합"""
         StateUtils.save_main_app_state(key1="val1")
@@ -57,6 +67,26 @@ class TestStateUtils(unittest.TestCase):
         StateUtils.save_main_app_state(test="data")
         tmp_path = StateUtils.path.with_suffix(".tmp")
         self.assertFalse(tmp_path.exists())
+
+    def test_save_preserves_falsy_values_except_none(self):
+        StateUtils.save_main_app_state(empty="", zero=0, disabled=False, missing=None)
+        data = StateUtils.load_main_app_state()
+        self.assertEqual(data["empty"], "")
+        self.assertEqual(data["zero"], 0)
+        self.assertFalse(data["disabled"])
+        self.assertNotIn("missing", data)
+
+    def test_parse_position_tuple_supports_string_tuple(self):
+        self.assertEqual(StateUtils.parse_position_tuple("(10, 20)"), (10, 20))
+        self.assertEqual(StateUtils.parse_position_tuple([30, 40]), (30, 40))
+        self.assertIsNone(StateUtils.parse_position_tuple("__import__('os').system('x')"))
+        self.assertIsNone(StateUtils.parse_position_tuple("(1e309, 0)"))
+
+    def test_parse_slash_int_pair_supports_valid_and_invalid_inputs(self):
+        self.assertEqual(StateUtils.parse_slash_int_pair("10/20"), (10, 20))
+        self.assertEqual(StateUtils.parse_slash_int_pair([30, 40]), (30, 40))
+        self.assertIsNone(StateUtils.parse_slash_int_pair("bad"))
+        self.assertIsNone(StateUtils.parse_slash_int_pair("1e309/0"))
 
 
 class TestKeyUtils(unittest.TestCase):
@@ -85,7 +115,13 @@ class TestKeyUtils(unittest.TestCase):
         code = KeyUtils.get_keycode("Q")
         self.assertEqual(KeyUtils.get_key_name_for_keycode(code), "Q")
 
-    @patch("app.utils.system.IS_WIN", True)
+    def test_platform_map_includes_shared_navigation_keys(self):
+        """Win/Mac 공통 편집·방향 키 이름이 현재 플랫폼 맵에 존재"""
+        names = set(KeyUtils.get_key_name_list())
+        for key in ("Enter", "Left", "Right", "Up", "Down", "Home", "End"):
+            self.assertIn(key, names, msg=f"missing {key} on this platform")
+            self.assertIsNotNone(KeyUtils.get_keycode(key))
+
     def test_windows_key_list_includes_enter(self):
         if "windows" not in KeyUtils._KEY_MAPS:
             self.skipTest("Windows key map unavailable")
@@ -101,6 +137,12 @@ class TestKeyUtils(unittest.TestCase):
 
 
 class TestPermissionUtils(unittest.TestCase):
+    def test_quartz_symbol_uses_module_attribute_lookup(self):
+        module = SimpleNamespace(CGPreflightScreenCaptureAccess=lambda: True)
+
+        with patch("app.utils.system._platform_module", return_value=module):
+            self.assertTrue(system.quartz_symbol("CGPreflightScreenCaptureAccess")())
+
     @patch("app.utils.system.IS_MAC", True)
     @patch(
         "app.utils.system.PermissionUtils.has_screen_capture_access", return_value=False
@@ -134,14 +176,6 @@ class TestRuntimeToggleUtils(unittest.TestCase):
         self.assertEqual(normalize_runtime_toggle_trigger("w_up"), "W_UP")
         self.assertEqual(normalize_runtime_toggle_trigger("mb_3"), "MB_3")
 
-    def test_normalize_runtime_toggle_trigger_uses_explicit_os_context(self):
-        self.assertEqual(
-            normalize_runtime_toggle_trigger("Option", os_name="Darwin"), "Option"
-        )
-        self.assertIsNone(
-            normalize_runtime_toggle_trigger("Option", os_name="Windows")
-        )
-
     def test_normalize_runtime_toggle_capture_key_prefers_keysym_then_char(self):
         self.assertEqual(normalize_runtime_toggle_capture_key("space", " "), "Space")
         self.assertEqual(normalize_runtime_toggle_capture_key("", "a"), "A")
@@ -158,10 +192,7 @@ class TestRuntimeToggleUtils(unittest.TestCase):
         )
         self.assertEqual(
             normalize_runtime_toggle_capture_key(
-                "BackSpace",
-                "₩",
-                KeyUtils.get_keycode("`", os_name="Windows"),
-                os_name="Windows",
+                "BackSpace", "₩", KeyUtils.get_keycode("`")
             ),
             "`",
         )
@@ -178,12 +209,8 @@ class TestRuntimeToggleUtils(unittest.TestCase):
         )
 
     def test_normalize_runtime_toggle_listener_key_prefers_vk_over_char(self):
-        key = type(
-            "KeyStub", (), {"vk": KeyUtils.get_keycode("Q", os_name="Windows"), "char": "ㅂ"}
-        )()
-        self.assertEqual(
-            normalize_runtime_toggle_listener_key(key, os_name="Windows"), "Q"
-        )
+        key = type("KeyStub", (), {"vk": KeyUtils.get_keycode("Q"), "char": "ㅂ"})()
+        self.assertEqual(normalize_runtime_toggle_listener_key(key), "Q")
 
     def test_normalize_runtime_toggle_wheel_event_supports_delta_and_button_num(self):
         self.assertEqual(
@@ -314,6 +341,40 @@ class TestRuntimeToggleUtils(unittest.TestCase):
 
         self.assertEqual(len(errors), 1)
         self.assertIn("conflicts with Start/Stop", errors[0])
+
+    def test_collect_validation_errors_for_runtime_toggle_member_missing_key(self):
+        profile = ProfileModel(
+            name="P1",
+            runtime_toggle_enabled=True,
+            runtime_toggle_key="F6",
+            event_list=[
+                EventModel(
+                    event_name="Extra",
+                    use_event=True,
+                    key_to_enter=None,
+                    execute_action=True,
+                    runtime_toggle_member=True,
+                )
+            ],
+        )
+
+        errors = collect_runtime_toggle_validation_errors(
+            profile,
+            profile.event_list,
+            settings=type(
+                "SettingsStub",
+                (),
+                {
+                    "toggle_start_stop_mac": False,
+                    "use_alt_shift_hotkey": False,
+                    "start_stop_key": "DISABLED",
+                },
+            )(),
+            os_name="Darwin",
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("missing an input key", errors[0])
 
 
 if __name__ == "__main__":

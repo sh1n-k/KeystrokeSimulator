@@ -20,6 +20,7 @@ REMOVED_LEGACY_MODULES = {
     "keystroke_sounds",
     "keystroke_sort_events",
     "keystroke_utils",
+    "main",
     "profile_display",
     "runtime_toggle_sound_assets",
     "runtime_toggle_utils",

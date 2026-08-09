@@ -7,6 +7,9 @@ from unittest.mock import patch
 from PIL import Image
 
 from app.core.models import EventModel, ProfileModel
+from app.storage.modkey_sets_storage import (
+    coerce_modification_keys,
+)
 from app.storage.profile_storage import (
     copy_profile,
     delete_profile_files,
@@ -17,24 +20,22 @@ from app.storage.profile_storage import (
     load_profile,
     load_profile_favorites,
     load_profile_meta_favorite,
+    raw_profile_has_unused_data,
     rename_profile_files,
     save_profile,
 )
 
 
 class TestProfileJsonStorage(unittest.TestCase):
-    def test_json_roundtrip_drops_latest_screenshot(self):
+    def test_json_roundtrip(self):
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
             held = Image.new("RGB", (3, 3), color=(10, 20, 30))
-            latest = Image.new("RGB", (3, 3), color=(1, 2, 3))
-
             evt = EventModel(
                 event_name="E1",
                 capture_size=(320, 180),
                 latest_position=(100, 200),
                 clicked_position=(10, 20),
-                latest_screenshot=latest,
                 held_screenshot=held,
                 ref_pixel_value=(10, 20, 30),
                 key_to_enter="F1",
@@ -56,11 +57,9 @@ class TestProfileJsonStorage(unittest.TestCase):
             )
             save_profile(prof_dir, p, name="P1")
 
-            # Verify JSON doesn't contain latest_screenshot.
             raw = json.loads((prof_dir / "P1.json").read_text(encoding="utf-8"))
             self.assertIn("events", raw)
             self.assertEqual(len(raw["events"]), 1)
-            self.assertNotIn("latest_screenshot", raw["events"][0])
             self.assertIn("held_screenshot", raw["events"][0])
             self.assertTrue(raw["events"][0]["runtime_toggle_member"])
             self.assertTrue(raw["profile"]["runtime_toggle_enabled"])
@@ -71,7 +70,6 @@ class TestProfileJsonStorage(unittest.TestCase):
             self.assertTrue(p2.favorite)
             self.assertEqual(len(p2.event_list), 1)
             e2 = p2.event_list[0]
-            self.assertIsNone(e2.latest_screenshot)
             self.assertIsNotNone(e2.held_screenshot)
             self.assertEqual(e2.held_screenshot.size, (3, 3))
             self.assertEqual(e2.capture_size, (320, 180))
@@ -147,55 +145,69 @@ class TestProfileJsonStorage(unittest.TestCase):
             raw = json.loads((prof_dir / "CrossOs.json").read_text(encoding="utf-8"))
             self.assertEqual(raw["profile"]["runtime_toggle_key"], "Alt")
 
-    def test_modification_keys_include_modifier_roundtrip(self):
+    def test_load_profile_invalid_json_falls_back_without_overwriting_file(self):
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
-            profile = ProfileModel(
-                name="ModKeys",
-                event_list=[],
-                modification_keys={
-                    "shift": {
-                        "enabled": True,
-                        "value": "V",
-                        "pass": False,
-                        "include_modifier": False,
-                    }
-                },
-            )
+            path = prof_dir / "Broken.json"
+            path.write_text("{bad", encoding="utf-8")
 
-            save_profile(prof_dir, profile, name=profile.name)
+            loaded = load_profile(prof_dir, "Broken", migrate=True)
 
-            raw = json.loads((prof_dir / "ModKeys.json").read_text(encoding="utf-8"))
-            self.assertFalse(
-                raw["profile"]["modification_keys"]["shift"]["include_modifier"]
-            )
-            loaded = load_profile(prof_dir, "ModKeys", migrate=False)
-            self.assertFalse(loaded.modification_keys["shift"]["include_modifier"])
+            self.assertEqual(loaded.name, "Broken")
+            self.assertEqual(loaded.event_list, [])
+            self.assertEqual(path.read_text(encoding="utf-8"), "{bad")
 
-    def test_legacy_modification_keys_default_include_modifier_to_true(self):
+    def test_load_profile_non_object_root_falls_back(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            (prof_dir / "Broken.json").write_text("[]", encoding="utf-8")
+
+            loaded = load_profile(prof_dir, "Broken", migrate=True)
+
+            self.assertEqual(loaded.name, "Broken")
+            self.assertEqual(loaded.event_list, [])
+
+    def test_load_profile_ignores_invalid_shape_without_crashing(self):
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
             payload = {
-                "schema_version": 1,
-                "profile": {
-                    "name": "LegacyMod",
-                    "favorite": False,
-                    "modification_keys": {
-                        "shift": {"enabled": True, "value": "V", "pass": False}
-                    },
-                },
-                "events": [],
+                "profile": [],
+                "events": [
+                    "bad",
+                    {"event_name": "BadPriority", "priority": "oops"},
+                    {"event_name": "BadXY", "capture_size": ["x", "y"]},
+                ],
             }
-            (prof_dir / "LegacyMod.json").write_text(
-                json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+            (prof_dir / "Mixed.json").write_text(json.dumps(payload), encoding="utf-8")
+
+            loaded = load_profile(prof_dir, "Mixed", migrate=False)
+
+            self.assertEqual(len(loaded.event_list), 2)
+            self.assertEqual(loaded.event_list[0].priority, 0)
+            self.assertEqual(loaded.event_list[1].capture_size, (100, 100))
+
+    def test_load_profile_skips_migration_when_invalid_data_was_ignored(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            path = prof_dir / "Mixed.json"
+            payload = {
+                "profile": {"name": "Mixed"},
+                "events": [
+                    {"event_name": "A", "key_to_enter": "X"},
+                    {"event_name": "A", "key_to_enter": "Y"},
+                    "bad",
+                ],
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            loaded = load_profile(prof_dir, "Mixed", migrate=True)
+            raw = json.loads(path.read_text(encoding="utf-8"))
+
+            self.assertEqual(
+                [evt.event_name for evt in loaded.event_list], ["A", "A (2)"]
             )
-
-            loaded = load_profile(prof_dir, "LegacyMod", migrate=False)
-
-            self.assertTrue(loaded.modification_keys["shift"]["enabled"])
-            self.assertEqual(loaded.modification_keys["shift"]["value"], "V")
-            self.assertFalse(loaded.modification_keys["shift"]["pass"])
-            self.assertTrue(loaded.modification_keys["shift"]["include_modifier"])
+            self.assertEqual(raw["events"][1]["event_name"], "A")
+            self.assertEqual(raw["events"][2], "bad")
 
 class TestRenameProfileFiles(unittest.TestCase):
     """rename_profile_files: 프로필 파일 이름 변경"""
@@ -332,7 +344,6 @@ class TestEventRoundtrip(unittest.TestCase):
             key_to_enter="B",
             press_duration_ms=200.0,
             randomization_ms=30.0,
-            independent_thread=True,
             match_mode="region",
             invert_match=True,
             region_size=(20, 30),
@@ -351,7 +362,6 @@ class TestEventRoundtrip(unittest.TestCase):
         self.assertEqual(restored.clicked_position, (5, 15))
         self.assertEqual(restored.key_to_enter, "B")
         self.assertEqual(restored.press_duration_ms, 200.0)
-        self.assertTrue(restored.independent_thread)
         self.assertEqual(restored.match_mode, "region")
         self.assertTrue(restored.invert_match)
         self.assertEqual(restored.region_size, (20, 30))
@@ -361,7 +371,6 @@ class TestEventRoundtrip(unittest.TestCase):
         self.assertEqual(restored.conditions, {"Dep": False})
         self.assertIsNotNone(restored.held_screenshot)
         self.assertEqual(restored.held_screenshot.size, (4, 4))
-        self.assertIsNone(restored.latest_screenshot)
 
     def test_none_fields_roundtrip(self):
         """None 필드 roundtrip"""
@@ -383,6 +392,33 @@ class TestEventRoundtrip(unittest.TestCase):
         }
         restored = event_from_dict(raw)
         self.assertEqual(restored.capture_size, (100, 100))
+
+    def test_non_boolean_conditions_are_rejected(self):
+        with self.assertRaises(ValueError):
+            event_from_dict(
+                {
+                    "event_name": "Conditions",
+                    "conditions": {"A": True, "B": False, "C": "false"},
+                }
+            )
+
+    def test_profile_load_skips_event_with_invalid_conditions(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            payload = {
+                "profile": {"name": "InvalidCondition"},
+                "events": [
+                    {"event_name": "Good", "conditions": {"A": True}},
+                    {"event_name": "Bad", "conditions": {"A": "false"}},
+                ],
+            }
+            (prof_dir / "InvalidCondition.json").write_text(
+                json.dumps(payload), encoding="utf-8"
+            )
+
+            loaded = load_profile(prof_dir, "InvalidCondition", migrate=True)
+
+            self.assertEqual([evt.event_name for evt in loaded.event_list], ["Good"])
 
     def test_image_roundtrip_preserves_pixels(self):
         """이미지 포함 roundtrip에서 픽셀 보존"""
@@ -476,6 +512,106 @@ class TestLoadProfileMetaFavorite(unittest.TestCase):
             self.assertEqual(
                 load_profile_favorites(prof_dir, ["A", "B"]), {"A": True, "B": True}
             )
+
+
+class TestProfileDiscardsModificationKeys(unittest.TestCase):
+    def test_save_omits_and_load_ignores_legacy_modification_keys(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            keys = {
+                "alt": {"enabled": True, "value": "Q", "pass": False},
+                "ctrl": {"enabled": True, "value": "Pass", "pass": True},
+                "shift": {"enabled": True, "value": "Pass", "pass": True},
+            }
+            save_profile(
+                prof_dir,
+                ProfileModel(name="M", event_list=[], modification_keys=keys),
+                name="M",
+            )
+            raw = json.loads((prof_dir / "M.json").read_text(encoding="utf-8"))
+            self.assertNotIn("modification_keys", raw.get("profile", {}))
+            # Inject legacy field and ensure load discards it.
+            raw["profile"]["modification_keys"] = keys
+            (prof_dir / "M.json").write_text(
+                json.dumps(raw, ensure_ascii=False), encoding="utf-8"
+            )
+            loaded = load_profile(prof_dir, "M", migrate=False)
+            self.assertIsNone(loaded.modification_keys)
+            # Legacy field still on disk when migrate=False.
+            raw_after = json.loads((prof_dir / "M.json").read_text(encoding="utf-8"))
+            self.assertIn("modification_keys", raw_after.get("profile", {}))
+
+    def test_load_migrate_strips_legacy_modification_keys_from_disk(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            payload = {
+                "schema_version": 1,
+                "profile": {
+                    "name": "Legacy",
+                    "favorite": False,
+                    "modification_keys": {
+                        "alt": {"enabled": True, "value": "Q", "pass": False},
+                    },
+                    "runtime_toggle_enabled": False,
+                    "runtime_toggle_key": None,
+                },
+                "events": [],
+            }
+            path = prof_dir / "Legacy.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            loaded = load_profile(prof_dir, "Legacy", migrate=True)
+            self.assertIsNone(loaded.modification_keys)
+            raw_after = json.loads(path.read_text(encoding="utf-8"))
+            self.assertNotIn("modification_keys", raw_after.get("profile", {}))
+
+    def test_load_migrate_strips_legacy_event_fields_from_disk(self):
+        with tempfile.TemporaryDirectory() as td:
+            prof_dir = Path(td)
+            payload = {
+                "schema_version": 1,
+                "profile": {
+                    "name": "E",
+                    "favorite": False,
+                    "runtime_toggle_enabled": False,
+                    "runtime_toggle_key": None,
+                },
+                "events": [
+                    {
+                        "event_name": "A",
+                        "use_event": True,
+                        "capture_size": [100, 100],
+                        "key_to_enter": "1",
+                        "independent_thread": False,
+                        "match_mode": "pixel",
+                        "conditions": {},
+                        "runtime_toggle_member": False,
+                    }
+                ],
+            }
+            path = prof_dir / "E.json"
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            self.assertTrue(raw_profile_has_unused_data(payload))
+            load_profile(prof_dir, "E", migrate=True)
+            raw_after = json.loads(path.read_text(encoding="utf-8"))
+            self.assertFalse(raw_profile_has_unused_data(raw_after))
+            self.assertNotIn("independent_thread", raw_after["events"][0])
+
+    def test_raw_profile_has_unused_data_detects_extra_root_key(self):
+        payload = {
+            "schema_version": 1,
+            "profile": {"name": "X", "favorite": False},
+            "events": [],
+            "legacy_blob": True,
+        }
+        self.assertTrue(raw_profile_has_unused_data(payload))
+
+    def test_coerce_fills_missing_slots(self):
+        coerced = coerce_modification_keys(
+            {"alt": {"enabled": True, "value": "Z", "pass": False}}
+        )
+        self.assertEqual(coerced["alt"]["value"], "Z")
+        self.assertTrue(coerced["ctrl"]["pass"])
+        self.assertTrue(coerced["shift"]["enabled"])
 
 
 if __name__ == "__main__":

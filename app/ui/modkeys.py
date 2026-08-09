@@ -1,66 +1,207 @@
+from __future__ import annotations
+
 import tkinter as tk
 from pathlib import Path
-from tkinter import ttk
-from typing import Dict, Any
+from tkinter import messagebox, ttk
+from typing import ClassVar, TypeAlias
 
 from loguru import logger
-from app.utils.i18n import dual_text_width, txt
-from app.storage.profile_storage import (
+from app.core.models import ModificationKeys
+from app.storage.modkey_sets_storage import (
     default_modification_keys,
-    load_profile,
-    save_profile,
+    get_modkey_set,
+    upsert_modkey_set,
 )
-from app.utils.system import WindowUtils
+from app.ui import theme
+from app.utils.i18n import dual_text_width, txt
+from app.utils.window_state import WindowUtils
+
+ModKeyRow: TypeAlias = tuple[
+    tk.BooleanVar,  # enabled
+    tk.StringVar,  # value
+    tk.StringVar,  # previous value
+    tk.BooleanVar,  # pass-through
+    tk.BooleanVar,  # include_modifier
+    ttk.Combobox,
+    ttk.Checkbutton,  # include_modifier widget
+    tk.Frame,
+    tk.Label,
+    tk.Label,
+    tk.Label,
+]
 
 
 class ModificationKeysWindow(tk.Toplevel):
-    def __init__(self, master, profile_name):
+    def __init__(
+        self,
+        master: tk.Tk | tk.Toplevel | None,
+        set_name: str,
+        *,
+        sets_path: Path,
+    ) -> None:
         super().__init__(master)
-        self.prof_name = profile_name
-        self.prof_dir = Path("profiles")
-        self.title(txt("Modification Keys", "수정 키 설정"))
-        self.transient(master)
+        self.set_name = set_name
+        self.sets_path = Path(sets_path)
+        self.title(
+            txt(
+                "Modifier Keys — {name}",
+                "수정 키 — {name}",
+                name=set_name,
+            )
+        )
+        if master is not None:
+            self.transient(master)
         self.grab_set()
+        try:
+            self.configure(bg=theme.SURFACE_PAPER)
+        except tk.TclError:
+            pass
+        theme.install_styles(self)
 
-        self.valid_keys = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-        self.labels = ("Alt", "Ctrl", "Shift")
-        self.rows = []  # (chk_var, cmb_var, prev_val, pass_var, include_var, cmb_widget, include_widget)
+        self.valid_keys: set[str] = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        self.labels: tuple[str, ...] = ("Alt", "Ctrl", "Shift")
+        self.rows: list[ModKeyRow] = []
 
         self._setup_ui()
         self._load_data()
 
-        self.bind("<Return>", lambda e: self.save())
-        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Return>", lambda _event: self.save())
+        self.bind("<Escape>", lambda _event: self.destroy())
         self.focus_force()
         WindowUtils.center_window(self)
 
-    def _setup_ui(self):
+    # SOT icon vocabulary for modifier keycaps.
+    _KEYCAPS: ClassVar[dict[str, str]] = {"Alt": "⎇", "Ctrl": "⌃", "Shift": "⇧"}
+
+    def _build_context_bar(self) -> tk.Frame:
+        f = theme.fonts()
+        bar = tk.Frame(
+            self,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_2,
+        )
+        title_col = tk.Frame(bar, bg=theme.SURFACE_PANEL)
+        title_col.pack(side="left", fill="x", expand=True)
+        tk.Label(
+            title_col,
+            text=txt("Modifier Keys", "수정 키"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_PRIMARY,
+            font=f["heading"],
+        ).pack(anchor="w")
+        tk.Label(
+            title_col,
+            text=txt(
+                "Set: {name} · independent of profiles",
+                "세트: {name} · 프로필과 무관합니다",
+                name=self.set_name,
+            ),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+        ).pack(anchor="w", pady=(theme.SPACE_1, 0))
+        return bar
+
+    def _setup_ui(self) -> None:
+        # Top ContextBar — keeps profile context visible across the dialog.
+        bar = self._build_context_bar()
+        bar.grid(row=0, column=0, columnspan=9, sticky="we")
+        tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).grid(
+            row=1, column=0, columnspan=9, sticky="we"
+        )
+
+        # Each modifier becomes its own card with a keycap glyph on the left.
+        f = theme.fonts()
         for i, lbl in enumerate(self.labels):
-            ttk.Label(self, text=lbl).grid(row=i, column=1, padx=5, pady=5)
+            card = tk.Frame(
+                self,
+                bg=theme.SURFACE_CANVAS,
+                highlightthickness=1,
+                highlightbackground=theme.SURFACE_DIVIDER,
+            )
+            card.grid(
+                row=i + 2,
+                column=0,
+                columnspan=6,
+                padx=theme.SPACE_3,
+                pady=theme.SPACE_1,
+                sticky="we",
+            )
+            keycap = self._KEYCAPS.get(lbl, "")
+            # Big monospace keycap glyph
+            lbl_cap = tk.Label(
+                card,
+                text=keycap,
+                width=2,
+                bg=theme.SURFACE_SUNKEN,
+                fg=theme.INK_PRIMARY,
+                font=f["display"],
+                padx=theme.SPACE_2,
+                pady=theme.SPACE_1,
+            )
+            lbl_cap.grid(row=0, column=0, padx=(theme.SPACE_2, theme.SPACE_1), pady=theme.SPACE_2)
+            lbl_name = tk.Label(
+                card,
+                text=lbl,
+                width=8,
+                bg=theme.SURFACE_CANVAS,
+                fg=theme.INK_PRIMARY,
+                font=f["body_bold"],
+            )
+            lbl_name.grid(row=0, column=1, padx=theme.SPACE_1, pady=theme.SPACE_2)
 
             chk = tk.BooleanVar()
-            ttk.Checkbutton(self, variable=chk).grid(row=i, column=2, padx=5)
+            ttk.Checkbutton(card, variable=chk).grid(
+                row=0, column=2, padx=theme.SPACE_1
+            )
 
             cmb_var = tk.StringVar(value="PressKey")
             cmb = ttk.Combobox(
-                self, textvariable=cmb_var, values=["PressKey"], width=10
+                card, textvariable=cmb_var, values=["PressKey"], width=10
             )
-            cmb.grid(row=i, column=3, padx=5)
-            cmb.bind("<KeyPress>", lambda e, v=cmb_var, idx=i: self._on_key(e, v, idx))
+            cmb.grid(row=0, column=3, padx=theme.SPACE_1)
+            cmb.bind(
+                "<KeyPress>", lambda e, v=cmb_var, idx=i: self._on_key(e, v, idx)
+            )
 
-            ttk.Label(self, text=txt("Pass", "패스")).grid(row=i, column=4, padx=5)
+            tk.Label(
+                card,
+                text=txt("Pass through", "패스"),
+                bg=theme.SURFACE_CANVAS,
+                fg=theme.INK_MUTED,
+                font=f["caption"],
+            ).grid(row=0, column=4, padx=(theme.SPACE_3, theme.SPACE_1))
 
             pas = tk.BooleanVar(value=False)
             ttk.Checkbutton(
-                self, variable=pas, command=lambda idx=i: self._toggle_pass(idx)
-            ).grid(row=i, column=5, padx=5)
+                card, variable=pas, command=lambda idx=i: self._toggle_pass(idx)
+            ).grid(row=0, column=5, padx=theme.SPACE_1)
 
-            ttk.Label(self, text=txt("With Mod", "원본 함께")).grid(
-                row=i, column=6, padx=5
-            )
+            tk.Label(
+                card,
+                text=txt("Include modifier", "수정키 포함"),
+                bg=theme.SURFACE_CANVAS,
+                fg=theme.INK_MUTED,
+                font=f["caption"],
+            ).grid(row=0, column=6, padx=(theme.SPACE_3, theme.SPACE_1))
+
             include_var = tk.BooleanVar(value=True)
-            include_chk = ttk.Checkbutton(self, variable=include_var)
-            include_chk.grid(row=i, column=7, padx=5)
+            include_chk = ttk.Checkbutton(card, variable=include_var)
+            include_chk.grid(row=0, column=7, padx=theme.SPACE_1)
+
+            # "PASS" chip surfaces alongside the keycap when Pass mode is on
+            # so users can tell at a glance which keys are pass-through.
+            chip = tk.Label(
+                card,
+                text=txt("PASS", "패스"),
+                bg=theme.SURFACE_CANVAS,
+                fg=theme.SURFACE_CANVAS,
+                font=f["caption"],
+                padx=theme.SPACE_2,
+                pady=0,
+            )
+            chip.grid(row=0, column=8, padx=(theme.SPACE_2, theme.SPACE_3))
 
             self.rows.append(
                 (
@@ -71,46 +212,67 @@ class ModificationKeysWindow(tk.Toplevel):
                     include_var,
                     cmb,
                     include_chk,
+                    card,
+                    lbl_cap,
+                    lbl_name,
+                    chip,
                 )
             )
 
-        ttk.Button(
-            self,
-            text=txt("Save (Enter)", "저장 (Enter)"),
-            width=dual_text_width("Save (Enter)", "저장 (Enter)", padding=2, min_width=12),
-            command=self.save,
-        ).grid(
-            row=len(self.labels), column=0, columnspan=8, pady=10
+        # Bottom RunDock — separator + panel-tone band hosting Save.
+        tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).grid(
+            row=len(self.labels) + 2,
+            column=0,
+            columnspan=9,
+            sticky="we",
+            pady=(theme.SPACE_2, 0),
         )
+        dock = tk.Frame(
+            self,
+            bg=theme.SURFACE_PANEL,
+            padx=theme.SPACE_3,
+            pady=theme.SPACE_2,
+        )
+        dock.grid(
+            row=len(self.labels) + 3,
+            column=0,
+            columnspan=9,
+            sticky="we",
+        )
+        ttk.Button(
+            dock,
+            text=txt("Save (Enter)", "저장 (Enter)"),
+            width=dual_text_width(
+                "Save (Enter)", "저장 (Enter)", padding=2, min_width=12
+            ),
+            command=self.save,
+            style="Accent.TButton",
+        ).pack(side="right")
 
-    def _load_data(self):
-        if not (self.prof_dir / f"{self.prof_name}.json").exists():
-            logger.warning(f"Profile '{self.prof_name}' missing.")
-            return self.destroy()
-
+    def _load_data(self) -> None:
         try:
-            p = load_profile(self.prof_dir, self.prof_name, migrate=True)
-
-            # Default initialization if missing
-            if not getattr(p, "modification_keys", None):
-                p.modification_keys = default_modification_keys()
-                save_profile(self.prof_dir, p, name=self.prof_name)
-
+            mod_keys = get_modkey_set(self.set_name, self.sets_path) or default_modification_keys()
             for i, lbl in enumerate(self.labels):
-                if d := p.modification_keys.get(lbl.lower()):
+                if d := mod_keys.get(lbl.lower()):
                     r = self.rows[i]
-                    r[0].set(d["enabled"])
-                    r[1].set(d["value"])
-                    r[2].set(d["value"])
-                    r[3].set(d["pass"])
-                    r[4].set(bool(d.get("include_modifier", True)))
-                    if d["pass"]:
+                    value = str(d.get("value", "PressKey"))
+                    enabled = bool(d.get("enabled", True))
+                    pass_through = bool(d.get("pass", False))
+                    include_modifier = bool(d.get("include_modifier", True))
+                    r[0].set(enabled)
+                    r[1].set(value)
+                    r[2].set(value)
+                    r[3].set(pass_through)
+                    r[4].set(include_modifier)
+                    if pass_through:
                         self._toggle_pass(i)
-            logger.info(f"Loaded keys for '{self.prof_name}'")
+            logger.info(f"Loaded modkey set '{self.set_name}'")
         except Exception as e:
             logger.error(f"Load failed: {e}")
 
-    def _on_key(self, event, var, idx):
+    def _on_key(
+        self, event: tk.Event[tk.Misc], var: tk.StringVar, idx: int
+    ) -> str | None:
         if (
             not self.rows[idx][3].get()
             and (char := event.char.upper()) in self.valid_keys
@@ -118,8 +280,10 @@ class ModificationKeysWindow(tk.Toplevel):
             var.set(char)
             return "break"
 
-    def _toggle_pass(self, idx):
-        _, cmb_var, prev, pas, _include_var, cmb, include_chk = self.rows[idx]
+    def _toggle_pass(self, idx: int) -> None:
+        row = self.rows[idx]
+        _, cmb_var, prev, pas, _include_var, cmb, include_chk = row[:7]
+        card, lbl_cap, lbl_name, chip = row[7:11]
         if pas.get():
             prev.set(cmb_var.get())
             cmb_var.set("Pass")
@@ -127,27 +291,47 @@ class ModificationKeysWindow(tk.Toplevel):
                 state="disabled"
             )  # 'readonly'보다 'disabled'가 명확하나 원본 의도 유지시 'readonly'
             include_chk.config(state="disabled")
+            # Dim card chrome and surface the PASS chip.
+            card.config(
+                bg=theme.SURFACE_PANEL, highlightbackground=theme.SURFACE_DIVIDER
+            )
+            lbl_cap.config(fg=theme.INK_MUTED, bg=theme.SURFACE_SUNKEN)
+            lbl_name.config(fg=theme.INK_MUTED, bg=theme.SURFACE_PANEL)
+            chip.config(bg=theme.SIGNAL_TINT, fg=theme.SIGNAL_BASE)
         else:
             cmb_var.set(prev.get())
             cmb.config(state="normal")
             include_chk.config(state="normal")
+            card.config(
+                bg=theme.SURFACE_CANVAS, highlightbackground=theme.SURFACE_DIVIDER
+            )
+            lbl_cap.config(fg=theme.INK_PRIMARY, bg=theme.SURFACE_SUNKEN)
+            lbl_name.config(fg=theme.INK_PRIMARY, bg=theme.SURFACE_CANVAS)
+            chip.config(bg=theme.SURFACE_CANVAS, fg=theme.SURFACE_CANVAS)
 
-    def save(self):
-        data = {
+    def save(self) -> None:
+        data: ModificationKeys = {
             lbl.lower(): {
                 "enabled": r[0].get(),
                 "value": "Pass" if r[3].get() else r[1].get(),
                 "pass": r[3].get(),
                 "include_modifier": r[4].get(),
             }
-            for lbl, r in zip(self.labels, self.rows)
+            for lbl, r in zip(self.labels, self.rows, strict=True)
         }
 
         try:
-            p = load_profile(self.prof_dir, self.prof_name, migrate=True)
-            p.modification_keys = data
-            save_profile(self.prof_dir, p, name=self.prof_name)
-            logger.info(f"Saved keys for '{self.prof_name}'")
+            upsert_modkey_set(self.set_name, data, self.sets_path)
+            logger.info(f"Saved modkey set '{self.set_name}'")
             self.destroy()
         except Exception as e:
             logger.error(f"Save failed: {e}")
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt(
+                    "Failed to save ModKey set: {error}",
+                    "수정키 세트 저장 실패: {error}",
+                    error=e,
+                ),
+                parent=self,
+            )

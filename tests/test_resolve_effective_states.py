@@ -1,6 +1,6 @@
 import unittest
 
-from helpers import make_processor_stub
+from tests.helpers import make_processor_stub
 
 
 def _evt(name, conds=None, **kwargs):

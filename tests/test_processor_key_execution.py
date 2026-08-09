@@ -1,9 +1,11 @@
+import os
 import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
-from app.core.processor import KeystrokeProcessor, KeySimulator, ModificationKeyHandler
+from app.core import processor as processor_module
+from app.core.processor import KeystrokeProcessor, ModificationKeyHandler
 
 
 def _make_processor_stub() -> KeystrokeProcessor:
@@ -13,6 +15,7 @@ def _make_processor_stub() -> KeystrokeProcessor:
     proc.key_lock = threading.Lock()
     proc.state_lock = threading.Lock()
     proc.pressed_keys = set()
+    proc.pressed_key_codes = {}
     proc.current_states = {}
     proc.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
     proc._calculate_press_duration = lambda _evt: 0.05
@@ -34,6 +37,7 @@ class TestPressKeyAsync(unittest.IsolatedAsyncioTestCase):
         proc.sim.press.assert_called_once_with(65)
         proc.sim.release.assert_called_once_with(65)
         self.assertNotIn("A", proc.pressed_keys)
+        self.assertNotIn("A", proc.pressed_key_codes)
 
     async def test_press_key_async_skips_when_terminated(self):
         proc = _make_processor_stub()
@@ -55,7 +59,7 @@ class TestPressKeyAsync(unittest.IsolatedAsyncioTestCase):
         proc.sim.press.assert_not_called()
         proc.sim.release.assert_not_called()
 
-    async def test_press_key_async_cleans_pressed_keys_even_if_wait_fails(self):
+    async def test_press_key_async_releases_even_if_wait_fails(self):
         proc = _make_processor_stub()
 
         async def boom_wait(_end_time, _check_interval=0.02):
@@ -67,7 +71,10 @@ class TestPressKeyAsync(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await proc._press_key_async(evt)
 
+        proc.sim.press.assert_called_once_with(65)
+        proc.sim.release.assert_called_once_with(65)
         self.assertNotIn("A", proc.pressed_keys)
+        self.assertNotIn("A", proc.pressed_key_codes)
 
     async def test_press_key_async_logs_only_referenced_conditions(self):
         proc = _make_processor_stub()
@@ -87,141 +94,260 @@ class TestPressKeyAsync(unittest.IsolatedAsyncioTestCase):
             "무관한 조건": True,
         }
 
-        with patch("app.core.processor.logger.info") as mock_info:
+        with patch("app.core.processor.logger.debug") as mock_debug:
             await proc._press_key_async(evt, state_snapshot)
 
-        mock_info.assert_called_once()
-        log_line = mock_info.call_args[0][0]
+        mock_debug.assert_called_once()
+        log_line = mock_debug.call_args[0][0]
         self.assertIn("Async Key Pressed: A", log_line)
         self.assertIn("[조건-비활성] 채널링 중=False", log_line)
         self.assertIn("[조건] 버프 준비=True", log_line)
         self.assertNotIn("무관한 조건", log_line)
 
-
-class TestPressKeySync(unittest.TestCase):
-    def test_sync_press_key_presses_and_releases(self):
+    async def test_press_key_async_allows_zero_keycode(self):
+        """Darwin 'A' is keycode 0; must not be treated as missing."""
         proc = _make_processor_stub()
-        proc._wait_until_sync = lambda _end_time, _check_interval=0.02: None
+        proc.key_codes = {"A": 0}
+
+        async def fake_wait(_end_time, _check_interval=0.02):
+            return None
+
+        proc._wait_until_async = fake_wait
         evt = {"name": "A_EVT", "key": "A"}
 
-        proc._sync_press_key(evt)
+        await proc._press_key_async(evt)
+
+        proc.sim.press.assert_called_once_with(0)
+        proc.sim.release.assert_called_once_with(0)
+        self.assertNotIn("A", proc.pressed_keys)
+        self.assertNotIn("A", proc.pressed_key_codes)
+
+    async def test_press_key_async_keeps_tracking_if_release_fails(self):
+        proc = _make_processor_stub()
+
+        async def fake_wait(_end_time, _check_interval=0.02):
+            return None
+
+        proc._wait_until_async = fake_wait
+        proc.sim.release.side_effect = RuntimeError("release boom")
+        evt = {"name": "A_EVT", "key": "A"}
+
+        await proc._press_key_async(evt)
 
         proc.sim.press.assert_called_once_with(65)
         proc.sim.release.assert_called_once_with(65)
-        self.assertNotIn("A", proc.pressed_keys)
+        self.assertIn("A", proc.pressed_keys)
+        self.assertEqual(proc.pressed_key_codes.get("A"), 65)
 
-    def test_sync_press_key_skips_duplicate_pressed_key(self):
+
+class TestForceRelease(unittest.TestCase):
+    def test_force_release_clears_tracked_keys(self):
         proc = _make_processor_stub()
-        proc.pressed_keys.add("A")
-        evt = {"name": "A_EVT", "key": "A"}
+        proc.pressed_keys = {"A", "B"}
+        proc.pressed_key_codes = {"A": 65, "B": 66}
 
-        proc._sync_press_key(evt)
+        proc._force_release_pressed_keys()
 
-        proc.sim.press.assert_not_called()
-        proc.sim.release.assert_not_called()
+        self.assertEqual(proc.sim.release.call_count, 2)
+        proc.sim.release.assert_any_call(65)
+        proc.sim.release.assert_any_call(66)
+        self.assertEqual(proc.pressed_keys, set())
+        self.assertEqual(proc.pressed_key_codes, {})
 
-    def test_sync_press_key_cleans_pressed_keys_on_press_error(self):
+    def test_stop_force_releases_after_join(self):
         proc = _make_processor_stub()
-        proc.sim.press.side_effect = RuntimeError("press failed")
-        evt = {"name": "A_EVT", "key": "A"}
-
-        with self.assertRaises(RuntimeError):
-            proc._sync_press_key(evt)
-
-        self.assertNotIn("A", proc.pressed_keys)
-
-    def test_sync_press_key_logs_referenced_conditions_from_current_states(self):
-        proc = _make_processor_stub()
-        proc._wait_until_sync = lambda _end_time, _check_interval=0.02: None
-        proc.current_states = {
-            "[조건-비활성] 채널링 중": False,
-            "[조건] 버프 준비": True,
-            "무관한 조건": True,
-        }
-        evt = {
-            "name": "A_EVT",
-            "key": "A",
-            "conds": {"[조건-비활성] 채널링 중": False, "[조건] 버프 준비": True},
-        }
-
-        with patch("app.core.processor.logger.info") as mock_info:
-            proc._sync_press_key(evt)
-
-        mock_info.assert_called_once()
-        log_line = mock_info.call_args[0][0]
-        self.assertIn("Sync Key Pressed: A", log_line)
-        self.assertIn("[조건-비활성] 채널링 중=False", log_line)
-        self.assertIn("[조건] 버프 준비=True", log_line)
-        self.assertNotIn("무관한 조건", log_line)
-
-
-class TestProcessorStart(unittest.TestCase):
-    def test_start_only_starts_main_thread(self):
-        proc = KeystrokeProcessor.__new__(KeystrokeProcessor)
-        proc.pid = None
         proc.main_thread = MagicMock()
-        proc.independent_events = [{"name": "A"}, {"name": "B"}]
+        proc.main_thread.is_alive.return_value = False
+        proc.pressed_keys = {"A"}
+        proc.pressed_key_codes = {"A": 65}
 
-        KeystrokeProcessor.start(proc)
+        KeystrokeProcessor.stop(proc)
 
-        proc.main_thread.start.assert_called_once()
+        proc.sim.release.assert_called_once_with(65)
+        self.assertEqual(proc.pressed_keys, set())
 
-    def test_notify_windows_input_fallback_reports_key_name_to_app(self):
-        proc = KeystrokeProcessor.__new__(KeystrokeProcessor)
-        proc.main_app = SimpleNamespace(notify_windows_input_fallback=MagicMock())
+    def test_force_release_retains_tracking_if_release_fails(self):
+        proc = _make_processor_stub()
+        proc.pressed_keys = {"A"}
+        proc.pressed_key_codes = {"A": 65}
+        proc.sim.release.side_effect = RuntimeError("os deny")
 
-        KeystrokeProcessor._notify_windows_input_fallback(proc, 65)
+        proc._force_release_pressed_keys()
 
-        proc.main_app.notify_windows_input_fallback.assert_called_once_with("A")
-
-
-class TestKeySimulatorWindows(unittest.TestCase):
-    def test_press_uses_sendinput_when_available(self):
-        sim = KeySimulator.__new__(KeySimulator)
-        sim.os_type = "Windows"
-        sim._sendinput_enabled = True
-        sim._user32 = object()
-        sim._send_windows_input = MagicMock(return_value=True)
-
-        KeySimulator.press(sim, 65)
-
-        sim._send_windows_input.assert_called_once_with(65, key_up=False)
-
-    @patch("app.core.processor.ctypes.windll.user32.keybd_event")
-    def test_release_falls_back_to_keybd_event_when_sendinput_fails(self, mock_keybd_event):
-        sim = KeySimulator.__new__(KeySimulator)
-        sim.os_type = "Windows"
-        sim._sendinput_enabled = True
-        sim._user32 = object()
-        sim._send_windows_input = MagicMock(return_value=False)
-
-        KeySimulator.release(sim, 65)
-
-        sim._send_windows_input.assert_called_once_with(65, key_up=True)
-        mock_keybd_event.assert_called_once_with(65, 0, 2, 0)
+        proc.sim.release.assert_called_once_with(65)
+        self.assertEqual(proc.pressed_keys, {"A"})
+        self.assertEqual(proc.pressed_key_codes, {"A": 65})
 
 
-class TestModificationKeyHandler(unittest.IsolatedAsyncioTestCase):
-    async def test_sim_key_keeps_modifier_when_include_modifier_is_true(self):
-        handler = ModificationKeyHandler.__new__(ModificationKeyHandler)
-        handler.key_codes = {"Shift": 16, "V": 86}
-        handler.press_time = (0.0, 0.0)
-        handler.os_type = "Windows"
+class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
+    async def test_sim_key_releases_after_sleep(self):
+        handler = ModificationKeyHandler(
+            key_codes={"A": 65},
+            default_press_times=(0.0, 0.0),
+            mod_keys={},
+            os_type="Darwin",
+        )
         handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
 
-        await handler._sim_key("shift", "V", include_modifier=True)
+        with patch("app.core.processor.asyncio.sleep", return_value=None):
+            await handler._sim_key("shift", "A")
+
+        handler.sim.press.assert_called_once_with(65)
+        handler.sim.release.assert_called_once_with(65)
+
+    async def test_sim_key_releases_if_sleep_fails(self):
+        handler = ModificationKeyHandler(
+            key_codes={"A": 65},
+            default_press_times=(0.05, 0.05),
+            mod_keys={},
+            os_type="Darwin",
+        )
+        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
+
+        with patch(
+            "app.core.processor.asyncio.sleep",
+            side_effect=RuntimeError("sleep boom"),
+        ):
+            with self.assertRaises(RuntimeError):
+                await handler._sim_key("shift", "A")
+
+        handler.sim.press.assert_called_once_with(65)
+        handler.sim.release.assert_called_once_with(65)
+
+    async def test_sim_key_aborts_hold_on_term_event(self):
+        term = threading.Event()
+        handler = ModificationKeyHandler(
+            key_codes={"A": 65},
+            default_press_times=(1.0, 1.0),
+            mod_keys={},
+            os_type="Darwin",
+            term_event=term,
+        )
+        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
+        sleep_calls = 0
+
+        async def fake_sleep(_seconds):
+            nonlocal sleep_calls
+            sleep_calls += 1
+            term.set()
+
+        with patch("app.core.processor.asyncio.sleep", side_effect=fake_sleep):
+            await handler._sim_key("shift", "A")
+
+        self.assertGreaterEqual(sleep_calls, 1)
+        handler.sim.press.assert_called_once_with(65)
+        handler.sim.release.assert_called_once_with(65)
+
+    async def test_sim_key_tracks_pressed_keys_for_force_release(self):
+        lock = threading.Lock()
+        pressed_keys: set[str] = set()
+        pressed_key_codes: dict[str, int] = {}
+        handler = ModificationKeyHandler(
+            key_codes={"A": 65},
+            default_press_times=(0.0, 0.0),
+            mod_keys={},
+            os_type="Darwin",
+            key_lock=lock,
+            pressed_keys=pressed_keys,
+            pressed_key_codes=pressed_key_codes,
+        )
+        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
+
+        with patch("app.core.processor.asyncio.sleep", return_value=None):
+            await handler._sim_key("shift", "A")
+
+        self.assertEqual(pressed_keys, set())
+        self.assertEqual(pressed_key_codes, {})
+
+    async def test_sim_key_keeps_tracking_when_release_fails(self):
+        lock = threading.Lock()
+        pressed_keys: set[str] = set()
+        pressed_key_codes: dict[str, int] = {}
+        handler = ModificationKeyHandler(
+            key_codes={"A": 65},
+            default_press_times=(0.0, 0.0),
+            mod_keys={},
+            os_type="Darwin",
+            key_lock=lock,
+            pressed_keys=pressed_keys,
+            pressed_key_codes=pressed_key_codes,
+        )
+        handler.sim = SimpleNamespace(
+            press=MagicMock(),
+            release=MagicMock(side_effect=RuntimeError("release boom")),
+        )
+
+        with patch("app.core.processor.asyncio.sleep", return_value=None):
+            await handler._sim_key("shift", "A")
+
+        self.assertEqual(pressed_keys, {"A"})
+        self.assertEqual(pressed_key_codes, {"A": 65})
+
+    async def test_sim_key_allows_zero_keycode(self):
+        handler = ModificationKeyHandler(
+            key_codes={"A": 0},
+            default_press_times=(0.0, 0.0),
+            mod_keys={},
+            os_type="Darwin",
+        )
+        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
+
+        with patch("app.core.processor.asyncio.sleep", return_value=None):
+            await handler._sim_key("shift", "A")
+
+        handler.sim.press.assert_called_once_with(0)
+        handler.sim.release.assert_called_once_with(0)
+
+    async def test_sim_key_honors_term_event_during_hold(self):
+        term = threading.Event()
+        handler = ModificationKeyHandler(
+            key_codes={"A": 65},
+            default_press_times=(1.0, 1.0),
+            mod_keys={},
+            os_type="Darwin",
+            term_event=term,
+        )
+        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
+        term.set()
+
+        started = __import__("asyncio").get_running_loop().time()
+        await handler._sim_key("shift", "A")
+        elapsed = __import__("asyncio").get_running_loop().time() - started
+
+        self.assertLess(elapsed, 0.2)
+        handler.sim.press.assert_called_once_with(65)
+        handler.sim.release.assert_called_once_with(65)
+
+    async def test_sim_key_keeps_modifier_when_include_modifier_is_true(self):
+        handler = ModificationKeyHandler(
+            key_codes={"V": 86, "Shift": 16},
+            default_press_times=(0.0, 0.0),
+            mod_keys={},
+            os_type="Windows",
+        )
+        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
+
+        with patch("app.core.processor.asyncio.sleep", return_value=None):
+            await handler._sim_key("shift", "V", include_modifier=True)
 
         handler.sim.press.assert_called_once_with(86)
         handler.sim.release.assert_called_once_with(86)
 
-    async def test_sim_key_temporarily_releases_modifier_when_include_modifier_is_false(self):
-        handler = ModificationKeyHandler.__new__(ModificationKeyHandler)
-        handler.key_codes = {"Shift": 16, "V": 86}
-        handler.press_time = (0.0, 0.0)
-        handler.os_type = "Windows"
+    async def test_sim_key_temporarily_releases_modifier_when_include_modifier_is_false(
+        self,
+    ):
+        handler = ModificationKeyHandler(
+            key_codes={"V": 86, "Shift": 16},
+            default_press_times=(0.0, 0.0),
+            mod_keys={},
+            os_type="Windows",
+        )
         handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
 
-        with patch("app.core.processor.KeyUtils.mod_key_pressed", return_value=True):
+        with (
+            patch("app.core.processor.asyncio.sleep", return_value=None),
+            patch("app.core.processor.KeyUtils.mod_key_pressed", return_value=True),
+        ):
             await handler._sim_key("shift", "V", include_modifier=False)
 
         self.assertEqual(
@@ -233,18 +359,209 @@ class TestModificationKeyHandler(unittest.IsolatedAsyncioTestCase):
             [call(86), call(16)],
         )
 
-    async def test_sim_key_does_not_restore_modifier_when_user_released_it(self):
-        handler = ModificationKeyHandler.__new__(ModificationKeyHandler)
-        handler.key_codes = {"Shift": 16, "V": 86}
-        handler.press_time = (0.0, 0.0)
-        handler.os_type = "Windows"
-        handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
 
-        with patch("app.core.processor.KeyUtils.mod_key_pressed", return_value=False):
-            await handler._sim_key("shift", "V", include_modifier=False)
+class TestWindowsSendInputHelpers(unittest.TestCase):
+    def test_extended_vk_detection(self):
+        self.assertTrue(processor_module._windows_is_extended_vk(0x25))  # Left
+        self.assertTrue(processor_module._windows_is_extended_vk(0x2E))  # Delete
+        self.assertFalse(processor_module._windows_is_extended_vk(0x41))  # A
+        self.assertFalse(processor_module._windows_is_extended_vk(0x0D))  # Enter
 
-        self.assertEqual(handler.sim.release.call_args_list, [call(16), call(86)])
-        self.assertEqual(handler.sim.press.call_args_list, [call(86)])
+    def test_build_keybdinput_default_uses_vk_and_scan(self):
+        with (
+            patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": ""}, clear=False),
+            patch(
+                "app.core.processor._windows_map_vk_to_scan", return_value=0x1E
+            ),
+        ):
+            ki = processor_module._windows_build_keybdinput(0x41, key_up=False)
+
+        self.assertEqual(ki.wVk, 0x41)
+        self.assertEqual(ki.wScan, 0x1E)
+        self.assertEqual(ki.dwFlags & processor_module._KEYEVENTF_SCANCODE, 0)
+
+    def test_build_keybdinput_scancode_path_clears_vk(self):
+        with (
+            patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": "1"}, clear=False),
+            patch(
+                "app.core.processor._windows_map_vk_to_scan", return_value=0x1E
+            ),
+        ):
+            ki = processor_module._windows_build_keybdinput(0x41, key_up=True)
+
+        self.assertEqual(ki.wVk, 0)
+        self.assertEqual(ki.wScan, 0x1E)
+        self.assertEqual(
+            ki.dwFlags & processor_module._KEYEVENTF_SCANCODE,
+            processor_module._KEYEVENTF_SCANCODE,
+        )
+        self.assertEqual(
+            ki.dwFlags & processor_module._KEYEVENTF_KEYUP,
+            processor_module._KEYEVENTF_KEYUP,
+        )
+
+    def test_build_keybdinput_sets_extended_flag(self):
+        with (
+            patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": ""}, clear=False),
+            patch(
+                "app.core.processor._windows_map_vk_to_scan", return_value=0x4B
+            ),
+        ):
+            ki = processor_module._windows_build_keybdinput(0x25, key_up=False)
+
+        self.assertEqual(
+            ki.dwFlags & processor_module._KEYEVENTF_EXTENDEDKEY,
+            processor_module._KEYEVENTF_EXTENDEDKEY,
+        )
+
+    def test_build_keybdinput_scancode_path_falls_back_when_scan_zero(self):
+        with (
+            patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": "1"}, clear=False),
+            patch(
+                "app.core.processor._windows_map_vk_to_scan", return_value=0
+            ),
+            patch("app.core.processor.logger.warning") as mock_warning,
+        ):
+            ki = processor_module._windows_build_keybdinput(0x41, key_up=False)
+
+        self.assertEqual(ki.wVk, 0x41)
+        self.assertEqual(ki.wScan, 0)
+        self.assertEqual(ki.dwFlags & processor_module._KEYEVENTF_SCANCODE, 0)
+        mock_warning.assert_called()
+
+    def test_scancode_path_plus_extended_flag(self):
+        with (
+            patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": "1"}, clear=False),
+            patch(
+                "app.core.processor._windows_map_vk_to_scan", return_value=0x4B
+            ),
+        ):
+            ki = processor_module._windows_build_keybdinput(0x25, key_up=False)
+
+        self.assertEqual(ki.wVk, 0)
+        flags = ki.dwFlags
+        self.assertEqual(
+            flags & processor_module._KEYEVENTF_SCANCODE,
+            processor_module._KEYEVENTF_SCANCODE,
+        )
+        self.assertEqual(
+            flags & processor_module._KEYEVENTF_EXTENDEDKEY,
+            processor_module._KEYEVENTF_EXTENDEDKEY,
+        )
+
+    def test_input_struct_matches_msvc_layout(self):
+        import ctypes
+
+        self.assertEqual(
+            ctypes.sizeof(processor_module._INPUT),
+            processor_module._windows_expected_input_sizeof(),
+        )
+        if ctypes.sizeof(ctypes.c_void_p) == 8:
+            self.assertEqual(ctypes.sizeof(processor_module._KEYBDINPUT), 24)
+            self.assertEqual(ctypes.sizeof(processor_module._MOUSEINPUT), 32)
+            self.assertEqual(ctypes.sizeof(processor_module._INPUT), 40)
+            self.assertEqual(processor_module._KEYBDINPUT.dwFlags.offset, 4)
+            self.assertEqual(processor_module._KEYBDINPUT.dwExtraInfo.offset, 16)
+            self.assertEqual(processor_module._INPUT.union.offset, 8)
+
+    def test_configure_user32_sets_argtypes_once(self):
+        import ctypes
+
+        send = MagicMock()
+        mapvk = MagicMock()
+        user32 = SimpleNamespace(SendInput=send, MapVirtualKeyW=mapvk)
+        windll = SimpleNamespace(user32=user32)
+        processor_module._win_user32_ready = False
+
+        with patch.dict(ctypes.__dict__, {"windll": windll}, clear=False):
+            processor_module._configure_windows_input_apis()
+            processor_module._configure_windows_input_apis()
+
+        self.assertEqual(send.argtypes[0], ctypes.c_uint)
+        self.assertIs(send.restype, ctypes.c_uint)
+        self.assertEqual(mapvk.argtypes, [ctypes.c_uint, ctypes.c_uint])
+        self.assertTrue(processor_module._win_user32_ready)
+        self.assertEqual(
+            send.argtypes,
+            [ctypes.c_uint, ctypes.POINTER(processor_module._INPUT), ctypes.c_int],
+        )
+        processor_module._win_user32_ready = False
+
+    def test_windows_send_key_invokes_sendinput_with_struct_size(self):
+        import ctypes
+
+        sent_sizes: list[int] = []
+        sent_counts: list[int] = []
+
+        def fake_send_input(n: int, _ptr: object, cb: int) -> int:
+            sent_counts.append(n)
+            sent_sizes.append(cb)
+            return n
+
+        fake_user32 = SimpleNamespace(
+            MapVirtualKeyW=lambda _vk, _mode: 0x1E,
+            SendInput=fake_send_input,
+        )
+        fake_windll = SimpleNamespace(user32=fake_user32)
+
+        with (
+            patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": ""}, clear=False),
+            patch.dict(ctypes.__dict__, {"windll": fake_windll}, clear=False),
+        ):
+            processor_module._win_user32_ready = False
+            processor_module._windows_send_key(0x41, key_up=False)
+            processor_module._windows_send_key(0x41, key_up=True)
+            processor_module._win_user32_ready = False
+
+        self.assertEqual(sent_counts, [1, 1])
+        expected = processor_module._windows_expected_input_sizeof()
+        self.assertEqual(sent_sizes, [expected, expected])
+
+
+class TestDarwinKeyEventSource(unittest.TestCase):
+    def test_darwin_key_event_uses_hid_event_source(self):
+        created_sources: list[object] = []
+        created_events: list[tuple[object, int, bool]] = []
+        posted: list[tuple[object, object]] = []
+        source_token = object()
+        event_token = object()
+
+        def source_create(state: object) -> object:
+            created_sources.append(state)
+            return source_token
+
+        def create_event(source: object, code: int, pressed: bool) -> object:
+            created_events.append((source, code, pressed))
+            return event_token
+
+        def post_event(tap: object, event: object) -> None:
+            posted.append((tap, event))
+
+        fake_quartz = SimpleNamespace(
+            CGEventSourceCreate=source_create,
+            CGEventCreateKeyboardEvent=create_event,
+            CGEventPost=post_event,
+            kCGHIDEventTap="HID_TAP",
+            kCGEventSourceStateHIDSystemState="HID_STATE",
+        )
+
+        with patch("app.core.processor.importlib.import_module", return_value=fake_quartz):
+            processor_module._darwin_key_event(0, True)
+
+        self.assertEqual(created_sources, ["HID_STATE"])
+        self.assertEqual(created_events, [(source_token, 0, True)])
+        self.assertEqual(posted, [("HID_TAP", event_token)])
+
+
+class TestProcessorStart(unittest.TestCase):
+    def test_start_only_starts_main_thread(self):
+        proc = KeystrokeProcessor.__new__(KeystrokeProcessor)
+        proc.pid = None
+        proc.main_thread = MagicMock()
+
+        KeystrokeProcessor.start(proc)
+
+        proc.main_thread.start.assert_called_once()
 
 
 if __name__ == "__main__":

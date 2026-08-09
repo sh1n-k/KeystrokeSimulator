@@ -3,7 +3,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.core.models import EventModel, ProfileModel
-from app.ui.profiles import EventListFrame, EventRow, KeystrokeProfiles
+from app.ui import theme
+from app.ui.profile_event_list import EventListFrame, EventRow
+from app.ui.profiles import KeystrokeProfiles
 from app.utils.i18n import set_language
 
 
@@ -58,6 +60,39 @@ def _make_event_list_frame_stub():
     """GUI 없이 EventListFrame의 메서드만 테스트하기 위한 stub"""
     stub = EventListFrame.__new__(EventListFrame)
     return stub
+
+
+class TestEventListDialogParent(unittest.TestCase):
+    def test_resolve_dialog_parent_prefers_host_window(self):
+        packing = object()
+        host = object()
+        self.assertIs(
+            EventListFrame.resolve_dialog_parent(packing, host),  # type: ignore[arg-type]
+            host,
+        )
+
+    def test_resolve_dialog_parent_falls_back_to_packing_parent(self):
+        packing = object()
+        self.assertIs(
+            EventListFrame.resolve_dialog_parent(packing, None),  # type: ignore[arg-type]
+            packing,
+        )
+
+
+class TestProfileGraphViewerGrabOwner(unittest.TestCase):
+    def test_only_toplevel_parents_own_grab(self):
+        from app.ui.profile_graph_viewer import ProfileGraphViewer
+
+        viewer = ProfileGraphViewer.__new__(ProfileGraphViewer)
+        viewer.parent = object()
+        self.assertFalse(ProfileGraphViewer._parent_can_own_grab(viewer))
+
+        class FakeTop:
+            pass
+
+        # isinstance check against real Tk types: non-Tk objects are false.
+        viewer.parent = FakeTop()
+        self.assertFalse(ProfileGraphViewer._parent_can_own_grab(viewer))
 
 
 class TestGetKeySortOrder(unittest.TestCase):
@@ -220,7 +255,7 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         stub.win = object()
 
         edited = EventModel(event_name="B", key_to_enter="X")
-        with patch("app.ui.profiles.messagebox.showerror") as mock_error:
+        with patch("app.ui.profile_event_list.messagebox.showerror") as mock_error:
             stub._on_editor_save(edited, is_edit=True, row=0)
 
         self.assertEqual(stub.profile.event_list[0].event_name, "A")
@@ -244,7 +279,7 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         row._tip_cond = FakeToolTip()
         row._tip_grp = FakeToolTip()
         row._tip_key = FakeToolTip()
-        row._last_saved_name = "OldName"
+        row.last_saved_name = "OldName"
         row._bound_event_id = id(renamed)
         row.cbs = {"save": lambda: None}
 
@@ -409,7 +444,7 @@ class TestSortEventsLogic(unittest.TestCase):
         stub.update_events = lambda: None
         stub.save_cb = lambda *args, **kwargs: None
 
-        with patch("app.ui.profiles.messagebox.showinfo") as mock_show:
+        with patch("app.ui.profile_event_list.messagebox.showinfo") as mock_show:
             stub._sort_events_by_key()
 
         mock_show.assert_called_once()
@@ -430,7 +465,7 @@ class TestSortEventsLogic(unittest.TestCase):
         stub.update_events = lambda: None
         stub.save_cb = lambda *args, **kwargs: None
 
-        with patch("app.ui.profiles.messagebox.showinfo") as mock_show:
+        with patch("app.ui.profile_event_list.messagebox.showinfo") as mock_show:
             stub._sort_events_by_name()
 
         mock_show.assert_called_once()
@@ -454,7 +489,7 @@ class TestEventRowBadges(unittest.TestCase):
         row._tip_cond = FakeToolTip()
         row._tip_grp = FakeToolTip()
         row._tip_key = FakeToolTip()
-        row._last_saved_name = ""
+        row.last_saved_name = ""
         return row
 
     def test_row_displays_condition_badges(self):
@@ -468,10 +503,10 @@ class TestEventRowBadges(unittest.TestCase):
 
         row.update_display()
 
-        self.assertEqual(row.lbl_cond.cget("text"), "🔎 Cond")
-        self.assertEqual(row.lbl_grp.cget("text"), "G1")
-        self.assertEqual(row.lbl_key.cget("text"), "🔎 Condition")
-        self.assertEqual(row.entry.cget("foreground"), "gray")
+        self.assertEqual(row.lbl_cond.cget("text"), "◐ Cond")
+        self.assertEqual(row.lbl_grp.cget("text"), "▣ G1")
+        self.assertEqual(row.lbl_key.cget("text"), "◐ Cond")
+        self.assertEqual(row.entry.cget("foreground"), theme.INK_MUTED)
 
     def test_row_displays_invert_and_missing_key_badges(self):
         evt = EventModel(
@@ -484,7 +519,7 @@ class TestEventRowBadges(unittest.TestCase):
 
         row.update_display()
 
-        self.assertEqual(row.lbl_key.cget("text"), "🔁 ⌨️ None")
+        self.assertEqual(row.lbl_key.cget("text"), "⇄ ⌨ None")
         self.assertIn("Invert match", row._tip_key.text)
 
 
@@ -599,6 +634,30 @@ class TestProfileOverviewBadges(unittest.TestCase):
         self.assertEqual(
             stub.lbl_status.cget("text"),
             "All events are ready for autosave and run checks.",
+        )
+
+    def test_save_badge_flash_skips_destroyed_widget(self):
+        stub = KeystrokeProfiles.__new__(KeystrokeProfiles)
+        stub.lbl_save_badge = MagicMock()
+        stub.lbl_save_badge.winfo_exists.return_value = False
+
+        stub._set_save_badge_bg("#fff")
+
+        stub.lbl_save_badge.config.assert_not_called()
+
+
+class TestProfileNavRailActions(unittest.TestCase):
+    def test_nav_import_uses_event_list_import_callback(self):
+        stub = KeystrokeProfiles.__new__(KeystrokeProfiles)
+        stub.win = object()
+        stub.e_frame = MagicMock()
+        stub.prof_dir = Path("profiles")
+
+        with patch("app.ui.profiles.EventImporter") as importer:
+            stub._nav_action_import()
+
+        importer.assert_called_once_with(
+            stub.win, stub.e_frame._import, profiles_dir=stub.prof_dir
         )
 
 

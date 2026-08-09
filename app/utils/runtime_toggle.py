@@ -1,9 +1,10 @@
 import platform
-from typing import Iterable
+from collections.abc import Iterable
+from typing import Protocol
 
 from app.utils.i18n import txt
 from app.core.models import EventModel, ProfileModel
-from app.utils.system import KeyUtils
+from app.utils.keys import KeyUtils
 
 
 WHEEL_UP_TRIGGER = "W_UP"
@@ -18,6 +19,12 @@ MOUSE_TRIGGER_TOKENS = (
 )
 RUNTIME_TOGGLE_DEBOUNCE_SECONDS = 0.25
 RUNTIME_TOGGLE_SCROLL_GESTURE_SECONDS = 0.75
+
+
+class StartStopSettings(Protocol):
+    toggle_start_stop_mac: bool
+    use_alt_shift_hotkey: bool
+    start_stop_key: str
 
 
 _RUNTIME_TOGGLE_CAPTURE_ALIASES = {
@@ -159,19 +166,6 @@ def display_runtime_toggle_trigger(
     return normalized or (str(trigger).strip() if trigger else "")
 
 
-def runtime_toggle_trigger_options() -> list[tuple[str, str]]:
-    options = [(name, name) for name in KeyUtils.get_key_name_list()]
-    options.extend(
-        [
-            (txt("Mouse wheel up", "마우스 휠 위"), WHEEL_UP_TRIGGER),
-            (txt("Mouse wheel down", "마우스 휠 아래"), WHEEL_DOWN_TRIGGER),
-            (txt("Mouse Button 3", "마우스 버튼 3"), MOUSE_BUTTON_3_TRIGGER),
-            (txt("Mouse Button 4", "마우스 버튼 4"), MOUSE_BUTTON_4_TRIGGER),
-        ]
-    )
-    return options
-
-
 def normalize_runtime_toggle_capture_key(
     keysym: str | None,
     char: str | None = None,
@@ -196,7 +190,9 @@ def normalize_runtime_toggle_capture_key(
     return None
 
 
-def normalize_runtime_toggle_listener_key(key, os_name: str | None = None) -> str:
+def normalize_runtime_toggle_listener_key(
+    key: object, os_name: str | None = None
+) -> str:
     vk = getattr(key, "vk", None)
     keycode_name = KeyUtils.get_key_name_for_keycode(vk, os_name=os_name)
     if keycode_name:
@@ -215,7 +211,6 @@ def normalize_runtime_toggle_listener_key(key, os_name: str | None = None) -> st
         return normalized.upper()
 
     return raw_name.upper()
-
 
 def normalize_runtime_toggle_wheel_event(
     delta: int | None = None, num: int | None = None
@@ -237,17 +232,19 @@ def active_runtime_toggle_events(events: Iterable[EventModel]) -> list[EventMode
     return [evt for evt in events if getattr(evt, "use_event", True)]
 
 
-def _resolve_start_stop_trigger(settings, os_name: str | None = None) -> str | None:
+def _resolve_start_stop_trigger(
+    settings: StartStopSettings | None, os_name: str | None = None
+) -> str | None:
     if settings is None:
         return None
 
     os_name = os_name or platform.system()
-    if os_name == "Darwin" and getattr(settings, "toggle_start_stop_mac", False):
+    if os_name == "Darwin" and settings.toggle_start_stop_mac:
         return "ALT_SHIFT_MAC"
-    if os_name == "Windows" and getattr(settings, "use_alt_shift_hotkey", False):
+    if os_name == "Windows" and settings.use_alt_shift_hotkey:
         return "ALT_SHIFT_WIN"
 
-    start_stop_key = getattr(settings, "start_stop_key", None) or ""
+    start_stop_key = settings.start_stop_key or ""
     if not start_stop_key or start_stop_key == "DISABLED":
         return None
     return normalize_runtime_toggle_trigger(start_stop_key, os_name=os_name)
@@ -256,7 +253,7 @@ def _resolve_start_stop_trigger(settings, os_name: str | None = None) -> str | N
 def collect_runtime_toggle_validation_errors(
     profile: ProfileModel,
     events: Iterable[EventModel],
-    settings=None,
+    settings: StartStopSettings | None = None,
     os_name: str | None = None,
 ) -> list[str]:
     if not getattr(profile, "runtime_toggle_enabled", False):
@@ -288,6 +285,24 @@ def collect_runtime_toggle_validation_errors(
             txt(
                 "Runtime Event Group has no selected events.",
                 "실행 중 추가 이벤트 묶음에 선택된 이벤트가 없습니다.",
+            )
+        )
+
+    invalid_member_events = sorted(
+        {
+            (getattr(evt, "event_name", None) or txt("Unnamed", "이름 없음")).strip()
+            for evt in active_events
+            if getattr(evt, "runtime_toggle_member", False)
+            and getattr(evt, "execute_action", True)
+            and not (getattr(evt, "key_to_enter", None) or "").strip()
+        }
+    )
+    if invalid_member_events:
+        errors.append(
+            txt(
+                "Runtime Event Group member is missing an input key. Events: {names}",
+                "실행 중 추가 이벤트 묶음 멤버에 입력 키가 없습니다. 이벤트: {names}",
+                names=", ".join(invalid_member_events),
             )
         )
 

@@ -1,4 +1,3 @@
-import threading
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -11,11 +10,9 @@ class TestSetCaptureSize(unittest.TestCase):
     """set_capture_size() 기능 테스트"""
 
     def _make_capturer(self, screen_w=1920, screen_h=1080):
-        monitor = MagicMock()
-        monitor.width = screen_w
-        monitor.height = screen_h
         with patch(
-            "app.core.capturer.screeninfo.get_monitors", return_value=[monitor]
+            "app.core.capturer.MonitorUtils.get_primary_size",
+            return_value=(screen_w, screen_h),
         ):
             return ScreenshotCapturer()
 
@@ -93,18 +90,19 @@ class TestCapturerAttributes(unittest.TestCase):
     """ScreenshotCapturer: 속성 초기화 및 접근"""
 
     def _make_capturer(self, screen_w=1920, screen_h=1080):
-        monitor = MagicMock()
-        monitor.width = screen_w
-        monitor.height = screen_h
         with patch(
-            "app.core.capturer.screeninfo.get_monitors", return_value=[monitor]
+            "app.core.capturer.MonitorUtils.get_primary_size",
+            return_value=(screen_w, screen_h),
         ):
             return ScreenshotCapturer()
 
     def test_screenshot_callback_settable(self):
         """screenshot_callback 설정 가능"""
         capturer = self._make_capturer()
-        cb = lambda pos, img: None
+
+        def cb(pos, img):
+            return None
+
         capturer.screenshot_callback = cb
         self.assertIs(capturer.screenshot_callback, cb)
 

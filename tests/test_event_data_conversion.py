@@ -1,6 +1,5 @@
 import unittest
 
-import numpy as np
 from PIL import Image as PilImage
 
 from app.core.models import EventModel
@@ -31,7 +30,7 @@ class TestInitEventDataFieldMapping(unittest.TestCase):
     def test_basic_field_mapping(self):
         """기본 필드가 올바르게 매핑되는지 확인"""
         proc = _make_processor_with_key_codes()
-        events, _, _ = proc._init_event_data([_make_basic_event()])
+        events = proc._init_event_data([_make_basic_event()])
 
         self.assertEqual(len(events), 1)
         evt = events[0]
@@ -44,7 +43,7 @@ class TestInitEventDataFieldMapping(unittest.TestCase):
     def test_invert_match_true_mapping(self):
         """invert_match=True → dict['invert']=True"""
         proc = _make_processor_with_key_codes()
-        events, _, _ = proc._init_event_data([
+        events = proc._init_event_data([
             _make_basic_event(invert_match=True)
         ])
         self.assertTrue(events[0]["invert"])
@@ -52,24 +51,21 @@ class TestInitEventDataFieldMapping(unittest.TestCase):
     def test_invert_match_default_false(self):
         """invert_match 기본값 → dict['invert']=False"""
         proc = _make_processor_with_key_codes()
-        events, _, _ = proc._init_event_data([_make_basic_event()])
+        events = proc._init_event_data([_make_basic_event()])
         self.assertFalse(events[0]["invert"])
 
     def test_rgb_to_bgr_conversion(self):
         """ref_pixel_value (R,G,B) → ref_bgr (B,G,R) 변환"""
         proc = _make_processor_with_key_codes()
-        events, _, _ = proc._init_event_data([
+        events = proc._init_event_data([
             _make_basic_event(ref_pixel_value=(100, 150, 200))
         ])
-        np.testing.assert_array_equal(
-            events[0]["ref_bgr"],
-            np.array([200, 150, 100], dtype=np.uint8),
-        )
+        self.assertEqual(events[0]["ref_bgr"], (200, 150, 100))
 
     def test_execute_action_false_mapping(self):
         """execute_action=False → dict['exec']=False"""
         proc = _make_processor_with_key_codes()
-        events, _, _ = proc._init_event_data([
+        events = proc._init_event_data([
             _make_basic_event(execute_action=False)
         ])
         self.assertFalse(events[0]["exec"])
@@ -77,7 +73,7 @@ class TestInitEventDataFieldMapping(unittest.TestCase):
     def test_group_and_priority_mapping(self):
         """group_id/priority 필드 매핑"""
         proc = _make_processor_with_key_codes()
-        events, _, _ = proc._init_event_data([
+        events = proc._init_event_data([
             _make_basic_event(group_id="G1", priority=5)
         ])
         self.assertEqual(events[0]["group"], "G1")
@@ -87,7 +83,7 @@ class TestInitEventDataFieldMapping(unittest.TestCase):
         """conditions → dict['conds'] 매핑"""
         proc = _make_processor_with_key_codes()
         conds = {"OtherEvent": True}
-        events, _, _ = proc._init_event_data([
+        events = proc._init_event_data([
             _make_basic_event(conditions=conds)
         ])
         self.assertEqual(events[0]["conds"], {"OtherEvent": True})
@@ -95,7 +91,7 @@ class TestInitEventDataFieldMapping(unittest.TestCase):
     def test_duration_and_randomization_mapping(self):
         """press_duration_ms, randomization_ms → dur, rand 매핑"""
         proc = _make_processor_with_key_codes()
-        events, _, _ = proc._init_event_data([
+        events = proc._init_event_data([
             _make_basic_event(press_duration_ms=150.0, randomization_ms=30.0)
         ])
         self.assertEqual(events[0]["dur"], 150.0)
@@ -104,7 +100,7 @@ class TestInitEventDataFieldMapping(unittest.TestCase):
     def test_key_normalization(self):
         """key_to_enter가 key_codes 기준으로 정규화됨"""
         proc = _make_processor_with_key_codes()
-        events, _, _ = proc._init_event_data([
+        events = proc._init_event_data([
             _make_basic_event(key_to_enter="a")  # 소문자 → 대문자 A
         ])
         self.assertEqual(events[0]["key"], "A")
@@ -112,10 +108,26 @@ class TestInitEventDataFieldMapping(unittest.TestCase):
     def test_no_key_maps_to_none(self):
         """key_to_enter가 None이면 dict['key']=None"""
         proc = _make_processor_with_key_codes()
-        events, _, _ = proc._init_event_data([
+        events = proc._init_event_data([
             _make_basic_event(key_to_enter=None)
         ])
         self.assertIsNone(events[0]["key"])
+
+    def test_unsupported_key_warns_and_maps_to_none(self):
+        """현재 플랫폼 맵에 없는 키는 경고 후 key=None으로 로드"""
+        from unittest.mock import patch
+
+        proc = _make_processor_with_key_codes()
+        proc.os_type = "Darwin"
+        with patch("app.core.processor.logger.warning") as mock_warning:
+            events = proc._init_event_data(
+                [_make_basic_event(key_to_enter="NotARealKey")]
+            )
+        self.assertEqual(len(events), 1)
+        self.assertIsNone(events[0]["key"])
+        mock_warning.assert_called()
+        self.assertIn("unsupported key", mock_warning.call_args[0][0])
+        self.assertIn("NotARealKey", mock_warning.call_args[0][0])
 
 
 class TestInitEventDataFiltering(unittest.TestCase):
@@ -124,16 +136,15 @@ class TestInitEventDataFiltering(unittest.TestCase):
     def test_use_event_false_skipped(self):
         """use_event=False인 이벤트는 건너뛴다"""
         proc = _make_processor_with_key_codes()
-        events, indep, _ = proc._init_event_data([
+        events = proc._init_event_data([
             _make_basic_event(use_event=False)
         ])
         self.assertEqual(len(events), 0)
-        self.assertEqual(len(indep), 0)
 
     def test_missing_ref_pixel_skipped(self):
         """pixel 모드에서 ref_pixel_value가 None이면 건너뛴다"""
         proc = _make_processor_with_key_codes()
-        events, _, _ = proc._init_event_data([
+        events = proc._init_event_data([
             _make_basic_event(ref_pixel_value=None)
         ])
         self.assertEqual(len(events), 0)
@@ -141,95 +152,27 @@ class TestInitEventDataFiltering(unittest.TestCase):
     def test_short_ref_pixel_skipped(self):
         """ref_pixel_value 길이가 3 미만이면 건너뛴다"""
         proc = _make_processor_with_key_codes()
-        events, _, _ = proc._init_event_data([
+        events = proc._init_event_data([
             _make_basic_event(ref_pixel_value=(255, 0))
         ])
         self.assertEqual(len(events), 0)
-
-    def test_independent_thread_is_ignored_and_event_stays_in_main_list(self):
-        """independent_thread=True여도 메인 이벤트로 처리한다"""
-        proc = _make_processor_with_key_codes()
-        events, independent, _ = proc._init_event_data([
-            _make_basic_event(independent_thread=True)
-        ])
-        self.assertEqual(len(events), 1)
-        self.assertEqual(len(independent), 0)
-        self.assertEqual(events[0]["name"], "TestEvent")
-        self.assertFalse(events[0]["independent"])
 
     def test_duplicate_signature_is_preserved_in_init(self):
         """초기화 단계에서는 동일 시그니처 이벤트도 유지"""
         proc = _make_processor_with_key_codes()
         e = _make_basic_event()
-        events, _, _ = proc._init_event_data([e, e])
+        events = proc._init_event_data([e, e])
         self.assertEqual(len(events), 2)
-
-
-class TestInitEventDataMegaRect(unittest.TestCase):
-    """_init_event_data: mega_rect 및 상대 좌표 계산"""
-
-    def test_mega_rect_computed(self):
-        """이벤트 좌표로부터 mega_rect가 계산됨"""
-        proc = _make_processor_with_key_codes()
-        _, _, mega_rect = proc._init_event_data([_make_basic_event()])
-
-        self.assertIsNotNone(mega_rect)
-        self.assertIn("left", mega_rect)
-        self.assertIn("top", mega_rect)
-        self.assertIn("width", mega_rect)
-        self.assertIn("height", mega_rect)
-
-    def test_rel_coords_set_after_mega_rect(self):
-        """mega_rect 기준으로 rel_x, rel_y가 계산됨"""
-        proc = _make_processor_with_key_codes()
-        events, _, mega_rect = proc._init_event_data([_make_basic_event()])
-        evt = events[0]
-
-        self.assertEqual(evt["rel_x"], evt["center_x"] - mega_rect["left"])
-        self.assertEqual(evt["rel_y"], evt["center_y"] - mega_rect["top"])
-
-    def test_no_events_no_mega_rect(self):
-        """유효 이벤트가 없으면 mega_rect=None"""
-        proc = _make_processor_with_key_codes()
-        _, _, mega_rect = proc._init_event_data([
-            _make_basic_event(use_event=False)
-        ])
-        self.assertIsNone(mega_rect)
-
-    def test_multiple_events_mega_rect_spans_all(self):
-        """여러 이벤트의 좌표를 모두 포함하는 mega_rect"""
-        proc = _make_processor_with_key_codes()
-        e1 = _make_basic_event(
-            event_name="E1",
-            latest_position=(0, 0),
-            clicked_position=(10, 20),
-            key_to_enter="A",
-        )
-        e2 = _make_basic_event(
-            event_name="E2",
-            latest_position=(50, 100),
-            clicked_position=(10, 20),
-            key_to_enter="B",
-        )
-        events, _, mega_rect = proc._init_event_data([e1, e2])
-
-        self.assertEqual(len(events), 2)
-        # E1: center (10, 20), E2: center (60, 120)
-        self.assertEqual(mega_rect["left"], 10)
-        self.assertEqual(mega_rect["top"], 20)
-        self.assertEqual(mega_rect["width"], 51)   # 60 - 10 + 1
-        self.assertEqual(mega_rect["height"], 101)  # 120 - 20 + 1
 
 
 
 def _make_region_event(img_w: int, img_h: int, region_w: int, region_h: int, **overrides) -> "EventModel":
     """region mode EventModel 생성 헬퍼 (체크포인트 생성 테스트용)"""
-    np_img = np.zeros((img_h, img_w, 3), dtype=np.uint8)
+    pil_img = PilImage.new("RGB", (img_w, img_h))
     # 단순 그라디언트로 각 픽셀이 고유한 색을 갖도록
     for r in range(img_h):
         for c in range(img_w):
-            np_img[r, c] = [c % 256, r % 256, (r + c) % 256]
-    pil_img = PilImage.fromarray(np_img)
+            pil_img.putpixel((c, r), (c % 256, r % 256, (r + c) % 256))
     defaults = dict(
         event_name="RegionEvent",
         latest_position=(0, 0),
@@ -252,7 +195,7 @@ class TestRegionCheckpointGeneration(unittest.TestCase):
     def _get_checkpoints(self, img_w, img_h, region_w, region_h, **overrides):
         """주어진 크기로 region 이벤트를 만들고 check_points 반환"""
         e = _make_region_event(img_w, img_h, region_w, region_h, **overrides)
-        events, _, _ = self.proc._init_event_data([e])
+        events = self.proc._init_event_data([e])
         self.assertEqual(len(events), 1, "이벤트가 1개 생성되어야 함")
         return events[0].get("check_points", [])
 
@@ -316,24 +259,30 @@ class TestRegionCheckpointGeneration(unittest.TestCase):
         rw, rh = 30, 30
         img_w, img_h = 200, 200
         e = _make_region_event(img_w, img_h, rw, rh)
-        events, _, _ = self.proc._init_event_data([e])
+        events = self.proc._init_event_data([e])
         evt = events[0]
         pts = evt.get("check_points", [])
         ref_img = evt.get("ref_img")
         self.assertIsNotNone(ref_img)
         for p in pts:
             px, py = p["pos"]
-            np.testing.assert_array_equal(
-                p["color"], ref_img[py, px],
-                err_msg=f"color mismatch at ({px},{py})"
+            self.assertEqual(
+                p["color"],
+                ref_img.pixel_bgr(px, py),
+                f"color mismatch at ({px},{py})",
             )
 
-    def test_no_held_screenshot_no_checkpoints(self):
-        """held_screenshot=None이면 check_points 키가 없음"""
+    def test_no_held_screenshot_skips_region_event(self):
+        """held_screenshot=None이면 region 이벤트를 실행 데이터에서 제외"""
         e = _make_region_event(200, 200, 30, 30, held_screenshot=None)
-        events, _, _ = self.proc._init_event_data([e])
-        self.assertEqual(len(events), 1)
-        self.assertNotIn("check_points", events[0])
+        events = self.proc._init_event_data([e])
+        self.assertEqual(events, [])
+
+    def test_empty_region_reference_skips_region_event(self):
+        """좌표 손상으로 체크포인트를 만들 수 없으면 실행 데이터에서 제외"""
+        e = _make_region_event(20, 20, 10, 10, clicked_position=(200, 200))
+        events = self.proc._init_event_data([e])
+        self.assertEqual(events, [])
 
     def test_asymmetric_roi_within_bounds(self):
         """직사각형(비정방) ROI에서도 모든 좌표가 유효"""

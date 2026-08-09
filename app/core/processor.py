@@ -1,47 +1,134 @@
 import asyncio
 import ctypes
+import importlib
 import os
 import platform
 import random
 import re
 import threading
 import time
-from typing import List, Dict, Optional, Any, Set, Tuple
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from typing import Any, NotRequired, Protocol, TypedDict, cast
 
-import numpy as np
 import mss
 from loguru import logger
+from mss.screenshot import ScreenShot
+from PIL import Image
 
-from app.core.models import EventModel
-from app.utils.system import KeyUtils, ProcessUtils
+from app.core.models import EventModel, ModificationKeys, UserSettings
+from app.utils.keys import KeyUtils
+from app.utils.system import ProcessUtils
 
-# OS-specific imports
-if platform.system() == "Windows":
-    from ctypes import wintypes
+Pixel = tuple[int, int, int]
+Rect = dict[str, int]
+KeyAction = Callable[[int], None]
+ImageBytes = bytes | bytearray | memoryview
 
-    import win32gui, win32process
 
-    _INPUT_KEYBOARD = 1
-    _KEYEVENTF_EXTENDEDKEY = 0x0001
-    _KEYEVENTF_KEYUP = 0x0002
+@dataclass(frozen=True)
+class ImageFrame:
+    width: int
+    height: int
+    data: ImageBytes
+    row_stride: int
+    pixel_stride: int
+    offset: int = 0
 
-    class _KEYBDINPUT(ctypes.Structure):
-        _fields_ = (
-            ("wVk", wintypes.WORD),
-            ("wScan", wintypes.WORD),
-            ("dwFlags", wintypes.DWORD),
-            ("time", wintypes.DWORD),
-            ("dwExtraInfo", ctypes.c_size_t),
+    @classmethod
+    def from_screenshot(cls, screenshot: ScreenShot) -> "ImageFrame":
+        return cls(
+            width=screenshot.width,
+            height=screenshot.height,
+            data=memoryview(screenshot.raw),
+            row_stride=screenshot.width * 4,
+            pixel_stride=4,
         )
 
-    class _INPUTUNION(ctypes.Union):
-        _fields_ = (("ki", _KEYBDINPUT),)
+    @classmethod
+    def from_rgb_image(cls, img: Image.Image) -> "ImageFrame":
+        rgb_img = img.convert("RGB")
+        return cls(
+            width=rgb_img.width,
+            height=rgb_img.height,
+            data=rgb_img.tobytes("raw", "BGR"),
+            row_stride=rgb_img.width * 3,
+            pixel_stride=3,
+        )
 
-    class _INPUT(ctypes.Structure):
-        _anonymous_ = ("u",)
-        _fields_ = (("type", wintypes.DWORD), ("u", _INPUTUNION))
-elif platform.system() == "Darwin":
-    from Quartz import CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap
+    def crop(self, x: int, y: int, width: int, height: int) -> "ImageFrame":
+        return ImageFrame(
+            width=width,
+            height=height,
+            data=self.data,
+            row_stride=self.row_stride,
+            pixel_stride=self.pixel_stride,
+            offset=self.offset + y * self.row_stride + x * self.pixel_stride,
+        )
+
+    def pixel_bgr(self, x: int, y: int) -> Pixel:
+        idx = self.offset + y * self.row_stride + x * self.pixel_stride
+        return (
+            int(self.data[idx]),
+            int(self.data[idx + 1]),
+            int(self.data[idx + 2]),
+        )
+
+
+def _pixel_from_object(value: object) -> Pixel | None:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return None
+    sequence = cast(Sequence[object], value)
+    if len(sequence) < 3:
+        return None
+
+    channels: list[int] = []
+    for channel in sequence[:3]:
+        if not isinstance(channel, (int, float, str)):
+            return None
+        try:
+            channels.append(int(channel))
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return (channels[0], channels[1], channels[2])
+
+
+class CheckPoint(TypedDict):
+    pos: tuple[int, int]
+    color: Pixel
+
+
+class EventData(TypedDict):
+    name: str
+    mode: str
+    invert: bool
+    key: str | None
+    center_x: int
+    center_y: int
+    dur: float | None
+    rand: float | None
+    exec: bool
+    group: str | None
+    priority: int
+    conds: dict[str, bool]
+    runtime_toggle_member: bool
+    region_w: int
+    region_h: int
+    rel_x: int
+    rel_y: int
+    ref_img: NotRequired[ImageFrame]
+    check_points: NotRequired[list[CheckPoint]]
+    ref_bgr: NotRequired[Pixel]
+    capture_rect: NotRequired[Rect]
+
+
+class CaptureGroup(TypedDict):
+    rect: Rect
+    events: list[EventData]
+
+
+class AppWithSettings(Protocol):
+    settings: UserSettings
 
 
 def _processor_perf_enabled() -> bool:
@@ -55,8 +142,8 @@ def _log_perf(label: str, start: float) -> None:
 
 
 def _normalize_key_name(
-    key_codes: Dict[str, int], key_name: Optional[str]
-) -> Optional[str]:
+    key_codes: dict[str, int], key_name: str | None
+) -> str | None:
     """Return the key name that exists in key_codes (case-insensitive)."""
     if not key_name:
         return None
@@ -80,91 +167,254 @@ def _normalize_key_name(
     return None
 
 
-class KeySimulator:
-    def __init__(self, os_type: str, fallback_callback=None):
-        self.os_type = os_type
-        self._sendinput_enabled = os_type == "Windows"
-        self._fallback_callback = fallback_callback
-        if os_type == "Windows":
-            self._user32 = ctypes.WinDLL("user32", use_last_error=True)
-        elif os_type == "Darwin":
-            self._user32 = None
-        else:
-            self._user32 = None
+def _noop_key_action(_code: int) -> None:
+    return None
 
-    def _send_windows_input(self, code: int, *, key_up: bool) -> bool:
-        if not self._sendinput_enabled or not self._user32:
-            return False
 
-        flags = _KEYEVENTF_KEYUP if key_up else 0
-        key_name = KeyUtils.get_key_name_for_keycode(code)
-        if KeyUtils.is_extended_key(key_name):
-            flags |= _KEYEVENTF_EXTENDEDKEY
+# user32 SendInput / MapVirtualKey constants
+_INPUT_KEYBOARD = 1
+_KEYEVENTF_EXTENDEDKEY = 0x0001
+_KEYEVENTF_KEYUP = 0x0002
+_KEYEVENTF_SCANCODE = 0x0008
+_MAPVK_VK_TO_VSC = 0
 
-        scan_code = self._user32.MapVirtualKeyW(code, 0)
-        event = _INPUT(
-            type=_INPUT_KEYBOARD,
-            ki=_KEYBDINPUT(
-                wVk=code,
-                wScan=scan_code,
-                dwFlags=flags,
-                time=0,
-                dwExtraInfo=0,
-            ),
-        )
-        sent = self._user32.SendInput(
-            1, ctypes.byref(event), ctypes.sizeof(_INPUT)
-        )
-        if sent == 1:
-            return True
+# Navigation / editing VKs that require KEYEVENTF_EXTENDEDKEY on many layouts.
+_WINDOWS_EXTENDED_VKS = frozenset(
+    {
+        0x21,  # Page Up
+        0x22,  # Page Down
+        0x23,  # End
+        0x24,  # Home
+        0x25,  # Left
+        0x26,  # Up
+        0x27,  # Right
+        0x28,  # Down
+        0x2D,  # Insert
+        0x2E,  # Delete
+    }
+)
 
-        self._sendinput_enabled = False
+# Fixed Win32 widths so MSVC layout holds on both LLP64 (Windows) and LP64 hosts.
+_WIN_WORD = ctypes.c_uint16
+_WIN_DWORD = ctypes.c_uint32
+_WIN_LONG = ctypes.c_int32
+_WIN_ULONG_PTR = (
+    ctypes.c_uint64 if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_uint32
+)
+
+_win_user32_ready = False
+
+
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = (
+        ("wVk", _WIN_WORD),
+        ("wScan", _WIN_WORD),
+        ("dwFlags", _WIN_DWORD),
+        ("time", _WIN_DWORD),
+        ("dwExtraInfo", _WIN_ULONG_PTR),
+    )
+
+
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = (
+        ("dx", _WIN_LONG),
+        ("dy", _WIN_LONG),
+        ("mouseData", _WIN_DWORD),
+        ("dwFlags", _WIN_DWORD),
+        ("time", _WIN_DWORD),
+        ("dwExtraInfo", _WIN_ULONG_PTR),
+    )
+
+
+class _HARDWAREINPUT(ctypes.Structure):
+    _fields_ = (
+        ("uMsg", _WIN_DWORD),
+        ("wParamL", _WIN_WORD),
+        ("wParamH", _WIN_WORD),
+    )
+
+
+class _INPUT_UNION(ctypes.Union):
+    _fields_ = (
+        ("ki", _KEYBDINPUT),
+        ("mi", _MOUSEINPUT),
+        ("hi", _HARDWAREINPUT),
+    )
+
+
+class _INPUT(ctypes.Structure):
+    _fields_ = (
+        ("type", _WIN_DWORD),
+        ("union", _INPUT_UNION),
+    )
+
+
+def _windows_use_scancode_path() -> bool:
+    """Optional KEYEVENTF_SCANCODE-centric inject path (KEYSIM_WIN_SCANCODE=1)."""
+    raw = os.getenv("KEYSIM_WIN_SCANCODE", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _windows_is_extended_vk(code: int) -> bool:
+    return code in _WINDOWS_EXTENDED_VKS
+
+
+def _windows_expected_input_sizeof() -> int:
+    """MSVC sizeof(INPUT): 40 on 64-bit, 28 on 32-bit."""
+    return 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28
+
+
+def _windows_user32() -> Any:
+    return ctypes.__dict__["windll"].user32
+
+
+def _configure_windows_input_apis() -> None:
+    """Bind SendInput/MapVirtualKey prototypes once."""
+    global _win_user32_ready
+    if _win_user32_ready:
+        return
+    user32 = _windows_user32()
+    map_virtual_key = user32.MapVirtualKeyW
+    send_input = user32.SendInput
+    map_virtual_key.argtypes = [ctypes.c_uint, ctypes.c_uint]
+    map_virtual_key.restype = ctypes.c_uint
+    send_input.argtypes = [ctypes.c_uint, ctypes.POINTER(_INPUT), ctypes.c_int]
+    send_input.restype = ctypes.c_uint
+    _win_user32_ready = True
+
+
+def _windows_map_vk_to_scan(code: int) -> int:
+    _configure_windows_input_apis()
+    map_virtual_key = cast(
+        Callable[[int, int], int], _windows_user32().MapVirtualKeyW
+    )
+    return int(map_virtual_key(int(code) & 0xFFFF, _MAPVK_VK_TO_VSC)) & 0xFF
+
+
+def _windows_build_keybdinput(code: int, *, key_up: bool) -> _KEYBDINPUT:
+    vk = int(code) & 0xFFFF
+    scan = _windows_map_vk_to_scan(vk)
+    flags = 0
+    if _windows_is_extended_vk(vk):
+        flags |= _KEYEVENTF_EXTENDEDKEY
+    if key_up:
+        flags |= _KEYEVENTF_KEYUP
+
+    prefer_scancode = _windows_use_scancode_path()
+    if prefer_scancode and scan == 0:
         logger.warning(
-            f"SendInput failed for VK {code}; falling back to keybd_event."
+            f"MapVirtualKey returned 0 for vk=0x{vk:02X}; falling back to VK path"
         )
-        if callable(self._fallback_callback):
-            try:
-                self._fallback_callback(code)
-            except Exception:
-                pass
-        return False
+        prefer_scancode = False
 
-    def press(self, code: int):
-        if self.os_type == "Windows":
-            if self._send_windows_input(code, key_up=False):
-                return
-            ctypes.windll.user32.keybd_event(code, 0, 0, 0)
-            return
+    if prefer_scancode:
+        # Scan-code path for titles that ignore virtual-key-only events.
+        flags |= _KEYEVENTF_SCANCODE
+        return _KEYBDINPUT(0, scan, flags, 0, 0)
 
-        if self.os_type == "Darwin":
-            CGEventPost(kCGHIDEventTap, CGEventCreateKeyboardEvent(None, code, True))
+    # Default: SendInput with VK + scan code (still user32 low-level).
+    return _KEYBDINPUT(vk, scan, flags, 0, 0)
 
-    def release(self, code: int):
-        if self.os_type == "Windows":
-            if self._send_windows_input(code, key_up=True):
-                return
-            ctypes.windll.user32.keybd_event(code, 0, 2, 0)
-            return
 
-        if self.os_type == "Darwin":
-            CGEventPost(kCGHIDEventTap, CGEventCreateKeyboardEvent(None, code, False))
+def _windows_send_key(code: int, *, key_up: bool) -> None:
+    _configure_windows_input_apis()
+    send_input = cast(Callable[..., int], _windows_user32().SendInput)
+    inp = _INPUT(
+        type=_INPUT_KEYBOARD,
+        union=_INPUT_UNION(ki=_windows_build_keybdinput(code, key_up=key_up)),
+    )
+    cb_size = ctypes.sizeof(_INPUT)
+    expected = _windows_expected_input_sizeof()
+    if cb_size != expected:
+        logger.error(
+            f"INPUT sizeof mismatch: got {cb_size}, expected {expected} for this pointer width"
+        )
+    sent = int(send_input(1, ctypes.byref(inp), cb_size))
+    if sent != 1:
+        logger.warning(
+            f"SendInput returned {sent} for vk=0x{int(code) & 0xFFFF:02X} key_up={key_up}"
+        )
+
+
+def _windows_key_press(code: int) -> None:
+    _windows_send_key(code, key_up=False)
+
+
+def _windows_key_release(code: int) -> None:
+    _windows_send_key(code, key_up=True)
+
+
+def _darwin_key_event(code: int, pressed: bool) -> None:
+    quartz = importlib.import_module("Quartz")
+    source_create = cast(Callable[[object], object], quartz.CGEventSourceCreate)
+    create_event = cast(
+        Callable[[object, int, bool], object], quartz.CGEventCreateKeyboardEvent
+    )
+    post_event = cast(Callable[[object, object], None], quartz.CGEventPost)
+    source = source_create(quartz.kCGEventSourceStateHIDSystemState)
+    event = create_event(source, code, pressed)
+    if event is None:
+        logger.warning(
+            f"CGEventCreateKeyboardEvent failed for code={code} pressed={pressed}"
+        )
+        return
+    post_event(quartz.kCGHIDEventTap, event)
+
+
+def _darwin_key_press(code: int) -> None:
+    _darwin_key_event(code, True)
+
+
+def _darwin_key_release(code: int) -> None:
+    _darwin_key_event(code, False)
+
+
+class KeySimulator:
+    def __init__(self, os_type: str) -> None:
+        self.os_type = os_type
+        if os_type == "Windows":
+            self.press: KeyAction = _windows_key_press
+            self.release: KeyAction = _windows_key_release
+        elif os_type == "Darwin":
+            self.press = _darwin_key_press
+            self.release = _darwin_key_release
+        else:
+            self.press = self.release = _noop_key_action
 
 
 class ModificationKeyHandler:
     def __init__(
-        self, key_codes, default_press_times, mod_keys, os_type, fallback_callback=None
-    ):
+        self,
+        key_codes: dict[str, int],
+        default_press_times: tuple[float, float],
+        mod_keys: ModificationKeys,
+        os_type: str,
+        *,
+        sim: KeySimulator | None = None,
+        key_lock: threading.Lock | None = None,
+        pressed_keys: set[str] | None = None,
+        pressed_key_codes: dict[str, int] | None = None,
+        term_event: threading.Event | None = None,
+    ) -> None:
         self.key_codes = key_codes
         # press_time: (min_sec, max_sec) 튜플
         self.press_time = default_press_times
         # 설정에서 enabled된 키만 필터링
         self.mod_keys = {k: v for k, v in mod_keys.items() if v.get("enabled")}
-        self.sim = KeySimulator(os_type, fallback_callback=fallback_callback)
+        self.os_type = os_type
+        self.sim = sim if sim is not None else KeySimulator(os_type)
+        self.key_lock = key_lock
+        self.pressed_keys = pressed_keys
+        self.pressed_key_codes = pressed_key_codes
+        self.term_event = term_event
         self.event = threading.Event()
 
     async def check_and_process(self) -> bool:
+        if not self.mod_keys:
+            return False
+
         active = False
-        tasks = []
+        tasks: list[Awaitable[None]] = []
 
         # 설정된 ModKey들을 순회하며 물리적 눌림 확인
         for k, v in self.mod_keys.items():
@@ -172,7 +422,14 @@ class ModificationKeyHandler:
                 active = True
                 # 'Pass' 설정이 아닐 경우(다른 키로 매핑된 경우) 키 입력 시뮬레이션
                 if not v.get("pass") and (val := v.get("value")):
-                    tasks.append(self._sim_key(k, val, bool(v.get("include_modifier", True))))
+                    if isinstance(val, str):
+                        tasks.append(
+                            self._sim_key(
+                                k,
+                                val,
+                                bool(v.get("include_modifier", True)),
+                            )
+                        )
 
         # 매핑된 키 입력 병렬 실행
         if tasks:
@@ -186,44 +443,113 @@ class ModificationKeyHandler:
         return active
 
     async def _sim_key(
-        self, modifier_name: str, key_name: str, include_modifier: bool = True
-    ):
+        self,
+        modifier_name: str,
+        key_name: str,
+        include_modifier: bool = True,
+    ) -> None:
         norm_key = _normalize_key_name(self.key_codes, key_name)
-        if norm_key and (code := self.key_codes.get(norm_key)):
-            modifier_code = self.key_codes.get(
-                {"alt": "Alt", "ctrl": "Ctrl", "shift": "Shift"}.get(
-                    modifier_name.lower(), ""
-                )
-            )
-            should_strip_modifier = (
+        if not norm_key:
+            return
+        code = self.key_codes.get(norm_key)
+        if code is None:
+            return
+
+        modifier_key = {
+            "alt": "Alt",
+            "ctrl": "Ctrl",
+            "shift": "Shift",
+        }.get(modifier_name.lower(), "")
+        modifier_code = self.key_codes.get(modifier_key) if modifier_key else None
+        strip_modifier_code = (
+            modifier_code
+            if (
                 self.os_type == "Windows"
                 and not include_modifier
                 and modifier_code is not None
             )
-            if should_strip_modifier:
-                self.sim.release(modifier_code)
-                await asyncio.sleep(0.01)
-            try:
-                self.sim.press(code)
-                await asyncio.sleep(random.uniform(*self.press_time))
-                self.sim.release(code)
-            finally:
-                if should_strip_modifier and KeyUtils.mod_key_pressed(modifier_name):
-                    await asyncio.sleep(0.01)
-                    self.sim.press(modifier_code)
+            else None
+        )
+
+        tracked = False
+        lock = self.key_lock
+        pressed_keys = self.pressed_keys
+        pressed_key_codes = self.pressed_key_codes
+        if lock is not None and pressed_keys is not None and pressed_key_codes is not None:
+            with lock:
+                if norm_key in pressed_keys:
+                    return
+                pressed_keys.add(norm_key)
+                pressed_key_codes[norm_key] = code
+            tracked = True
+
+        down = False
+        release_failed = False
+        try:
+            if strip_modifier_code is not None:
+                self.sim.release(strip_modifier_code)
+                await self._wait_hold_async(0.01)
+            self.sim.press(code)
+            down = True
+            await self._wait_hold_async(random.uniform(*self.press_time))
+        finally:
+            if down:
+                try:
+                    self.sim.release(code)
+                except Exception as exc:
+                    release_failed = True
+                    logger.warning(
+                        f"Modification key release failed for {norm_key!r}: {exc}"
+                    )
+            if strip_modifier_code is not None and KeyUtils.mod_key_pressed(
+                modifier_name
+            ):
+                try:
+                    await self._wait_hold_async(0.01)
+                    self.sim.press(strip_modifier_code)
+                except Exception as exc:
+                    logger.warning(
+                        f"Failed to restore modifier {modifier_name!r}: {exc}"
+                    )
+            if tracked and lock is not None and pressed_keys is not None and pressed_key_codes is not None:
+                with lock:
+                    if release_failed:
+                        pressed_keys.add(norm_key)
+                        pressed_key_codes[norm_key] = code
+                    else:
+                        pressed_keys.discard(norm_key)
+                        pressed_key_codes.pop(norm_key, None)
+    async def _wait_hold_async(
+        self, duration: float, check_interval: float = 0.02
+    ) -> None:
+        """Hold duration, aborting early when processor term_event is set."""
+        if duration <= 0:
+            return
+        end_time = time.time() + duration
+        term = self.term_event
+        while time.time() < end_time:
+            if term is not None and term.is_set():
+                break
+            remaining = end_time - time.time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(check_interval, remaining))
 
 
 class KeystrokeProcessor:
     PID_REGEX = re.compile(r"\((\d+)\)")
+    # While Pass/mod is held, skip capture but poll often so release leads
+    # promptly into a fresh grab/match (not an extra 100ms back-off).
+    MOD_ACTIVE_POLL_INTERVAL = 0.02
 
     def __init__(
         self,
-        main_app,
+        main_app: AppWithSettings,
         target_proc: str,
-        events: List[EventModel],
-        mod_keys: Dict,
+        events: list[EventModel],
+        mod_keys: ModificationKeys,
         term_event: threading.Event,
-    ):
+    ) -> None:
         self.main_app = main_app
         self.term_event = term_event
         self.os_type = platform.system()
@@ -241,110 +567,158 @@ class KeystrokeProcessor:
         )
 
         self.key_codes = KeyUtils.get_key_list()
-        self.sim = KeySimulator(self.os_type, fallback_callback=self._notify_windows_input_fallback)
-        self.mod_handler = ModificationKeyHandler(
-            self.key_codes,
-            self.default_press_times,
-            mod_keys,
-            self.os_type,
-            fallback_callback=self._notify_windows_input_fallback,
-        )
+        self.sim = KeySimulator(self.os_type)
 
         # Thread Safety & State
         self.key_lock = threading.Lock()
         self.state_lock = threading.Lock()
 
-        self.pressed_keys: Set[str] = set()
-        self.current_states: Dict[str, bool] = {}
+        self.pressed_keys: set[str] = set()
+        # Tracks key name → code for force-release on stop.
+        self.pressed_key_codes: dict[str, int] = {}
+        self.current_states: dict[str, bool] = {}
         self.runtime_toggle_active = False
-        self._roi_warn_logged: Set[str] = set()
+        self._roi_warn_logged: set[str] = set()
+        self._unsupported_key_warned: set[str] = set()
 
-        self.event_data_list, self.independent_events, self.mega_rect = self._init_event_data(events)
-        self.main_capture_groups = self._build_capture_groups(self.event_data_list)
+        self.mod_handler = ModificationKeyHandler(
+            self.key_codes,
+            self.default_press_times,
+            mod_keys,
+            self.os_type,
+            sim=self.sim,
+            key_lock=self.key_lock,
+            pressed_keys=self.pressed_keys,
+            pressed_key_codes=self.pressed_key_codes,
+            term_event=self.term_event,
+        )
+
+        self.event_data_list: list[EventData] = self._init_event_data(events)
+        self.main_capture_groups: list[CaptureGroup] = self._build_capture_groups(
+            self.event_data_list
+        )
 
         self.loop = asyncio.new_event_loop()
         self.main_thread = threading.Thread(target=self._run_loop, daemon=True)
 
-    def _notify_windows_input_fallback(self, code: int) -> None:
-        key_name = KeyUtils.get_key_name_for_keycode(code) or str(code)
-        callback = getattr(self.main_app, "notify_windows_input_fallback", None)
-        if callable(callback):
-            callback(key_name)
-
-    def start(self):
+    def start(self) -> None:
         logger.info(f"Processor starting... PID: {self.pid}")
         self.main_thread.start()
 
-    def stop(self):
+    def stop(self) -> None:
         logger.info("Processor stopping...")
         self.term_event.set()
 
         if self.main_thread.is_alive():
             self.main_thread.join(timeout=1.0)
+            if self.main_thread.is_alive():
+                logger.warning(
+                    "Processor thread did not stop within timeout; force-releasing keys"
+                )
+        self._force_release_pressed_keys()
 
-    def _init_event_data(
-        self, raw_events: List[EventModel]
-    ) -> Tuple[List[Dict], List[Dict], Optional[Dict]]:
-        events_data = []
-        all_coords = []
+    def _force_release_pressed_keys(self) -> None:
+        """Best-effort OS key-up for any keys still tracked as down."""
+        with self.key_lock:
+            pending = list(self.pressed_key_codes.items())
+            self.pressed_key_codes.clear()
+            self.pressed_keys.clear()
+
+        failed: dict[str, int] = {}
+        for key_name, code in pending:
+            try:
+                self.sim.release(code)
+                logger.debug(f"Force-released key {key_name!r} (code={code})")
+            except Exception as exc:
+                failed[key_name] = code
+                logger.warning(f"Force-release failed for {key_name!r}: {exc}")
+
+        if failed:
+            with self.key_lock:
+                self.pressed_key_codes.update(failed)
+                self.pressed_keys.update(failed)
+
+    def _warn_unsupported_key(self, event_name: str, raw_key: str) -> None:
+        if not hasattr(self, "_unsupported_key_warned"):
+            self._unsupported_key_warned = set()
+        warn_key = f"{event_name}\0{raw_key}"
+        if warn_key in self._unsupported_key_warned:
+            return
+        self._unsupported_key_warned.add(warn_key)
+        os_label = getattr(self, "os_type", platform.system())
+        logger.warning(
+            f"Event '{event_name}': unsupported key {raw_key!r} on {os_label}; "
+            "key press will be skipped"
+        )
+
+    def _init_event_data(self, raw_events: list[EventModel]) -> list[EventData]:
+        events_data: list[EventData] = []
 
         for e in raw_events:
             if not e.use_event:
                 continue
 
-            if getattr(e, "match_mode", "pixel") == "pixel":
+            mode = e.match_mode or "pixel"
+            latest_position = e.latest_position
+            clicked_position = e.clicked_position
+            if latest_position is None or clicked_position is None:
+                continue
+
+            if mode == "pixel":
                 if not e.ref_pixel_value or len(e.ref_pixel_value) < 3:
                     continue
 
-            center_x = e.latest_position[0] + e.clicked_position[0]
-            center_y = e.latest_position[1] + e.clicked_position[1]
-            mode = getattr(e, "match_mode", "pixel")
+            center_x = latest_position[0] + clicked_position[0]
+            center_y = latest_position[1] + clicked_position[1]
+            raw_key = e.key_to_enter
             key = (
-                _normalize_key_name(self.key_codes, e.key_to_enter)
-                if e.key_to_enter
-                else None
+                _normalize_key_name(self.key_codes, raw_key) if raw_key else None
             )
+            if raw_key and raw_key.strip() and key is None:
+                self._warn_unsupported_key(e.event_name or "Unknown", raw_key.strip())
 
-            evt_data = {
+            evt_data: EventData = {
                 "name": e.event_name or "Unknown",
                 "mode": mode,
-                "invert": getattr(e, "invert_match", False),
+                "invert": e.invert_match,
                 "key": key,
                 "center_x": center_x,
                 "center_y": center_y,
-                "dur": getattr(e, "press_duration_ms", None),
-                "rand": getattr(e, "randomization_ms", None),
-                "exec": getattr(e, "execute_action", True),
-                "group": getattr(e, "group_id", None),
-                "priority": getattr(e, "priority", 0),
-                "conds": getattr(e, "conditions", {}),
-                "runtime_toggle_member": bool(
-                    getattr(e, "runtime_toggle_member", False)
-                ),
-                # independent_thread is deprecated at runtime; all events now
-                # flow through the main evaluation pipeline.
-                "independent": False,
+                "dur": e.press_duration_ms,
+                "rand": e.randomization_ms,
+                "exec": e.execute_action,
+                "group": e.group_id,
+                "priority": e.priority,
+                "conds": e.conditions,
+                "runtime_toggle_member": bool(e.runtime_toggle_member),
+                "region_w": 1,
+                "region_h": 1,
+                "rel_x": 0,
+                "rel_y": 0,
             }
 
             if evt_data["mode"] == "region":
-                r_size = getattr(e, "region_size", (20, 20))
+                if e.held_screenshot is None:
+                    continue
+                r_size = e.region_size
                 w, h = r_size if r_size else (20, 20)
                 evt_data["region_w"], evt_data["region_h"] = w, h
 
                 if e.held_screenshot:
-                    full_img = np.array(e.held_screenshot.convert("RGB"))
-                    cx, cy = e.clicked_position
+                    full_img = ImageFrame.from_rgb_image(e.held_screenshot)
+                    cx, cy = clicked_position
                     y1, y2 = (
                         max(0, cy - h // 2),
-                        min(full_img.shape[0], cy + h // 2 + (h % 2)),
+                        min(full_img.height, cy + h // 2 + (h % 2)),
                     )
                     x1, x2 = (
                         max(0, cx - w // 2),
-                        min(full_img.shape[1], cx + w // 2 + (w % 2)),
+                        min(full_img.width, cx + w // 2 + (w % 2)),
                     )
-                    evt_data["ref_img"] = full_img[y1:y2, x1:x2][:, :, ::-1].copy()
+                    evt_data["ref_img"] = full_img.crop(x1, y1, x2 - x1, y2 - y1)
 
-                    rh, rw = evt_data["ref_img"].shape[:2]
+                    ref_img = evt_data["ref_img"]
+                    rh, rw = ref_img.height, ref_img.width
                     if rh > 0 and rw > 0:
                         # Target count (actual may be less after dedup for very small ROIs)
                         n = max(5, min(25, (rw * rh) // 100))
@@ -361,43 +735,29 @@ class KeystrokeProcessor:
                             )
                         )
                         evt_data["check_points"] = [
-                            {"pos": (px, py), "color": evt_data["ref_img"][py, px]}
+                            {
+                                "pos": (px, py),
+                                "color": ref_img.pixel_bgr(px, py),
+                            }
                             for px, py in pts
                         ]
+                if "check_points" not in evt_data:
+                    continue
             else:
+                if e.ref_pixel_value is None:
+                    continue
                 ref_rgb = e.ref_pixel_value[:3]
-                evt_data["ref_bgr"] = np.array(ref_rgb[::-1], dtype=np.uint8)
+                evt_data["ref_bgr"] = (
+                    int(ref_rgb[2]),
+                    int(ref_rgb[1]),
+                    int(ref_rgb[0]),
+                )
 
             events_data.append(evt_data)
-            if evt_data["mode"] == "region":
-                w, h = evt_data["region_w"], evt_data["region_h"]
-                all_coords.extend(
-                    [
-                        (center_x - w // 2, center_y - h // 2),
-                        (center_x + w // 2, center_y + h // 2),
-                    ]
-                )
-            else:
-                all_coords.append((center_x, center_y))
 
-        mega_rect = None
-        if events_data and all_coords:
-            coords = np.array(all_coords)
-            x_min, y_min = coords.min(axis=0)
-            x_max, y_max = coords.max(axis=0)
-            mega_rect = {
-                "left": int(x_min),
-                "top": int(y_min),
-                "width": int(x_max - x_min + 1),
-                "height": int(y_max - y_min + 1),
-            }
-            for evt in events_data:
-                evt["rel_x"] = evt["center_x"] - mega_rect["left"]
-                evt["rel_y"] = evt["center_y"] - mega_rect["top"]
+        return events_data
 
-        return events_data, [], mega_rect
-
-    def _run_loop(self):
+    def _run_loop(self) -> None:
         asyncio.set_event_loop(self.loop)
         try:
             self.loop.run_until_complete(self._process_main())
@@ -406,7 +766,7 @@ class KeystrokeProcessor:
         finally:
             self.loop.close()
 
-    async def _process_main(self):
+    async def _process_main(self) -> None:
         if not self.event_data_list or not self.main_capture_groups:
             return
 
@@ -431,14 +791,14 @@ class KeystrokeProcessor:
                     continue
 
                 if await self.mod_handler.check_and_process():
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(self.MOD_ACTIVE_POLL_INTERVAL)
                     continue
 
                 try:
                     cycle_started = time.perf_counter()
-                    local_match_states = {}
+                    local_match_states: dict[str, bool] = {}
                     for group in self.main_capture_groups:
-                        img = np.array(sct.grab(group["rect"]))
+                        img = ImageFrame.from_screenshot(sct.grab(group["rect"]))
                         local_match_states.update(
                             self._evaluate_capture_group(img, group["events"])
                         )
@@ -450,11 +810,11 @@ class KeystrokeProcessor:
                 await asyncio.sleep(random.uniform(*self.delays))
 
     @staticmethod
-    def _rect_area(rect: Dict[str, int]) -> int:
+    def _rect_area(rect: Rect) -> int:
         return max(1, rect["width"]) * max(1, rect["height"])
 
     @staticmethod
-    def _merge_rects(rect_a: Dict[str, int], rect_b: Dict[str, int]) -> Dict[str, int]:
+    def _merge_rects(rect_a: Rect, rect_b: Rect) -> Rect:
         left = min(rect_a["left"], rect_b["left"])
         top = min(rect_a["top"], rect_b["top"])
         right = max(rect_a["left"] + rect_a["width"], rect_b["left"] + rect_b["width"])
@@ -466,13 +826,13 @@ class KeystrokeProcessor:
             "height": max(1, bottom - top),
         }
 
-    def _assign_group_relative_coords(self, group: Dict[str, Any]) -> None:
+    def _assign_group_relative_coords(self, group: CaptureGroup) -> None:
         rect = group["rect"]
         for evt in group["events"]:
             evt["rel_x"] = evt["center_x"] - rect["left"]
             evt["rel_y"] = evt["center_y"] - rect["top"]
 
-    def _build_capture_groups(self, events_data: List[Dict]) -> List[Dict]:
+    def _build_capture_groups(self, events_data: list[EventData]) -> list[CaptureGroup]:
         if not events_data:
             return []
 
@@ -482,7 +842,7 @@ class KeystrokeProcessor:
             events_data,
             key=lambda evt: (evt["center_x"], evt["center_y"], evt.get("name", "")),
         )
-        groups: List[Dict[str, Any]] = []
+        groups: list[CaptureGroup] = []
 
         for evt in sorted_events:
             evt_rect = self._build_capture_rect(evt)
@@ -516,10 +876,10 @@ class KeystrokeProcessor:
             self._assign_group_relative_coords(group)
         return groups
 
-    def _select_by_group_priority(self, events: List[Dict]) -> List[Dict]:
+    def _select_by_group_priority(self, events: list[EventData]) -> list[EventData]:
         """그룹별 우선순위로 이벤트 선택"""
-        groups = {}
-        no_group = []
+        groups: dict[str, list[EventData]] = {}
+        no_group: list[EventData] = []
 
         for evt in events:
             if evt["group"]:
@@ -540,18 +900,18 @@ class KeystrokeProcessor:
         return final_events
 
     @staticmethod
-    def _event_execution_signature(evt: Dict) -> Tuple[Any, ...]:
+    def _event_execution_signature(evt: EventData) -> tuple[object, ...]:
         """실행 직전 dedupe에 사용할 서명(동일 입력만 병합)."""
         mode = evt.get("mode")
         if mode == "region":
             checkpoints = tuple(
                 (
                     tuple(pt.get("pos", (None, None))),
-                    tuple(int(v) for v in np.asarray(pt.get("color", []))[:3]),
+                    _pixel_from_object(pt.get("color")),
                 )
                 for pt in evt.get("check_points", [])
             )
-            match_sig: Tuple[Any, ...] = (
+            match_sig: tuple[object, ...] = (
                 "region",
                 evt.get("region_w"),
                 evt.get("region_h"),
@@ -559,16 +919,13 @@ class KeystrokeProcessor:
             )
         else:
             ref = evt.get("ref_bgr")
-            ref_bgr = (
-                tuple(int(v) for v in np.asarray(ref)[:3]) if ref is not None else None
-            )
+            ref_bgr = _pixel_from_object(ref) if ref is not None else None
             match_sig = ("pixel", ref_bgr)
 
-        conds = evt.get("conds") or {}
+        conds = evt.get("conds", {})
         cond_sig = tuple(sorted((str(k), bool(v)) for k, v in conds.items()))
 
         return (
-            evt.get("independent", False),
             evt.get("center_x"),
             evt.get("center_y"),
             match_sig,
@@ -581,9 +938,11 @@ class KeystrokeProcessor:
             cond_sig,
         )
 
-    def _dedupe_events_for_execution(self, events: List[Dict]) -> List[Dict]:
-        seen: Set[Tuple[Any, ...]] = set()
-        deduped: List[Dict] = []
+    def _dedupe_events_for_execution(
+        self, events: list[EventData]
+    ) -> list[EventData]:
+        seen: set[tuple[object, ...]] = set()
+        deduped: list[EventData] = []
         for evt in events:
             signature = self._event_execution_signature(evt)
             if signature in seen:
@@ -591,10 +950,6 @@ class KeystrokeProcessor:
             seen.add(signature)
             deduped.append(evt)
         return deduped
-
-    def is_runtime_toggle_active(self) -> bool:
-        with self.state_lock:
-            return bool(self.runtime_toggle_active)
 
     def set_runtime_toggle_active(self, active: bool) -> bool:
         active = bool(active)
@@ -607,8 +962,8 @@ class KeystrokeProcessor:
         return active
 
     def _resolve_effective_states(
-        self, local_match_states: Dict[str, bool]
-    ) -> Dict[str, bool]:
+        self, local_match_states: dict[str, bool]
+    ) -> dict[str, bool]:
         """
         조건 체인을 포함한 '실제 활성 상태' 계산.
         - raw match가 False면 비활성
@@ -620,8 +975,8 @@ class KeystrokeProcessor:
             base_states = dict(self.current_states)
             runtime_toggle_active = bool(self.runtime_toggle_active)
 
-        resolved: Dict[str, bool] = {}
-        visiting: Set[str] = set()
+        resolved: dict[str, bool] = {}
+        visiting: set[str] = set()
 
         def resolve(name: str) -> bool:
             if name in resolved:
@@ -664,16 +1019,16 @@ class KeystrokeProcessor:
         return resolved
 
     def _evaluate_capture_group(
-        self, img: np.ndarray, events: List[Dict]
-    ) -> Dict[str, bool]:
-        local_match_states = {}
+        self, img: ImageFrame, events: list[EventData]
+    ) -> dict[str, bool]:
+        local_match_states: dict[str, bool] = {}
         for evt in events:
-            local_match_states[evt["name"]] = self._check_match(
-                img, evt, is_independent=False
-            )
+            local_match_states[evt["name"]] = self._check_match(img, evt)
         return local_match_states
 
-    async def _apply_local_match_states(self, local_match_states: Dict[str, bool]):
+    async def _apply_local_match_states(
+        self, local_match_states: dict[str, bool]
+    ) -> None:
         local_states = self._resolve_effective_states(local_match_states)
 
         with self.state_lock:
@@ -699,12 +1054,7 @@ class KeystrokeProcessor:
         if tasks:
             await asyncio.gather(*tasks)
 
-    async def _evaluate_and_execute_main(self, img: np.ndarray):
-        await self._apply_local_match_states(
-            self._evaluate_capture_group(img, self.event_data_list)
-        )
-
-    def _build_capture_rect(self, evt: Dict) -> Dict[str, int]:
+    def _build_capture_rect(self, evt: EventData) -> Rect:
         """이벤트에 대한 캡처 영역 생성"""
         cx, cy = evt["center_x"], evt["center_y"]
         if evt["mode"] == "region":
@@ -712,29 +1062,13 @@ class KeystrokeProcessor:
             return {"top": cy - h // 2, "left": cx - w // 2, "width": w, "height": h}
         return {"top": cy, "left": cx, "width": 1, "height": 1}
 
-    def _check_conditions(self, evt: Dict) -> bool:
-        """이벤트 조건 검사"""
-        if not evt["conds"]:
-            return True
-
-        with self.state_lock:
-            return all(
-                self.current_states.get(cond_name, False) == expected
-                for cond_name, expected in evt["conds"].items()
-            )
-
-    def _extract_roi(
-        self, img: np.ndarray, evt: Dict, is_independent: bool
-    ) -> Optional[np.ndarray]:
+    def _extract_roi(self, img: ImageFrame, evt: EventData) -> ImageFrame | None:
         """이미지에서 관심 영역(ROI) 추출"""
-        if is_independent:
-            return img[:, :, :3]
-
         w, h = evt["region_w"], evt["region_h"]
         x, y = evt["rel_x"] - w // 2, evt["rel_y"] - h // 2
 
         # 경계 검사
-        if x < 0 or y < 0 or x + w > img.shape[1] or y + h > img.shape[0]:
+        if x < 0 or y < 0 or x + w > img.width or y + h > img.height:
             name = evt.get("name", "?")
             if not hasattr(self, "_roi_warn_logged"):
                 self._roi_warn_logged = set()
@@ -743,28 +1077,31 @@ class KeystrokeProcessor:
                 logger.warning(
                     f"Event '{name}': ROI extraction failed — "
                     f"region_size({w}×{h}) exceeds capture area "
-                    f"({img.shape[1]}×{img.shape[0]}). Matching will always return False."
+                    f"({img.width}×{img.height}). Matching will always return False."
                 )
             return None
 
-        return img[y : y + h, x : x + w, :3]
+        return img.crop(x, y, w, h)
 
-    def _check_match(self, img: np.ndarray, evt: Dict, is_independent: bool) -> bool:
+    def _check_match(self, img: ImageFrame, evt: EventData) -> bool:
         matched = False
         evaluated = False
         try:
             if evt["mode"] == "region":
-                roi = self._extract_roi(img, evt, is_independent)
+                check_points = evt.get("check_points")
+                if not check_points:
+                    return False
+                roi = self._extract_roi(img, evt)
                 if roi is None:
                     return False
 
                 # 체크포인트 검증
-                for pt in evt.get("check_points", []):
+                for pt in check_points:
                     px, py = pt["pos"]
-                    if py >= roi.shape[0] or px >= roi.shape[1]:
+                    if py >= roi.height or px >= roi.width:
                         continue
                     # 색상 비교
-                    if not np.array_equal(roi[py, px], pt["color"]):
+                    if roi.pixel_bgr(px, py) != pt["color"]:
                         matched = False
                         evaluated = True
                         break
@@ -772,15 +1109,15 @@ class KeystrokeProcessor:
                     matched = True
                     evaluated = True
             else:
+                ref_bgr = evt.get("ref_bgr")
+                if ref_bgr is None:
+                    return False
                 # 픽셀 모드
-                if is_independent:
-                    pixel = img[0, 0, :3]
-                else:
-                    py, px = evt["rel_y"], evt["rel_x"]
-                    if py >= img.shape[0] or px >= img.shape[1]:
-                        return False
-                    pixel = img[py, px][:3]
-                matched = np.array_equal(pixel, evt["ref_bgr"])
+                py, px = evt["rel_y"], evt["rel_x"]
+                if py >= img.height or px >= img.width:
+                    return False
+                pixel = img.pixel_bgr(px, py)
+                matched = pixel == ref_bgr
                 evaluated = True
         except Exception:
             return False
@@ -788,21 +1125,25 @@ class KeystrokeProcessor:
             return not matched
         return matched
 
-    def _calculate_press_duration(self, evt: Dict) -> float:
+    def _calculate_press_duration(self, evt: EventData) -> float:
         """목표 키 누름 지속 시간 계산 (초 단위)"""
+        duration_ms = evt["dur"]
+        randomization_ms = evt["rand"]
         duration = (
-            evt["dur"] / 1000.0
-            if evt["dur"]
+            duration_ms / 1000.0
+            if duration_ms
             else random.uniform(*self.default_press_times)
         )
-        if evt["rand"]:
-            duration += random.uniform(-evt["rand"], evt["rand"]) / 1000.0
+        if randomization_ms:
+            duration += (
+                random.uniform(-randomization_ms, randomization_ms) / 1000.0
+            )
         return max(0.05, duration)
 
     def _snapshot_condition_states(
-        self, evt: Dict, state_snapshot: Optional[Dict[str, bool]] = None
-    ) -> Dict[str, bool]:
-        conds = evt.get("conds") or {}
+        self, evt: EventData, state_snapshot: dict[str, bool] | None = None
+    ) -> dict[str, bool]:
+        conds = evt.get("conds", {})
         if not conds:
             return {}
 
@@ -820,9 +1161,9 @@ class KeystrokeProcessor:
 
     @staticmethod
     def _format_condition_states(
-        evt: Dict, condition_states: Optional[Dict[str, bool]] = None
+        evt: EventData, condition_states: dict[str, bool] | None = None
     ) -> str:
-        conds = evt.get("conds") or {}
+        conds = evt.get("conds", {})
         if not conds:
             return ""
 
@@ -836,18 +1177,20 @@ class KeystrokeProcessor:
     def _log_key_execution(
         self,
         mode: str,
-        evt: Dict,
+        evt: EventData,
         target_duration: float,
-        state_snapshot: Optional[Dict[str, bool]] = None,
+        state_snapshot: dict[str, bool] | None = None,
     ) -> None:
         condition_states = self._snapshot_condition_states(evt, state_snapshot)
         cond_suffix = self._format_condition_states(evt, condition_states)
-        logger.info(
+        logger.debug(
             f"{mode} Key Pressed: {evt['key']} Evt: '{evt['name']}' "
             f"(Duration: {target_duration:.3f}s){cond_suffix}"
         )
 
-    async def _wait_until_async(self, end_time: float, check_interval: float = 0.02):
+    async def _wait_until_async(
+        self, end_time: float, check_interval: float = 0.02
+    ) -> None:
         """절대 종료 시간까지 비동기 대기"""
         while time.time() < end_time and not self.term_event.is_set():
             remaining = end_time - time.time()
@@ -855,57 +1198,46 @@ class KeystrokeProcessor:
                 break
             await asyncio.sleep(min(check_interval, remaining))
 
-    def _wait_until_sync(self, end_time: float, check_interval: float = 0.02):
-        """절대 종료 시간까지 동기 대기"""
-        while time.time() < end_time and not self.term_event.is_set():
-            remaining = end_time - time.time()
-            if remaining <= 0:
-                break
-            time.sleep(min(check_interval, remaining))
-
     async def _press_key_async(
-        self, evt: Dict, state_snapshot: Optional[Dict[str, bool]] = None
-    ):
+        self, evt: EventData, state_snapshot: dict[str, bool] | None = None
+    ) -> None:
         """비동기 키 입력 실행 (메인 루프용)"""
         if self.term_event.is_set():
             return
 
         key = evt["key"]
-        if not key or not (code := self.key_codes.get(key)):
+        if not key:
+            return
+        code = self.key_codes.get(key)
+        if code is None:
             return
 
         with self.key_lock:
             if key in self.pressed_keys:
                 return
             self.pressed_keys.add(key)
+            self.pressed_key_codes[key] = code
 
+        down = False
+        release_failed = False
         try:
             self.sim.press(code)
+            down = True
             target_duration = self._calculate_press_duration(evt)
             await self._wait_until_async(time.time() + target_duration)
-            self.sim.release(code)
             self._log_key_execution("Async", evt, target_duration, state_snapshot)
         finally:
+            if down:
+                try:
+                    self.sim.release(code)
+                except Exception as exc:
+                    release_failed = True
+                    logger.warning(f"Key release failed for {key!r}: {exc}")
             with self.key_lock:
-                self.pressed_keys.discard(key)
-
-    def _sync_press_key(self, evt: Dict):
-        """동기 키 입력 실행 (독립 스레드용)"""
-        key = evt["key"]
-        if not key or not (code := self.key_codes.get(key)):
-            return
-
-        with self.key_lock:
-            if key in self.pressed_keys:
-                return
-            self.pressed_keys.add(key)
-
-        try:
-            self.sim.press(code)
-            target_duration = self._calculate_press_duration(evt)
-            self._wait_until_sync(time.time() + target_duration)
-            self.sim.release(code)
-            self._log_key_execution("Sync", evt, target_duration)
-        finally:
-            with self.key_lock:
-                self.pressed_keys.discard(key)
+                if release_failed:
+                    # Keep tracking so stop()/force-release can retry key-up.
+                    self.pressed_keys.add(key)
+                    self.pressed_key_codes[key] = code
+                else:
+                    self.pressed_keys.discard(key)
+                    self.pressed_key_codes.pop(key, None)
