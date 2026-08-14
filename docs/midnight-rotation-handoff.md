@@ -230,6 +230,7 @@ WW, Havoc, Feral, Arcane, Outlaw, Sub, Assa, Aff, Enhance(Stormbringer)
 | 경로 | 내용 |
 | --- | --- |
 | `docs/midnight-rotation-handoff.md` | **이 파일** (세션 핸드오프) |
+| `docs/bm-hunter-rotation-rules.md` | 야수 사냥꾼 확정 규칙 (스펙별 문서) |
 | `~/Projects/simc-apl-research/README.md` | SimC 스냅샷 안내 |
 | `~/Projects/simc-apl-research/SOURCE.txt` | midnight 커밋·fetch 메타 |
 | `~/Projects/simc-apl-research/notes/INVENTORY.md` | default/assisted 파일 목록 |
