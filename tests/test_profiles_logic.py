@@ -9,6 +9,7 @@ from app.ui.profile_event_list import (
     EVENT_PRIORITY_MIN,
     EventListFrame,
     EventRow,
+    event_modifier_state,
     resolve_selection,
     selection_mode_for_state,
 )
@@ -1057,6 +1058,22 @@ class TestSelectionGestures(unittest.TestCase):
         selection, anchor = resolve_selection(set(), None, 4, "range")
         self.assertEqual(selection, {4})
         self.assertEqual(anchor, 4)
+
+    def test_events_without_modifier_info_are_treated_as_plain(self):
+        """Tk reports '??' for <FocusIn> and friends; that must not raise."""
+
+        class FakeEvent:
+            def __init__(self, state):
+                self.state = state
+
+        self.assertEqual(event_modifier_state(None), 0)
+        self.assertEqual(event_modifier_state(FakeEvent("??")), 0)
+        self.assertEqual(event_modifier_state(FakeEvent(None)), 0)
+        self.assertEqual(event_modifier_state(FakeEvent(0x0004)), 0x0004)
+        self.assertEqual(
+            selection_mode_for_state(event_modifier_state(FakeEvent("??"))),
+            "replace",
+        )
 
     def test_modifier_bits_map_to_gestures(self):
         self.assertEqual(selection_mode_for_state(0), "replace")

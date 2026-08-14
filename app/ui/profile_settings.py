@@ -21,6 +21,8 @@ from app.utils.runtime_toggle import (
 UI_PAD_XS = theme.SPACE_1
 UI_PAD_SM = theme.SPACE_1
 UI_PAD_MD = theme.SPACE_2
+# Keep in step with the event-name delay in profile_event_list.
+NAME_COMMIT_DELAY_MS = 700
 
 class ProfileFrame(ttk.Frame):
     def __init__(
@@ -35,6 +37,8 @@ class ProfileFrame(ttk.Frame):
         super().__init__(master)
         self.on_change = on_change
         self._original_name = name
+        self._committed_name = name
+        self._name_after_id: str | None = None
         self._profiles_dir = profiles_dir
         self.fav_var = tk.BooleanVar(value=fav)
 
@@ -50,18 +54,57 @@ class ProfileFrame(ttk.Frame):
         self.lbl_warn = ttk.Label(self, text="", foreground=theme.STATUS_ERROR_FG)
         self.lbl_warn.pack(side=tk.LEFT, padx=(UI_PAD_SM, 0))
 
-        def on_entry_changed(_event: tk.Event[tk.Misc]) -> None:
-            self._notify_changed()
-
         def on_favorite_changed(*_args: str) -> None:
             self._notify_changed()
 
-        self.entry.bind("<KeyRelease>", on_entry_changed)
-        self.entry.bind("<FocusOut>", on_entry_changed)
+        # Saving a renamed profile renames its file, so typing must not save
+        # on every keystroke. Validation feedback stays immediate.
+        self.entry.bind("<KeyRelease>", self._on_name_typed)
+        self.entry.bind("<FocusOut>", self._on_name_commit)
+        self.entry.bind("<Return>", self._on_name_commit)
+        self.entry.bind("<KP_Enter>", self._on_name_commit)
         self.fav_var.trace_add("write", on_favorite_changed)
 
     def get_data(self) -> tuple[str, bool]:
         return self.entry.get(), self.fav_var.get()
+
+    def _cancel_name_timer(self) -> None:
+        if self._name_after_id:
+            try:
+                self.after_cancel(self._name_after_id)
+            except (ValueError, tk.TclError):
+                pass
+            self._name_after_id = None
+
+    def _on_name_typed(self, _event: tk.Event[tk.Misc] | None = None) -> None:
+        """Show validation right away, but defer the save until typing stops."""
+        self._validate()
+        self._cancel_name_timer()
+        try:
+            self._name_after_id = self.after(
+                NAME_COMMIT_DELAY_MS, self._commit_name
+            )
+        except tk.TclError:
+            self._name_after_id = None
+
+    def _on_name_commit(self, _event: tk.Event[tk.Misc] | None = None) -> None:
+        self._cancel_name_timer()
+        self._commit_name()
+
+    def _commit_name(self) -> None:
+        self._name_after_id = None
+        try:
+            typed = self.entry.get()
+        except tk.TclError:
+            return
+        if typed == self._committed_name:
+            return
+        self._committed_name = typed
+        self._notify_changed()
+
+    def destroy(self) -> None:
+        self._cancel_name_timer()
+        super().destroy()
 
     def _validate(self) -> None:
         name = self.entry.get().strip()

@@ -43,6 +43,10 @@ EVENT_ACTIONS_COL_WIDTH = 18
 # Priority bounds shared by the inspector spinbox and the bulk dialog.
 EVENT_PRIORITY_MIN = 0
 EVENT_PRIORITY_MAX = 999
+# How long typing must pause before a name edit is committed and autosaved.
+# Long enough to sit out a normal typing burst (including Hangul composition),
+# short enough that the save still feels immediate once the user stops.
+NAME_COMMIT_DELAY_MS = 700
 
 ClickAction: TypeAlias = Literal["open", "copy", "remove"]
 SortKey: TypeAlias = Callable[[EventModel], tuple[object, ...]]
@@ -53,6 +57,20 @@ SelectMode: TypeAlias = Literal["replace", "toggle", "range"]
 _STATE_SHIFT = 0x0001
 _STATE_CONTROL = 0x0004
 _STATE_COMMAND = 0x0008
+
+
+def event_modifier_state(event: tk.Event[tk.Misc] | None) -> int:
+    """Modifier bits of an event, or 0 when Tk has none to report.
+
+    Events like <FocusIn> carry the placeholder string '??' in `state`, which
+    would raise if coerced to int.
+    """
+    if event is None:
+        return 0
+    try:
+        return int(getattr(cast(Any, event), "state", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def selection_mode_for_state(state: int) -> SelectMode:
@@ -190,6 +208,7 @@ class EventRow(ttk.Frame):
         self.btn_delete: ttk.Button | None = None
         self.tip_delete: ToolTip | None = None
         self.selected = False
+        self._name_after_id: str | None = None
 
         # Compact one-line cell: selection marker | state color bar | index |
         # use | name | group | key/condition | extra | actions.
@@ -289,8 +308,12 @@ class EventRow(ttk.Frame):
 
         # Context Menu Binding
         self.entry.bind("<Button-3>", self._on_context_menu)
-        self.entry.bind("<KeyRelease>", self._on_name_changed)
-        self.entry.bind("<FocusOut>", self._on_name_changed)
+        # Typing only arms a timer; the name is committed once typing settles,
+        # or immediately on Enter / focus loss.
+        self.entry.bind("<KeyRelease>", self._on_name_typed)
+        self.entry.bind("<FocusOut>", self._on_name_commit)
+        self.entry.bind("<Return>", self._on_name_commit)
+        self.entry.bind("<KP_Enter>", self._on_name_commit)
         self.entry.bind("<FocusIn>", self._on_select)
         for widget in (
             self,
@@ -505,8 +528,9 @@ class EventRow(ttk.Frame):
         select_cb = self.cbs.get("select")
         if self.event is None or select_cb is None:
             return
-        state = int(getattr(cast(Any, event), "state", 0) or 0) if event else 0
-        select_cb(self.row_num, selection_mode_for_state(state))
+        select_cb(
+            self.row_num, selection_mode_for_state(event_modifier_state(event))
+        )
 
     def _on_click(self, key: ClickAction) -> None:
         if key == "open":
@@ -522,12 +546,48 @@ class EventRow(ttk.Frame):
             if remove_cb is not None:
                 remove_cb(self, self.row_num)
 
+    def _cancel_name_timer(self) -> None:
+        if self._name_after_id:
+            try:
+                self.after_cancel(self._name_after_id)
+            except (ValueError, tk.TclError):
+                pass
+            self._name_after_id = None
+
+    def _on_name_typed(self, event: tk.Event[tk.Misc] | None = None) -> None:
+        """Restart the settle timer on every keystroke, so a burst of typing
+        results in one save instead of one per key."""
+        self._cancel_name_timer()
+        try:
+            self._name_after_id = self.after(
+                NAME_COMMIT_DELAY_MS, self._on_name_changed
+            )
+        except tk.TclError:
+            self._name_after_id = None
+
+    def _on_name_commit(self, event: tk.Event[tk.Misc] | None = None) -> None:
+        """Enter or focus loss means the edit is finished — save right away."""
+        self._cancel_name_timer()
+        self._on_name_changed()
+
     def _on_name_changed(self, event: tk.Event[tk.Misc] | None = None) -> None:
-        if self.event:
-            self.event.event_name = self.entry.get()
-            save_cb = self.cbs.get("save")
-            if save_cb is not None:
-                save_cb()
+        self._name_after_id = None
+        if not self.event:
+            return
+        try:
+            typed = self.entry.get()
+        except tk.TclError:  # row destroyed while the timer was pending
+            return
+        if typed == (self.event.event_name or ""):
+            return
+        self.event.event_name = typed
+        save_cb = self.cbs.get("save")
+        if save_cb is not None:
+            save_cb()
+
+    def destroy(self) -> None:
+        self._cancel_name_timer()
+        super().destroy()
 
     def get_name(self) -> str:
         return self.entry.get()
