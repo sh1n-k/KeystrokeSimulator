@@ -96,3 +96,16 @@ def event_key_sort_key(event: EventModel) -> EventSortKey:
         name.casefold(),
         name,
     )
+
+
+def _group_sort_prefix(event: EventModel) -> tuple[int, str, str]:
+    group = (event.group_id or "").strip()
+    return (0 if group else 1, group.casefold(), group)
+
+
+def event_group_name_sort_key(event: EventModel) -> EventSortKey:
+    return (*_group_sort_prefix(event), *event_name_sort_key(event))
+
+
+def event_group_key_sort_key(event: EventModel) -> EventSortKey:
+    return (*_group_sort_prefix(event), *event_key_sort_key(event))

@@ -9,6 +9,8 @@ from typing import Any, Literal, Optional, Protocol, TypeAlias, TypedDict, cast
 from app.core.models import EventModel, ProfileModel
 from app.core.profile_events import (
     clone_event,
+    event_group_key_sort_key,
+    event_group_name_sort_key,
     event_key_sort_key,
     event_name_sort_key,
     event_type_sort_order,
@@ -526,44 +528,42 @@ class EventListFrame(ttk.Frame):
             ),
         )
 
-        self.btn_sort_name = ttk.Button(
+        self.btn_sort = ttk.Menubutton(
             f_secondary,
-            text=txt("↕ Sort (Name)", "↕ 정렬(이름순서)"),
+            text=txt("↕ Sort", "↕ 정렬"),
+            width=dual_text_width("↕ Sort", "↕ 정렬", padding=1, min_width=8),
+        )
+        self.btn_sort.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
+        ToolTip(
+            self.btn_sort,
+            txt(
+                "Sort events by name, key, group/name, or group/key.",
+                "이름, 키, 그룹/이름, 그룹/키 순으로 이벤트를 정렬합니다.",
+            ),
+        )
+        self.sort_menu = tk.Menu(self.btn_sort, tearoff=0)
+        self.sort_menu.add_command(
+            label=txt("Name", "이름"),
             command=self._sort_events_by_name,
-            width=dual_text_width(
-                "↕ Sort (Name)", "↕ 정렬(이름순서)", padding=2, min_width=16
-            ),
         )
-        self.btn_sort_name.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
-        ToolTip(
-            self.btn_sort_name,
-            txt(
-                "Sort events automatically by event type and then by name.",
-                "이벤트 타입 우선, 그다음 이름순으로 자동 정렬합니다.",
-            ),
-        )
-
-        self.btn_sort_key = ttk.Button(
-            f_secondary,
-            text=txt("↕ Sort (Key)", "↕ 정렬(키 순서)"),
+        self.sort_menu.add_command(
+            label=txt("Key", "키"),
             command=self._sort_events_by_key,
-            width=dual_text_width(
-                "↕ Sort (Key)", "↕ 정렬(키 순서)", padding=2, min_width=16
-            ),
         )
-        self.btn_sort_key.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
-        ToolTip(
-            self.btn_sort_key,
-            txt(
-                "Sort events automatically by event type: conditions by name, actions by input key order.",
-                "이벤트 타입 우선으로 자동 정렬합니다: 조건은 이름순, 실행은 입력 키 순서입니다.",
-            ),
+        self.sort_menu.add_command(
+            label=txt("Group / Name", "그룹/이름"),
+            command=self._sort_events_by_group_name,
         )
+        self.sort_menu.add_command(
+            label=txt("Group / Key", "그룹/키"),
+            command=self._sort_events_by_group_key,
+        )
+        self.btn_sort.configure(menu=self.sort_menu)
 
         self.btn_more = ttk.Menubutton(
             f_secondary,
             text=txt("⋯ More", "⋯ 더보기"),
-            width=dual_text_width("⋯ More", "⋯ 더보기", padding=2, min_width=12),
+            width=dual_text_width("⋯ More", "⋯ 더보기", padding=1, min_width=8),
         )
         self.btn_more.pack(side=tk.LEFT)
         ToolTip(
@@ -656,6 +656,30 @@ class EventListFrame(ttk.Frame):
             txt(
                 "Events were sorted by:\nCondition → Name\nAction → Input Key",
                 "이벤트를 다음 순서로 정렬했습니다:\n조건 → 이름\n실행 → 입력 키",
+            ),
+        )
+
+    def _sort_events_by_group_name(self) -> None:
+        """그룹 우선, 그룹 안에서는 이름 정렬. 그룹 없음은 마지막."""
+
+        self._sort_events_with_feedback(
+            event_group_name_sort_key,
+            txt("Group / Name Sort Complete", "그룹/이름 정렬 완료"),
+            txt(
+                "Events were sorted by:\nGroup → Event Type → Name\nEvents without a group are last.",
+                "이벤트를 다음 순서로 정렬했습니다:\n그룹 → 이벤트 타입 → 이름\n그룹 없는 이벤트는 맨 뒤입니다.",
+            ),
+        )
+
+    def _sort_events_by_group_key(self) -> None:
+        """그룹 우선, 그룹 안에서는 키 정렬. 그룹 없음은 마지막."""
+
+        self._sort_events_with_feedback(
+            event_group_key_sort_key,
+            txt("Group / Key Sort Complete", "그룹/키 정렬 완료"),
+            txt(
+                "Events were sorted by:\nGroup → Condition/Name, Action/Key\nEvents without a group are last.",
+                "이벤트를 다음 순서로 정렬했습니다:\n그룹 → 조건/이름, 실행/키\n그룹 없는 이벤트는 맨 뒤입니다.",
             ),
         )
 
