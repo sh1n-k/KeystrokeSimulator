@@ -8,14 +8,18 @@ from pathlib import Path
 from tkinter import ttk, messagebox
 from typing import Any, Literal, Protocol, TypeAlias, TypedDict, cast
 
-from PIL import Image
+from dataclasses import replace as dataclass_replace
 
-from app.utils.i18n import txt
-from app.ui.event_importer import EventImporter
-from app.ui.profile_event_list import EventListFrame, EventRow
+from PIL import Image, ImageTk
+
+from app.utils.i18n import dual_text_width, txt
+from app.ui.profile_event_list import EventListFrame, EventRow, ToolTip
+from app.ui.profile_groups import GroupSelector
 from app.ui.profile_settings import ProfileFrame, RuntimeToggleSettingsFrame
 from app.core.models import ProfileModel, EventModel
+from app.core.profile_events import EventFilterState, event_needs_attention
 from app.core.validation import find_duplicate_event_names
+from app.utils.keys import KeyUtils
 from app.storage.profile_storage import load_profile, rename_profile_files, save_profile
 from app.utils.window_state import StateUtils, WindowUtils
 from app.utils.runtime_toggle import (
@@ -71,6 +75,7 @@ class AccordionSection(TypedDict):
     wrapper: tk.Frame
     header: tk.Frame
     glyph: tk.Label
+    title_label: tk.Label
     body: tk.Frame
     expanded: bool
 
@@ -167,6 +172,11 @@ class KeystrokeProfiles:
         self._last_saved_fingerprint: ProfileFingerprint | None = None
         self._overview_status_text = ""
         self._inspector_event: EventModel | None = None
+        self._status_action_after_id: str | None = None
+        self._inspector_thumb: ImageTk.PhotoImage | None = None
+        self._inspector_syncing = False
+        self._inspector_synced_id: int | None = None
+        self.filter_state = EventFilterState()
 
         self.win = tk.Toplevel(main_win)
         self.win.title(f"{txt('Profile Manager', '프로필 관리자')} - {self.prof_name}")
@@ -231,6 +241,8 @@ class KeystrokeProfiles:
             fg=theme.INK_MUTED,
         )
         self.lbl_status.pack(side=tk.LEFT, padx=UI_PAD_MD)
+        # Undo affordance for destructive actions; hidden until one happens.
+        self.btn_status_action = ttk.Button(f_status, text="", width=10)
 
         f_summary = tk.Frame(f_status, bg=theme.SURFACE_PANEL)
         f_summary.pack(side=tk.RIGHT)
@@ -243,6 +255,10 @@ class KeystrokeProfiles:
         self.lbl_groups_badge.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
         self.lbl_attention_badge = self._make_chip(f_summary)
         self.lbl_attention_badge.pack(side=tk.LEFT)
+        # The badge is a way in to the events it counts, not just a number.
+        self.lbl_attention_badge.config(cursor="hand2")
+        self.lbl_attention_badge.bind("<Button-1>", self._on_attention_badge_click)
+        self._tip_attention_badge = ToolTip(self.lbl_attention_badge)
 
         # Workspace: left NavRail + right event list (+ inspector later).
         self.workspace = ttk.Frame(self.win)
@@ -251,6 +267,12 @@ class KeystrokeProfiles:
         )
         self.nav_rail = self._build_nav_rail(self.workspace)
         self.nav_rail.pack(side=tk.LEFT, fill="y", padx=(0, UI_PAD_MD))
+
+        # Both fixed-width panels claim their space before the list, which
+        # expands. Packing the inspector last would let the list squeeze it
+        # off the right edge of the window.
+        self.inspector_panel = self._build_inspector(self.workspace)
+        self.inspector_panel.pack(side=tk.RIGHT, fill="y", padx=(UI_PAD_MD, 0))
 
         self.e_frame = EventListFrame(
             self.workspace,
@@ -261,12 +283,9 @@ class KeystrokeProfiles:
             select_cb=self._set_inspector_event,
             profiles_dir=self.prof_dir,
             host_window=self.win,
+            filter_change_cb=self._on_filter_changed,
         )
         self.e_frame.pack(side=tk.LEFT, fill="both", expand=True)
-
-        # Right-side Inspector — read-only preview / profile summary.
-        self.inspector_panel = self._build_inspector(self.workspace)
-        self.inspector_panel.pack(side=tk.LEFT, fill="y", padx=(UI_PAD_MD, 0))
 
         self._load_pos()
         self._refresh_profile_overview()
@@ -290,11 +309,10 @@ class KeystrokeProfiles:
         )
 
     def _build_nav_rail(self, parent: tk.Misc) -> tk.Frame:
-        """좌측 NavRail: FILTER / GROUPS / ACTIONS.
+        """좌측 NavRail: 이벤트 목록을 좁히는 필터 전용 패널.
 
-        Filter checkboxes are disabled placeholders in this milestone, matching
-        the SOT's visual slot without adding filter semantics. ACTIONS reuse the
-        existing EventListFrame command callbacks so behaviour stays intact.
+        Actions used to be duplicated here and in the list toolbar; the toolbar
+        is now the single home for them, so the rail only filters.
         """
         f = theme.fonts()
         rail = tk.Frame(
@@ -316,13 +334,38 @@ class KeystrokeProfiles:
                 anchor="w",
             ).pack(fill="x", pady=(theme.SPACE_2, theme.SPACE_1))
 
-        # --- FILTER (visual placeholder) -------------------------------
+        # --- FILTER ----------------------------------------------------
         _section_label(txt("FILTER", "필터"))
         self.nav_filter_vars: dict[str, tk.BooleanVar] = {}
-        for key, en, ko in [
-            ("active", "Active", "활성"),
-            ("grouped", "Grouped", "그룹화"),
-            ("cond", "Condition only", "조건 전용"),
+        for key, en, ko, tip_en, tip_ko in [
+            (
+                "active",
+                "In use",
+                "사용 중",
+                "Show only events whose Use box is checked.",
+                "사용 체크된 이벤트만 표시합니다.",
+            ),
+            (
+                "grouped",
+                "Grouped",
+                "그룹 있음",
+                "Show only events that belong to a group.",
+                "그룹에 속한 이벤트만 표시합니다.",
+            ),
+            (
+                "cond",
+                "Condition only",
+                "조건 전용",
+                "Show only events that check conditions without pressing a key.",
+                "키를 누르지 않고 조건만 확인하는 이벤트만 표시합니다.",
+            ),
+            (
+                "attention",
+                "Needs attention",
+                "주의 필요",
+                "Show only action events that are missing an input key.",
+                "입력 키가 없는 실행 이벤트만 표시합니다.",
+            ),
         ]:
             var = tk.BooleanVar(value=False)
             self.nav_filter_vars[key] = var
@@ -330,30 +373,21 @@ class KeystrokeProfiles:
                 rail,
                 text=txt(en, ko),
                 variable=var,
-                state="disabled",
+                command=self._on_nav_filter_changed,
             )
             cb.pack(anchor="w")
+            ToolTip(cb, txt(tip_en, tip_ko))
 
-        # --- GROUPS (read-only) ----------------------------------------
+        # --- GROUPS (clickable filters) --------------------------------
         _section_label(txt("GROUPS", "그룹"))
         self.nav_groups_frame = tk.Frame(rail, bg=theme.SURFACE_PANEL)
         self.nav_groups_frame.pack(fill="x")
 
-        # --- ACTIONS ---------------------------------------------------
-        _section_label(txt("ACTIONS", "액션"))
-        for en, ko, callback in [
-            ("＋ Add", "＋ 추가", self._nav_action_add),
-            ("Import", "가져오기", self._nav_action_import),
-            ("Sort", "정렬", self._nav_action_sort),
-            ("Graph", "그래프", self._nav_action_graph),
-        ]:
-            btn = ttk.Button(
-                rail,
-                text=txt(en, ko),
-                command=callback,
-            )
-            btn.pack(fill="x", pady=(0, theme.SPACE_1))
-
+        self.btn_nav_reset = ttk.Button(
+            rail,
+            text=txt("Clear filters", "필터 모두 해제"),
+            command=self._clear_all_filters,
+        )
         return rail
 
     def _refresh_nav_groups(self) -> None:
@@ -362,9 +396,13 @@ class KeystrokeProfiles:
         for child in self.nav_groups_frame.winfo_children():
             child.destroy()
         events = list(self.profile.event_list or [])
-        groups = sorted({e.group_id for e in events if e.group_id})
+        counts: dict[str, int] = {}
+        for event in events:
+            group = (event.group_id or "").strip()
+            if group:
+                counts[group] = counts.get(group, 0) + 1
         f = theme.fonts()
-        if not groups:
+        if not counts:
             tk.Label(
                 self.nav_groups_frame,
                 text=txt("(none)", "(없음)"),
@@ -373,46 +411,112 @@ class KeystrokeProfiles:
                 font=f["caption"],
                 anchor="w",
             ).pack(fill="x")
+            self._sync_nav_reset_button()
             return
-        for grp in groups:
-            tk.Label(
+        selected = self.filter_state.group_ids
+        for grp in sorted(counts):
+            active = grp in selected
+            label = tk.Label(
                 self.nav_groups_frame,
-                text=f"▣ {grp}",
-                bg=theme.SURFACE_PANEL,
-                fg=theme.INK_PRIMARY,
+                text=f"▣ {grp} ({counts[grp]})",
+                bg=theme.SIGNAL_TINT if active else theme.SURFACE_PANEL,
+                fg=theme.SIGNAL_BASE if active else theme.INK_PRIMARY,
                 font=f["caption"],
                 anchor="w",
-            ).pack(fill="x")
-
-    # --- NavRail action forwards (preserve existing call sites) -------
-    def _nav_action_add(self) -> None:
-        e_frame = getattr(self, "e_frame", None)
-        if e_frame:
-            add_event = cast(Callable[[], None], e_frame._add_event)
-            add_event()
-
-    def _nav_action_import(self) -> None:
-        # Mirror the call site already used by EventListFrame's import button.
-        e_frame = getattr(self, "e_frame", None)
-        if e_frame:
-            import_events = cast(
-                Callable[[list[EventModel]], None], e_frame._import
+                cursor="hand2",
+                padx=theme.SPACE_1,
             )
-            EventImporter(self.win, import_events, profiles_dir=self.prof_dir)
-
-    def _nav_action_sort(self) -> None:
-        e_frame = getattr(self, "e_frame", None)
-        if e_frame:
-            sort_events = cast(
-                Callable[[], None], e_frame._sort_events_by_name
+            label.pack(fill="x")
+            label.bind(
+                "<Button-1>",
+                lambda _e, name=grp: self._toggle_group_filter(name),
             )
-            sort_events()
+            ToolTip(
+                label,
+                txt(
+                    f"Click to show only '{grp}'. Click again to clear.",
+                    f"클릭하면 '{grp}'만 표시합니다. 다시 누르면 해제됩니다.",
+                ),
+            )
+        self._sync_nav_reset_button()
 
-    def _nav_action_graph(self) -> None:
+    def _sync_nav_reset_button(self) -> None:
+        button = getattr(self, "btn_nav_reset", None)
+        if button is None:
+            return
+        if self.filter_state.is_active():
+            button.pack(fill="x", pady=(theme.SPACE_3, 0))
+        else:
+            button.pack_forget()
+
+    # --- Filter plumbing ---------------------------------------------
+    def _collect_nav_filter_state(self) -> EventFilterState:
+        """Rail checkboxes + current group picks, keeping the search text."""
+        variables = getattr(self, "nav_filter_vars", {})
+        return dataclass_replace(
+            self.filter_state,
+            active_only=bool(variables.get("active") and variables["active"].get()),
+            grouped_only=bool(variables.get("grouped") and variables["grouped"].get()),
+            condition_only=bool(variables.get("cond") and variables["cond"].get()),
+            attention_only=bool(
+                variables.get("attention") and variables["attention"].get()
+            ),
+        )
+
+    def _apply_filter_state(self, state: EventFilterState) -> None:
+        self.filter_state = state
         e_frame = getattr(self, "e_frame", None)
-        if e_frame:
-            open_graph = cast(Callable[[], None], e_frame._open_graph)
-            open_graph()
+        if e_frame is not None:
+            e_frame.set_filter_state(state)
+        self._sync_nav_filter_widgets()
+
+    def _sync_nav_filter_widgets(self) -> None:
+        variables = getattr(self, "nav_filter_vars", {})
+        pairs = (
+            ("active", self.filter_state.active_only),
+            ("grouped", self.filter_state.grouped_only),
+            ("cond", self.filter_state.condition_only),
+            ("attention", self.filter_state.attention_only),
+        )
+        for key, value in pairs:
+            var = variables.get(key)
+            if var is not None and var.get() != value:
+                var.set(value)
+        self._refresh_nav_groups()
+
+    def _on_nav_filter_changed(self) -> None:
+        self._apply_filter_state(self._collect_nav_filter_state())
+
+    def _on_filter_changed(self, state: EventFilterState) -> None:
+        """The list's own search box changed the filter; mirror it in the rail."""
+        self.filter_state = state
+        self._sync_nav_filter_widgets()
+
+    def _toggle_group_filter(self, group: str) -> None:
+        selected = set(self.filter_state.group_ids)
+        if group in selected:
+            selected.discard(group)
+        else:
+            selected.add(group)
+        self._apply_filter_state(
+            dataclass_replace(self.filter_state, group_ids=frozenset(selected))
+        )
+
+    def _clear_all_filters(self) -> None:
+        self._apply_filter_state(EventFilterState())
+
+    def _on_attention_badge_click(self, _event: tk.Event[tk.Misc] | None = None) -> None:
+        """Jump from the warning count to the events it counts."""
+        events = list(self.profile.event_list or [])
+        if not any(event_needs_attention(event) for event in events):
+            return
+        turning_on = not self.filter_state.attention_only
+        self._apply_filter_state(
+            dataclass_replace(
+                EventFilterState(),
+                attention_only=turning_on,
+            )
+        )
 
     # ------------------------------------------------------------------
     # Right-side Inspector
@@ -465,15 +569,24 @@ class KeystrokeProfiles:
         )
         self.lbl_inspector_meta.pack(fill="x")
 
-        hint_body = self._make_accordion_section(
-            panel, "activity", txt("Activity", "사용"), expanded=True
+        # --- Capture preview — the one thing the row cannot show -------
+        self.inspector_capture_body = self._make_accordion_section(
+            panel, "capture", txt("Capture", "캡처"), expanded=True
         )
-        self.lbl_inspector_hint = tk.Label(
-            hint_body,
-            text=txt(
-                "Use the rail on the left to review groups or run an action.\n\nClick a row's Edit button to open the full editor.",
-                "왼쪽 네비로 그룹을 확인하거나 액션을 실행하고, 각 행의 편집 버튼으로 전체 편집기를 엽니다.",
-            ),
+        self.lbl_inspector_thumb = tk.Label(
+            self.inspector_capture_body,
+            text="",
+            bg=theme.SURFACE_SUNKEN,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+            anchor="center",
+            justify="center",
+            wraplength=200,
+        )
+        self.lbl_inspector_thumb.pack(fill="x")
+        self.lbl_inspector_capture_meta = tk.Label(
+            self.inspector_capture_body,
+            text="",
             bg=theme.SURFACE_PANEL,
             fg=theme.INK_MUTED,
             font=f["caption"],
@@ -481,8 +594,189 @@ class KeystrokeProfiles:
             justify="left",
             wraplength=200,
         )
-        self.lbl_inspector_hint.pack(fill="x")
+        self.lbl_inspector_capture_meta.pack(fill="x", pady=(theme.SPACE_1, 0))
+
+        # --- Inline edit — avoids a round trip through the full editor --
+        self.inspector_edit_body = self._make_accordion_section(
+            panel, "edit", txt("Quick edit", "빠른 편집"), expanded=True
+        )
+        self._build_inspector_editor(self.inspector_edit_body)
         return panel
+
+    def _build_inspector_editor(self, body: tk.Frame) -> None:
+        f = theme.fonts()
+        self.insp_use_var = tk.BooleanVar(value=True)
+        self.insp_cond_var = tk.BooleanVar(value=False)
+        self.insp_key_var = tk.StringVar(value="")
+        self.insp_priority_var = tk.StringVar(value="0")
+
+        self.insp_chk_use = ttk.Checkbutton(
+            body,
+            text=txt("In use", "사용"),
+            variable=self.insp_use_var,
+            command=self._on_inspector_use_changed,
+        )
+        self.insp_chk_use.pack(anchor="w")
+        self.insp_chk_cond = ttk.Checkbutton(
+            body,
+            text=txt("Condition only", "조건 전용"),
+            variable=self.insp_cond_var,
+            command=self._on_inspector_cond_changed,
+        )
+        self.insp_chk_cond.pack(anchor="w", pady=(0, theme.SPACE_1))
+
+        tk.Label(
+            body,
+            text=txt("Input key", "입력 키"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+            anchor="w",
+        ).pack(fill="x")
+        self.insp_key_combo = ttk.Combobox(
+            body,
+            textvariable=self.insp_key_var,
+            state="readonly",
+            values=KeyUtils.get_key_name_list(),
+            width=14,
+        )
+        self.insp_key_combo.pack(fill="x")
+        self.insp_key_combo.bind("<<ComboboxSelected>>", self._on_inspector_key_changed)
+
+        f_priority = tk.Frame(body, bg=theme.SURFACE_PANEL)
+        f_priority.pack(fill="x", pady=(theme.SPACE_1, 0))
+        tk.Label(
+            f_priority,
+            text=txt("Priority", "우선순위"),
+            bg=theme.SURFACE_PANEL,
+            fg=theme.INK_MUTED,
+            font=f["caption"],
+            anchor="w",
+        ).pack(side=tk.LEFT)
+        self.insp_priority_spin = ttk.Spinbox(
+            f_priority,
+            from_=0,
+            to=999,
+            width=5,
+            textvariable=self.insp_priority_var,
+            command=self._on_inspector_priority_changed,
+        )
+        self.insp_priority_spin.pack(side=tk.RIGHT)
+        self.insp_priority_spin.bind("<FocusOut>", self._on_inspector_priority_changed)
+        self.insp_priority_spin.bind("<Return>", self._on_inspector_priority_changed)
+
+        self.insp_btn_group = ttk.Button(
+            body,
+            text=txt("▣ Group", "▣ 그룹"),
+            command=self._on_inspector_group_clicked,
+        )
+        self.insp_btn_group.pack(fill="x", pady=(theme.SPACE_2, 0))
+        self.insp_btn_open = ttk.Button(
+            body,
+            text=txt("Open full editor", "전체 편집기 열기"),
+            command=self._on_inspector_open_editor,
+            width=dual_text_width(
+                "Open full editor", "전체 편집기 열기", padding=1, min_width=16
+            ),
+        )
+        self.insp_btn_open.pack(fill="x", pady=(theme.SPACE_1, 0))
+
+    # --- Inspector edit handlers -------------------------------------
+    def _inspector_target(self) -> EventModel | None:
+        """The selected event, but only while the widgets are user-driven."""
+        if self._inspector_syncing:
+            return None
+        event = self._inspector_event
+        if event is None:
+            return None
+        if not any(evt is event for evt in (self.profile.event_list or [])):
+            return None
+        return event
+
+    def _commit_inspector_change(self, event: EventModel) -> None:
+        index = next(
+            (
+                i
+                for i, evt in enumerate(self.profile.event_list or [])
+                if evt is event
+            ),
+            None,
+        )
+        if index is not None and index < len(self.e_frame.rows):
+            self.e_frame.rows[index].update_display()
+        self._on_changed(check_name=False)
+        self._refresh_profile_overview()
+
+    def _on_inspector_use_changed(self) -> None:
+        event = self._inspector_target()
+        if event is None:
+            return
+        event.use_event = self.insp_use_var.get()
+        self._commit_inspector_change(event)
+
+    def _on_inspector_cond_changed(self) -> None:
+        event = self._inspector_target()
+        if event is None:
+            return
+        event.execute_action = not self.insp_cond_var.get()
+        self._commit_inspector_change(event)
+        self._refresh_inspector()
+
+    def _on_inspector_key_changed(self, _event: tk.Event[tk.Misc] | None = None) -> None:
+        event = self._inspector_target()
+        if event is None:
+            return
+        event.key_to_enter = self.insp_key_var.get() or None
+        self._commit_inspector_change(event)
+
+    def _on_inspector_priority_changed(
+        self, _event: tk.Event[tk.Misc] | None = None
+    ) -> None:
+        event = self._inspector_target()
+        if event is None:
+            return
+        try:
+            priority = int(self.insp_priority_var.get())
+        except (TypeError, ValueError):
+            self.insp_priority_var.set(str(event.priority))
+            return
+        priority = max(0, min(999, priority))
+        if priority == event.priority:
+            return
+        event.priority = priority
+        self.insp_priority_var.set(str(priority))
+        self._commit_inspector_change(event)
+
+    def _on_inspector_group_clicked(self) -> None:
+        event = self._inspector_target()
+        if event is None:
+            return
+        existing = sorted(
+            {e.group_id for e in (self.profile.event_list or []) if e.group_id}
+        )
+
+        def on_selected(new_group: str | None) -> None:
+            event.group_id = new_group
+            self._commit_inspector_change(event)
+            self._refresh_inspector()
+
+        GroupSelector(self.win, event.group_id, existing, on_selected)
+
+    def _on_inspector_open_editor(self) -> None:
+        event = self._inspector_event
+        if event is None:
+            return
+        index = next(
+            (
+                i
+                for i, evt in enumerate(self.profile.event_list or [])
+                if evt is event
+            ),
+            None,
+        )
+        if index is None:
+            return
+        self.e_frame.open_editor_for(index)
 
     def _make_accordion_section(
         self, parent: tk.Misc, key: str, title: str, expanded: bool = True
@@ -521,6 +815,7 @@ class KeystrokeProfiles:
             "wrapper": wrapper,
             "header": header,
             "glyph": glyph,
+            "title_label": label,
             "body": body,
             "expanded": expanded,
         }
@@ -552,59 +847,175 @@ class KeystrokeProfiles:
         if not hasattr(self, "lbl_inspector_title"):
             return
         events = list(self.profile.event_list or [])
-        event_count = len(events)
-        group_count = len({e.group_id for e in events if e.group_id})
-        runtime_members = runtime_toggle_member_count(events)
         selected = getattr(self, "_inspector_event", None)
         selected = selected if any(evt is selected for evt in events) else None
         if selected is None:
             self._inspector_event = None
-        else:
-            key = (selected.key_to_enter or "").strip()
-            group = selected.group_id or txt("No Group", "그룹 없음")
-            cond_count = len(getattr(selected, "conditions", {}) or {})
-            mode = txt("Condition only", "조건 전용") if not getattr(
-                selected, "execute_action", True
-            ) else txt("Action", "실행")
-            self.lbl_inspector_title.config(text=selected.event_name or txt("(Unnamed)", "(이름 없음)"))
-            self.lbl_inspector_meta.config(
-                text="\n".join(
-                    [
-                        txt(
-                            f"{mode} · Group {group}",
-                            f"{mode} · 그룹 {group}",
-                        ),
-                        txt(
-                            f"Key: {key if key else 'None'} · Priority {selected.priority}",
-                            f"키: {key if key else '없음'} · 우선순위 {selected.priority}",
-                        ),
-                        txt(
-                            f"Conditions: {cond_count}",
-                            f"조건: {cond_count}개",
-                        ),
-                    ]
+            self._show_inspector_placeholder()
+            return
+        self._show_inspector_event(selected)
+
+    def _set_inspector_section_title(self, key: str, title: str) -> None:
+        section = getattr(self, "_inspector_sections", {}).get(key)
+        if section is not None:
+            section["title_label"].config(text=title)
+
+    def _show_inspector_placeholder(self) -> None:
+        """No selection: say how to get one instead of repeating the counts
+        already shown in the status bar badges."""
+        self._set_inspector_section_title("summary", txt("Summary", "요약"))
+        self.lbl_inspector_title.config(
+            text=txt("No event selected", "선택된 이벤트 없음")
+        )
+        self.lbl_inspector_meta.config(
+            text=txt(
+                "Click a row to inspect and edit it here.\n"
+                "⌘/Ctrl+click or Shift+click selects several at once.",
+                "행을 클릭하면 여기에서 확인하고 편집할 수 있습니다.\n"
+                "⌘/Ctrl+클릭 또는 Shift+클릭으로 여러 개를 선택합니다.",
+            )
+        )
+        self._set_inspector_body_visible("capture", False)
+        self._set_inspector_body_visible("edit", False)
+
+    def _set_inspector_body_visible(self, key: str, visible: bool) -> None:
+        section = getattr(self, "_inspector_sections", {}).get(key)
+        if section is None:
+            return
+        section["wrapper"].pack_forget()
+        if visible:
+            section["wrapper"].pack(fill="x", pady=(0, theme.SPACE_2))
+
+    def _show_inspector_event(self, selected: EventModel) -> None:
+        key = (selected.key_to_enter or "").strip()
+        group = selected.group_id or txt("No Group", "그룹 없음")
+        cond_count = len(getattr(selected, "conditions", {}) or {})
+        is_condition_only = not getattr(selected, "execute_action", True)
+        mode = (
+            txt("Condition only", "조건 전용")
+            if is_condition_only
+            else txt("Action", "실행")
+        )
+        self._set_inspector_section_title("summary", txt("Event", "이벤트"))
+        self.lbl_inspector_title.config(
+            text=selected.event_name or txt("(Unnamed)", "(이름 없음)")
+        )
+        meta_lines = [
+            txt(f"{mode} · Group {group}", f"{mode} · 그룹 {group}"),
+            txt(
+                f"Key: {key if key else 'None'} · Priority {selected.priority}",
+                f"키: {key if key else '없음'} · 우선순위 {selected.priority}",
+            ),
+            txt(f"Conditions: {cond_count}", f"조건: {cond_count}개"),
+        ]
+        if getattr(selected, "runtime_toggle_member", False):
+            meta_lines.append(txt("In the toggle set", "토글 세트 포함"))
+        self.lbl_inspector_meta.config(text="\n".join(meta_lines))
+
+        self._set_inspector_body_visible("capture", True)
+        self._set_inspector_body_visible("edit", True)
+        self._refresh_inspector_capture(selected)
+        self._sync_inspector_editor(selected)
+
+    def _refresh_inspector_capture(self, selected: EventModel) -> None:
+        """Show the captured reference image — otherwise only the full editor
+        can tell the user what this event actually watches."""
+        image = getattr(selected, "held_screenshot", None)
+        if image is None:
+            self._inspector_thumb = None
+            self.lbl_inspector_thumb.config(
+                image="",
+                text=txt(
+                    "No capture yet.\nOpen the editor to capture a target area.",
+                    "캡처가 없습니다.\n편집기에서 대상 영역을 캡처하세요.",
+                ),
+                height=4,
+            )
+            self.lbl_inspector_capture_meta.config(
+                text=txt(
+                    "Screenless event: it runs on conditions only."
+                    if selected.is_screenless_input()
+                    else "",
+                    "화면 없는 이벤트: 조건만으로 실행됩니다."
+                    if selected.is_screenless_input()
+                    else "",
                 )
             )
             return
-
-        favorite_glyph = "★ " if self.profile.favorite else ""
-        self.lbl_inspector_title.config(text=f"{favorite_glyph}{self.prof_name}")
-        meta_lines = [
-            txt(
-                f"{event_count} events · {group_count} groups",
-                f"이벤트 {event_count}개 · 그룹 {group_count}개",
-            ),
-        ]
-        if runtime_members:
-            meta_lines.append(
+        try:
+            preview = image.copy()
+            preview.thumbnail((200, 150))
+            self._inspector_thumb = ImageTk.PhotoImage(preview)
+            self.lbl_inspector_thumb.config(
+                image=cast(Any, self._inspector_thumb), text="", height=0
+            )
+        except (OSError, ValueError, tk.TclError):
+            self._inspector_thumb = None
+            self.lbl_inspector_thumb.config(
+                image="",
+                text=txt("Preview unavailable.", "미리보기를 표시할 수 없습니다."),
+                height=3,
+            )
+        meta_parts: list[str] = []
+        if selected.clicked_position:
+            meta_parts.append(
                 txt(
-                    f"Toggle set: {runtime_members}",
-                    f"토글 세트: {runtime_members}개",
+                    f"Reference point {selected.clicked_position}",
+                    f"기준점 {selected.clicked_position}",
                 )
             )
-        self.lbl_inspector_meta.config(text="\n".join(meta_lines))
+        if selected.ref_pixel_value:
+            meta_parts.append(
+                txt(
+                    f"RGB {tuple(selected.ref_pixel_value)[:3]}",
+                    f"RGB {tuple(selected.ref_pixel_value)[:3]}",
+                )
+            )
+        match_mode = getattr(selected, "match_mode", "pixel")
+        meta_parts.append(
+            txt(f"Mode: {match_mode}", f"매칭: {match_mode}")
+            + (txt(" (inverted)", " (반전)") if selected.invert_match else "")
+        )
+        self.lbl_inspector_capture_meta.config(text="\n".join(meta_parts))
 
-    def _set_inspector_event(self, event: EventModel) -> None:
+    def _inspector_editor_has_focus(self) -> bool:
+        try:
+            widget = self.win.focus_get()
+        except (KeyError, tk.TclError):
+            return False
+        return widget in (
+            getattr(self, "insp_priority_spin", None),
+            getattr(self, "insp_key_combo", None),
+        )
+
+    def _sync_inspector_editor(self, selected: EventModel) -> None:
+        """Push model values into the edit widgets without echoing back as
+        user edits. Autosave refreshes the inspector, so a half-typed value in
+        a focused field must not be overwritten mid-edit."""
+        if (
+            getattr(self, "_inspector_synced_id", None) == id(selected)
+            and self._inspector_editor_has_focus()
+        ):
+            return
+        self._inspector_synced_id = id(selected)
+        self._inspector_syncing = True
+        try:
+            self.insp_use_var.set(bool(getattr(selected, "use_event", True)))
+            self.insp_cond_var.set(not getattr(selected, "execute_action", True))
+            self.insp_key_var.set(selected.key_to_enter or "")
+            self.insp_priority_var.set(str(selected.priority))
+            key_state = "disabled" if self.insp_cond_var.get() else "readonly"
+            self.insp_key_combo.config(state=key_state)
+            self.insp_btn_group.config(
+                text=txt(
+                    f"▣ {selected.group_id}" if selected.group_id else "▣ No group",
+                    f"▣ {selected.group_id}" if selected.group_id else "▣ 그룹 없음",
+                )
+            )
+        finally:
+            self._inspector_syncing = False
+
+    def _set_inspector_event(self, event: EventModel | None) -> None:
         self._inspector_event = event
         self._refresh_inspector()
 
@@ -685,12 +1096,51 @@ class KeystrokeProfiles:
             )
         return old_name != self.prof_name
 
-    def _show_temp_status(self, text: str, duration_ms: int = 2000) -> None:
+    def _show_temp_status(
+        self,
+        text: str,
+        duration_ms: int = 2000,
+        *,
+        action_label: str | None = None,
+        action: Callable[[], None] | None = None,
+    ) -> None:
+        """Transient status. With an action, it becomes an undo affordance and
+        stays up long enough to be clicked."""
+        self._hide_status_action()
         self.lbl_status.config(text=text, foreground=theme.STATUS_READY_FG)
-        self.win.after(
-            duration_ms,
-            lambda: self.lbl_status.config(text="", foreground=theme.INK_MUTED),
-        )
+        if action_label and action is not None:
+            duration_ms = max(duration_ms, 8000)
+
+            def run_action() -> None:
+                self._hide_status_action()
+                self.lbl_status.config(text="", foreground=theme.INK_MUTED)
+                action()
+
+            self.btn_status_action.config(
+                text=action_label,
+                command=run_action,
+                width=dual_text_width(action_label, action_label, padding=2, min_width=8),
+            )
+            self.btn_status_action.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
+
+        def expire() -> None:
+            self._status_action_after_id = None
+            self._hide_status_action()
+            self.lbl_status.config(text="", foreground=theme.INK_MUTED)
+
+        self._status_action_after_id = self.win.after(duration_ms, expire)
+
+    def _hide_status_action(self) -> None:
+        after_id = self._status_action_after_id
+        self._status_action_after_id = None
+        if after_id:
+            try:
+                self.win.after_cancel(after_id)
+            except (ValueError, tk.TclError):
+                pass
+        button = getattr(self, "btn_status_action", None)
+        if button is not None:
+            button.pack_forget()
 
     def _set_save_badge_bg(self, bg: str) -> None:
         badge = getattr(self, "lbl_save_badge", None)
@@ -712,11 +1162,7 @@ class KeystrokeProfiles:
         condition_only_count = sum(
             1 for e in events if not getattr(e, "execute_action", True)
         )
-        missing_key_count = sum(
-            1
-            for e in events
-            if getattr(e, "execute_action", True) and not (e.key_to_enter or "").strip()
-        )
+        missing_key_count = sum(1 for e in events if event_needs_attention(e))
         toggle_member_count = runtime_toggle_member_count(events)
         validation_errors = collect_runtime_toggle_validation_errors(
             self.profile,
@@ -756,6 +1202,7 @@ class KeystrokeProfiles:
                 bg=BADGE_BG_WARN,
                 fg=BADGE_FG_WARN,
             )
+            self._sync_attention_badge_tip(missing_key_count)
             return
         if condition_only_count:
             if toggle_member_count:
@@ -787,6 +1234,31 @@ class KeystrokeProfiles:
             bg=BADGE_BG_OK,
             fg=BADGE_FG_OK,
         )
+        self._sync_attention_badge_tip(0)
+
+    def _sync_attention_badge_tip(self, missing_key_count: int) -> None:
+        tip = getattr(self, "_tip_attention_badge", None)
+        if tip is None:
+            return
+        if missing_key_count:
+            tip.update_text(
+                txt(
+                    "Click to show only the events missing an input key.",
+                    "클릭하면 입력 키가 없는 이벤트만 표시합니다.",
+                )
+                if not self.filter_state.attention_only
+                else txt(
+                    "Click to clear the attention filter.",
+                    "클릭하면 주의 필터를 해제합니다.",
+                )
+            )
+        else:
+            tip.update_text(
+                txt(
+                    "Every action event has an input key.",
+                    "모든 실행 이벤트에 입력 키가 있습니다.",
+                )
+            )
 
     def _set_save_status(self, status: str, detail: str = "") -> None:
         self._refresh_profile_overview()

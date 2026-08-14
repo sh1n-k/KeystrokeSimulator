@@ -1,19 +1,24 @@
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 from collections.abc import Callable
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any, Literal, Optional, Protocol, TypeAlias, TypedDict, cast
 
 from app.core.models import EventModel, ProfileModel
 from app.core.profile_events import (
+    EventFilterState,
     clone_event,
+    event_matches_filter,
     event_group_key_sort_key,
     event_group_name_sort_key,
     event_key_sort_key,
     event_name_sort_key,
     event_type_sort_order,
+    filter_event_indices,
     key_sort_order,
     remove_condition_references,
     rename_condition_references,
@@ -39,10 +44,54 @@ EVENT_ACTIONS_COL_WIDTH = 18
 ClickAction: TypeAlias = Literal["open", "copy", "remove"]
 SortKey: TypeAlias = Callable[[EventModel], tuple[object, ...]]
 KeySortOrder: TypeAlias = tuple[int, int, str]
+SelectMode: TypeAlias = Literal["replace", "toggle", "range"]
+
+# tk event.state modifier bits. macOS reports Command as Mod1 (0x8).
+_STATE_SHIFT = 0x0001
+_STATE_CONTROL = 0x0004
+_STATE_COMMAND = 0x0008
+
+
+def selection_mode_for_state(state: int) -> SelectMode:
+    """Map a click's modifier bits onto a selection gesture."""
+    if state & _STATE_SHIFT:
+        return "range"
+    if state & _STATE_CONTROL:
+        return "toggle"
+    if sys.platform == "darwin" and state & _STATE_COMMAND:
+        return "toggle"
+    return "replace"
+
+
+def resolve_selection(
+    current: set[int], anchor: int | None, index: int, mode: SelectMode
+) -> tuple[set[int], int | None]:
+    """Pure selection transition. Returns the new selection and anchor."""
+    if mode == "toggle":
+        updated = set(current)
+        if index in updated:
+            updated.discard(index)
+        else:
+            updated.add(index)
+        return updated, index
+    if mode == "range" and anchor is not None:
+        low, high = sorted((anchor, index))
+        return set(range(low, high + 1)), anchor
+    return {index}, index
 
 
 class SaveCallback(Protocol):
     def __call__(self, check_name: bool = False) -> object: ...
+
+
+class StatusCallback(Protocol):
+    def __call__(
+        self,
+        text: str,
+        *,
+        action_label: str | None = None,
+        action: Callable[[], None] | None = None,
+    ) -> None: ...
 
 
 class EventRowCallbacks(TypedDict, total=False):
@@ -52,7 +101,7 @@ class EventRowCallbacks(TypedDict, total=False):
     menu: Callable[[tk.Event[tk.Misc], int], object]
     group_select: Callable[[int, EventModel], object]
     save: Callable[[], object]
-    select: Callable[[EventModel], object]
+    select: Callable[[int, SelectMode], object]
 
 
 class ToolTip:
@@ -125,7 +174,7 @@ class EventRow(ttk.Frame):
         event: Optional[EventModel],
         cbs: EventRowCallbacks,
     ) -> None:
-        super().__init__(master)
+        super().__init__(master, style="Row.TFrame")
         self.row_num, self.event, self.cbs = row_num, event, cbs
         self.use_var = tk.BooleanVar(value=event.use_event if event else True)
         self.runtime_toggle_var = tk.BooleanVar(
@@ -136,20 +185,27 @@ class EventRow(ttk.Frame):
         self.last_saved_name: str = (event.event_name or "") if event else ""
         self._bound_event_id = id(event) if event else None
         self.btn_delete: ttk.Button | None = None
+        self.tip_delete: ToolTip | None = None
+        self.selected = False
 
-        # Compact one-line cell:
-        # left color bar | index | use | name | group | key/condition | extra | actions.
+        # Compact one-line cell: selection marker | state color bar | index |
+        # use | name | group | key/condition | extra | actions.
+        # The marker floats with place() so hiding it never shifts the row.
+        self.select_bar = tk.Frame(self, bg=theme.ROW_MARKER_SELECTED)
         self.color_bar = tk.Frame(self, bg=theme.SIGNAL_BASE, width=4)
-        self.color_bar.pack(side=tk.LEFT, fill="y", padx=(0, UI_PAD_SM))
+        self.color_bar.pack(
+            side=tk.LEFT, fill="y", padx=(theme.ROW_MARKER_WIDTH + 2, UI_PAD_SM)
+        )
         self.color_bar.pack_propagate(False)
 
-        row_body = ttk.Frame(self)
+        row_body = ttk.Frame(self, style="Row.TFrame")
+        self.row_body = row_body
         row_body.pack(side=tk.LEFT, fill="x", expand=True)
         for col, weight in [(2, 1)]:
             row_body.grid_columnconfigure(col, weight=weight)
 
         self.lbl_index = ttk.Label(
-            row_body, text=str(row_num + 1), width=2, anchor="center"
+            row_body, text=str(row_num + 1), width=2, anchor="center", style="Row.TLabel"
         )
         self.lbl_index.grid(row=0, column=0, sticky="ew", padx=(0, UI_PAD_XS))
         ttk.Checkbutton(
@@ -187,7 +243,11 @@ class EventRow(ttk.Frame):
         self._tip_key = ToolTip(self.lbl_key)
 
         self.lbl_cond = ttk.Label(
-            row_body, text="", width=EVENT_COND_COL_WIDTH, anchor="center"
+            row_body,
+            text="",
+            width=EVENT_COND_COL_WIDTH,
+            anchor="center",
+            style="Row.TLabel",
         )
         self.lbl_cond.grid(row=0, column=5, sticky="ew", padx=(0, theme.SPACE_1))
         self._tip_cond = ToolTip(self.lbl_cond)
@@ -203,7 +263,8 @@ class EventRow(ttk.Frame):
         )
         self._tip_runtime_toggle = ToolTip(self.chk_runtime_toggle)
 
-        actions_frame = ttk.Frame(row_body)
+        actions_frame = ttk.Frame(row_body, style="Row.TFrame")
+        self.actions_frame = actions_frame
         actions_frame.grid(row=0, column=7, sticky="e")
         button_specs: tuple[tuple[str, str, ClickAction, int], ...] = (
             ("Edit", "편집", "open", 5),
@@ -221,17 +282,47 @@ class EventRow(ttk.Frame):
             btn.bind("<Button-3>", self._on_context_menu)
             if key == "remove":
                 self.btn_delete = btn
+                self.tip_delete = ToolTip(btn)
 
         # Context Menu Binding
         self.entry.bind("<Button-3>", self._on_context_menu)
         self.entry.bind("<KeyRelease>", self._on_name_changed)
         self.entry.bind("<FocusOut>", self._on_name_changed)
         self.entry.bind("<FocusIn>", self._on_select)
-        for widget in (self, self.color_bar, row_body, self.lbl_cond):
+        for widget in (
+            self,
+            self.select_bar,
+            self.color_bar,
+            row_body,
+            self.lbl_index,
+            self.lbl_cond,
+        ):
             widget.bind("<Button-1>", self._on_select, add="+")
 
         # Initial Display
         self.update_display()
+
+    def set_selected(self, selected: bool) -> None:
+        """Tint the row and show its marker bar. The marker is a plain tk frame
+        so selection stays visible on themes that drop ttk backgrounds."""
+        if selected == self.selected:
+            return
+        self.selected = selected
+        suffix = "RowSelected" if selected else "Row"
+        try:
+            self.configure(style=f"{suffix}.TFrame")
+            self.row_body.configure(style=f"{suffix}.TFrame")
+            self.actions_frame.configure(style=f"{suffix}.TFrame")
+            self.lbl_index.configure(style=f"{suffix}.TLabel")
+            self.lbl_cond.configure(style=f"{suffix}.TLabel")
+            if selected:
+                self.select_bar.place(
+                    x=0, y=0, relheight=1.0, width=theme.ROW_MARKER_WIDTH
+                )
+            else:
+                self.select_bar.place_forget()
+        except tk.TclError:
+            return
 
     def update_display(self) -> None:
         """이벤트 상태에 따라 UI 갱신"""
@@ -409,8 +500,10 @@ class EventRow(ttk.Frame):
 
     def _on_select(self, event: tk.Event[tk.Misc] | None = None) -> None:
         select_cb = self.cbs.get("select")
-        if self.event and select_cb is not None:
-            select_cb(self.event)
+        if self.event is None or select_cb is None:
+            return
+        state = int(getattr(cast(Any, event), "state", 0) or 0) if event else 0
+        select_cb(self.row_num, selection_mode_for_state(state))
 
     def _on_click(self, key: ClickAction) -> None:
         if key == "open":
@@ -452,11 +545,12 @@ class EventListFrame(ttk.Frame):
         profile: ProfileModel,
         save_cb: SaveCallback,
         name_getter: Optional[Callable[[], str]] = None,
-        status_cb: Optional[Callable[[str], None]] = None,
-        select_cb: Optional[Callable[[EventModel], None]] = None,
+        status_cb: Optional[StatusCallback] = None,
+        select_cb: Optional[Callable[[EventModel | None], None]] = None,
         *,
         profiles_dir: Path,
         host_window: tk.Misc | None = None,
+        filter_change_cb: Optional[Callable[[EventFilterState], None]] = None,
     ) -> None:
         # `win` is the packing parent (often an inner workspace Frame).
         # Dialogs and grab handoff must use the Profile Toplevel host instead.
@@ -469,12 +563,52 @@ class EventListFrame(ttk.Frame):
         self.profile_name_getter = name_getter
         self.status_cb = status_cb
         self.select_cb = select_cb
+        self.filter_change_cb = filter_change_cb
         self.profiles_dir = profiles_dir
         self.graph_viewer: ProfileGraphViewer | None = None
         self.empty_state_frame: Optional[ttk.LabelFrame] = None
+        self.no_match_frame: Optional[ttk.Frame] = None
         self.add_event_label = txt("➕ Add Event", "➕ 이벤트 추가")
+        self.filter_state = EventFilterState()
+        self.selected_indices: set[int] = set()
+        self.selection_anchor: int | None = None
+        self._undo_delete: dict[str, Any] | None = None
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1)
+        self.grid_rowconfigure(4, weight=1)
+
+        # --- Search ---
+        f_search = ttk.Frame(self)
+        f_search.grid(
+            row=0,
+            column=0,
+            columnspan=2,
+            padx=UI_PAD_MD,
+            pady=(UI_PAD_SM, 0),
+            sticky="we",
+        )
+        ttk.Label(f_search, text=txt("🔎", "🔎")).pack(side=tk.LEFT, padx=(0, UI_PAD_XS))
+        self.search_var = tk.StringVar(value="")
+        self.search_entry = ttk.Entry(f_search, textvariable=self.search_var)
+        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.search_entry.bind("<Escape>", self._on_search_escape)
+        self.search_var.trace_add("write", self._on_search_changed)
+        ToolTip(
+            self.search_entry,
+            txt(
+                "Filter events by name, input key or group.",
+                "이벤트 이름, 입력 키, 그룹으로 걸러냅니다.",
+            ),
+        )
+        self.lbl_filter_summary = ttk.Label(
+            f_search, text="", foreground=theme.INK_MUTED
+        )
+        self.lbl_filter_summary.pack(side=tk.LEFT, padx=(UI_PAD_SM, 0))
+        self.btn_clear_filter = ttk.Button(
+            f_search,
+            text=txt("Clear filter", "필터 해제"),
+            command=self.clear_filters,
+            width=dual_text_width("Clear filter", "필터 해제", padding=1, min_width=11),
+        )
 
         # --- Control Buttons ---
         f_ctrl = ttk.Frame(self)
@@ -597,9 +731,127 @@ class EventListFrame(ttk.Frame):
             command=self._apply_pixel_batch,
         )
 
+        self._create_bulk_bar()
         self._create_header()
         self._create_scroll_area()
         self._load_events()
+        self._bind_keyboard_shortcuts()
+
+    # ------------------------------------------------------------------
+    # Bulk action bar — appears only while a multi-selection is live.
+    # ------------------------------------------------------------------
+    def _create_bulk_bar(self) -> None:
+        self.bulk_bar = ttk.Frame(self)
+        self.lbl_bulk_count = ttk.Label(self.bulk_bar, text="")
+        self.lbl_bulk_count.pack(side=tk.LEFT, padx=(0, UI_PAD_MD))
+        # Packed before the left-hand buttons so it keeps its width instead of
+        # being squeezed off the edge of the bar.
+        ttk.Button(
+            self.bulk_bar,
+            text=txt("Deselect", "선택 해제"),
+            command=self.clear_selection,
+        ).pack(side=tk.RIGHT)
+        for en, ko, command in (
+            ("▣ Group", "▣ 그룹", self._bulk_set_group),
+            ("Use on", "사용 켜기", lambda: self._bulk_set_use(True)),
+            ("Use off", "사용 끄기", lambda: self._bulk_set_use(False)),
+            ("Toggle set", "토글 세트", self._bulk_toggle_runtime_member),
+        ):
+            ttk.Button(
+                self.bulk_bar,
+                text=txt(en, ko),
+                command=command,
+            ).pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
+        ttk.Button(
+            self.bulk_bar,
+            text=txt("Delete", "삭제"),
+            command=self._bulk_delete,
+            style="Danger.TButton",
+        ).pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
+
+    def _sync_bulk_bar(self) -> None:
+        count = len(self.selected_indices)
+        if count >= 2:
+            self.lbl_bulk_count.config(
+                text=txt(f"{count} selected", f"{count}개 선택됨")
+            )
+            self.bulk_bar.grid(
+                row=2,
+                column=0,
+                columnspan=2,
+                padx=UI_PAD_MD,
+                pady=(0, UI_PAD_SM),
+                sticky="we",
+            )
+        else:
+            self.bulk_bar.grid_remove()
+
+    def _bind_keyboard_shortcuts(self) -> None:
+        """Row navigation on the profile window. Bindings defer to text entry:
+        while a name field has focus, editing keys keep their normal meaning."""
+        host = self.win
+        bindings: tuple[tuple[str, Callable[[tk.Event[tk.Misc]], object]], ...] = (
+            ("<Up>", lambda e: self._move_selection(-1)),
+            ("<Down>", lambda e: self._move_selection(1)),
+            ("<Return>", self._on_shortcut_open),
+            ("<Delete>", self._on_shortcut_delete),
+            ("<BackSpace>", self._on_shortcut_delete),
+            ("<Control-d>", self._on_shortcut_copy),
+            ("<Command-d>", self._on_shortcut_copy),
+            ("<Control-f>", self._on_shortcut_search),
+            ("<Command-f>", self._on_shortcut_search),
+        )
+        for sequence, handler in bindings:
+            try:
+                host.bind(sequence, handler, add="+")
+            except tk.TclError:
+                continue
+
+    def _focus_is_text_entry(self) -> bool:
+        try:
+            widget = self.win.focus_get()
+        except (KeyError, tk.TclError):
+            return False
+        return isinstance(widget, (ttk.Entry, tk.Entry, tk.Text, ttk.Combobox))
+
+    def _on_shortcut_search(self, _event: tk.Event[tk.Misc]) -> str:
+        self.search_entry.focus_set()
+        self.search_entry.select_range(0, tk.END)
+        return "break"
+
+    def _on_search_escape(self, _event: tk.Event[tk.Misc]) -> str:
+        self.search_var.set("")
+        return "break"
+
+    def _on_shortcut_open(self, _event: tk.Event[tk.Misc]) -> str | None:
+        if self._focus_is_text_entry():
+            return None
+        index = self._primary_selection()
+        if index is None:
+            return None
+        self._open_editor(index, self.profile.event_list[index])
+        return "break"
+
+    def _on_shortcut_delete(self, _event: tk.Event[tk.Misc]) -> str | None:
+        if self._focus_is_text_entry():
+            return None
+        if len(self.selected_indices) >= 2:
+            self._bulk_delete()
+            return "break"
+        index = self._primary_selection()
+        if index is None or index >= len(self.rows):
+            return None
+        self._remove_row(self.rows[index], index)
+        return "break"
+
+    def _on_shortcut_copy(self, _event: tk.Event[tk.Misc]) -> str | None:
+        if self._focus_is_text_entry():
+            return None
+        index = self._primary_selection()
+        if index is None:
+            return None
+        self._copy_row(self.profile.event_list[index])
+        return "break"
 
     def _get_existing_groups(self) -> list[str]:
         """프로필 내 모든 고유 그룹 ID 반환"""
@@ -623,17 +875,19 @@ class EventListFrame(ttk.Frame):
     def _sort_events_with_feedback(
         self, sort_key: SortKey, title_text: str, message_text: str
     ) -> None:
+        """Sorting is safe and reversible by re-sorting, so it reports in the
+        status line instead of interrupting with a modal."""
         if not self.profile.event_list:
             return
         self.save_names()
         self.profile.event_list.sort(key=sort_key)
+        self.clear_selection()
         self.update_events()
         self.save_cb()
-        messagebox.showinfo(
-            title_text,
-            message_text,
-            parent=self.win,
-        )
+        if self.status_cb:
+            self.status_cb(title_text)
+        else:
+            messagebox.showinfo(title_text, message_text, parent=self.win)
 
     def _sort_events_by_name(self) -> None:
         """이벤트 타입 우선, 같은 타입 내에서는 이름순 정렬."""
@@ -843,7 +1097,7 @@ class EventListFrame(ttk.Frame):
         """Compact row header aligned to EventRow's fixed grid columns."""
         header = ttk.Frame(self)
         header.grid(
-            row=2,
+            row=3,
             column=0,
             columnspan=2,
             padx=UI_PAD_MD,
@@ -918,7 +1172,7 @@ class EventListFrame(ttk.Frame):
 
         # 구분선
         ttk.Separator(self, orient="horizontal").grid(
-            row=2, column=0, columnspan=2, sticky="ew", pady=(20, 0), padx=UI_PAD_MD
+            row=3, column=0, columnspan=2, sticky="ew", pady=(20, 0), padx=UI_PAD_MD
         )
 
     def _create_scroll_area(self) -> None:
@@ -929,7 +1183,7 @@ class EventListFrame(ttk.Frame):
             background=theme.SURFACE_PAPER,
         )
         self.event_canvas.grid(
-            row=3,
+            row=4,
             column=0,
             padx=(UI_PAD_MD, 0),
             pady=(UI_PAD_XS, 0),
@@ -941,14 +1195,14 @@ class EventListFrame(ttk.Frame):
             command=cast(Any, self.event_canvas).yview,
         )
         self.event_scrollbar.grid(
-            row=3,
+            row=4,
             column=1,
             padx=(UI_PAD_SM, UI_PAD_MD),
             pady=(UI_PAD_XS, 0),
             sticky="ns",
         )
         self.event_canvas.configure(yscrollcommand=self.event_scrollbar.set)
-        self.event_rows_frame = ttk.Frame(self.event_canvas)
+        self.event_rows_frame = ttk.Frame(self.event_canvas, style="Row.TFrame")
         self.event_rows_window = cast(Any, self.event_canvas).create_window(
             (0, 0), window=self.event_rows_frame, anchor="nw"
         )
@@ -992,6 +1246,7 @@ class EventListFrame(ttk.Frame):
             self._add_row(i, evt)
         self._update_delete_buttons()
         self._sync_empty_state()
+        self._refresh_row_layout()
 
     def _sync_empty_state(self) -> None:
         has_events = bool(self.profile.event_list)
@@ -1014,22 +1269,22 @@ class EventListFrame(ttk.Frame):
             ttk.Label(
                 self.empty_state_frame,
                 text=txt(
-                    "1) Add your first event with the ➕ Add Event button.",
-                    "1) ➕ Add Event 버튼으로 첫 이벤트를 추가하세요.",
+                    "1) Add your first event with the '➕ Add Event' button.",
+                    "1) '➕ 이벤트 추가' 버튼으로 첫 이벤트를 추가하세요.",
                 ),
             ).pack(anchor="w", padx=10, pady=(8, 2))
             ttk.Label(
                 self.empty_state_frame,
                 text=txt(
                     "2) Configure capture and input key in the event editor.",
-                    "2) 🖼 이벤트 편집기에서 캡처와 입력 키를 설정하세요.",
+                    "2) 이벤트 편집기에서 캡처와 입력 키를 설정하세요.",
                 ),
             ).pack(anchor="w", padx=10, pady=2)
             ttk.Label(
                 self.empty_state_frame,
                 text=txt(
-                    "3) Done when the top save status changes to 'Saved HH:MM:SS'.",
-                    "3) ✅ 상단 저장 상태가 'Saved HH:MM:SS'로 바뀌면 완료입니다.",
+                    "3) Done when the bottom save status shows '✅ Saved HH:MM:SS'.",
+                    "3) 하단 저장 상태가 '✅ 저장됨 HH:MM:SS'로 바뀌면 완료입니다.",
                 ),
             ).pack(anchor="w", padx=10, pady=2)
             ttk.Button(
@@ -1073,7 +1328,7 @@ class EventListFrame(ttk.Frame):
             "menu": self._show_menu,
             "group_select": self._on_group_select,  # NEW
             "save": save_without_name_check,  # 추가
-            "select": self._select_event,
+            "select": self._select_row,
         }
         row = EventRow(self.event_rows_frame, idx, event, cbs)
         row.grid(
@@ -1086,9 +1341,149 @@ class EventListFrame(ttk.Frame):
         self._bind_scroll_events(row)
         self.rows.append(row)
 
-    def _select_event(self, event: EventModel) -> None:
-        if self.select_cb:
-            self.select_cb(event)
+    # ------------------------------------------------------------------
+    # Selection
+    # ------------------------------------------------------------------
+    def _primary_selection(self) -> int | None:
+        """The single row that row-scoped actions (edit, copy, delete) target."""
+        if not self.selected_indices:
+            return None
+        if self.selection_anchor in self.selected_indices:
+            return self.selection_anchor
+        return min(self.selected_indices)
+
+    def _select_row(self, index: int, mode: SelectMode = "replace") -> None:
+        if not (0 <= index < len(self.profile.event_list)):
+            return
+        self.selected_indices, self.selection_anchor = resolve_selection(
+            self.selected_indices, self.selection_anchor, index, mode
+        )
+        self._sync_row_selection()
+        self._notify_selection()
+
+    def clear_selection(self) -> None:
+        self.selected_indices = set()
+        self.selection_anchor = None
+        self._sync_row_selection()
+        self._notify_selection()
+
+    def _notify_selection(self) -> None:
+        if not self.select_cb:
+            return
+        index = self._primary_selection()
+        single = index if len(self.selected_indices) == 1 else None
+        if single is not None and 0 <= single < len(self.profile.event_list):
+            self.select_cb(self.profile.event_list[single])
+        else:
+            self.select_cb(None)
+
+    def _sync_row_selection(self) -> None:
+        for i, row in enumerate(self.rows):
+            row.set_selected(i in self.selected_indices)
+        self._sync_bulk_bar()
+
+    def _move_selection(self, delta: int) -> str:
+        """Move the cursor through the *visible* rows so filtering and
+        keyboard navigation agree."""
+        visible = self.visible_indices()
+        if not visible:
+            return "break"
+        current = self._primary_selection()
+        if current is None or current not in visible:
+            target = visible[0] if delta > 0 else visible[-1]
+        else:
+            position = visible.index(current) + delta
+            position = max(0, min(len(visible) - 1, position))
+            target = visible[position]
+        self._select_row(target, "replace")
+        self._scroll_row_into_view(target)
+        if self._focus_is_text_entry():
+            self.event_canvas.focus_set()
+        return "break"
+
+    def _scroll_row_into_view(self, index: int) -> None:
+        if not (0 <= index < len(self.rows)):
+            return
+        row = self.rows[index]
+        try:
+            self.event_canvas.update_idletasks()
+            total = self.event_rows_frame.winfo_height()
+            if total <= 0:
+                return
+            top = row.winfo_y() / total
+            bottom = (row.winfo_y() + row.winfo_height()) / total
+            view_top, view_bottom = cast(Any, self.event_canvas).yview()
+            if top < view_top:
+                cast(Any, self.event_canvas).yview_moveto(top)
+            elif bottom > view_bottom:
+                span = view_bottom - view_top
+                cast(Any, self.event_canvas).yview_moveto(max(0.0, bottom - span))
+        except (tk.TclError, ZeroDivisionError):
+            return
+
+    # ------------------------------------------------------------------
+    # Filtering
+    # ------------------------------------------------------------------
+    def visible_indices(self) -> list[int]:
+        return filter_event_indices(self.profile.event_list, self.filter_state)
+
+    def _on_search_changed(self, *_args: str) -> None:
+        self.set_filter_state(
+            dataclass_replace(self.filter_state, query=self.search_var.get()),
+            notify=True,
+        )
+
+    def set_filter_state(
+        self, state: EventFilterState, *, notify: bool = False
+    ) -> None:
+        self.filter_state = state
+        if self.search_var.get() != state.query:
+            self.search_var.set(state.query)
+        self._refresh_row_layout()
+        if notify and self.filter_change_cb:
+            self.filter_change_cb(state)
+
+    def clear_filters(self) -> None:
+        self.set_filter_state(EventFilterState(), notify=True)
+
+    def reveal_event(self, index: int) -> None:
+        """Make sure a just-added or just-edited event is actually on screen.
+        Without this a live filter silently swallows it."""
+        if not (0 <= index < len(self.profile.event_list)):
+            return
+        event = self.profile.event_list[index]
+        if self.filter_state.is_active() and not event_matches_filter(
+            event, self.filter_state
+        ):
+            self.clear_filters()
+            if self.status_cb:
+                self.status_cb(
+                    txt(
+                        "Filter cleared so the event stays visible.",
+                        "이벤트가 보이도록 필터를 해제했습니다.",
+                    )
+                )
+        self._select_row(index, "replace")
+        self._scroll_row_into_view(index)
+
+    def _sync_filter_chrome(self, visible_count: int) -> None:
+        total = len(self.profile.event_list)
+        if self.filter_state.is_active():
+            self.lbl_filter_summary.config(
+                text=txt(
+                    f"{visible_count} / {total}",
+                    f"{visible_count} / {total}",
+                )
+            )
+            self.btn_clear_filter.pack(side=tk.LEFT, padx=(UI_PAD_SM, 0))
+        else:
+            self.lbl_filter_summary.config(text="")
+            self.btn_clear_filter.pack_forget()
+
+    def open_editor_for(self, index: int) -> None:
+        """Open the full editor for a row index (used by the inspector)."""
+        if 0 <= index < len(self.profile.event_list):
+            self._open_editor(index, self.profile.event_list[index])
 
     def _open_editor(self, row: int, evt: EventModel | None) -> None:
         def event_provider() -> EventModel:
@@ -1145,6 +1540,9 @@ class EventListFrame(ttk.Frame):
             self.profile.event_list.append(evt)
         self.update_events()
         self.save_cb(check_name=False)
+        self.reveal_event(
+            row if is_edit else len(self.profile.event_list) - 1
+        )
 
     def _copy_row(self, evt: EventModel | None) -> None:
         if not evt:
@@ -1166,61 +1564,261 @@ class EventListFrame(ttk.Frame):
             self._add_row(event=new)
             self.save_cb()
             self._update_delete_buttons()
+            self._refresh_row_layout()
             if self.status_cb:
                 self.status_cb(txt("Event copied", "이벤트 복사됨"))
+            self.reveal_event(len(self.profile.event_list) - 1)
         except Exception as e:
             messagebox.showerror(
                 txt("Error", "오류"),
                 txt(f"Copy failed: {e}", f"복사 실패: {e}"),
             )
 
+    def _capture_condition_snapshot(self) -> list[tuple[EventModel, dict[str, bool]]]:
+        """Remember every event's conditions so an undo can restore the
+        references that deleting an event strips from its dependents."""
+        return [(evt, dict(evt.conditions)) for evt in self.profile.event_list]
+
+    def _delete_indices(self, indices: list[int]) -> int:
+        """Delete the given positions, keeping at least one event alive.
+        Returns how many were actually removed."""
+        targets = sorted({i for i in indices if 0 <= i < len(self.profile.event_list)})
+        keep_at_least_one = len(self.profile.event_list) - len(targets) < 1
+        if keep_at_least_one:
+            targets = targets[: max(0, len(self.profile.event_list) - 1)]
+        if not targets:
+            return 0
+
+        snapshot = self._capture_condition_snapshot()
+        removed_pairs = [(i, self.profile.event_list[i]) for i in targets]
+        for index in reversed(targets):
+            self.profile.event_list.pop(index)
+        for _, removed in removed_pairs:
+            name = getattr(removed, "event_name", None)
+            if name and all(
+                getattr(evt, "event_name", None) != name
+                for evt in self.profile.event_list
+            ):
+                self._remove_condition_references(name)
+
+        self._undo_delete = {"removed": removed_pairs, "conditions": snapshot}
+        self.clear_selection()
+        self.update_events()
+        self.save_cb()
+        self._announce_delete(len(removed_pairs), keep_at_least_one)
+        return len(removed_pairs)
+
+    def _announce_delete(self, count: int, hit_floor: bool) -> None:
+        if not self.status_cb:
+            return
+        message = txt(f"{count} event(s) deleted", f"이벤트 {count}개 삭제됨")
+        if hit_floor:
+            message = txt(
+                f"{count} event(s) deleted. The last event is kept.",
+                f"이벤트 {count}개 삭제됨. 마지막 이벤트 1개는 남깁니다.",
+            )
+        def undo() -> None:
+            self.undo_delete()
+
+        self.status_cb(
+            message,
+            action_label=txt("Undo", "되돌리기"),
+            action=undo,
+        )
+
+    def undo_delete(self) -> bool:
+        """Restore the most recent delete, including condition references."""
+        pending = self._undo_delete
+        if not pending:
+            return False
+        self._undo_delete = None
+        removed_pairs = cast(
+            "list[tuple[int, EventModel]]", pending.get("removed") or []
+        )
+        for index, event in removed_pairs:
+            position = min(index, len(self.profile.event_list))
+            self.profile.event_list.insert(position, event)
+        snapshot = cast(
+            "list[tuple[EventModel, dict[str, bool]]]", pending.get("conditions") or []
+        )
+        for event, conditions in snapshot:
+            event.conditions.clear()
+            event.conditions.update(conditions)
+        self.clear_selection()
+        self.update_events()
+        self.save_cb()
+        if self.status_cb:
+            self.status_cb(txt("Delete undone", "삭제를 되돌렸습니다"))
+        return True
+
     def _remove_row(self, row_widget: EventRow, row_num: int) -> None:
         if len(self.profile.event_list) < 2:
             return
-        row_widget.destroy()
-        self.rows.remove(row_widget)
-        removed_name = None
-        if 0 <= row_num < len(self.profile.event_list):
-            removed = self.profile.event_list.pop(row_num)
-            removed_name = getattr(removed, "event_name", None)
-        if removed_name and all(
-            getattr(evt, "event_name", None) != removed_name
-            for evt in self.profile.event_list
-        ):
-            self._remove_condition_references(removed_name)
-        for i, row in enumerate(self.rows):
-            row.row_num = i
-        self._update_row_indices()
-        self._update_delete_buttons()
-        self._sync_empty_state()
-        self.save_cb()
+        self._delete_indices([row_num])
         self.win.update_idletasks()
+
+    # ------------------------------------------------------------------
+    # Bulk actions — operate on the current multi-selection.
+    # ------------------------------------------------------------------
+    def _selected_events(self) -> list[EventModel]:
+        return [
+            self.profile.event_list[i]
+            for i in sorted(self.selected_indices)
+            if 0 <= i < len(self.profile.event_list)
+        ]
+
+    def _bulk_set_group(self) -> None:
+        events = self._selected_events()
+        if not events:
+            return
+        current = events[0].group_id if len({e.group_id for e in events}) == 1 else None
+
+        def on_selected(new_group: str | None) -> None:
+            for event in events:
+                event.group_id = new_group
+            self.update_events()
+            self.save_cb(check_name=False)
+            if self.status_cb:
+                label = new_group or txt("No Group", "그룹 없음")
+                self.status_cb(
+                    txt(
+                        f"{len(events)} event(s) moved to {label}",
+                        f"이벤트 {len(events)}개를 {label}(으)로 옮겼습니다",
+                    )
+                )
+
+        GroupSelector(self.win, current, self._get_existing_groups(), on_selected)
+
+    def _bulk_set_use(self, use: bool) -> None:
+        events = self._selected_events()
+        if not events:
+            return
+        for event in events:
+            event.use_event = use
+        self.update_events()
+        self.save_cb(check_name=False)
+        if self.status_cb:
+            state = txt("on", "켜짐") if use else txt("off", "꺼짐")
+            self.status_cb(
+                txt(
+                    f"Use set to {state} for {len(events)} event(s)",
+                    f"이벤트 {len(events)}개의 사용을 {state}으로 바꿨습니다",
+                )
+            )
+
+    def _bulk_toggle_runtime_member(self) -> None:
+        """Make the whole selection match: if any row is out of the toggle set,
+        add them all; otherwise remove them all."""
+        events = self._selected_events()
+        if not events:
+            return
+        target = not all(
+            bool(getattr(e, "runtime_toggle_member", False)) for e in events
+        )
+        for event in events:
+            event.runtime_toggle_member = target
+        self.update_events()
+        self.save_cb(check_name=False)
+        if self.status_cb:
+            state = txt("added to", "에 추가") if target else txt("removed from", "에서 제외")
+            self.status_cb(
+                txt(
+                    f"{len(events)} event(s) {state} the toggle set",
+                    f"이벤트 {len(events)}개를 토글 세트{state}했습니다",
+                )
+            )
+
+    def _bulk_delete(self) -> None:
+        indices = sorted(self.selected_indices)
+        if not indices:
+            return
+        if not messagebox.askyesno(
+            txt("Confirm", "확인"),
+            txt(
+                f"Delete {len(indices)} selected event(s)?",
+                f"선택한 이벤트 {len(indices)}개를 삭제할까요?",
+            ),
+            parent=self.win,
+        ):
+            return
+        self._delete_indices(indices)
 
     def _import(self, evts: list[EventModel]) -> None:
         self.profile.event_list.extend(evts)
         for e in evts:
             self._add_row(event=e)
         self._sync_empty_state()
+        self._refresh_row_layout()
         self.save_cb()
+        if evts:
+            self.reveal_event(len(self.profile.event_list) - 1)
 
     def _update_row_indices(self) -> None:
-        """모든 행의 인덱스 라벨 업데이트"""
+        """행 인덱스 라벨 갱신 + 현재 필터에 맞춰 표시/숨김 재배치."""
+        self._refresh_row_layout()
+
+    def _refresh_row_layout(self) -> None:
+        """Lay out only the rows that pass the filter. Row numbers stay tied to
+        the profile's real positions so callbacks and the label keep matching."""
+        visible = set(self.visible_indices())
+        slot = 0
         for i, row in enumerate(self.rows):
-            row.grid(
-                row=i,
-                column=0,
-                padx=0,
-                pady=(0, UI_PAD_XS),
-                sticky="ew",
-            )
+            row.row_num = i
             row.lbl_index.config(text=str(i + 1))
+            if i in visible:
+                row.grid(
+                    row=slot,
+                    column=0,
+                    padx=0,
+                    pady=(0, UI_PAD_XS),
+                    sticky="ew",
+                )
+                slot += 1
+            else:
+                row.grid_remove()
+        self._sync_filter_chrome(len(visible))
+        self._sync_no_match_state(bool(visible))
+
+    def _sync_no_match_state(self, has_visible: bool) -> None:
+        """Explain an empty list caused by filtering, and offer a way out."""
+        if has_visible or not self.profile.event_list or not self.filter_state.is_active():
+            if self.no_match_frame and self.no_match_frame.winfo_exists():
+                self.no_match_frame.grid_remove()
+            return
+        if not self.no_match_frame or not self.no_match_frame.winfo_exists():
+            self.no_match_frame = ttk.Frame(self.event_rows_frame)
+            ttk.Label(
+                self.no_match_frame,
+                text=txt(
+                    "No events match the current filter.",
+                    "현재 필터와 일치하는 이벤트가 없습니다.",
+                ),
+                foreground=theme.INK_MUTED,
+            ).pack(side=tk.LEFT, padx=(UI_PAD_MD, UI_PAD_SM), pady=UI_PAD_MD)
+            ttk.Button(
+                self.no_match_frame,
+                text=txt("Clear filter", "필터 해제"),
+                command=self.clear_filters,
+            ).pack(side=tk.LEFT, pady=UI_PAD_MD)
+        # Grid rows must stay adjacent, so sit right after the (hidden) rows.
+        self.no_match_frame.grid(row=len(self.rows), column=0, sticky="ew")
 
     def _update_delete_buttons(self) -> None:
         can_delete = len(self.profile.event_list) > 1
         state = "normal" if can_delete else "disabled"
+        hint = (
+            txt("Delete this event.", "이 이벤트를 삭제합니다.")
+            if can_delete
+            else txt(
+                "A profile needs at least one event, so the last one cannot be deleted.",
+                "프로필에는 이벤트가 최소 1개 필요해서 마지막 이벤트는 삭제할 수 없습니다.",
+            )
+        )
         for row in self.rows:
             if row.btn_delete:
                 row.btn_delete.config(state=state)
+            if row.tip_delete:
+                row.tip_delete.update_text(hint)
 
     def update_events(self) -> None:
         curr, new = len(self.rows), len(self.profile.event_list)
@@ -1240,10 +1838,16 @@ class EventListFrame(ttk.Frame):
         for i in range(curr, new):
             self._add_row(i, self.profile.event_list[i])
 
+        # Drop selection that the new list length no longer has.
+        self.selected_indices = {i for i in self.selected_indices if i < new}
+        if self.selection_anchor is not None and self.selection_anchor >= new:
+            self.selection_anchor = None
+
         # Re-grid all rows and update indices
         self._update_row_indices()
         self._update_delete_buttons()
         self._sync_empty_state()
+        self._sync_row_selection()
         self.win.update_idletasks()
 
     def save_names(self) -> None:
