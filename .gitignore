@@ -24,6 +24,8 @@ profiles/
 app_state.json
 user_settings.json
 modkey_sets.json
+run_sets.json
+
 # Editor / OS noise
 .idea/
 .vscode/
