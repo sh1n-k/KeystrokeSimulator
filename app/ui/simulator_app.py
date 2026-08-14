@@ -862,6 +862,9 @@ class KeystrokeSimulatorApp(tk.Tk):
     def _events_with_processor_inputs(events: list[EventModel]) -> list[EventModel]:
         ready: list[EventModel] = []
         for evt in events:
+            if evt.is_screenless_input():
+                ready.append(evt)
+                continue
             if evt.latest_position is None or evt.clicked_position is None:
                 continue
             mode = evt.match_mode or "pixel"

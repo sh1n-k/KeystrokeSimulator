@@ -315,7 +315,9 @@ class EventRow(ttk.Frame):
         # Key — SOT icon vocabulary (⌨ for key, ◐ for condition-only,
         # ⇄ prefix for inverted match).
         key = self.event.key_to_enter or ""
-        invert = getattr(self.event, "invert_match", False)
+        invert = bool(getattr(self.event, "invert_match", False)) and not (
+            self.event.is_screenless_input()
+        )
         if is_cond:
             display = txt("◐ Cond", "◐ 조건")
         else:
@@ -351,12 +353,20 @@ class EventRow(ttk.Frame):
                 )
             )
         elif key:
-            self._tip_key.update_text(
-                txt(
-                    f"Input key: {key}. Click to open the editor.",
-                    f"입력 키: {key}. 클릭하면 편집기를 엽니다.",
+            if self.event.is_screenless_input():
+                self._tip_key.update_text(
+                    txt(
+                        f"Input key: {key}. No screen target; runs when conditions match.",
+                        f"입력 키: {key}. 화면 없이 조건이 맞으면 실행됩니다.",
+                    )
                 )
-            )
+            else:
+                self._tip_key.update_text(
+                    txt(
+                        f"Input key: {key}. Click to open the editor.",
+                        f"입력 키: {key}. 클릭하면 편집기를 엽니다.",
+                    )
+                )
         else:
             self._tip_key.update_text(
                 txt(

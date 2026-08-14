@@ -782,8 +782,8 @@ class KeystrokeEventEditor:
         ttk.Label(
             gb_exec,
             text=txt(
-                "When disabled, no key is pressed and this event is used only as a condition for other events.",
-                "해제하면 키를 누르지 않고, 다른 이벤트의 조건으로만 사용됩니다.",
+                "When disabled, no key is pressed and this event is used only as a condition for other events. An input event can omit the screen if at least one condition is set.",
+                "해제하면 키를 누르지 않고, 다른 이벤트의 조건으로만 사용됩니다. 입력 이벤트는 조건이 하나 이상이면 화면 없이 저장할 수 있습니다.",
             ),
             foreground=theme.INK_MUTED,
             wraplength=240,
@@ -951,6 +951,12 @@ class KeystrokeEventEditor:
             command=self.hold_image,
             style="Outline.TButton",
         ).pack(side="left", padx=theme.SPACE_3)
+        ttk.Button(
+            f_btn,
+            text=txt("Clear Screen", "화면 지우기"),
+            command=self._clear_capture,
+            style="Outline.TButton",
+        ).pack(side="left", padx=(0, theme.SPACE_3))
         self.btn_step_back = ttk.Button(
             f_btn,
             text=txt("← Back", "← 이전"),
@@ -982,6 +988,7 @@ class KeystrokeEventEditor:
         """모든 조건을 무시 상태로 초기화"""
         self.temp_conditions.clear()
         self._populate_condition_tree()
+        self._refresh_basic_guidance()
 
     def _update_condition_summary(self) -> None:
         """조건 수 카운터 갱신"""
@@ -1015,10 +1022,22 @@ class KeystrokeEventEditor:
                 missing=", ".join(missing_labels),
             )
         elif not self.held_img:
-            message = txt(
-                "Step 1: move the mouse over the target, then press CTRL to capture the current area.",
-                "1단계: 대상 위로 마우스를 옮긴 뒤 CTRL로 현재 영역을 캡처하세요.",
-            )
+            if self.execute_action_var.get() and getattr(self, "temp_conditions", None):
+                if self.key_to_enter:
+                    message = txt(
+                        "Ready to save without a screen. Capture a target if this event should also match pixels.",
+                        "화면 없이 저장할 수 있습니다. 픽셀도 맞출 이벤트면 화면을 캡처하세요.",
+                    )
+                else:
+                    message = txt(
+                        "Choose an input key to save without a screen, or capture a target area with CTRL.",
+                        "화면 없이 저장하려면 입력 키를 고르거나, CTRL로 대상 영역을 캡처하세요.",
+                    )
+            else:
+                message = txt(
+                    "Step 1: move the mouse over the target, then press CTRL to capture the current area. An input event can skip this if it has conditions.",
+                    "1단계: 대상 위로 마우스를 옮긴 뒤 CTRL로 현재 영역을 캡처하세요. 입력 이벤트는 조건이 있으면 이 단계를 건너뛸 수 있습니다.",
+                )
         elif not self.clicked_pos:
             message = txt(
                 "Step 2: click the right image to choose the trigger pixel or region center.",
@@ -1443,6 +1462,7 @@ class KeystrokeEventEditor:
             self.temp_conditions[evt_name] = new_val
 
         self._update_condition_summary()
+        self._refresh_basic_guidance()
 
     def _validate_cycles(
         self, new_event_name: str, new_conditions: dict[str, bool]
@@ -1490,33 +1510,73 @@ class KeystrokeEventEditor:
                     return result
         return None
 
-    def _validate_required_fields(self) -> bool:
-        """필수 필드 검증"""
-        required: list[object | None] = [
-            self.latest_pos,
+    def _held_screen_position(self) -> Position | None:
+        session = getattr(self, "capture_session", None)
+        if session is None:
+            return None
+        return session.held_position
+
+    def _has_complete_screen(self) -> bool:
+        return bool(
+            self._held_screen_position()
+            and self.clicked_pos
+            and self.held_img
+            and self.ref_pixel
+        )
+
+    def _has_partial_screen(self) -> bool:
+        parts = [
+            self._held_screen_position(),
             self.clicked_pos,
             self.held_img,
             self.ref_pixel,
         ]
-        need_key = self.execute_action_var.get()
-        if need_key:
-            required.append(self.key_to_enter)
+        return any(parts) and not all(parts)
 
-        if not all(required):
-            msg = (
+    def _validate_required_fields(self) -> bool:
+        """필수 필드 검증"""
+        need_key = self.execute_action_var.get()
+        has_conditions = bool(getattr(self, "temp_conditions", None))
+
+        if need_key and not self.key_to_enter:
+            messagebox.showerror(
+                txt("Error", "오류"),
                 txt(
-                    "Please set image, coordinates, and key.",
-                    "이미지, 좌표, 키를 모두 설정해 주세요.",
-                )
-                if need_key
-                else txt(
-                    "Please set image and coordinates.",
-                    "이미지와 좌표를 설정해 주세요.",
-                )
+                    "Please set an input key.",
+                    "입력 키를 설정해 주세요.",
+                ),
             )
-            messagebox.showerror(txt("Error", "오류"), msg)
             return False
-        return True
+
+        if self._has_complete_screen():
+            return True
+
+        if self._has_partial_screen():
+            messagebox.showerror(
+                txt("Error", "오류"),
+                txt(
+                    "Finish the screen capture or clear it. An input event can omit the screen only when at least one condition is set.",
+                    "화면 캡처를 끝내거나 지우세요. 입력 이벤트는 조건이 하나 이상일 때만 화면을 생략할 수 있습니다.",
+                ),
+            )
+            return False
+
+        if need_key and has_conditions:
+            return True
+
+        msg = (
+            txt(
+                "Capture a screen, or set at least one condition for an input event without a screen.",
+                "화면을 캡처하거나, 화면 없는 입력 이벤트라면 조건을 하나 이상 설정하세요.",
+            )
+            if need_key
+            else txt(
+                "Please set image and coordinates.",
+                "이미지와 좌표를 설정해 주세요.",
+            )
+        )
+        messagebox.showerror(txt("Error", "오류"), msg)
+        return False
 
     def _parse_numeric_inputs(
         self,
@@ -1608,18 +1668,24 @@ class KeystrokeEventEditor:
             return
 
         dur, rand, rw, rh, prio = parsed
-        latest_pos = self.capture_session.held_position
-        clicked_pos = self.clicked_pos
-        held_img = self.held_img
-        ref_pixel = self.ref_pixel
-        if latest_pos is None or clicked_pos is None or held_img is None or ref_pixel is None:
+        has_screen = self._has_complete_screen()
+        latest_pos = self.capture_session.held_position if has_screen else None
+        clicked_pos = self.clicked_pos if has_screen else None
+        held_img = self.held_img if has_screen else None
+        ref_pixel = self.ref_pixel if has_screen else None
+        if has_screen and (
+            latest_pos is None
+            or clicked_pos is None
+            or held_img is None
+            or ref_pixel is None
+        ):
             return
         cap_w = max(50, min(1000, self.capture_w_var.get()))
         cap_h = max(50, min(1000, self.capture_h_var.get()))
 
         if not self._validate_timing_values(dur, rand):
             return
-        if not self._validate_region_bounds(rw, rh):
+        if has_screen and not self._validate_region_bounds(rw, rh):
             return
 
         cycle_path = self._validate_cycles(final_name, self.temp_conditions)
@@ -1641,15 +1707,15 @@ class KeystrokeEventEditor:
             event_name=final_name,
             latest_position=latest_pos,
             clicked_position=clicked_pos,
-            held_screenshot=held_img.copy(),  # 복사본
+            held_screenshot=held_img.copy() if held_img is not None else None,
             ref_pixel_value=ref_pixel,
             key_to_enter=self.key_to_enter,
             press_duration_ms=dur,
             randomization_ms=rand,
             capture_size=(cap_w, cap_h),
-            match_mode=self.match_mode_var.get(),
-            invert_match=self.invert_match_var.get(),
-            region_size=(rw, rh),
+            match_mode=self.match_mode_var.get() if has_screen else "pixel",
+            invert_match=self.invert_match_var.get() if has_screen else False,
+            region_size=(rw, rh) if has_screen else None,
             execute_action=self.execute_action_var.get(),
             group_id=grp_id,
             priority=prio,
@@ -1659,7 +1725,8 @@ class KeystrokeEventEditor:
             logger.error("Event save callback is not configured")
             return
         self.save_cb(evt, self.is_edit, self.row_num)
-        self._update_img_lbl(self.lbl_img2, held_img)
+        if held_img is not None:
+            self._update_img_lbl(self.lbl_img2, held_img)
         self.close_window()
 
     def close_window(self, event: object | None = None) -> None:
@@ -1804,3 +1871,22 @@ class KeystrokeEventEditor:
         photo = ImageTk.PhotoImage(img.convert("RGB"), master=lbl)
         lbl.configure(image=photo, width=img.width, height=img.height)
         cast(Any, lbl).image = photo
+
+    def _clear_preview_label(self, lbl: tk.Label | None) -> None:
+        if lbl is None:
+            return
+        try:
+            if not lbl.winfo_exists():
+                return
+            lbl.configure(image="", width=1, height=1)
+            cast(Any, lbl).image = None
+        except tk.TclError:
+            return
+
+    def _clear_capture(self) -> None:
+        self.capture_session.clear_hold()
+        for entry in self.coord_entries[2:]:
+            entry.delete(0, tk.END)
+        self._clear_preview_label(getattr(self, "lbl_img2", None))
+        self._clear_preview_label(getattr(self, "lbl_ref", None))
+        self._refresh_basic_guidance()

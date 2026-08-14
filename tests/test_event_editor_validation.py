@@ -66,6 +66,8 @@ class TestValidateRequiredFields(unittest.TestCase):
         ref_pixel=None,
         key_to_enter=None,
         execute_action=True,
+        conditions=None,
+        held_position=None,
     ):
         stub = SimpleNamespace(
             latest_pos=latest_pos,
@@ -74,6 +76,19 @@ class TestValidateRequiredFields(unittest.TestCase):
             ref_pixel=ref_pixel,
             key_to_enter=key_to_enter,
             execute_action_var=SimpleNamespace(get=lambda: execute_action),
+            temp_conditions=dict(conditions or {}),
+            capture_session=SimpleNamespace(
+                held_position=latest_pos if held_position is None else held_position
+            ),
+        )
+        stub._held_screen_position = (
+            lambda s=stub: KeystrokeEventEditor._held_screen_position(s)
+        )
+        stub._has_complete_screen = (
+            lambda s=stub: KeystrokeEventEditor._has_complete_screen(s)
+        )
+        stub._has_partial_screen = (
+            lambda s=stub: KeystrokeEventEditor._has_partial_screen(s)
         )
         return stub
 
@@ -128,6 +143,31 @@ class TestValidateRequiredFields(unittest.TestCase):
         )
         result = KeystrokeEventEditor._validate_required_fields(stub)
         self.assertTrue(result)
+
+    def test_screenless_input_with_conditions_passes(self):
+        stub = self._make_editor_stub(
+            key_to_enter="A",
+            conditions={"Other": True},
+        )
+        result = KeystrokeEventEditor._validate_required_fields(stub)
+        self.assertTrue(result)
+
+    @patch("app.ui.event_editor.messagebox")
+    def test_screenless_input_without_conditions_fails(self, mock_msgbox):
+        stub = self._make_editor_stub(key_to_enter="A")
+        result = KeystrokeEventEditor._validate_required_fields(stub)
+        self.assertFalse(result)
+        mock_msgbox.showerror.assert_called()
+
+    @patch("app.ui.event_editor.messagebox")
+    def test_screenless_condition_only_event_fails(self, mock_msgbox):
+        stub = self._make_editor_stub(
+            execute_action=False,
+            conditions={"Other": True},
+        )
+        result = KeystrokeEventEditor._validate_required_fields(stub)
+        self.assertFalse(result)
+        mock_msgbox.showerror.assert_called()
 
 
 class TestUniqueEventNameValidation(unittest.TestCase):

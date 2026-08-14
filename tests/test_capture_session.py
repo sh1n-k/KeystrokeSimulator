@@ -96,6 +96,23 @@ class TestCaptureSession(unittest.TestCase):
         self.assertEqual(self.session.set_capture_size(1, 2000), (50, 1000))
         self.assertEqual(self.capturer.size, (50, 1000))
 
+    def test_clear_hold_drops_capture_but_keeps_live_frame(self) -> None:
+        self.session.start()
+        image = Image.new("RGB", (6, 6), "red")
+        assert self.capturer.screenshot_callback is not None
+        self.capturer.screenshot_callback((2, 3), image)
+        self.assertTrue(self.session.hold())
+        self.assertTrue(self.session.select((3, 3), (6, 6)))
+
+        self.session.clear_hold()
+
+        snapshot = self.session.snapshot()
+        self.assertIsNone(snapshot.held_image)
+        self.assertIsNone(snapshot.held_position)
+        self.assertIsNone(snapshot.selected_position)
+        self.assertIsNone(snapshot.reference_color)
+        self.assertEqual(snapshot.latest_position, (2, 3))
+
 
 if __name__ == "__main__":
     unittest.main()

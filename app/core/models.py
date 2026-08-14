@@ -53,6 +53,15 @@ class EventModel:
     # 토글 세트(실행 중 ON/OFF)에 포함되는지 여부
     runtime_toggle_member: bool = False
 
+    def is_screenless_input(self) -> bool:
+        """화면 좌표 없이 조건 AND만으로 키를 실행하는 입력 이벤트인지."""
+        return (
+            bool(self.execute_action)
+            and bool(self.conditions)
+            and self.latest_position is None
+            and self.clicked_position is None
+        )
+
 
 @dataclass
 class ProfileModel:

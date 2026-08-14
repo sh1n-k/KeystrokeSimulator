@@ -8,6 +8,7 @@ import re
 import threading
 import time
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, NotRequired, Protocol, TypedDict, cast
 
@@ -116,6 +117,7 @@ class EventData(TypedDict):
     region_h: int
     rel_x: int
     rel_y: int
+    screenless: NotRequired[bool]
     ref_img: NotRequired[ImageFrame]
     check_points: NotRequired[list[CheckPoint]]
     ref_bgr: NotRequired[Pixel]
@@ -618,6 +620,39 @@ class KeystrokeProcessor:
             if not e.use_event:
                 continue
 
+            if e.is_screenless_input():
+                raw_key = e.key_to_enter
+                key = (
+                    _normalize_key_name(self.key_codes, raw_key) if raw_key else None
+                )
+                if raw_key and raw_key.strip() and key is None:
+                    self._warn_unsupported_key(
+                        e.event_name or "Unknown", raw_key.strip()
+                    )
+                events_data.append(
+                    {
+                        "name": e.event_name or "Unknown",
+                        "mode": "none",
+                        "invert": False,
+                        "key": key,
+                        "center_x": 0,
+                        "center_y": 0,
+                        "dur": e.press_duration_ms,
+                        "rand": e.randomization_ms,
+                        "exec": True,
+                        "group": e.group_id,
+                        "priority": e.priority,
+                        "conds": e.conditions,
+                        "runtime_toggle_member": bool(e.runtime_toggle_member),
+                        "region_w": 1,
+                        "region_h": 1,
+                        "rel_x": 0,
+                        "rel_y": 0,
+                        "screenless": True,
+                    }
+                )
+                continue
+
             mode = e.match_mode or "pixel"
             latest_position = e.latest_position
             clicked_position = e.clicked_position
@@ -727,14 +762,15 @@ class KeystrokeProcessor:
             self.loop.close()
 
     async def _process_main(self) -> None:
-        if not self.event_data_list or not self.main_capture_groups:
+        if not self.event_data_list:
             return
 
         last_proc_check_time = 0
         is_proc_active_cached = True
         proc_check_interval = 0.3
+        capture_cm = mss.mss() if self.main_capture_groups else nullcontext()
 
-        with mss.mss() as sct:
+        with capture_cm as sct:
             while not self.term_event.is_set():
                 current_time = time.time()
                 if self.pid and (
@@ -757,11 +793,12 @@ class KeystrokeProcessor:
                 try:
                     cycle_started = time.perf_counter()
                     local_match_states: dict[str, bool] = {}
-                    for group in self.main_capture_groups:
-                        img = ImageFrame.from_screenshot(sct.grab(group["rect"]))
-                        local_match_states.update(
-                            self._evaluate_capture_group(img, group["events"])
-                        )
+                    if sct is not None:
+                        for group in self.main_capture_groups:
+                            img = ImageFrame.from_screenshot(sct.grab(group["rect"]))
+                            local_match_states.update(
+                                self._evaluate_capture_group(img, group["events"])
+                            )
                     await self._apply_local_match_states(local_match_states)
                     _log_perf("processor_main_cycle", cycle_started)
                 except Exception as e:
@@ -805,6 +842,8 @@ class KeystrokeProcessor:
         groups: list[CaptureGroup] = []
 
         for evt in sorted_events:
+            if evt.get("screenless"):
+                continue
             evt_rect = self._build_capture_rect(evt)
             evt["capture_rect"] = evt_rect
             if not groups:
@@ -989,7 +1028,11 @@ class KeystrokeProcessor:
     async def _apply_local_match_states(
         self, local_match_states: dict[str, bool]
     ) -> None:
-        local_states = self._resolve_effective_states(local_match_states)
+        match_states = dict(local_match_states)
+        for evt in self.event_data_list:
+            if evt.get("screenless"):
+                match_states[evt["name"]] = True
+        local_states = self._resolve_effective_states(match_states)
 
         with self.state_lock:
             self.current_states.update(local_states)
@@ -1044,6 +1087,8 @@ class KeystrokeProcessor:
         return img.crop(x, y, w, h)
 
     def _check_match(self, img: ImageFrame, evt: EventData) -> bool:
+        if evt.get("screenless"):
+            return True
         matched = False
         evaluated = False
         try:

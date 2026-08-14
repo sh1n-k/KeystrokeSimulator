@@ -37,6 +37,7 @@
 - `_resolve_effective_states`가 한 loop 안에서 조건 체인의 유효 상태를 해석한다.
 - 같은 `group_id`에서 매칭된 이벤트가 여러 개면 낮은 `priority`가 우선한다.
 - `execute_action=False` 이벤트는 조건 평가에는 참여하지만 키 입력을 실행하지 않는다.
+- 화면 좌표가 없는 입력 이벤트는 조건이 하나 이상일 때만 로드하고, raw match를 True로 둔 뒤 기존 조건 AND로 키를 실행한다.
 - runtime toggle의 활성 상태와 trigger 처리는 processor와 simulator app 사이에서 일치해야 한다.
 - key press duration과 loop delay는 stop 요청에 응답할 수 있어야 한다.
 

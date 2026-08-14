@@ -686,6 +686,37 @@ class TestMainUiState(unittest.TestCase):
         self.assertEqual(snapshot["badge_text"], "Check Events")
         self.assertIn("reference data", snapshot["title"])
 
+    @patch("app.ui.simulator_app.PermissionUtils.missing_macos_permissions", return_value=[])
+    @patch("app.ui.simulator_app.load_profile")
+    def test_readiness_snapshot_allows_screenless_input_with_conditions(
+        self, mock_load_profile, _mock_permissions
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Dummy Process (1234)")
+        app.selected_profile.set("Quick")
+        mock_load_profile.return_value = ProfileModel(
+            name="Quick",
+            event_list=[
+                EventModel(
+                    event_name="Gate",
+                    execute_action=False,
+                    latest_position=(10, 10),
+                    clicked_position=(1, 1),
+                    ref_pixel_value=(1, 2, 3),
+                ),
+                EventModel(
+                    event_name="Fire",
+                    key_to_enter="A",
+                    conditions={"Gate": True},
+                ),
+            ],
+        )
+
+        snapshot = KeystrokeSimulatorApp._get_readiness_snapshot(app)
+
+        self.assertTrue(snapshot["can_start"])
+        self.assertEqual(snapshot["badge_text"], "Ready")
+
 
 class TestRuntimeEditGuards(unittest.TestCase):
     @patch("app.ui.simulator_app.KeystrokeQuickEventEditor")
