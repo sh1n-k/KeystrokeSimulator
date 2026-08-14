@@ -1177,6 +1177,35 @@ class TestBulkActions(unittest.TestCase):
         ask.assert_not_called()
         self.assertEqual([e.priority for e in stub.profile.event_list], [0, 0, 0])
 
+    def test_select_all_picks_every_listed_event(self):
+        stub = self._make_stub()
+        stub.selected_indices = set()
+        stub.filter_state = EventFilterState()
+
+        stub.select_all_visible()
+
+        self.assertEqual(stub.selected_indices, {0, 1, 2})
+        self.assertEqual(stub.selection_anchor, 0)
+
+    def test_select_all_respects_an_active_filter(self):
+        stub = self._make_stub()
+        stub.selected_indices = set()
+        stub.profile.event_list[1].event_name = "Keep"
+        stub.filter_state = EventFilterState(query="keep")
+
+        stub.select_all_visible()
+
+        self.assertEqual(stub.selected_indices, {1})
+
+    def test_select_all_is_inert_when_nothing_is_listed(self):
+        stub = self._make_stub()
+        stub.selected_indices = set()
+        stub.filter_state = EventFilterState(query="nothing-matches-this")
+
+        stub.select_all_visible()
+
+        self.assertEqual(stub.selected_indices, set())
+
     def test_bulk_actions_are_inert_without_a_selection(self):
         stub = self._make_stub()
         stub.selected_indices = set()

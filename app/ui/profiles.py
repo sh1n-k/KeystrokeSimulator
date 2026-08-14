@@ -38,7 +38,9 @@ UI_PAD_XS = theme.SPACE_1
 UI_PAD_SM = theme.SPACE_1
 UI_PAD_MD = theme.SPACE_2
 PROFILE_WINDOW_DEFAULT_GEOMETRY = "1280x720"
-PROFILE_WINDOW_MIN_SIZE = (1120, 680)
+# Wide enough for the full toolbar (add / graph / select all / clear) to sit
+# beside the sort and more menus without clipping.
+PROFILE_WINDOW_MIN_SIZE = (1180, 680)
 EVENT_NAME_COL_WIDTH = 34
 EVENT_GROUP_COL_WIDTH = 10
 EVENT_KEY_COL_WIDTH = 8

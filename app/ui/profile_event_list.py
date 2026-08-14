@@ -624,22 +624,23 @@ class EventListFrame(ttk.Frame):
             sticky="we",
         )
 
-        f_primary = ttk.Frame(f_ctrl)
-        f_primary.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Right-hand group claims its width first; otherwise the expanding
+        # left group pushes Sort/More off the edge of the toolbar.
         f_secondary = ttk.Frame(f_ctrl)
         f_secondary.pack(side=tk.RIGHT)
+        f_primary = ttk.Frame(f_ctrl)
+        f_primary.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        # No explicit width on the toolbar buttons: each takes just what its
+        # label needs so all of them still fit at the minimum window width.
         self.btn_add_event = ttk.Button(
             f_primary,
             text=self.add_event_label,
             command=self._add_event,
-            width=dual_text_width(
-                "➕ Add Event", "➕ 이벤트 추가", padding=2, min_width=18
-            ),
         )
-        self.btn_add_event.pack(
-            side=tk.LEFT, padx=(0, UI_PAD_SM), fill=tk.X, expand=True
-        )
+        # Sized to its label rather than stretched, leaving room for the
+        # selection buttons beside it.
+        self.btn_add_event.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
         ToolTip(
             self.btn_add_event,
             txt(
@@ -652,9 +653,6 @@ class EventListFrame(ttk.Frame):
             f_primary,
             text=txt("🗺 View Graph", "🗺 그래프 보기"),
             command=self._open_graph,
-            width=dual_text_width(
-                "🗺 View Graph", "🗺 그래프 보기", padding=2, min_width=13
-            ),
         )
         self.btn_graph.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
         ToolTip(
@@ -663,6 +661,31 @@ class EventListFrame(ttk.Frame):
                 "Open a graph view of the current event flow.",
                 "현재 이벤트 흐름을 그래프로 확인합니다.",
             ),
+        )
+
+        self.btn_select_all = ttk.Button(
+            f_primary,
+            text=txt("Select all", "전체 선택"),
+            command=self.select_all_visible,
+        )
+        self.btn_select_all.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
+        ToolTip(
+            self.btn_select_all,
+            txt(
+                "Select every event currently listed. While a filter is on, only the visible ones are selected.",
+                "목록에 보이는 이벤트를 모두 선택합니다. 필터가 켜져 있으면 보이는 것만 선택합니다.",
+            ),
+        )
+
+        self.btn_deselect_all = ttk.Button(
+            f_primary,
+            text=txt("Clear selection", "전체 해제"),
+            command=self.clear_selection,
+        )
+        self.btn_deselect_all.pack(side=tk.LEFT, padx=(0, UI_PAD_SM))
+        ToolTip(
+            self.btn_deselect_all,
+            txt("Deselect all events.", "선택을 모두 해제합니다."),
         )
 
         self.btn_sort = ttk.Menubutton(
@@ -747,13 +770,8 @@ class EventListFrame(ttk.Frame):
         self.bulk_bar = ttk.Frame(self)
         self.lbl_bulk_count = ttk.Label(self.bulk_bar, text="")
         self.lbl_bulk_count.pack(side=tk.LEFT, padx=(0, UI_PAD_MD))
-        # Packed before the left-hand buttons so it keeps its width instead of
-        # being squeezed off the edge of the bar.
-        ttk.Button(
-            self.bulk_bar,
-            text=txt("Deselect", "선택 해제"),
-            command=self.clear_selection,
-        ).pack(side=tk.RIGHT)
+        # Deselect lives in the toolbar, which is always visible; repeating it
+        # here would show the same action twice whenever the bar is up.
         for en, ko, command in (
             ("▣ Group", "▣ 그룹", self._bulk_set_group),
             ("Priority", "우선순위", self._bulk_set_priority),
@@ -1100,27 +1118,35 @@ class EventListFrame(ttk.Frame):
     def _create_header(self) -> None:
         """Compact row header aligned to EventRow's fixed grid columns."""
         header = ttk.Frame(self)
+        # Spans only the canvas column (not the scrollbar) and uses the same
+        # padding, so its width matches a row's exactly.
         header.grid(
             row=3,
             column=0,
-            columnspan=2,
-            padx=UI_PAD_MD,
+            padx=(UI_PAD_MD, 0),
             pady=(UI_PAD_SM, 0),
             sticky="ew",
         )
-        tk.Frame(header, width=4).pack(side=tk.LEFT, fill="y", padx=(0, UI_PAD_SM))
+        # Left gutter must match the row's marker + state bar, or every
+        # column below it starts shifted.
+        tk.Frame(header, width=4).pack(
+            side=tk.LEFT,
+            fill="y",
+            padx=(theme.ROW_MARKER_WIDTH + 2, UI_PAD_SM),
+        )
         header_body = ttk.Frame(header)
+        self.header_body = header_body
         header_body.pack(side=tk.LEFT, fill="x", expand=True)
         header_body.grid_columnconfigure(2, weight=1)
 
-        ttk.Label(header_body, text="", width=2).grid(row=0, column=0, sticky="ew")
-        lbl_use = ttk.Label(
-            header_body,
-            text=txt("Use", "사용"),
-            width=5,
-            anchor="center",
+        # No fixed widths: column sizes are mirrored from a real row by
+        # _sync_header_columns, and each title centers inside its column.
+        # padx mirrors EventRow's so the centers line up, not just the widths.
+        ttk.Label(header_body, text="").grid(
+            row=0, column=0, sticky="ew", padx=(0, UI_PAD_XS)
         )
-        lbl_use.grid(row=0, column=1, sticky="ew")
+        lbl_use = ttk.Label(header_body, text=txt("Use", "사용"), anchor="center")
+        lbl_use.grid(row=0, column=1, sticky="ew", padx=(0, UI_PAD_XS))
         ToolTip(
             lbl_use,
             txt("Uncheck to skip this event.", "체크 해제 시 이벤트를 건너뜁니다"),
@@ -1129,8 +1155,7 @@ class EventListFrame(ttk.Frame):
         lbl_name = ttk.Label(
             header_body,
             text=txt("Event", "이벤트"),
-            anchor="w",
-            width=EVENT_NAME_COL_WIDTH,
+            anchor="center",
         )
         lbl_name.grid(row=0, column=2, sticky="ew", padx=(0, UI_PAD_SM))
         ToolTip(
@@ -1143,32 +1168,27 @@ class EventListFrame(ttk.Frame):
         ttk.Label(
             header_body,
             text=txt("Group", "그룹"),
-            width=EVENT_GROUP_COL_WIDTH,
             anchor="center",
         ).grid(row=0, column=3, sticky="ew", padx=(0, theme.SPACE_1))
         ttk.Label(
             header_body,
             text=txt("Key", "키"),
-            width=EVENT_KEY_COL_WIDTH,
             anchor="center",
         ).grid(row=0, column=4, sticky="ew", padx=(0, theme.SPACE_1))
         ttk.Label(
             header_body,
             text=txt("Cond", "조건"),
-            width=EVENT_COND_COL_WIDTH,
             anchor="center",
         ).grid(row=0, column=5, sticky="ew", padx=(0, theme.SPACE_1))
         ttk.Label(
             header_body,
             text=txt("Toggle", "토글"),
-            width=EVENT_EXTRA_COL_WIDTH,
             anchor="center",
         ).grid(row=0, column=6, sticky="ew", padx=(0, theme.SPACE_1))
 
         lbl_actions = ttk.Label(
             header_body,
             text=txt("Actions", "동작"),
-            width=EVENT_ACTIONS_COL_WIDTH,
             anchor="center",
         )
         lbl_actions.grid(row=0, column=7, sticky="ew")
@@ -1178,6 +1198,33 @@ class EventListFrame(ttk.Frame):
         ttk.Separator(self, orient="horizontal").grid(
             row=3, column=0, columnspan=2, sticky="ew", pady=(20, 0), padx=UI_PAD_MD
         )
+
+    def _sync_header_columns(self) -> None:
+        """Copy a live row's column widths onto the header.
+
+        The header and each row are separate grids, so their columns size
+        independently and the titles drift out of line. Mirroring the measured
+        widths keeps them centered over the data whatever the font or platform.
+        """
+        header_body = getattr(self, "header_body", None)
+        if header_body is None or not self.rows:
+            return
+        reference = next(
+            (row for row in self.rows if row.winfo_manager() == "grid"), None
+        )
+        if reference is None:
+            return
+        try:
+            reference.update_idletasks()
+            for column in range(8):
+                if column == 2:
+                    # Name column absorbs slack on both sides via weight=1.
+                    continue
+                bbox = reference.row_body.grid_bbox(column=column, row=0)
+                if bbox and bbox[2] > 0:
+                    header_body.grid_columnconfigure(column, minsize=bbox[2])
+        except tk.TclError:
+            return
 
     def _create_scroll_area(self) -> None:
         self.event_canvas = tk.Canvas(
@@ -1225,6 +1272,8 @@ class EventListFrame(ttk.Frame):
         cast(Any, self.event_canvas).itemconfigure(
             self.event_rows_window, width=event.width
         )
+        # Row columns resize with the window; the header has to follow.
+        self.after_idle(self._sync_header_columns)
 
     def _bind_scroll_events(self, widget: tk.Misc) -> None:
         widget.bind("<MouseWheel>", self._on_event_mousewheel, add="+")
@@ -1362,6 +1411,17 @@ class EventListFrame(ttk.Frame):
         self.selected_indices, self.selection_anchor = resolve_selection(
             self.selected_indices, self.selection_anchor, index, mode
         )
+        self._sync_row_selection()
+        self._notify_selection()
+
+    def select_all_visible(self) -> None:
+        """Select what the list currently shows. With a filter on this means
+        the filtered subset, matching what the user can actually see."""
+        visible = self.visible_indices()
+        if not visible:
+            return
+        self.selected_indices = set(visible)
+        self.selection_anchor = visible[0]
         self._sync_row_selection()
         self._notify_selection()
 
@@ -1818,6 +1878,7 @@ class EventListFrame(ttk.Frame):
                 row.grid_remove()
         self._sync_filter_chrome(len(visible))
         self._sync_no_match_state(bool(visible))
+        self._sync_header_columns()
 
     def _sync_no_match_state(self, has_visible: bool) -> None:
         """Explain an empty list caused by filtering, and offer a way out."""
