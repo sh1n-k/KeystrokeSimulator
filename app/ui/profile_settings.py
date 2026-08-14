@@ -117,7 +117,8 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
             command=self._notify_changed,
         ).grid(row=0, column=0, padx=(UI_PAD_MD, UI_PAD_SM), pady=UI_PAD_SM, sticky="w")
 
-        ttk.Label(self, text=txt("Toggle trigger:", "토글 트리거:")).grid(
+        self.lbl_trigger = ttk.Label(self, text=txt("Toggle trigger:", "토글 트리거:"))
+        self.lbl_trigger.grid(
             row=0, column=1, padx=(0, UI_PAD_SM), pady=UI_PAD_SM, sticky="w"
         )
         self.key_entry = ttk.Entry(
@@ -173,6 +174,8 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
             ),
             foreground=theme.INK_MUTED,
         )
+        # Must be laid out once here: _set_detail_visible re-shows it with a
+        # bare grid(), which only restores previously supplied options.
         self.lbl_help.grid(
             row=2,
             column=0,
@@ -181,7 +184,42 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
             pady=(0, UI_PAD_SM),
             sticky="w",
         )
+        # One-line stand-in shown while the feature is off, so an unused
+        # toggle set costs a single row instead of the full panel.
+        self.lbl_collapsed_hint = ttk.Label(
+            self,
+            text=txt(
+                "Off — enable to turn a set of events on and off with one key while running.",
+                "사용 안 함 — 켜면 실행 중 키 하나로 이벤트 묶음을 한 번에 켜고 끕니다.",
+            ),
+            foreground=theme.INK_MUTED,
+        )
         self._sync_state()
+
+    def _set_detail_visible(self, visible: bool) -> None:
+        detail_widgets = (
+            self.lbl_trigger,
+            self.key_entry,
+            self.capture_button,
+            self.clear_button,
+            self.lbl_capture,
+            self.lbl_help,
+        )
+        if visible:
+            self.lbl_collapsed_hint.grid_remove()
+            for widget in detail_widgets:
+                widget.grid()
+            return
+        for widget in detail_widgets:
+            widget.grid_remove()
+        self.lbl_collapsed_hint.grid(
+            row=0,
+            column=1,
+            columnspan=4,
+            padx=(0, UI_PAD_MD),
+            pady=UI_PAD_SM,
+            sticky="w",
+        )
 
     def get_data(self) -> tuple[bool, Optional[str]]:
         return self.enabled_var.get(), (self._selected_trigger or None)
@@ -201,6 +239,7 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         self.key_entry.config(state="readonly" if enabled else "disabled")
         self.capture_button.config(state="normal" if enabled else "disabled")
         self.clear_button.config(state="normal" if enabled else "disabled")
+        self._set_detail_visible(enabled)
         if not enabled:
             self._stop_capture()
             self.capture_status_var.set("")

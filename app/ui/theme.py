@@ -72,6 +72,15 @@ COND_INACTIVE_FG = "#7A2820"
 COND_INACTIVE_BG = "#F2D9D4"
 DANGER_BASE = "#A33627"
 
+# Event row selection. The marker is shown only while selected — painting an
+# "idle" marker would require knowing the real row background, which macOS
+# aqua decides for itself. Mid-tone green so it separates from both a light
+# and a dark row background.
+ROW_BG = SURFACE_PAPER
+ROW_SELECTED_BG = SIGNAL_TINT
+ROW_MARKER_SELECTED = "#3A8F63"
+ROW_MARKER_WIDTH = 4
+
 
 # ---------------------------------------------------------------------------
 # Spacing — 4px base grid (use these instead of arbitrary padx/pady)
@@ -225,3 +234,12 @@ def install_styles(root: tk.Misc) -> None:
         )
     except tk.TclError:
         pass
+
+    # Event list rows — idle vs selected. Paired frame/label styles so the
+    # tint covers the whole row instead of leaving label-shaped holes.
+    for suffix, background in (("Row", ROW_BG), ("RowSelected", ROW_SELECTED_BG)):
+        try:
+            style.configure(f"{suffix}.TFrame", background=background)
+            style.configure(f"{suffix}.TLabel", background=background)
+        except tk.TclError:
+            pass

@@ -4,8 +4,19 @@ from unittest.mock import MagicMock, patch
 
 from app.core.models import EventModel, ProfileModel
 from app.ui import theme
-from app.ui.profile_event_list import EventListFrame, EventRow
-from app.core.profile_events import event_group_key_sort_key, event_group_name_sort_key
+from app.ui.profile_event_list import (
+    EventListFrame,
+    EventRow,
+    resolve_selection,
+    selection_mode_for_state,
+)
+from app.core.profile_events import (
+    EventFilterState,
+    event_group_key_sort_key,
+    event_group_name_sort_key,
+    event_needs_attention,
+    filter_event_indices,
+)
 from app.ui.profiles import KeystrokeProfiles, _profile_fingerprint
 from app.utils.i18n import set_language
 
@@ -38,6 +49,17 @@ class FakeVar:
 
     def set(self, value):
         self.value = value
+
+
+class FakeBoolVar:
+    def __init__(self, value=False):
+        self.value = bool(value)
+
+    def get(self):
+        return self.value
+
+    def set(self, value):
+        self.value = bool(value)
 
 
 class FakeToolTip:
@@ -199,6 +221,7 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         )
         stub.update_events = MagicMock()
         stub.save_cb = MagicMock()
+        stub.reveal_event = MagicMock()
 
         edited = EventModel(event_name="NewName", key_to_enter="A")
         stub._on_editor_save(edited, is_edit=True, row=0)
@@ -214,6 +237,7 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         stub.profile = ProfileModel(event_list=[dependent])
         stub.update_events = MagicMock()
         stub.save_cb = MagicMock()
+        stub.reveal_event = MagicMock()
 
         new_evt = EventModel(event_name="NewEvent", key_to_enter="B")
         stub._on_editor_save(new_evt, is_edit=False, row=1)
@@ -234,6 +258,7 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         stub.profile = ProfileModel(event_list=[original])
         stub.update_events = MagicMock()
         stub.save_cb = MagicMock()
+        stub.reveal_event = MagicMock()
 
         edited = EventModel(event_name="OldName", key_to_enter="B")
         stub._on_editor_save(edited, is_edit=True, row=0)
@@ -294,58 +319,141 @@ class TestEditorSaveRenamePropagation(unittest.TestCase):
         self.assertEqual(dependent.conditions, {"NewName": True})
 
 
+def _make_deletable_stub(events):
+    """삭제/되돌리기 경로를 실행할 수 있는 EventListFrame stub."""
+    set_language("en")
+    stub = _make_event_list_frame_stub()
+    stub.profile = ProfileModel(event_list=events)
+    stub.rows = [FakeDestroyable() for _ in events]
+    stub.selected_indices = set()
+    stub.selection_anchor = None
+    stub._undo_delete = None
+    stub.update_events = MagicMock()
+    stub._update_row_indices = MagicMock()
+    stub._update_delete_buttons = MagicMock()
+    stub._sync_empty_state = MagicMock()
+    stub._sync_row_selection = MagicMock()
+    stub._sync_bulk_bar = MagicMock()
+    stub.select_cb = None
+    stub.status_cb = MagicMock()
+    stub.save_cb = MagicMock()
+    stub.win = type("FakeWin", (), {"update_idletasks": lambda self: None})()
+    return stub
+
+
 class TestRemoveRowConditionCleanup(unittest.TestCase):
     """EventListFrame._remove_row: 삭제 시 조건 참조 정리"""
 
     def test_remove_row_cleans_orphaned_condition_references(self):
-        stub = _make_event_list_frame_stub()
         dependent = EventModel(event_name="B", conditions={"A": True, "Other": False})
-        stub.profile = ProfileModel(
-            event_list=[
-                EventModel(event_name="A"),
-                dependent,
-                EventModel(event_name="C"),
-            ]
+        stub = _make_deletable_stub(
+            [EventModel(event_name="A"), dependent, EventModel(event_name="C")]
         )
-        first_row = FakeDestroyable()
-        second_row = FakeDestroyable()
-        third_row = FakeDestroyable()
-        stub.rows = [first_row, second_row, third_row]
-        stub._update_row_indices = MagicMock()
-        stub._update_delete_buttons = MagicMock()
-        stub._sync_empty_state = MagicMock()
-        stub.save_cb = MagicMock()
-        stub.win = type("FakeWin", (), {"update_idletasks": lambda self: None})()
 
-        stub._remove_row(first_row, 0)
+        stub._remove_row(stub.rows[0], 0)
 
-        self.assertTrue(first_row.destroyed)
+        self.assertEqual([e.event_name for e in stub.profile.event_list], ["B", "C"])
         self.assertEqual(dependent.conditions, {"Other": False})
         stub.save_cb.assert_called_once()
 
     def test_remove_row_preserves_conditions_when_same_name_still_exists(self):
-        stub = _make_event_list_frame_stub()
         dependent = EventModel(event_name="B", conditions={"A": True})
-        stub.profile = ProfileModel(
-            event_list=[
+        stub = _make_deletable_stub(
+            [
                 EventModel(event_name="A"),
                 EventModel(event_name="A"),
                 dependent,
             ]
         )
-        first_row = FakeDestroyable()
-        second_row = FakeDestroyable()
-        third_row = FakeDestroyable()
-        stub.rows = [first_row, second_row, third_row]
-        stub._update_row_indices = MagicMock()
-        stub._update_delete_buttons = MagicMock()
-        stub._sync_empty_state = MagicMock()
-        stub.save_cb = MagicMock()
-        stub.win = type("FakeWin", (), {"update_idletasks": lambda self: None})()
 
-        stub._remove_row(first_row, 0)
+        stub._remove_row(stub.rows[0], 0)
 
         self.assertEqual(dependent.conditions, {"A": True})
+
+    def test_remove_row_keeps_the_last_remaining_event(self):
+        stub = _make_deletable_stub([EventModel(event_name="Only")])
+
+        stub._remove_row(stub.rows[0], 0)
+
+        self.assertEqual(len(stub.profile.event_list), 1)
+
+
+class TestDeleteUndo(unittest.TestCase):
+    """삭제는 되돌릴 수 있어야 한다 (자동저장이라 확인 대화상자만으로는 부족)."""
+
+    def test_undo_restores_the_deleted_event_at_its_position(self):
+        stub = _make_deletable_stub(
+            [
+                EventModel(event_name="A"),
+                EventModel(event_name="B"),
+                EventModel(event_name="C"),
+            ]
+        )
+
+        stub._delete_indices([1])
+        self.assertEqual([e.event_name for e in stub.profile.event_list], ["A", "C"])
+
+        self.assertTrue(stub.undo_delete())
+        self.assertEqual(
+            [e.event_name for e in stub.profile.event_list], ["A", "B", "C"]
+        )
+
+    def test_undo_restores_condition_references_stripped_by_the_delete(self):
+        dependent = EventModel(event_name="B", conditions={"A": True, "Other": False})
+        stub = _make_deletable_stub([EventModel(event_name="A"), dependent])
+
+        stub._delete_indices([0])
+        self.assertEqual(dependent.conditions, {"Other": False})
+
+        stub.undo_delete()
+
+        self.assertEqual(dependent.conditions, {"A": True, "Other": False})
+
+    def test_undo_restores_a_multi_selection_delete(self):
+        stub = _make_deletable_stub(
+            [
+                EventModel(event_name="A"),
+                EventModel(event_name="B"),
+                EventModel(event_name="C"),
+                EventModel(event_name="D"),
+            ]
+        )
+
+        stub._delete_indices([0, 2])
+        self.assertEqual([e.event_name for e in stub.profile.event_list], ["B", "D"])
+
+        stub.undo_delete()
+
+        self.assertEqual(
+            [e.event_name for e in stub.profile.event_list], ["A", "B", "C", "D"]
+        )
+
+    def test_delete_offers_undo_through_the_status_line(self):
+        stub = _make_deletable_stub(
+            [EventModel(event_name="A"), EventModel(event_name="B")]
+        )
+
+        stub._delete_indices([0])
+
+        _, kwargs = stub.status_cb.call_args
+        self.assertEqual(kwargs["action_label"], "Undo")
+        kwargs["action"]()
+        self.assertEqual([e.event_name for e in stub.profile.event_list], ["A", "B"])
+
+    def test_undo_is_a_no_op_without_a_pending_delete(self):
+        stub = _make_deletable_stub([EventModel(event_name="A")])
+
+        self.assertFalse(stub.undo_delete())
+
+    def test_bulk_delete_never_empties_the_profile(self):
+        stub = _make_deletable_stub(
+            [EventModel(event_name="A"), EventModel(event_name="B")]
+        )
+
+        removed = stub._delete_indices([0, 1])
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(len(stub.profile.event_list), 1)
 
 
 class TestSortEventsLogic(unittest.TestCase):
@@ -355,6 +463,17 @@ class TestSortEventsLogic(unittest.TestCase):
         set_language("en")
         stub = _make_event_list_frame_stub()
         stub.profile = ProfileModel(event_list=events)
+        return stub
+
+    def _make_running_sort_stub(self, events):
+        """정렬을 실제로 실행할 수 있는 stub (상태줄 콜백 포함)."""
+        stub = self._make_sortable_stub(events)
+        stub.win = object()
+        stub.save_names = lambda: None
+        stub.update_events = lambda: None
+        stub.save_cb = lambda *args, **kwargs: None
+        stub.clear_selection = lambda: None
+        stub.status_cb = MagicMock()
         return stub
 
     def _name_sort_key(self, stub, e):
@@ -434,37 +553,40 @@ class TestSortEventsLogic(unittest.TestCase):
         sorted_events = sorted(events, key=lambda e: self._name_sort_key(stub, e))
         self.assertEqual([e.event_name for e in sorted_events], ["Zulu", "Alpha"])
 
-    def test_sort_events_by_key_uses_default_language_dialog_message(self):
+    def test_sort_by_key_reports_in_the_status_line(self):
         events = [
             EventModel(event_name="B", execute_action=True, key_to_enter="B"),
             EventModel(event_name="A", execute_action=False, key_to_enter=None),
         ]
-        stub = self._make_sortable_stub(events)
-        stub.win = object()
-        stub.save_names = lambda: None
-        stub.update_events = lambda: None
-        stub.save_cb = lambda *args, **kwargs: None
+        stub = self._make_running_sort_stub(events)
 
         with patch("app.ui.profile_event_list.messagebox.showinfo") as mock_show:
             stub._sort_events_by_key()
 
-        mock_show.assert_called_once()
-        args, kwargs = mock_show.call_args
-        self.assertEqual(args[0], "Key Sort Complete")
-        self.assertIn("Condition", args[1])
-        self.assertIn("Input Key", args[1])
-        self.assertEqual(kwargs["parent"], stub.win)
+        mock_show.assert_not_called()
+        stub.status_cb.assert_called_once_with("Key Sort Complete")
 
-    def test_sort_events_by_name_uses_default_language_dialog_message(self):
+    def test_sort_by_name_reports_in_the_status_line(self):
         events = [
             EventModel(event_name="B", execute_action=True, key_to_enter="B"),
             EventModel(event_name="A", execute_action=False, key_to_enter=None),
         ]
-        stub = self._make_sortable_stub(events)
-        stub.win = object()
-        stub.save_names = lambda: None
-        stub.update_events = lambda: None
-        stub.save_cb = lambda *args, **kwargs: None
+        stub = self._make_running_sort_stub(events)
+
+        with patch("app.ui.profile_event_list.messagebox.showinfo") as mock_show:
+            stub._sort_events_by_name()
+
+        mock_show.assert_not_called()
+        stub.status_cb.assert_called_once_with("Name Sort Complete")
+        self.assertEqual([e.event_name for e in stub.profile.event_list], ["A", "B"])
+
+    def test_sort_falls_back_to_a_dialog_without_a_status_line(self):
+        events = [
+            EventModel(event_name="B", execute_action=True, key_to_enter="B"),
+            EventModel(event_name="A", execute_action=False, key_to_enter=None),
+        ]
+        stub = self._make_running_sort_stub(events)
+        stub.status_cb = None
 
         with patch("app.ui.profile_event_list.messagebox.showinfo") as mock_show:
             stub._sort_events_by_name()
@@ -472,8 +594,6 @@ class TestSortEventsLogic(unittest.TestCase):
         mock_show.assert_called_once()
         args, kwargs = mock_show.call_args
         self.assertEqual(args[0], "Name Sort Complete")
-        self.assertIn("Event Type", args[1])
-        self.assertIn("Name", args[1])
         self.assertEqual(kwargs["parent"], stub.win)
 
     def test_group_name_sort_clusters_groups_then_names(self):
@@ -499,50 +619,31 @@ class TestSortEventsLogic(unittest.TestCase):
         ordered = sorted(events, key=event_group_key_sort_key)
         self.assertEqual([e.event_name for e in ordered], ["Alpha", "Zulu", "Solo"])
 
-    def test_sort_events_by_group_name_uses_default_language_dialog_message(self):
+    def test_sort_by_group_name_reports_in_the_status_line(self):
         events = [
             EventModel(event_name="B", group_id="G", execute_action=True),
             EventModel(event_name="A", group_id=None, execute_action=False),
         ]
-        stub = self._make_sortable_stub(events)
-        stub.win = object()
-        stub.save_names = lambda: None
-        stub.update_events = lambda: None
-        stub.save_cb = lambda *args, **kwargs: None
+        stub = self._make_running_sort_stub(events)
 
-        with patch("app.ui.profile_event_list.messagebox.showinfo") as mock_show:
-            stub._sort_events_by_group_name()
+        stub._sort_events_by_group_name()
 
-        mock_show.assert_called_once()
-        args, kwargs = mock_show.call_args
-        self.assertEqual(args[0], "Group / Name Sort Complete")
-        self.assertIn("Group", args[1])
-        self.assertIn("Name", args[1])
-        self.assertEqual(kwargs["parent"], stub.win)
+        stub.status_cb.assert_called_once_with("Group / Name Sort Complete")
         self.assertEqual(
             [e.event_name for e in stub.profile.event_list],
             ["B", "A"],
         )
 
-    def test_sort_events_by_group_key_uses_default_language_dialog_message(self):
+    def test_sort_by_group_key_reports_in_the_status_line(self):
         events = [
             EventModel(event_name="B", group_id="G", key_to_enter="B"),
             EventModel(event_name="A", group_id="G", key_to_enter="A"),
         ]
-        stub = self._make_sortable_stub(events)
-        stub.win = object()
-        stub.save_names = lambda: None
-        stub.update_events = lambda: None
-        stub.save_cb = lambda *args, **kwargs: None
+        stub = self._make_running_sort_stub(events)
 
-        with patch("app.ui.profile_event_list.messagebox.showinfo") as mock_show:
-            stub._sort_events_by_group_key()
+        stub._sort_events_by_group_key()
 
-        mock_show.assert_called_once()
-        args, kwargs = mock_show.call_args
-        self.assertEqual(args[0], "Group / Key Sort Complete")
-        self.assertIn("Group", args[1])
-        self.assertEqual(kwargs["parent"], stub.win)
+        stub.status_cb.assert_called_once_with("Group / Key Sort Complete")
         self.assertEqual(
             [e.event_name for e in stub.profile.event_list],
             ["A", "B"],
@@ -719,19 +820,82 @@ class TestProfileOverviewBadges(unittest.TestCase):
         stub.lbl_save_badge.config.assert_not_called()
 
 
-class TestProfileNavRailActions(unittest.TestCase):
-    def test_nav_import_uses_event_list_import_callback(self):
+class TestProfileNavRailFilters(unittest.TestCase):
+    """NavRail은 액션이 아니라 필터를 소유한다 (액션은 리스트 툴바로 일원화)."""
+
+    def _make_stub(self, events=None):
+        set_language("en")
         stub = KeystrokeProfiles.__new__(KeystrokeProfiles)
-        stub.win = object()
+        stub.profile = ProfileModel(event_list=events or [])
+        stub.filter_state = EventFilterState()
         stub.e_frame = MagicMock()
-        stub.prof_dir = Path("profiles")
+        stub.nav_filter_vars = {
+            key: FakeBoolVar() for key in ("active", "grouped", "cond", "attention")
+        }
+        stub._refresh_nav_groups = MagicMock()
+        return stub
 
-        with patch("app.ui.profiles.EventImporter") as importer:
-            stub._nav_action_import()
+    def test_rail_no_longer_exposes_action_forwards(self):
+        for removed in (
+            "_nav_action_add",
+            "_nav_action_import",
+            "_nav_action_sort",
+            "_nav_action_graph",
+        ):
+            self.assertFalse(
+                hasattr(KeystrokeProfiles, removed),
+                f"{removed} should be gone: actions live in the list toolbar",
+            )
 
-        importer.assert_called_once_with(
-            stub.win, stub.e_frame._import, profiles_dir=stub.prof_dir
+    def test_checkbox_state_reaches_the_event_list(self):
+        stub = self._make_stub()
+        stub.nav_filter_vars["cond"].set(True)
+
+        stub._on_nav_filter_changed()
+
+        self.assertTrue(stub.filter_state.condition_only)
+        stub.e_frame.set_filter_state.assert_called_once_with(stub.filter_state)
+
+    def test_group_click_toggles_that_group(self):
+        stub = self._make_stub()
+
+        stub._toggle_group_filter("Alpha")
+        self.assertEqual(stub.filter_state.group_ids, frozenset({"Alpha"}))
+
+        stub._toggle_group_filter("Alpha")
+        self.assertEqual(stub.filter_state.group_ids, frozenset())
+
+    def test_search_query_survives_a_rail_toggle(self):
+        stub = self._make_stub()
+        stub.filter_state = EventFilterState(query="atk")
+        stub.nav_filter_vars["active"].set(True)
+
+        stub._on_nav_filter_changed()
+
+        self.assertEqual(stub.filter_state.query, "atk")
+        self.assertTrue(stub.filter_state.active_only)
+
+    def test_attention_badge_click_filters_to_events_missing_a_key(self):
+        stub = self._make_stub(
+            [
+                EventModel(event_name="A", execute_action=True, key_to_enter=None),
+                EventModel(event_name="B", execute_action=True, key_to_enter="X"),
+            ]
         )
+
+        stub._on_attention_badge_click()
+
+        self.assertTrue(stub.filter_state.attention_only)
+
+    def test_attention_badge_click_is_inert_when_nothing_needs_attention(self):
+        stub = self._make_stub(
+            [EventModel(event_name="B", execute_action=True, key_to_enter="X")]
+        )
+
+        stub._on_attention_badge_click()
+
+        self.assertFalse(stub.filter_state.attention_only)
+        stub.e_frame.set_filter_state.assert_not_called()
 
 
 class TestProfileSaveValidation(unittest.TestCase):
@@ -773,6 +937,187 @@ class TestProfileSaveValidation(unittest.TestCase):
 
         self.assertFalse(renamed)
         mock_save.assert_not_called()
+
+
+class TestEventFiltering(unittest.TestCase):
+    """검색/필터는 순수 함수라 GUI 없이 검증한다."""
+
+    def setUp(self):
+        set_language("en")
+        self.events = [
+            EventModel(
+                event_name="Attack", key_to_enter="A", group_id="Combat", use_event=True
+            ),
+            EventModel(
+                event_name="Heal", key_to_enter="H", group_id=None, use_event=False
+            ),
+            EventModel(
+                event_name="Watch HP",
+                execute_action=False,
+                key_to_enter=None,
+                group_id="Combat",
+            ),
+            EventModel(
+                event_name="Broken", execute_action=True, key_to_enter=None, group_id=None
+            ),
+        ]
+
+    def test_no_filter_shows_everything(self):
+        state = EventFilterState()
+        self.assertFalse(state.is_active())
+        self.assertEqual(filter_event_indices(self.events, state), [0, 1, 2, 3])
+
+    def test_query_matches_name_key_and_group(self):
+        self.assertEqual(
+            filter_event_indices(self.events, EventFilterState(query="att")), [0]
+        )
+        self.assertEqual(
+            filter_event_indices(self.events, EventFilterState(query="combat")), [0, 2]
+        )
+        self.assertEqual(
+            filter_event_indices(self.events, EventFilterState(query="h")), [1, 2]
+        )
+
+    def test_query_is_case_insensitive_and_trimmed(self):
+        self.assertEqual(
+            filter_event_indices(self.events, EventFilterState(query="  ATTACK ")), [0]
+        )
+
+    def test_active_only_keeps_checked_events(self):
+        self.assertEqual(
+            filter_event_indices(self.events, EventFilterState(active_only=True)),
+            [0, 2, 3],
+        )
+
+    def test_grouped_only_keeps_events_with_a_group(self):
+        self.assertEqual(
+            filter_event_indices(self.events, EventFilterState(grouped_only=True)),
+            [0, 2],
+        )
+
+    def test_condition_only_keeps_non_action_events(self):
+        self.assertEqual(
+            filter_event_indices(self.events, EventFilterState(condition_only=True)), [2]
+        )
+
+    def test_attention_only_keeps_action_events_without_a_key(self):
+        self.assertEqual(
+            filter_event_indices(self.events, EventFilterState(attention_only=True)), [3]
+        )
+
+    def test_group_ids_restrict_to_the_picked_groups(self):
+        state = EventFilterState(group_ids=frozenset({"Combat"}))
+        self.assertEqual(filter_event_indices(self.events, state), [0, 2])
+
+    def test_filters_combine_with_and(self):
+        state = EventFilterState(
+            query="watch", group_ids=frozenset({"Combat"}), condition_only=True
+        )
+        self.assertEqual(filter_event_indices(self.events, state), [2])
+
+    def test_conflicting_filters_yield_nothing(self):
+        state = EventFilterState(condition_only=True, attention_only=True)
+        self.assertEqual(filter_event_indices(self.events, state), [])
+
+    def test_condition_only_events_never_need_attention(self):
+        self.assertFalse(event_needs_attention(self.events[2]))
+        self.assertTrue(event_needs_attention(self.events[3]))
+
+    def test_whitespace_key_still_needs_attention(self):
+        self.assertTrue(
+            event_needs_attention(EventModel(event_name="X", key_to_enter="   "))
+        )
+
+
+class TestSelectionGestures(unittest.TestCase):
+    """다중선택 제스처는 순수 함수로 분리해 검증한다."""
+
+    def test_plain_click_replaces_the_selection(self):
+        selection, anchor = resolve_selection({1, 2}, 1, 5, "replace")
+        self.assertEqual(selection, {5})
+        self.assertEqual(anchor, 5)
+
+    def test_toggle_adds_and_removes(self):
+        selection, _ = resolve_selection({1}, 1, 3, "toggle")
+        self.assertEqual(selection, {1, 3})
+        selection, _ = resolve_selection(selection, 3, 1, "toggle")
+        self.assertEqual(selection, {3})
+
+    def test_range_spans_from_the_anchor_in_either_direction(self):
+        selection, anchor = resolve_selection({2}, 2, 5, "range")
+        self.assertEqual(selection, {2, 3, 4, 5})
+        self.assertEqual(anchor, 2)
+
+        selection, _ = resolve_selection({5}, 5, 2, "range")
+        self.assertEqual(selection, {2, 3, 4, 5})
+
+    def test_range_without_an_anchor_behaves_like_a_plain_click(self):
+        selection, anchor = resolve_selection(set(), None, 4, "range")
+        self.assertEqual(selection, {4})
+        self.assertEqual(anchor, 4)
+
+    def test_modifier_bits_map_to_gestures(self):
+        self.assertEqual(selection_mode_for_state(0), "replace")
+        self.assertEqual(selection_mode_for_state(0x0001), "range")
+        self.assertEqual(selection_mode_for_state(0x0004), "toggle")
+
+    def test_shift_wins_over_control(self):
+        self.assertEqual(selection_mode_for_state(0x0005), "range")
+
+
+class TestBulkActions(unittest.TestCase):
+    """선택한 여러 이벤트를 한 번에 바꾼다."""
+
+    def _make_stub(self):
+        stub = _make_deletable_stub(
+            [
+                EventModel(event_name="A", use_event=True),
+                EventModel(event_name="B", use_event=True),
+                EventModel(event_name="C", use_event=True),
+            ]
+        )
+        stub.selected_indices = {0, 2}
+        return stub
+
+    def test_bulk_use_off_only_touches_the_selection(self):
+        stub = self._make_stub()
+
+        stub._bulk_set_use(False)
+
+        self.assertEqual(
+            [e.use_event for e in stub.profile.event_list], [False, True, False]
+        )
+
+    def test_bulk_toggle_set_adds_when_any_member_is_missing(self):
+        stub = self._make_stub()
+        stub.profile.event_list[0].runtime_toggle_member = True
+
+        stub._bulk_toggle_runtime_member()
+
+        self.assertEqual(
+            [e.runtime_toggle_member for e in stub.profile.event_list],
+            [True, False, True],
+        )
+
+    def test_bulk_toggle_set_removes_when_all_are_members(self):
+        stub = self._make_stub()
+        for index in (0, 2):
+            stub.profile.event_list[index].runtime_toggle_member = True
+
+        stub._bulk_toggle_runtime_member()
+
+        self.assertEqual(
+            [e.runtime_toggle_member for e in stub.profile.event_list],
+            [False, False, False],
+        )
+
+    def test_bulk_actions_are_inert_without_a_selection(self):
+        stub = self._make_stub()
+        stub.selected_indices = set()
+
+        stub._bulk_set_use(False)
+
+        self.assertEqual([e.use_event for e in stub.profile.event_list], [True] * 3)
 
 
 if __name__ == "__main__":

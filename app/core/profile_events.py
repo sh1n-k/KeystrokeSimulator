@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 
 from app.core.models import EventModel
 
@@ -109,3 +109,72 @@ def event_group_name_sort_key(event: EventModel) -> EventSortKey:
 
 def event_group_key_sort_key(event: EventModel) -> EventSortKey:
     return (*_group_sort_prefix(event), *event_key_sort_key(event))
+
+
+# ---------------------------------------------------------------------------
+# Filtering — shared by the profile manager's nav rail, search box and badges.
+# ---------------------------------------------------------------------------
+
+
+def event_needs_attention(event: EventModel) -> bool:
+    """An action event without an input key cannot run. Single source of truth
+    for the 'Attention' badge count and the attention filter."""
+    return bool(getattr(event, "execute_action", True)) and not (
+        event.key_to_enter or ""
+    ).strip()
+
+
+@dataclass(frozen=True)
+class EventFilterState:
+    """Which events the list should show. All fields combine with AND."""
+
+    query: str = ""
+    active_only: bool = False
+    grouped_only: bool = False
+    condition_only: bool = False
+    attention_only: bool = False
+    group_ids: frozenset[str] = field(default_factory=lambda: frozenset[str]())
+
+    def is_active(self) -> bool:
+        return bool(
+            self.query.strip()
+            or self.active_only
+            or self.grouped_only
+            or self.condition_only
+            or self.attention_only
+            or self.group_ids
+        )
+
+
+def event_matches_query(event: EventModel, query: str) -> bool:
+    """Substring match over the fields visible in a row: name, key, group."""
+    needle = query.strip().casefold()
+    if not needle:
+        return True
+    haystacks = (
+        event.event_name or "",
+        event.key_to_enter or "",
+        event.group_id or "",
+    )
+    return any(needle in value.casefold() for value in haystacks)
+
+
+def event_matches_filter(event: EventModel, state: EventFilterState) -> bool:
+    if state.active_only and not getattr(event, "use_event", True):
+        return False
+    if state.grouped_only and not (event.group_id or "").strip():
+        return False
+    if state.condition_only and getattr(event, "execute_action", True):
+        return False
+    if state.attention_only and not event_needs_attention(event):
+        return False
+    if state.group_ids and (event.group_id or "") not in state.group_ids:
+        return False
+    return event_matches_query(event, state.query)
+
+
+def filter_event_indices(
+    events: list[EventModel], state: EventFilterState
+) -> list[int]:
+    """Positions of the events that pass `state`, in list order."""
+    return [i for i, event in enumerate(events) if event_matches_filter(event, state)]
