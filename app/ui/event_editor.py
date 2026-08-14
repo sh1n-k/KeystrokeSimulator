@@ -540,13 +540,13 @@ class KeystrokeEventEditor:
         gb_screen.grid(row=0, column=0, sticky="w", padx=(0, theme.SPACE_2))
         gb_pixel = ttk.LabelFrame(
             coord_frame,
-            text=txt("Target pixel (click capture)", "대상 픽셀 (캡처본 클릭)"),
+            text=txt("Target pixel (capture space)", "대상 픽셀 (캡처본 기준)"),
         )
         gb_pixel.grid(row=0, column=1, sticky="w")
         self.coord_entries = self.create_coord_entries(
             gb_screen, [txt("X:", "X:"), txt("Y:", "Y:")]
         ) + self.create_coord_entries(
-            gb_pixel, [txt("X:", "X:"), txt("Y:", "Y:")], readonly=True
+            gb_pixel, [txt("X:", "X:"), txt("Y:", "Y:")], pixel=True
         )
 
         f_key = ttk.Frame(right)
@@ -1271,12 +1271,11 @@ class KeystrokeEventEditor:
             return
 
     def create_coord_entries(
-        self, parent: tk.Misc, labels: Sequence[str], readonly: bool = False
+        self, parent: tk.Misc, labels: Sequence[str], pixel: bool = False
     ) -> list[tk.Entry]:
         """좌표 한 쌍(X/Y)을 만든다.
 
-        readonly 그룹은 표시 전용이다. 편집을 허용하면 입력한 값이 반영되지
-        않은 채 무시되어 오해를 부른다.
+        pixel 그룹은 캡처본 안의 대상 지점이라 화면 위치와 반영 경로가 다르다.
         """
         entries: list[tk.Entry] = []
 
@@ -1301,23 +1300,43 @@ class KeystrokeEventEditor:
             entries.append(e)
 
         for e in entries:
-            if readonly:
-                e.config(state="readonly", readonlybackground=theme.SURFACE_SUNKEN)
-                continue
             e.bind("<Up>", make_adjust_handler(e, 1))
             e.bind("<Down>", make_adjust_handler(e, -1))
-            e.bind("<FocusOut>", self.update_position_from_entries)
+            if pixel:
+                # 타이핑하는 즉시 캡처본 크로스라인이 따라 움직인다.
+                e.bind("<KeyRelease>", self.update_clicked_position_from_entries)
+                e.bind("<FocusOut>", self._on_pixel_entry_focus_out)
+            else:
+                e.bind("<FocusOut>", self.update_position_from_entries)
         return entries
+
+    def _is_pixel_entry(self, entry: tk.Entry) -> bool:
+        return len(self.coord_entries) >= 4 and entry in self.coord_entries[2:4]
+
+    def _pixel_entry_limit(self, entry: tk.Entry) -> int | None:
+        """대상 픽셀 입력의 상한 (캡처본 크기 기준)."""
+        img = self.held_img
+        if img is None or not self._is_pixel_entry(entry):
+            return None
+        is_x = entry is self.coord_entries[2]
+        return (img.width if is_x else img.height) - 1
 
     def _adj_entry(self, entry: tk.Entry, delta: int) -> str:
         try:
             val = int(entry.get()) + delta
-            entry.delete(0, tk.END)
-            entry.insert(0, str(val))
-            if entry in self.coord_entries[:2]:
-                self.update_position_from_entries()
         except ValueError:
-            pass
+            return "break"
+        if self._is_pixel_entry(entry):
+            limit = self._pixel_entry_limit(entry)
+            if limit is None:
+                return "break"
+            val = max(0, min(limit, val))
+        entry.delete(0, tk.END)
+        entry.insert(0, str(val))
+        if entry in self.coord_entries[:2]:
+            self.update_position_from_entries()
+        else:
+            self.update_clicked_position_from_entries()
         return "break"
 
     def check_key_states(self) -> None:
@@ -2090,6 +2109,55 @@ class KeystrokeEventEditor:
         except ValueError:
             pass
 
+    def update_clicked_position_from_entries(
+        self, event: object | None = None
+    ) -> None:
+        """대상 픽셀 입력을 반영하고 캡처본의 크로스라인을 옮긴다.
+
+        타이핑 도중의 범위 밖 값은 무시한다. 확정은 포커스가 빠질 때 한다.
+        """
+        img = self.held_img
+        if img is None or len(self.coord_entries) < 4:
+            return
+        try:
+            position = (
+                int(self.coord_entries[2].get()),
+                int(self.coord_entries[3].get()),
+            )
+        except ValueError:
+            return
+        if not (0 <= position[0] < img.width and 0 <= position[1] < img.height):
+            return
+        if self.clicked_pos == position:
+            return
+
+        self.clicked_pos = position
+        self._update_ref_pixel(img, position)
+        self._sync_region_constraints()
+        self._on_region_size_change()
+        self._draw_overlay(img, self.lbl_img2)
+        self._refresh_basic_guidance()
+
+    def _on_pixel_entry_focus_out(self, event: object | None = None) -> None:
+        """포커스를 벗어날 때 범위 밖 값이나 빈 칸을 정리한다."""
+        img = self.held_img
+        if img is None or len(self.coord_entries) < 4:
+            return
+        try:
+            x = int(self.coord_entries[2].get())
+            y = int(self.coord_entries[3].get())
+        except ValueError:
+            if self.clicked_pos:
+                self._set_entries(self.coord_entries[2:], *self.clicked_pos)
+            return
+        clamped = (
+            max(0, min(img.width - 1, x)),
+            max(0, min(img.height - 1, y)),
+        )
+        if (x, y) != clamped:
+            self._set_entries(self.coord_entries[2:], *clamped)
+        self.update_clicked_position_from_entries()
+
     def load_stored_event(self, func: EventFactory) -> None:
         if not (evt := func()):
             default_name = f"Event_{len(self.existing_events) + 1}"
@@ -2172,24 +2240,10 @@ class KeystrokeEventEditor:
         self._refresh_basic_guidance()
 
     @staticmethod
-    def _write_entry(entry: tk.Entry, value: str) -> None:
-        """readonly 좌표 필드에도 값을 쓸 수 있도록 잠시 상태를 해제한다."""
-        try:
-            was_readonly = str(entry.cget("state")) == "readonly"
-        except tk.TclError:
-            was_readonly = False
-        if was_readonly:
-            entry.config(state="normal")
-        entry.delete(0, tk.END)
-        if value:
-            entry.insert(0, value)
-        if was_readonly:
-            entry.config(state="readonly")
-
-    @staticmethod
     def _set_entries(entries: Sequence[tk.Entry], x: int, y: int) -> None:
         for i, val in enumerate((x, y)):
-            KeystrokeEventEditor._write_entry(entries[i], str(val))
+            entries[i].delete(0, tk.END)
+            entries[i].insert(0, str(val))
 
     def _safe_update_img_lbl(self, lbl: tk.Label, img: Image.Image) -> None:
         """위젯 존재 확인 후 안전하게 이미지 업데이트"""
@@ -2222,7 +2276,7 @@ class KeystrokeEventEditor:
     def _clear_capture(self) -> None:
         self.capture_session.clear_hold()
         for entry in self.coord_entries[2:]:
-            self._write_entry(entry, "")
+            entry.delete(0, tk.END)
         self._clear_preview_label(getattr(self, "lbl_img2", None))
         self._clear_preview_label(getattr(self, "lbl_ref", None))
         self._refresh_basic_guidance()
