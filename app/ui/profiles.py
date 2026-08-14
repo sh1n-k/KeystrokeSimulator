@@ -628,13 +628,6 @@ class KeystrokeProfiles:
 
     def _save(self, check_name: bool = True, reload: bool = True) -> bool:
         started = time.perf_counter()
-        if not self.profile.event_list:
-            raise ValueError(
-                txt(
-                    "At least one event must be set",
-                    "최소 1개 이상의 이벤트가 필요합니다",
-                )
-            )
         new_name, is_fav = self.p_frame.get_data()
         new_name = (new_name or "").strip()
 

@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 from app.core.models import EventModel, ProfileModel
 from app.ui import theme
 from app.ui.profile_event_list import EventListFrame, EventRow
-from app.ui.profiles import KeystrokeProfiles
+from app.core.profile_events import event_group_key_sort_key, event_group_name_sort_key
+from app.ui.profiles import KeystrokeProfiles, _profile_fingerprint
 from app.utils.i18n import set_language
 
 
@@ -475,6 +476,78 @@ class TestSortEventsLogic(unittest.TestCase):
         self.assertIn("Name", args[1])
         self.assertEqual(kwargs["parent"], stub.win)
 
+    def test_group_name_sort_clusters_groups_then_names(self):
+        events = [
+            EventModel(event_name="Solo", group_id=None),
+            EventModel(event_name="B2", group_id="Beta"),
+            EventModel(event_name="A2", group_id="Alpha"),
+            EventModel(event_name="B1", group_id="Beta"),
+            EventModel(event_name="A1", group_id="Alpha"),
+        ]
+        ordered = sorted(events, key=event_group_name_sort_key)
+        self.assertEqual(
+            [e.event_name for e in ordered],
+            ["A1", "A2", "B1", "B2", "Solo"],
+        )
+
+    def test_group_key_sort_uses_key_order_inside_group(self):
+        events = [
+            EventModel(event_name="Zulu", group_id="G", key_to_enter="B"),
+            EventModel(event_name="Alpha", group_id="G", key_to_enter="A"),
+            EventModel(event_name="Solo", group_id=None, key_to_enter="1"),
+        ]
+        ordered = sorted(events, key=event_group_key_sort_key)
+        self.assertEqual([e.event_name for e in ordered], ["Alpha", "Zulu", "Solo"])
+
+    def test_sort_events_by_group_name_uses_default_language_dialog_message(self):
+        events = [
+            EventModel(event_name="B", group_id="G", execute_action=True),
+            EventModel(event_name="A", group_id=None, execute_action=False),
+        ]
+        stub = self._make_sortable_stub(events)
+        stub.win = object()
+        stub.save_names = lambda: None
+        stub.update_events = lambda: None
+        stub.save_cb = lambda *args, **kwargs: None
+
+        with patch("app.ui.profile_event_list.messagebox.showinfo") as mock_show:
+            stub._sort_events_by_group_name()
+
+        mock_show.assert_called_once()
+        args, kwargs = mock_show.call_args
+        self.assertEqual(args[0], "Group / Name Sort Complete")
+        self.assertIn("Group", args[1])
+        self.assertIn("Name", args[1])
+        self.assertEqual(kwargs["parent"], stub.win)
+        self.assertEqual(
+            [e.event_name for e in stub.profile.event_list],
+            ["B", "A"],
+        )
+
+    def test_sort_events_by_group_key_uses_default_language_dialog_message(self):
+        events = [
+            EventModel(event_name="B", group_id="G", key_to_enter="B"),
+            EventModel(event_name="A", group_id="G", key_to_enter="A"),
+        ]
+        stub = self._make_sortable_stub(events)
+        stub.win = object()
+        stub.save_names = lambda: None
+        stub.update_events = lambda: None
+        stub.save_cb = lambda *args, **kwargs: None
+
+        with patch("app.ui.profile_event_list.messagebox.showinfo") as mock_show:
+            stub._sort_events_by_group_key()
+
+        mock_show.assert_called_once()
+        args, kwargs = mock_show.call_args
+        self.assertEqual(args[0], "Group / Key Sort Complete")
+        self.assertIn("Group", args[1])
+        self.assertEqual(kwargs["parent"], stub.win)
+        self.assertEqual(
+            [e.event_name for e in stub.profile.event_list],
+            ["A", "B"],
+        )
+
 
 class TestEventRowBadges(unittest.TestCase):
     def _make_row(self, event: EventModel):
@@ -681,6 +754,25 @@ class TestProfileSaveValidation(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Duplicate event names"):
             stub._save(check_name=True, reload=False)
+
+    def test_save_allows_empty_event_list(self):
+        set_language("en")
+        stub = KeystrokeProfiles.__new__(KeystrokeProfiles)
+        stub.profile = ProfileModel(name="Quick", event_list=[], favorite=False)
+        stub.prof_name = "Quick"
+        stub.prof_dir = Path(".")
+        stub.p_frame = MagicMock(get_data=lambda: ("Quick", False))
+        stub._last_saved_fingerprint = _profile_fingerprint(
+            stub.profile, "Quick", False
+        )
+        stub.ext_save_cb = None
+        stub.runtime_toggle_frame = None
+
+        with patch("app.ui.profiles.save_profile") as mock_save:
+            renamed = stub._save(check_name=True, reload=False)
+
+        self.assertFalse(renamed)
+        mock_save.assert_not_called()
 
 
 if __name__ == "__main__":
