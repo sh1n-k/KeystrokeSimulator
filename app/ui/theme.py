@@ -163,7 +163,9 @@ def install_styles(root: tk.Misc) -> None:
         style.map(
             "Accent.TButton",
             background=[("active", SIGNAL_HOVER), ("disabled", INK_MUTED)],
-            foreground=[("disabled", SURFACE_PAPER)],
+            # SURFACE_PAPER equals INK_INVERSE, so using it here left disabled
+            # buttons looking identical to enabled ones on macOS aqua.
+            foreground=[("disabled", INK_MUTED)],
         )
     except tk.TclError:
         pass

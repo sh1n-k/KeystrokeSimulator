@@ -75,8 +75,14 @@ class KeystrokeEventEditor:
         self.entry_capture_h: ttk.Spinbox | None = None
         self.entry_region_w: ttk.Spinbox | None = None
         self.entry_region_h: ttk.Spinbox | None = None
-        self.entry_priority: ttk.Entry | None = None
+        self.entry_priority: ttk.Spinbox | None = None
         self.coord_entries: list[tk.Entry] = []
+        self._error_message: tuple[str, str] | None = None
+        self._error_fingerprint: tuple[object, ...] = ()
+        self._suppress_dirty_prompt: bool = False
+        self._capture_blocked: bool = False
+        self._permission_message: str | None = self._compute_permission_message()
+        self._permission_ticks: int = self._PERMISSION_POLL_TICKS
 
         self._create_layout()
         self.bind_events()
@@ -85,6 +91,8 @@ class KeystrokeEventEditor:
         event_factory = event_function or (lambda: None)
         self.is_edit = bool(event_factory())
         self.load_stored_event(event_factory)
+        # Baseline for the discard prompt on close.
+        self._initial_fingerprint: tuple[object, ...] = self._form_fingerprint()
         self._is_closing: bool = False
         self._capture_generation = -1
         self._ctrl_was_pressed = False
@@ -99,9 +107,13 @@ class KeystrokeEventEditor:
         # Traces
         self.match_mode_var.trace_add("write", self._trace_redraw_overlay)
         self.match_mode_var.trace_add("write", self._on_match_mode_change)
+        self.match_mode_var.trace_add("write", self._trace_refresh_step_indicators)
         self.region_w_var.trace_add("write", self._trace_redraw_overlay)
         self.region_h_var.trace_add("write", self._trace_redraw_overlay)
         self.execute_action_var.trace_add("write", self._trace_refresh_basic_guidance)
+        self.invert_match_var.trace_add("write", self._trace_refresh_step_indicators)
+        self.group_id_var.trace_add("write", self._trace_refresh_step_indicators)
+        self.priority_var.trace_add("write", self._trace_refresh_step_indicators)
 
     @property
     def latest_pos(self) -> Position | None:
@@ -148,6 +160,9 @@ class KeystrokeEventEditor:
 
     def _trace_refresh_basic_guidance(self, *_args: object) -> None:
         self._refresh_basic_guidance()
+
+    def _trace_refresh_step_indicators(self, *_args: object) -> None:
+        self._refresh_step_indicators()
 
     def _create_layout(self) -> None:
         # Apply the workstation theme to this editor window.
@@ -210,9 +225,8 @@ class KeystrokeEventEditor:
         )
         self.step_content.pack(side=tk.LEFT, fill="both", expand=True)
 
-        # Step frames replace the old Notebook tabs. The attribute names are
-        # kept (tab_basic/tab_detail/tab_logic) because the per-tab setup
-        # methods reference them directly.
+        # Tab frames. The attribute names are kept (tab_basic/tab_detail/
+        # tab_logic) because the per-tab setup methods reference them directly.
         self.tab_basic: ttk.Frame = ttk.Frame(self.step_content)
         self.tab_detail: ttk.Frame = ttk.Frame(self.step_content)
         self.tab_logic: ttk.Frame = ttk.Frame(self.step_content)
@@ -222,12 +236,11 @@ class KeystrokeEventEditor:
             self.tab_logic,
         )
 
-        # Rail labels — clickable indicators for each step.
+        # Rail labels — clickable tab selectors.
         self._step_indicators: list[tk.Label] = []
         self._step_indicator_titles: list[str] = []
-        for i, (en, ko) in enumerate(
-            [("Basic", "기본"), ("Advanced", "상세 설정"), ("Conditions / Group", "조건 / 그룹")]
-        ):
+        self._indicator_cache: dict[int, tuple[str, bool]] = {}
+        for i, (en, ko) in enumerate(self._STEP_TITLES):
             title = txt(en, ko)
             self._step_indicator_titles.append(title)
             ind = tk.Label(
@@ -280,6 +293,7 @@ class KeystrokeEventEditor:
         self._setup_detail_tab()
         self._setup_logic_tab()
         self._setup_bottom_buttons()
+        self._lock_step_content_size()
         self._goto_step(0)
         # Sync meta chips with current state and hook variable traces.
         self.invert_match_var.trace_add("write", self._refresh_meta_chips)
@@ -287,13 +301,28 @@ class KeystrokeEventEditor:
         self._refresh_meta_chips()
 
     # ------------------------------------------------------------------
-    # Stepper helpers — replace the legacy Notebook navigation.
+    # Tab helpers. Advanced/Conditions are optional, so the rail shows which
+    # tab holds settings (a content badge) rather than a wizard progress mark.
     # ------------------------------------------------------------------
     _STEP_TITLES: ClassVar[list[tuple[str, str]]] = [
-        ("Step 1 of 3 · Basic", "단계 1 / 3 · 기본"),
-        ("Step 2 of 3 · Advanced", "단계 2 / 3 · 상세 설정"),
-        ("Step 3 of 3 · Conditions / Group", "단계 3 / 3 · 조건 / 그룹"),
+        ("Basic", "기본"),
+        ("Advanced", "상세 설정"),
+        ("Conditions / Group", "조건 / 그룹"),
     ]
+
+    _STEP_PADDING = 8
+
+    def _lock_step_content_size(self) -> None:
+        """탭을 오갈 때마다 창이 리사이즈되지 않도록 가장 큰 탭에 맞춰 고정한다."""
+        try:
+            self.win.update_idletasks()
+            pad = self._STEP_PADDING * 2
+            width = max(f.winfo_reqwidth() for f in self._step_frames) + pad
+            height = max(f.winfo_reqheight() for f in self._step_frames) + pad
+            self.step_content.configure(width=width, height=height)
+            self.step_content.pack_propagate(False)
+        except tk.TclError:
+            return
 
     def _goto_step(self, idx: int) -> None:
         if not hasattr(self, "_step_frames"):
@@ -302,38 +331,58 @@ class KeystrokeEventEditor:
         self.step_index = idx
         for frame in self._step_frames:
             frame.pack_forget()
-        self._step_frames[idx].pack(fill="both", expand=True, padx=8, pady=8)
+        self._step_frames[idx].pack(
+            fill="both",
+            expand=True,
+            padx=self._STEP_PADDING,
+            pady=self._STEP_PADDING,
+        )
         self._refresh_step_indicators()
         self._refresh_stepper_title()
+
+    def _step_badges(self) -> list[str]:
+        """탭별 '설정된 항목 수' — 진행률이 아니라 내용 유무를 알린다."""
+        detail = 0
+        logic = len(getattr(self, "temp_conditions", {}) or {})
+        try:
+            if self.match_mode_var.get() == "region":
+                detail += 1
+            if self.invert_match_var.get():
+                detail += 1
+            for name in ("entry_dur", "entry_rand"):
+                entry = getattr(self, name, None)
+                if entry is not None and entry.get().strip():
+                    detail += 1
+            if self.group_id_var.get().strip():
+                logic += 1
+            if self.priority_var.get():
+                logic += 1
+        except tk.TclError:
+            pass
+        return ["", str(detail) if detail else "", str(logic) if logic else ""]
 
     def _refresh_step_indicators(self) -> None:
         if not hasattr(self, "_step_indicators"):
             return
         f = theme.fonts()
+        badges = self._step_badges()
         for i, ind in enumerate(self._step_indicators):
             title = self._step_indicator_titles[i]
-            if i == self.step_index:
+            badge = f"  · {badges[i]}" if badges[i] else ""
+            active = i == self.step_index
+            text = f"{'●' if active else '○'} {title}{badge}"
+            if self._indicator_cache.get(i) == (text, active):
+                continue
+            self._indicator_cache[i] = (text, active)
+            try:
                 ind.config(
-                    text=f"● {title}",
-                    bg=theme.SURFACE_CANVAS,
-                    fg=theme.SIGNAL_BASE,
-                    font=f["body_bold"],
+                    text=text,
+                    bg=theme.SURFACE_CANVAS if active else theme.SURFACE_PANEL,
+                    fg=theme.SIGNAL_BASE if active else theme.INK_SECONDARY,
+                    font=f["body_bold"] if active else f["body"],
                 )
-            else:
-                glyph = "✓" if i < self.step_index else "○"
-                ind.config(
-                    text=f"{glyph} {title}",
-                    bg=theme.SURFACE_PANEL,
-                    fg=theme.INK_SECONDARY,
-                    font=f["body"],
-                )
-        if hasattr(self, "btn_step_back"):
-            self.btn_step_back.config(state="disabled" if self.step_index == 0 else "normal")
-        if hasattr(self, "btn_step_next"):
-            last_idx = len(self._step_indicators) - 1
-            self.btn_step_next.config(
-                state="disabled" if self.step_index >= last_idx else "normal"
-            )
+            except tk.TclError:
+                return
 
     def _refresh_stepper_title(self) -> None:
         if not hasattr(self, "lbl_stepper_title"):
@@ -405,13 +454,32 @@ class KeystrokeEventEditor:
         for seq in ("<Button-1>", "<B1-Motion>"):
             self.lbl_img2.bind(seq, self.get_coordinates_of_held_image)
 
+        # Capture actions live next to the previews they act on, not in the
+        # window-wide bottom dock where they applied to every tab.
+        f_capture_actions = ttk.Frame(left)
+        f_capture_actions.grid(
+            row=2, column=0, columnspan=2, sticky="we", pady=(theme.SPACE_2, 0)
+        )
+        ttk.Button(
+            f_capture_actions,
+            text=txt("Capture (Ctrl)", "캡처 (Ctrl)"),
+            command=self.hold_image,
+            style="Outline.TButton",
+        ).pack(side="left", padx=(theme.SPACE_2, theme.SPACE_1))
+        ttk.Button(
+            f_capture_actions,
+            text=txt("Clear Screen", "화면 지우기"),
+            command=self._clear_capture,
+            style="Outline.TButton",
+        ).pack(side="left")
+
         f_ref = ttk.Frame(left)
-        f_ref.grid(row=2, column=0, columnspan=2, pady=(theme.SPACE_2, 0))
+        f_ref.grid(row=3, column=0, columnspan=2, sticky="w", pady=(theme.SPACE_2, 0))
         ttk.Label(
             f_ref,
             text=txt("Reference pixel:", "기준 픽셀:"),
             foreground=theme.INK_MUTED,
-        ).grid(row=0, column=0, padx=theme.SPACE_1)
+        ).grid(row=0, column=0, padx=(theme.SPACE_2, theme.SPACE_1))
         self.lbl_ref: tk.Label = tk.Label(
             f_ref,
             width=2,
@@ -422,41 +490,16 @@ class KeystrokeEventEditor:
         )
         self.lbl_ref.grid(row=0, column=1, padx=theme.SPACE_1)
 
-        # ---------------- Right: name / coords / key / capture size -------
-        right = ttk.Frame(self.tab_basic)
-        right.grid(row=0, column=1, sticky="nsew")
-        right.grid_columnconfigure(0, weight=1)
-
-        f_name = ttk.Frame(right)
-        f_name.grid(row=0, column=0, sticky="we", pady=(0, theme.SPACE_2))
-        ttk.Label(f_name, text=txt("Event Name:", "이벤트 이름:")).pack(side="left")
-        self.entry_name: ttk.Entry = ttk.Entry(f_name)
-        self.entry_name.pack(side="left", fill="x", expand=True, padx=theme.SPACE_2)
-
-        coord_frame = ttk.Frame(right)
-        self.coord_entries = self.create_coord_entries(
-            coord_frame,
-            [
-                txt("Area X:", "영역 X:"),
-                txt("Area Y:", "영역 Y:"),
-                txt("Pixel X:", "픽셀 X:"),
-                txt("Pixel Y:", "픽셀 Y:"),
-            ],
+        # Capture Size sits under the previews it resizes.
+        f_cap = ttk.LabelFrame(left, text=txt("Capture Size", "캡처 크기"))
+        f_cap.grid(
+            row=4,
+            column=0,
+            columnspan=2,
+            sticky="we",
+            padx=theme.SPACE_2,
+            pady=(theme.SPACE_2, 0),
         )
-        coord_frame.grid(row=1, column=0, sticky="we", pady=(0, theme.SPACE_2))
-
-        f_key = ttk.Frame(right)
-        f_key.grid(row=2, column=0, sticky="we", pady=(0, theme.SPACE_2))
-        ttk.Label(f_key, text=txt("Key:", "키:"), anchor="w").pack(
-            side="left", padx=(0, theme.SPACE_2)
-        )
-        self.key_combobox: ttk.Combobox = ttk.Combobox(
-            f_key, state="readonly", values=KeyUtils.get_key_name_list()
-        )
-        self.key_combobox.pack(side="left", fill="x", expand=True)
-
-        f_cap = ttk.LabelFrame(right, text=txt("Capture Size", "캡처 크기"))
-        f_cap.grid(row=3, column=0, sticky="we", pady=(0, theme.SPACE_2))
         f_cap_row = ttk.Frame(f_cap)
         f_cap_row.pack(pady=theme.SPACE_1, padx=theme.SPACE_2)
         ttk.Label(f_cap_row, text=txt("Width:", "너비:")).pack(side="left", padx=5)
@@ -474,6 +517,48 @@ class KeystrokeEventEditor:
         for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
             self.entry_capture_h.bind(seq, self._on_capture_size_change)
 
+        # ---------------- Right: name / coords / key ----------------------
+        right = ttk.Frame(self.tab_basic)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.grid_columnconfigure(0, weight=1)
+
+        f_name = ttk.Frame(right)
+        f_name.grid(row=0, column=0, sticky="we", pady=(0, theme.SPACE_2))
+        ttk.Label(f_name, text=txt("Event Name:", "이벤트 이름:")).pack(side="left")
+        self.entry_name: ttk.Entry = ttk.Entry(f_name)
+        self.entry_name.pack(side="left", fill="x", expand=True, padx=theme.SPACE_2)
+        self.entry_name.bind("<KeyRelease>", self._trace_refresh_basic_guidance)
+
+        # The two coordinate pairs use different coordinate systems, so they
+        # are labelled as separate groups instead of one undifferentiated row.
+        coord_frame = ttk.Frame(right)
+        coord_frame.grid(row=1, column=0, sticky="we", pady=(0, theme.SPACE_2))
+        gb_screen = ttk.LabelFrame(
+            coord_frame,
+            text=txt("Screen position (ALT to move)", "화면 위치 (ALT로 이동)"),
+        )
+        gb_screen.grid(row=0, column=0, sticky="w", padx=(0, theme.SPACE_2))
+        gb_pixel = ttk.LabelFrame(
+            coord_frame,
+            text=txt("Target pixel (click capture)", "대상 픽셀 (캡처본 클릭)"),
+        )
+        gb_pixel.grid(row=0, column=1, sticky="w")
+        self.coord_entries = self.create_coord_entries(
+            gb_screen, [txt("X:", "X:"), txt("Y:", "Y:")]
+        ) + self.create_coord_entries(
+            gb_pixel, [txt("X:", "X:"), txt("Y:", "Y:")], readonly=True
+        )
+
+        f_key = ttk.Frame(right)
+        f_key.grid(row=2, column=0, sticky="we", pady=(0, theme.SPACE_2))
+        ttk.Label(f_key, text=txt("Key:", "키:"), anchor="w").pack(
+            side="left", padx=(0, theme.SPACE_2)
+        )
+        self.key_combobox: ttk.Combobox = ttk.Combobox(
+            f_key, state="readonly", values=KeyUtils.get_key_name_list()
+        )
+        self.key_combobox.pack(side="left", fill="x", expand=True)
+
         self.lbl_basic_step = ttk.Label(
             right,
             text="",
@@ -481,7 +566,7 @@ class KeystrokeEventEditor:
             wraplength=420,
             justify="left",
         )
-        self.lbl_basic_step.grid(row=4, column=0, sticky="w", pady=(0, theme.SPACE_2))
+        self.lbl_basic_step.grid(row=3, column=0, sticky="w", pady=(0, theme.SPACE_2))
 
     def _create_numeric_validator(self) -> tuple[str, str]:
         """숫자 입력 검증 함수 생성 (재사용)"""
@@ -514,6 +599,8 @@ class KeystrokeEventEditor:
             value="region",
         ).pack(side="left")
 
+        # The checkbox itself carries the state; the rail chip covers the
+        # at-a-glance view, so no duplicate chip is rendered here.
         f_invert = ttk.Frame(gb_mode)
         f_invert.pack(fill="x", padx=theme.SPACE_2, pady=(theme.SPACE_1, theme.SPACE_2))
         ttk.Checkbutton(
@@ -523,19 +610,6 @@ class KeystrokeEventEditor:
             ),
             variable=self.invert_match_var,
         ).pack(side="left")
-        # Chip stays in sync with the invert toggle so users see the state
-        # next to the editor without needing to scan the Stepper rail.
-        self.lbl_invert_chip: tk.Label = tk.Label(
-            f_invert,
-            text=f"{theme.ICON_INVERTED} Inverted",
-            bg=theme.SURFACE_SUNKEN,
-            fg=theme.INK_MUTED,
-            font=theme.fonts()["caption"],
-            padx=theme.SPACE_2,
-            pady=theme.SPACE_1,
-        )
-        self.lbl_invert_chip.pack(side="left", padx=(theme.SPACE_2, 0))
-        self.invert_match_var.trace_add("write", self._on_invert_match_change)
 
         # ── Region Size card (visually disabled outside Region mode) ──
         self.gb_size: ttk.LabelFrame = ttk.LabelFrame(
@@ -577,21 +651,25 @@ class KeystrokeEventEditor:
         )
         gb_time.pack(fill="x", pady=5)
 
-        ttk.Label(gb_time, text=txt("Duration (ms):", "지속 시간 (ms):")).grid(
-            row=0, column=0, padx=5, pady=2, sticky="e"
-        )
+        # Minimums are stated up front instead of only in the save-time error.
+        ttk.Label(
+            gb_time,
+            text=txt("Duration (ms, min 50):", "지속 시간 (ms, 최소 50):"),
+        ).grid(row=0, column=0, padx=5, pady=2, sticky="e")
         self.entry_dur: ttk.Entry = ttk.Entry(
             gb_time, width=8, validate="key", validatecommand=vcmd
         )
         self.entry_dur.grid(row=0, column=1, padx=5, pady=2)
+        self.entry_dur.bind("<KeyRelease>", self._trace_refresh_step_indicators)
 
-        ttk.Label(gb_time, text=txt("Random (ms):", "랜덤 (ms):")).grid(
-            row=1, column=0, padx=5, pady=2, sticky="e"
-        )
+        ttk.Label(
+            gb_time, text=txt("Random (ms, min 30):", "랜덤 (ms, 최소 30):")
+        ).grid(row=1, column=0, padx=5, pady=2, sticky="e")
         self.entry_rand: ttk.Entry = ttk.Entry(
             gb_time, width=8, validate="key", validatecommand=vcmd
         )
         self.entry_rand.grid(row=1, column=1, padx=5, pady=2)
+        self.entry_rand.bind("<KeyRelease>", self._trace_refresh_step_indicators)
 
         ttk.Label(
             gb_time,
@@ -602,26 +680,23 @@ class KeystrokeEventEditor:
             foreground=theme.INK_MUTED,
         ).grid(row=2, column=0, columnspan=2, padx=5, pady=(theme.SPACE_1, 2), sticky="w")
 
-        # 초기 region 필드 상태 + invert chip 색상 동기화
+        # 초기 region 필드 상태 동기화
         self._on_match_mode_change()
-        self._on_invert_match_change()
 
     def _on_match_mode_change(self, *_args: object) -> None:
         """매칭 모드 변경 시 영역 크기 필드 활성/비활성"""
         self._sync_region_constraints()
 
-    def _on_invert_match_change(self, *_args: object) -> None:
-        """반전 매칭 토글 시 칩 톤 갱신 (체크 시 강조, 해제 시 muted)."""
-        chip = getattr(self, "lbl_invert_chip", None)
-        if not chip:
+    def _on_priority_focus_out(self, *_args: object) -> None:
+        """빈 우선순위가 저장 시 조용히 0으로 바뀌지 않도록 즉시 채운다."""
+        entry = self.entry_priority
+        if entry is None:
             return
         try:
-            if self.invert_match_var.get():
-                chip.config(bg=theme.SIGNAL_TINT, fg=theme.SIGNAL_BASE)
-            else:
-                chip.config(bg=theme.SURFACE_SUNKEN, fg=theme.INK_MUTED)
+            if not entry.get().strip():
+                self.priority_var.set(0)
         except tk.TclError:
-            return
+            pass
 
     def _on_capture_size_change(self, *_args: object) -> None:
         """캡처 크기 변경 시 capturer 동기화"""
@@ -698,12 +773,26 @@ class KeystrokeEventEditor:
                 "Region Size (Region mode only)",
                 "영역 크기 (영역 모드 전용)",
             )
+            muted = txt("pixel mode", "픽셀 모드")
             try:
                 gb_size.configure(
-                    text=base if is_region else f"{base}  ·  pixel mode",
+                    text=base if is_region else f"{base}  ·  {muted}",
                 )
             except tk.TclError:
                 pass
+
+    def _fail_with_modal(
+        self,
+        step: int,
+        short: str,
+        detail: str,
+        focus: tk.Misc | None = None,
+        title: str | None = None,
+    ) -> bool:
+        """검증 실패 — modal로 알리고 고쳐야 할 탭으로 이동한다."""
+        messagebox.showerror(title or txt("Error", "오류"), detail)
+        self._report_validation_error(step, (short, detail), focus)
+        return False
 
     def _validate_region_bounds(self, rw: int, rh: int) -> bool:
         if self.match_mode_var.get() != "region":
@@ -711,37 +800,38 @@ class KeystrokeEventEditor:
 
         limits = self._get_region_limits()
         if not limits:
-            messagebox.showerror(
-                txt("Error", "오류"),
+            return self._fail_with_modal(
+                0,
+                txt("Capture required for Region mode", "영역 모드에 캡처 필요"),
                 txt(
                     "Please capture an image and select a target point for Region mode.",
                     "영역 모드를 사용하려면 이미지를 캡처하고 대상 지점을 선택해 주세요.",
                 ),
             )
-            return False
 
         max_w, max_h = limits
         if max_w < 20 or max_h < 20:
-            messagebox.showerror(
-                txt("Error", "오류"),
+            return self._fail_with_modal(
+                0,
+                txt("Target point too close to the edge", "대상 지점이 가장자리에 근접"),
                 txt(
                     "The selected point is too close to the edge for Region mode. Move the point inward or increase Capture Size.",
                     "선택한 지점이 가장자리에 너무 가까워 영역 모드를 사용할 수 없습니다. 지점을 안쪽으로 옮기거나 캡처 크기를 키워 주세요.",
                 ),
             )
-            return False
 
         if rw > max_w or rh > max_h:
-            messagebox.showerror(
-                txt("Error", "오류"),
+            return self._fail_with_modal(
+                1,
+                txt("Region size out of bounds", "영역 크기 초과"),
                 txt(
                     "Region size exceeds the captured image bounds for this point. Maximum allowed here is {width}x{height}.",
                     "이 지점에서는 영역 크기가 캡처 이미지 범위를 벗어납니다. 여기서 가능한 최대 크기는 {width}x{height}입니다.",
                     width=max_w,
                     height=max_h,
                 ),
+                getattr(self, "entry_region_w", None),
             )
-            return False
 
         return True
 
@@ -807,14 +897,19 @@ class KeystrokeEventEditor:
         ttk.Label(
             gb_grp, text=txt("Priority (0 is highest):", "우선순위 (0이 가장 높음):")
         ).grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.entry_priority = ttk.Entry(
+        # Spinbox rather than a free Entry: an empty Entry used to fall back to
+        # 0 silently on save, with no sign that the value had been replaced.
+        self.entry_priority = ttk.Spinbox(
             gb_grp,
             textvariable=self.priority_var,
+            from_=0,
+            to=99,
             width=5,
             validate="key",
             validatecommand=vcmd,
         )
         self.entry_priority.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        self.entry_priority.bind("<FocusOut>", self._on_priority_focus_out)
 
         self.lbl_group_hint = ttk.Label(
             gb_grp,
@@ -889,13 +984,25 @@ class KeystrokeEventEditor:
             "ignore", background="", foreground=theme.INK_MUTED
         )
 
-        sb = ttk.Scrollbar(
+        self.cond_scrollbar: ttk.Scrollbar = ttk.Scrollbar(
             gb_cond, orient="vertical", command=cast(Any, self.tree_cond).yview
         )
-        self.tree_cond.configure(yscrollcommand=sb.set)
+        self.tree_cond.configure(yscrollcommand=self.cond_scrollbar.set)
         self.tree_cond.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
+        self.cond_scrollbar.pack(side="right", fill="y")
         self.tree_cond.bind("<Button-1>", self._on_tree_click)
+
+        # Empty state — an empty tree otherwise reads as a broken filter.
+        self.lbl_condition_empty: ttk.Label = ttk.Label(
+            gb_cond,
+            text=txt(
+                "No other event in this profile can be used as a condition.",
+                "이 프로필에는 조건으로 사용할 다른 이벤트가 없습니다.",
+            ),
+            foreground=theme.INK_MUTED,
+            wraplength=300,
+            justify="left",
+        )
 
         # Footer keeps a single affordance: Reset All as an underlined text
         # link so the heavy ttk.Button no longer competes with the counter.
@@ -931,8 +1038,8 @@ class KeystrokeEventEditor:
         )
 
     def _setup_bottom_buttons(self) -> None:
-        # Bottom RunDock — divider + panel-tone strip with hint, capture,
-        # save, cancel. Uses theme accent/outline styles for hierarchy.
+        # Bottom dock — status badge on the left, commit actions on the right.
+        # Capture actions belong to the Basic tab, so they are not here.
         tk.Frame(self.win, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x")
         f_btn = tk.Frame(self.win, bg=theme.SURFACE_PANEL)
         f_btn.pack(fill="x", ipady=theme.SPACE_2)
@@ -942,47 +1049,27 @@ class KeystrokeEventEditor:
             text="",
             bg=theme.SURFACE_PANEL,
             fg=theme.INK_SECONDARY,
+            font=theme.fonts()["caption"],
+            padx=theme.SPACE_2,
+            pady=theme.SPACE_1,
         )
         self.lbl_bottom_hint.pack(side="left", padx=theme.SPACE_3)
 
-        ttk.Button(
+        # Save is packed first so it lands furthest right, as macOS expects
+        # for the default action.
+        self.btn_save: ttk.Button = ttk.Button(
             f_btn,
-            text=txt("Capture (Ctrl)", "캡처 (Ctrl)"),
-            command=self.hold_image,
-            style="Outline.TButton",
-        ).pack(side="left", padx=theme.SPACE_3)
-        ttk.Button(
-            f_btn,
-            text=txt("Clear Screen", "화면 지우기"),
-            command=self._clear_capture,
-            style="Outline.TButton",
-        ).pack(side="left", padx=(0, theme.SPACE_3))
-        self.btn_step_back = ttk.Button(
-            f_btn,
-            text=txt("← Back", "← 이전"),
-            command=lambda: self._goto_step(self.step_index - 1),
-            style="Outline.TButton",
+            text=txt("Save (Enter)", "저장 (Enter)"),
+            command=self.save_event,
+            style="Accent.TButton",
         )
-        self.btn_step_back.pack(side="left", padx=(0, theme.SPACE_1))
-        self.btn_step_next = ttk.Button(
-            f_btn,
-            text=txt("Next →", "다음 →"),
-            command=lambda: self._goto_step(self.step_index + 1),
-            style="Outline.TButton",
-        )
-        self.btn_step_next.pack(side="left", padx=(0, theme.SPACE_3))
+        self.btn_save.pack(side="right", padx=theme.SPACE_3)
         ttk.Button(
             f_btn,
             text=txt("Cancel (ESC)", "취소 (ESC)"),
             command=self.close_window,
             style="Outline.TButton",
-        ).pack(side="right", padx=theme.SPACE_3)
-        ttk.Button(
-            f_btn,
-            text=txt("Save (Enter)", "저장 (Enter)"),
-            command=self.save_event,
-            style="Accent.TButton",
-        ).pack(side="right", padx=theme.SPACE_1)
+        ).pack(side="right", padx=(0, theme.SPACE_1))
 
     def _reset_all_conditions(self) -> None:
         """모든 조건을 무시 상태로 초기화"""
@@ -1003,68 +1090,194 @@ class KeystrokeEventEditor:
             parts.append(txt("Inactive: {count}", "비활성: {count}", count=inactive))
         self.lbl_condition_summary.config(text=" | ".join(parts) if parts else "")
 
+    # Bottom-dock badge tones. The detailed sentence stays in the tab body;
+    # the dock carries only the short state so it never truncates.
+    _STATUS_TONES: ClassVar[dict[str, tuple[str, str, str]]] = {
+        "ready": (theme.STATUS_READY_BG, theme.STATUS_READY_FG, theme.STATUS_READY_ICON),
+        "info": (theme.STATUS_INFO_BG, theme.STATUS_INFO_FG, theme.STATUS_INFO_ICON),
+        "warn": (theme.STATUS_WARN_BG, theme.STATUS_WARN_FG, theme.STATUS_WARN_ICON),
+        "error": (theme.STATUS_ERROR_BG, theme.STATUS_ERROR_FG, theme.STATUS_ERROR_ICON),
+    }
+
+    # 100ms 폴링 기준 3초. 권한 조회 한 번이 10ms를 넘기 때문에 캐시한다.
+    _PERMISSION_POLL_TICKS = 30
+
+    def _compute_permission_message(self) -> str | None:
+        """macOS 권한 조회는 호출당 10ms 이상이라 폴링에서만 호출한다."""
+        missing_permissions = PermissionUtils.missing_macos_permissions()
+        if not missing_permissions:
+            return None
+        missing_labels: list[str] = []
+        if "screen" in missing_permissions:
+            missing_labels.append(txt("Screen Recording", "화면 기록"))
+        if "accessibility" in missing_permissions:
+            missing_labels.append(txt("Accessibility", "손쉬운 사용"))
+        return txt(
+            "macOS permission required: {missing}. Grant access in System Settings before capturing or sending keys.",
+            "macOS 권한 필요: {missing}. 캡처 또는 키 입력 전에 시스템 설정에서 권한을 허용하세요.",
+            missing=", ".join(missing_labels),
+        )
+
+    def _window_blocks_capture(self) -> bool:
+        """캡처 영역이 에디터 창과 겹치는지 — 겹치면 창이 캡처본에 섞인다."""
+        try:
+            pointer = self.capture_session.current_position()
+            cap_w = max(50, min(1000, self.capture_w_var.get()))
+            cap_h = max(50, min(1000, self.capture_h_var.get()))
+            win_x, win_y = self.win.winfo_rootx(), self.win.winfo_rooty()
+            win_w, win_h = self.win.winfo_width(), self.win.winfo_height()
+        except (tk.TclError, TypeError, ValueError):
+            return False
+        if not pointer or win_w <= 1 or win_h <= 1:
+            return False
+        left, top = pointer[0] - cap_w // 2, pointer[1] - cap_h // 2
+        return not (
+            left + cap_w <= win_x
+            or left >= win_x + win_w
+            or top + cap_h <= win_y
+            or top >= win_y + win_h
+        )
+
+    def _required_field_error(self) -> tuple[str, str] | None:
+        """저장 필수 조건 위반 시 (짧은 상태, 상세 안내). 충족되면 None."""
+        need_key = self.execute_action_var.get()
+        has_conditions = bool(getattr(self, "temp_conditions", None))
+
+        if need_key and not self.key_to_enter:
+            return (
+                txt("Input key required", "입력 키 필요"),
+                txt("Please set an input key.", "입력 키를 설정해 주세요."),
+            )
+
+        if self._has_complete_screen():
+            return None
+
+        if self._has_partial_screen():
+            if self.held_img is not None and not self.clicked_pos:
+                return (
+                    txt("Target pixel required", "대상 픽셀 필요"),
+                    txt(
+                        "Click the captured image to choose the trigger pixel or region center.",
+                        "오른쪽 캡처본을 클릭해 트리거 픽셀 또는 영역 중심을 고르세요.",
+                    ),
+                )
+            return (
+                txt("Capture incomplete", "캡처 미완료"),
+                txt(
+                    "Finish the screen capture or clear it. An input event can omit the screen only when at least one condition is set.",
+                    "화면 캡처를 끝내거나 지우세요. 입력 이벤트는 조건이 하나 이상일 때만 화면을 생략할 수 있습니다.",
+                ),
+            )
+
+        if need_key and has_conditions:
+            return None
+
+        detail = (
+            txt(
+                "Capture a screen, or set at least one condition for an input event without a screen.",
+                "화면을 캡처하거나, 화면 없는 입력 이벤트라면 조건을 하나 이상 설정하세요.",
+            )
+            if need_key
+            else txt(
+                "Please set image and coordinates.",
+                "이미지와 좌표를 설정해 주세요.",
+            )
+        )
+        return (txt("Screen capture required", "화면 캡처 필요"), detail)
+
+    def _save_blocker(self) -> tuple[str, str] | None:
+        """저장을 막는 사유를 미리 판정한다 (modal 없이)."""
+        required = self._required_field_error()
+        if required:
+            return required
+        final_name = self.entry_name.get().strip()
+        if not final_name:
+            return (
+                txt("Event name required", "이벤트 이름 필요"),
+                txt("Please enter an event name.", "이벤트 이름을 입력해 주세요."),
+            )
+        if self._duplicate_name_exists(final_name):
+            return (
+                txt("Duplicate event name", "이벤트 이름 중복"),
+                txt(
+                    "Event name '{name}' already exists in this profile.",
+                    "이 프로필에 '{name}' 이벤트 이름이 이미 존재합니다.",
+                    name=final_name,
+                ),
+            )
+        return None
+
+    def _guidance(self) -> tuple[str, str, str, bool]:
+        """(tone, 짧은 상태, 상세 안내, 저장 가능 여부)."""
+        blocker = self._save_blocker()
+        can_save = blocker is None
+
+        permission = self._permission_message
+        if permission:
+            return "warn", txt("macOS permission required", "macOS 권한 필요"), permission, can_save
+
+        # 화면이 아직 완성되지 않았을 때만 겹침을 경고한다. 캡처가 끝난 뒤에는
+        # 남은 저장 조건을 알리는 편이 더 쓸모 있다.
+        if self._capture_blocked and not self._has_complete_screen():
+            return (
+                "warn",
+                txt("Window covers capture area", "창이 캡처 영역을 가림"),
+                txt(
+                    "This window overlaps the area under the pointer, so a capture would include the editor itself. Move the window aside before pressing CTRL.",
+                    "이 창이 포인터 주변 캡처 영역과 겹쳐 있어 캡처본에 에디터 창이 함께 담깁니다. CTRL을 누르기 전에 창을 옆으로 옮기세요.",
+                ),
+                can_save,
+            )
+
+        if self._error_message:
+            # 값을 고치면 지난 실패 안내는 즉시 사라져야 한다.
+            if self._form_fingerprint() == self._error_fingerprint:
+                short, detail = self._error_message
+                return "error", short, detail, can_save
+            self._error_message = None
+
+        if blocker:
+            return "info", blocker[0], blocker[1], can_save
+
+        return (
+            "ready",
+            txt("Ready to save", "저장 가능"),
+            txt(
+                "Ready to save. Review advanced settings only if you need custom matching, timing, or conditions.",
+                "이제 저장할 수 있습니다. 맞춤 매칭, 타이밍, 조건이 필요할 때만 상세 설정을 확인하세요.",
+            ),
+            True,
+        )
+
     def _refresh_basic_guidance(self) -> None:
         if getattr(self, "_is_closing", False):
             return
         basic_label = getattr(self, "lbl_basic_step", None)
         if not basic_label:
             return
-        missing_permissions = PermissionUtils.missing_macos_permissions()
-        if missing_permissions:
-            missing_labels: list[str] = []
-            if "screen" in missing_permissions:
-                missing_labels.append(txt("Screen Recording", "화면 기록"))
-            if "accessibility" in missing_permissions:
-                missing_labels.append(txt("Accessibility", "손쉬운 사용"))
-            message = txt(
-                "macOS permission required: {missing}. Grant access in System Settings before capturing or sending keys.",
-                "macOS 권한 필요: {missing}. 캡처 또는 키 입력 전에 시스템 설정에서 권한을 허용하세요.",
-                missing=", ".join(missing_labels),
-            )
-        elif not self.held_img:
-            if self.execute_action_var.get() and getattr(self, "temp_conditions", None):
-                if self.key_to_enter:
-                    message = txt(
-                        "Ready to save without a screen. Capture a target if this event should also match pixels.",
-                        "화면 없이 저장할 수 있습니다. 픽셀도 맞출 이벤트면 화면을 캡처하세요.",
-                    )
-                else:
-                    message = txt(
-                        "Choose an input key to save without a screen, or capture a target area with CTRL.",
-                        "화면 없이 저장하려면 입력 키를 고르거나, CTRL로 대상 영역을 캡처하세요.",
-                    )
-            else:
-                message = txt(
-                    "Step 1: move the mouse over the target, then press CTRL to capture the current area. An input event can skip this if it has conditions.",
-                    "1단계: 대상 위로 마우스를 옮긴 뒤 CTRL로 현재 영역을 캡처하세요. 입력 이벤트는 조건이 있으면 이 단계를 건너뛸 수 있습니다.",
-                )
-        elif not self.clicked_pos:
-            message = txt(
-                "Step 2: click the right image to choose the trigger pixel or region center.",
-                "2단계: 오른쪽 이미지를 클릭해 트리거 픽셀 또는 영역 중심을 고르세요.",
-            )
-        elif self.execute_action_var.get() and not self.key_to_enter:
-            message = txt(
-                "Step 3: choose an input key, then save the event.",
-                "3단계: 입력 키를 선택한 뒤 이벤트를 저장하세요.",
-            )
-        else:
-            message = txt(
-                "Ready to save. Review advanced settings only if you need custom matching, timing, or conditions.",
-                "이제 저장할 수 있습니다. 맞춤 매칭, 타이밍, 조건이 필요할 때만 상세 설정을 확인하세요.",
-            )
+        tone, short, detail, can_save = self._guidance()
         try:
-            basic_label.config(text=message)
+            basic_label.config(text=detail)
             bottom_hint = getattr(self, "lbl_bottom_hint", None)
             if bottom_hint:
-                bottom_hint.config(text=message)
+                bg, fg, icon = self._STATUS_TONES[tone]
+                bottom_hint.config(text=f"{icon}  {short}", bg=bg, fg=fg)
+            btn_save = getattr(self, "btn_save", None)
+            if btn_save is not None:
+                btn_save.config(state="normal" if can_save else "disabled")
+            self._refresh_step_indicators()
         except tk.TclError:
             # 예약된 after/trace 콜백이 창 파괴 이후 도착할 수 있다.
             return
 
     def create_coord_entries(
-        self, parent: tk.Misc, labels: Sequence[str]
+        self, parent: tk.Misc, labels: Sequence[str], readonly: bool = False
     ) -> list[tk.Entry]:
+        """좌표 한 쌍(X/Y)을 만든다.
+
+        readonly 그룹은 표시 전용이다. 편집을 허용하면 입력한 값이 반영되지
+        않은 채 무시되어 오해를 부른다.
+        """
         entries: list[tk.Entry] = []
 
         def make_adjust_handler(
@@ -1076,15 +1289,23 @@ class KeystrokeEventEditor:
             return adjust
 
         for i, label_text in enumerate(labels):
-            r, c = i // 2, (i % 2) * 2
-            tk.Label(parent, text=label_text).grid(row=r, column=c, padx=1, sticky=tk.E)
-            e = tk.Entry(parent, width=4)
-            e.grid(row=r, column=c + 1, padx=4, sticky=tk.W)
-            e.bind("<Up>", make_adjust_handler(e, 1))
-            e.bind("<Down>", make_adjust_handler(e, -1))
+            tk.Label(parent, text=label_text).grid(
+                row=0, column=i * 2, padx=(theme.SPACE_2, 1), pady=theme.SPACE_1,
+                sticky=tk.E,
+            )
+            e = tk.Entry(parent, width=5)
+            e.grid(
+                row=0, column=i * 2 + 1, padx=(1, theme.SPACE_2), pady=theme.SPACE_1,
+                sticky=tk.W,
+            )
             entries.append(e)
 
-        for e in entries[:2]:
+        for e in entries:
+            if readonly:
+                e.config(state="readonly", readonlybackground=theme.SURFACE_SUNKEN)
+                continue
+            e.bind("<Up>", make_adjust_handler(e, 1))
+            e.bind("<Down>", make_adjust_handler(e, -1))
             e.bind("<FocusOut>", self.update_position_from_entries)
         return entries
 
@@ -1112,6 +1333,27 @@ class KeystrokeEventEditor:
         if ctrl_pressed and not self._ctrl_was_pressed:
             self.hold_image()
         self._ctrl_was_pressed = ctrl_pressed
+
+        # Warn as soon as the editor starts covering the area about to be
+        # captured — an always-on-top window would end up inside the capture.
+        stale = False
+        blocked = self._window_blocks_capture()
+        if blocked != self._capture_blocked:
+            self._capture_blocked = blocked
+            stale = True
+
+        # 권한 조회는 비싸므로 3초에 한 번만 확인한다.
+        self._permission_ticks -= 1
+        if self._permission_ticks <= 0:
+            self._permission_ticks = self._PERMISSION_POLL_TICKS
+            permission = self._compute_permission_message()
+            if permission != self._permission_message:
+                self._permission_message = permission
+                stale = True
+
+        if stale:
+            self._refresh_basic_guidance()
+
         self._modifier_after_id = self.win.after(100, self.check_key_states)
 
     def _poll_capture_frame(self) -> None:
@@ -1368,11 +1610,36 @@ class KeystrokeEventEditor:
             return "inactive"
         return "ignore"
 
+    def _set_condition_empty(self, empty: bool) -> None:
+        """조건 후보가 없을 때 빈 표 대신 이유를 보여준다."""
+        empty_label = getattr(self, "lbl_condition_empty", None)
+        if empty_label is None:
+            return
+        legend = getattr(self, "lbl_condition_hint", None)
+        try:
+            if empty:
+                self.tree_cond.pack_forget()
+                self.cond_scrollbar.pack_forget()
+                empty_label.pack(
+                    fill="both", expand=True, padx=theme.SPACE_2, pady=theme.SPACE_3
+                )
+                if legend is not None:
+                    legend.pack_forget()
+            else:
+                empty_label.pack_forget()
+                self.tree_cond.pack(side="left", fill="both", expand=True)
+                self.cond_scrollbar.pack(side="right", fill="y")
+                if legend is not None and not legend.winfo_manager():
+                    legend.pack(side="left")
+        except tk.TclError:
+            return
+
     def _populate_condition_tree(self) -> None:
         for item in self.tree_cond.get_children():
             self.tree_cond.delete(item)
 
         hidden_count = 0
+        shown_count = 0
 
         for evt in self.existing_events:
             if self.event_name and evt.event_name == self.event_name:
@@ -1393,6 +1660,9 @@ class KeystrokeEventEditor:
             self.tree_cond.insert(
                 "", "end", values=(indicator, evt_name, display), tags=(tag,)
             )
+            shown_count += 1
+
+        self._set_condition_empty(shown_count == 0)
 
         # 숨겨진 이벤트 안내 — toast band on warning tone, blank otherwise.
         if self.lbl_hidden_notice:
@@ -1533,49 +1803,35 @@ class KeystrokeEventEditor:
         ]
         return any(parts) and not all(parts)
 
+    def _report_validation_error(
+        self,
+        step: int,
+        error: tuple[str, str],
+        focus: tk.Misc | None = None,
+    ) -> None:
+        """검증 실패를 고쳐야 할 탭으로 이동시켜 알린다."""
+        self._error_message = error
+        self._error_fingerprint = self._form_fingerprint()
+        self._goto_step(step)
+        if focus is not None:
+            try:
+                focus.focus_set()
+            except tk.TclError:
+                pass
+        self._refresh_basic_guidance()
+
+    def _required_focus_widget(self) -> tk.Misc | None:
+        if self.execute_action_var.get() and not self.key_to_enter:
+            return getattr(self, "key_combobox", None)
+        return None
+
     def _validate_required_fields(self) -> bool:
-        """필수 필드 검증"""
-        need_key = self.execute_action_var.get()
-        has_conditions = bool(getattr(self, "temp_conditions", None))
-
-        if need_key and not self.key_to_enter:
-            messagebox.showerror(
-                txt("Error", "오류"),
-                txt(
-                    "Please set an input key.",
-                    "입력 키를 설정해 주세요.",
-                ),
-            )
-            return False
-
-        if self._has_complete_screen():
+        """필수 필드 검증 (사전 판정으로 걸러지지 않은 경우의 마지막 방어선)"""
+        error = self._required_field_error()
+        if error is None:
             return True
-
-        if self._has_partial_screen():
-            messagebox.showerror(
-                txt("Error", "오류"),
-                txt(
-                    "Finish the screen capture or clear it. An input event can omit the screen only when at least one condition is set.",
-                    "화면 캡처를 끝내거나 지우세요. 입력 이벤트는 조건이 하나 이상일 때만 화면을 생략할 수 있습니다.",
-                ),
-            )
-            return False
-
-        if need_key and has_conditions:
-            return True
-
-        msg = (
-            txt(
-                "Capture a screen, or set at least one condition for an input event without a screen.",
-                "화면을 캡처하거나, 화면 없는 입력 이벤트라면 조건을 하나 이상 설정하세요.",
-            )
-            if need_key
-            else txt(
-                "Please set image and coordinates.",
-                "이미지와 좌표를 설정해 주세요.",
-            )
-        )
-        messagebox.showerror(txt("Error", "오류"), msg)
+        messagebox.showerror(txt("Error", "오류"), error[1])
+        self._report_validation_error(0, error, self._required_focus_widget())
         return False
 
     def _parse_numeric_inputs(
@@ -1591,12 +1847,14 @@ class KeystrokeEventEditor:
             rh = self.region_h_var.get()
 
             if self.match_mode_var.get() == "region" and (rw <= 0 or rh <= 0):
-                messagebox.showerror(
-                    txt("Error", "오류"),
+                self._fail_with_modal(
+                    1,
+                    txt("Region size invalid", "영역 크기 오류"),
                     txt(
                         "Region width/height must be greater than 0.",
                         "영역 너비/높이는 0보다 커야 합니다.",
                     ),
+                    getattr(self, "entry_region_w", None),
                 )
                 return None, None, 0, 0, 0
 
@@ -1607,57 +1865,72 @@ class KeystrokeEventEditor:
 
             return dur, rand, rw, rh, prio
         except ValueError:
-            messagebox.showerror(
-                txt("Error", "오류"),
+            self._fail_with_modal(
+                1,
+                txt("Invalid numeric input", "잘못된 숫자 입력"),
                 txt("Invalid numeric input.", "잘못된 숫자 입력입니다."),
+                getattr(self, "entry_dur", None),
             )
             return None, None, 0, 0, 0
 
     def _validate_timing_values(self, dur: int | None, rand: int | None) -> bool:
         """타이밍 값 검증"""
         if dur and dur < 50:
-            messagebox.showerror(
-                txt("Error", "오류"),
+            return self._fail_with_modal(
+                1,
+                txt("Duration below minimum", "지속 시간 최소값 미만"),
                 txt(
                     "Duration must be at least 50ms.",
                     "지속 시간은 최소 50ms여야 합니다.",
                 ),
+                getattr(self, "entry_dur", None),
             )
-            return False
         if dur and rand and rand < 30:
-            messagebox.showerror(
-                txt("Error", "오류"),
+            return self._fail_with_modal(
+                1,
+                txt("Random below minimum", "랜덤 최소값 미만"),
                 txt("Random must be at least 30ms.", "랜덤은 최소 30ms여야 합니다."),
+                getattr(self, "entry_rand", None),
             )
-            return False
         return True
 
-    def _validate_unique_event_name(self, final_name: str) -> bool:
-        """현재 프로필 내 이벤트 이름 중복 여부 검증"""
+    def _duplicate_name_exists(self, final_name: str) -> bool:
+        """현재 프로필 내 이벤트 이름 중복 여부 (알림 없음)"""
         for idx, evt in enumerate(self.existing_events):
             if self.is_edit and idx == self.row_num:
                 continue
             if (getattr(evt, "event_name", None) or "").strip() == final_name:
-                messagebox.showerror(
-                    txt("Duplicate Event Name", "중복 이벤트 이름"),
-                    txt(
-                        "Event name '{name}' already exists in this profile.",
-                        "이 프로필에 '{name}' 이벤트 이름이 이미 존재합니다.",
-                        name=final_name,
-                    ),
-                )
-                return False
-        return True
+                return True
+        return False
+
+    def _validate_unique_event_name(self, final_name: str) -> bool:
+        """현재 프로필 내 이벤트 이름 중복 여부 검증"""
+        if not self._duplicate_name_exists(final_name):
+            return True
+        return self._fail_with_modal(
+            0,
+            txt("Duplicate event name", "이벤트 이름 중복"),
+            txt(
+                "Event name '{name}' already exists in this profile.",
+                "이 프로필에 '{name}' 이벤트 이름이 이미 존재합니다.",
+                name=final_name,
+            ),
+            getattr(self, "entry_name", None),
+            title=txt("Duplicate Event Name", "중복 이벤트 이름"),
+        )
 
     def save_event(self, event: object | None = None) -> None:
+        self._error_message = None
         if not self._validate_required_fields():
             return
 
         final_name = self.entry_name.get().strip()
         if not final_name:
-            messagebox.showerror(
-                txt("Error", "오류"),
+            self._fail_with_modal(
+                0,
+                txt("Event name required", "이벤트 이름 필요"),
                 txt("Please enter an event name.", "이벤트 이름을 입력해 주세요."),
+                getattr(self, "entry_name", None),
             )
             return
         if not self._validate_unique_event_name(final_name):
@@ -1691,13 +1964,15 @@ class KeystrokeEventEditor:
         cycle_path = self._validate_cycles(final_name, self.temp_conditions)
         if cycle_path:
             path_str = " → ".join(cycle_path)
-            messagebox.showerror(
-                txt("Error", "오류"),
+            self._fail_with_modal(
+                2,
+                txt("Circular reference", "순환 참조"),
                 txt(
                     "Circular reference detected.\nPath: {path}\nPlease remove a condition in the cycle path.",
                     "순환 참조가 감지되었습니다.\n경로: {path}\n순환 경로의 조건을 제거해 주세요.",
                     path=path_str,
                 ),
+                getattr(self, "tree_cond", None),
             )
             return
 
@@ -1727,9 +2002,56 @@ class KeystrokeEventEditor:
         self.save_cb(evt, self.is_edit, self.row_num)
         if held_img is not None:
             self._update_img_lbl(self.lbl_img2, held_img)
+        self._suppress_dirty_prompt = True
         self.close_window()
 
+    def _form_fingerprint(self) -> tuple[object, ...]:
+        """편집 중인 폼 상태. 닫기 시 변경 여부 판정에만 쓴다."""
+        try:
+            held = self.held_img
+            return (
+                self.entry_name.get(),
+                self.key_to_enter,
+                self.clicked_pos,
+                self.ref_pixel,
+                self.capture_session.held_position,
+                None if held is None else (id(held), held.size, held.mode),
+                self.entry_dur.get(),
+                self.entry_rand.get(),
+                self.capture_w_var.get(),
+                self.capture_h_var.get(),
+                self.region_w_var.get(),
+                self.region_h_var.get(),
+                self.match_mode_var.get(),
+                bool(self.invert_match_var.get()),
+                bool(self.execute_action_var.get()),
+                self.group_id_var.get(),
+                self.priority_var.get(),
+                tuple(sorted(self.temp_conditions.items())),
+            )
+        except (tk.TclError, AttributeError):
+            # 읽을 수 없는 값이 있으면 보수적으로 '변경됨'으로 본다.
+            return (object(),)
+
+    def _confirm_discard(self) -> bool:
+        if self._suppress_dirty_prompt:
+            return True
+        if self._form_fingerprint() == getattr(self, "_initial_fingerprint", None):
+            return True
+        return bool(
+            messagebox.askyesno(
+                txt("Discard changes?", "변경사항을 버릴까요?"),
+                txt(
+                    "This event has unsaved changes. Close without saving?",
+                    "저장하지 않은 변경사항이 있습니다. 저장하지 않고 닫을까요?",
+                ),
+                parent=self.win,
+            )
+        )
+
     def close_window(self, event: object | None = None) -> None:
+        if not self._confirm_discard():
+            return
         self._is_closing = True
         for after_id in (self._capture_after_id, self._modifier_after_id):
             if after_id is not None:
@@ -1850,10 +2172,24 @@ class KeystrokeEventEditor:
         self._refresh_basic_guidance()
 
     @staticmethod
+    def _write_entry(entry: tk.Entry, value: str) -> None:
+        """readonly 좌표 필드에도 값을 쓸 수 있도록 잠시 상태를 해제한다."""
+        try:
+            was_readonly = str(entry.cget("state")) == "readonly"
+        except tk.TclError:
+            was_readonly = False
+        if was_readonly:
+            entry.config(state="normal")
+        entry.delete(0, tk.END)
+        if value:
+            entry.insert(0, value)
+        if was_readonly:
+            entry.config(state="readonly")
+
+    @staticmethod
     def _set_entries(entries: Sequence[tk.Entry], x: int, y: int) -> None:
         for i, val in enumerate((x, y)):
-            entries[i].delete(0, tk.END)
-            entries[i].insert(0, str(val))
+            KeystrokeEventEditor._write_entry(entries[i], str(val))
 
     def _safe_update_img_lbl(self, lbl: tk.Label, img: Image.Image) -> None:
         """위젯 존재 확인 후 안전하게 이미지 업데이트"""
@@ -1886,7 +2222,7 @@ class KeystrokeEventEditor:
     def _clear_capture(self) -> None:
         self.capture_session.clear_hold()
         for entry in self.coord_entries[2:]:
-            entry.delete(0, tk.END)
+            self._write_entry(entry, "")
         self._clear_preview_label(getattr(self, "lbl_img2", None))
         self._clear_preview_label(getattr(self, "lbl_ref", None))
         self._refresh_basic_guidance()

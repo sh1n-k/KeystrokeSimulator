@@ -90,6 +90,11 @@ class TestValidateRequiredFields(unittest.TestCase):
         stub._has_partial_screen = (
             lambda s=stub: KeystrokeEventEditor._has_partial_screen(s)
         )
+        stub._required_field_error = (
+            lambda s=stub: KeystrokeEventEditor._required_field_error(s)
+        )
+        stub._required_focus_widget = lambda: None
+        stub._report_validation_error = lambda *_args, **_kwargs: None
         return stub
 
     @patch("app.ui.event_editor.messagebox")
@@ -371,6 +376,7 @@ class TestBasicGuidanceSafety(unittest.TestCase):
         editor.clicked_pos = None
         editor.key_to_enter = None
         editor.execute_action_var = tk.BooleanVar(master=interp, value=True)
+        editor._guidance = lambda: ("info", "short", "detail", False)
 
         KeystrokeEventEditor._refresh_basic_guidance(editor)
 
