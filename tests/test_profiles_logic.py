@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 from app.core.models import EventModel, ProfileModel
 from app.ui import theme
 from app.ui.profile_event_list import (
+    EVENT_PRIORITY_MAX,
+    EVENT_PRIORITY_MIN,
     EventListFrame,
     EventRow,
     resolve_selection,
@@ -1110,6 +1112,70 @@ class TestBulkActions(unittest.TestCase):
             [e.runtime_toggle_member for e in stub.profile.event_list],
             [False, False, False],
         )
+
+    def test_bulk_priority_applies_the_entered_value_to_the_selection(self):
+        stub = self._make_stub()
+        stub.win = object()
+
+        with patch(
+            "app.ui.profile_event_list.simpledialog.askinteger", return_value=7
+        ) as ask:
+            stub._bulk_set_priority()
+
+        self.assertEqual([e.priority for e in stub.profile.event_list], [7, 0, 7])
+        self.assertEqual(ask.call_args.kwargs["minvalue"], EVENT_PRIORITY_MIN)
+        self.assertEqual(ask.call_args.kwargs["maxvalue"], EVENT_PRIORITY_MAX)
+
+    def test_bulk_priority_cancel_changes_nothing(self):
+        stub = self._make_stub()
+        stub.win = object()
+        stub.profile.event_list[0].priority = 3
+
+        with patch(
+            "app.ui.profile_event_list.simpledialog.askinteger", return_value=None
+        ):
+            stub._bulk_set_priority()
+
+        self.assertEqual([e.priority for e in stub.profile.event_list], [3, 0, 0])
+        stub.save_cb.assert_not_called()
+
+    def test_bulk_priority_seeds_the_dialog_with_a_shared_value(self):
+        stub = self._make_stub()
+        stub.win = object()
+        for index in (0, 2):
+            stub.profile.event_list[index].priority = 5
+
+        with patch(
+            "app.ui.profile_event_list.simpledialog.askinteger", return_value=5
+        ) as ask:
+            stub._bulk_set_priority()
+
+        self.assertEqual(ask.call_args.kwargs["initialvalue"], 5)
+
+    def test_bulk_priority_seeds_the_dialog_with_the_lowest_mixed_value(self):
+        stub = self._make_stub()
+        stub.win = object()
+        stub.profile.event_list[0].priority = 8
+        stub.profile.event_list[2].priority = 2
+
+        with patch(
+            "app.ui.profile_event_list.simpledialog.askinteger", return_value=2
+        ) as ask:
+            stub._bulk_set_priority()
+
+        self.assertEqual(ask.call_args.kwargs["initialvalue"], 2)
+
+    def test_bulk_priority_is_inert_without_a_selection(self):
+        stub = self._make_stub()
+        stub.selected_indices = set()
+
+        with patch(
+            "app.ui.profile_event_list.simpledialog.askinteger"
+        ) as ask:
+            stub._bulk_set_priority()
+
+        ask.assert_not_called()
+        self.assertEqual([e.priority for e in stub.profile.event_list], [0, 0, 0])
 
     def test_bulk_actions_are_inert_without_a_selection(self):
         stub = self._make_stub()

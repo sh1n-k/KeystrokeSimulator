@@ -13,7 +13,13 @@ from dataclasses import replace as dataclass_replace
 from PIL import Image, ImageTk
 
 from app.utils.i18n import dual_text_width, txt
-from app.ui.profile_event_list import EventListFrame, EventRow, ToolTip
+from app.ui.profile_event_list import (
+    EVENT_PRIORITY_MAX,
+    EVENT_PRIORITY_MIN,
+    EventListFrame,
+    EventRow,
+    ToolTip,
+)
 from app.ui.profile_groups import GroupSelector
 from app.ui.profile_settings import ProfileFrame, RuntimeToggleSettingsFrame
 from app.core.models import ProfileModel, EventModel
@@ -655,8 +661,8 @@ class KeystrokeProfiles:
         ).pack(side=tk.LEFT)
         self.insp_priority_spin = ttk.Spinbox(
             f_priority,
-            from_=0,
-            to=999,
+            from_=EVENT_PRIORITY_MIN,
+            to=EVENT_PRIORITY_MAX,
             width=5,
             textvariable=self.insp_priority_var,
             command=self._on_inspector_priority_changed,
@@ -740,7 +746,7 @@ class KeystrokeProfiles:
         except (TypeError, ValueError):
             self.insp_priority_var.set(str(event.priority))
             return
-        priority = max(0, min(999, priority))
+        priority = max(EVENT_PRIORITY_MIN, min(EVENT_PRIORITY_MAX, priority))
         if priority == event.priority:
             return
         event.priority = priority

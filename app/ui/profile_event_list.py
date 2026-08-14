@@ -5,7 +5,7 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import replace as dataclass_replace
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 from typing import Any, Literal, Optional, Protocol, TypeAlias, TypedDict, cast
 
 from app.core.models import EventModel, ProfileModel
@@ -40,6 +40,9 @@ EVENT_KEY_COL_WIDTH = 8
 EVENT_COND_COL_WIDTH = 6
 EVENT_EXTRA_COL_WIDTH = 7
 EVENT_ACTIONS_COL_WIDTH = 18
+# Priority bounds shared by the inspector spinbox and the bulk dialog.
+EVENT_PRIORITY_MIN = 0
+EVENT_PRIORITY_MAX = 999
 
 ClickAction: TypeAlias = Literal["open", "copy", "remove"]
 SortKey: TypeAlias = Callable[[EventModel], tuple[object, ...]]
@@ -753,6 +756,7 @@ class EventListFrame(ttk.Frame):
         ).pack(side=tk.RIGHT)
         for en, ko, command in (
             ("▣ Group", "▣ 그룹", self._bulk_set_group),
+            ("Priority", "우선순위", self._bulk_set_priority),
             ("Use on", "사용 켜기", lambda: self._bulk_set_use(True)),
             ("Use off", "사용 끄기", lambda: self._bulk_set_use(False)),
             ("Toggle set", "토글 세트", self._bulk_toggle_runtime_member),
@@ -1688,6 +1692,42 @@ class EventListFrame(ttk.Frame):
                 )
 
         GroupSelector(self.win, current, self._get_existing_groups(), on_selected)
+
+    def _bulk_set_priority(self) -> None:
+        """Give every selected event the same priority. Inside a group the
+        lowest value wins, so the prompt says which direction is stronger."""
+        events = self._selected_events()
+        if not events:
+            return
+        distinct = {e.priority for e in events}
+        initial = distinct.pop() if len(distinct) == 1 else min(e.priority for e in events)
+        value = simpledialog.askinteger(
+            txt("Priority", "우선순위"),
+            txt(
+                "Set the priority of {count} selected event(s).\n"
+                "Within a group, the lowest value runs first.",
+                "선택한 이벤트 {count}개의 우선순위를 설정합니다.\n"
+                "같은 그룹에서는 값이 낮을수록 먼저 실행됩니다.",
+                count=len(events),
+            ),
+            parent=cast(Any, self.win),
+            minvalue=EVENT_PRIORITY_MIN,
+            maxvalue=EVENT_PRIORITY_MAX,
+            initialvalue=initial,
+        )
+        if value is None:
+            return
+        for event in events:
+            event.priority = value
+        self.update_events()
+        self.save_cb(check_name=False)
+        if self.status_cb:
+            self.status_cb(
+                txt(
+                    f"Priority set to {value} for {len(events)} event(s)",
+                    f"이벤트 {len(events)}개의 우선순위를 {value}로 설정했습니다",
+                )
+            )
 
     def _bulk_set_use(self, use: bool) -> None:
         events = self._selected_events()
