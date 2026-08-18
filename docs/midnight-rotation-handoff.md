@@ -231,6 +231,9 @@ WW, Havoc, Feral, Arcane, Outlaw, Sub, Assa, Aff, Enhance(Stormbringer)
 | --- | --- |
 | `docs/midnight-rotation-handoff.md` | **이 파일** (세션 핸드오프) |
 | `docs/bm-hunter-rotation-rules.md` | 야수 사냥꾼 확정 규칙 (스펙별 문서) |
+| `docs/warrior-rotation-rules.md` | 전사 방어·무기·분노 확정 규칙 |
+| `docs/paladin-rotation-rules.md` | 성기사 보호·징벌 확정 규칙 |
+| `docs/deathknight-rotation-rules.md` | 죽음의 기사 혈기·냉기·부정 확정 규칙 |
 | `~/Projects/simc-apl-research/README.md` | SimC 스냅샷 안내 |
 | `~/Projects/simc-apl-research/SOURCE.txt` | midnight 커밋·fetch 메타 |
 | `~/Projects/simc-apl-research/notes/INVENTORY.md` | default/assisted 파일 목록 |
