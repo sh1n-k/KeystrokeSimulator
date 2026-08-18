@@ -985,6 +985,8 @@ class TestSaveLatestState(unittest.TestCase):
         app = _make_app_stub()
         app.selected_process = FakeVar("SomeProcess (4321)")
         app.selected_profile = FakeVar("Quick")
+        app.winfo_x = MagicMock(return_value=80)
+        app.winfo_y = MagicMock(return_value=90)
 
         KeystrokeSimulatorApp._save_latest_state(app)
 
@@ -993,7 +995,36 @@ class TestSaveLatestState(unittest.TestCase):
             profile="Quick",
             run_set="__current__",
             modkey_set="Default",
+            main_pos="80/90",
         )
+
+    @patch("app.ui.simulator_app.WindowUtils.center_window")
+    @patch("app.ui.simulator_app.StateUtils.load_main_app_state")
+    def test_restore_window_position_uses_saved_coordinates(
+        self, mock_load_state, mock_center
+    ):
+        mock_load_state.return_value = {"main_pos": "120/340"}
+        app = _make_app_stub()
+        app.geometry = MagicMock()
+
+        KeystrokeSimulatorApp._restore_window_position(app)
+
+        app.geometry.assert_called_once_with("+120+340")
+        mock_center.assert_not_called()
+
+    @patch("app.ui.simulator_app.WindowUtils.center_window")
+    @patch("app.ui.simulator_app.StateUtils.load_main_app_state")
+    def test_restore_window_position_centers_when_missing(
+        self, mock_load_state, mock_center
+    ):
+        mock_load_state.return_value = {}
+        app = _make_app_stub()
+        app.geometry = MagicMock()
+
+        KeystrokeSimulatorApp._restore_window_position(app)
+
+        mock_center.assert_called_once_with(app)
+        app.geometry.assert_not_called()
 
 
 class TestRuntimeToggleMouseHandlers(unittest.TestCase):

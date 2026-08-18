@@ -404,7 +404,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         style = ttk.Style(self)
         style.configure("TEntry", fieldbackground=theme.SURFACE_CANVAS)
         self._refresh_ui_texts()
-        WindowUtils.center_window(self)
+        self._restore_window_position()
 
     # ---------------------------------------------------------------
     # Helpers used by _create_ui
@@ -1765,12 +1765,30 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.unbind_events()
         self.settings_window = KeystrokeSettings(self)
 
+    def _restore_window_position(self) -> None:
+        pos = StateUtils.parse_slash_int_pair(
+            (StateUtils.load_main_app_state() or {}).get("main_pos")
+        )
+        if pos is not None:
+            try:
+                self.geometry(f"+{pos[0]}+{pos[1]}")
+                return
+            except tk.TclError:
+                pass
+        WindowUtils.center_window(self)
+
     def _save_latest_state(self) -> None:
+        main_pos = None
+        try:
+            main_pos = f"{self.winfo_x()}/{self.winfo_y()}"
+        except tk.TclError:
+            pass
         StateUtils.save_main_app_state(
             process=self.selected_process.get().split(" (")[0],
             profile=self.selected_profile.get(),
             run_set=self.selected_run_set.get() or CURRENT_RUN_SET_ID,
             modkey_set=self.selected_modkey_set.get(),
+            main_pos=main_pos,
         )
 
     def unbind_events(self) -> None:
