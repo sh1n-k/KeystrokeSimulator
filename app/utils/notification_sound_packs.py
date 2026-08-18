@@ -13,6 +13,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.utils._classic_notification_sounds import CLASSIC_START_SOUND, CLASSIC_STOP_SOUND
+from app.utils._toggle_notification_sounds import (
+    SOFT_A_TOGGLE_OFF,
+    SOFT_A_TOGGLE_ON,
+    SOFT_B_TOGGLE_OFF,
+    SOFT_B_TOGGLE_ON,
+    SOFT_C_TOGGLE_OFF,
+    SOFT_C_TOGGLE_ON,
+)
+from app.utils.sound_assets import (
+    RUNTIME_TOGGLE_OFF_SOUND,
+    RUNTIME_TOGGLE_ON_SOUND,
+)
 
 DEFAULT_NOTIFICATION_SOUND_PACK = "classic"
 
@@ -29,6 +41,8 @@ class NotificationSoundPack:
     pack_id: str
     start_b64: str
     stop_b64: str
+    on_b64: str
+    off_b64: str
     label_en: str
     label_ko: str
 
@@ -38,6 +52,8 @@ NOTIFICATION_SOUND_PACKS: dict[str, NotificationSoundPack] = {
         pack_id="classic",
         start_b64=CLASSIC_START_SOUND,
         stop_b64=CLASSIC_STOP_SOUND,
+        on_b64=RUNTIME_TOGGLE_ON_SOUND,
+        off_b64=RUNTIME_TOGGLE_OFF_SOUND,
         label_en="Classic",
         label_ko="클래식",
     ),
@@ -45,6 +61,8 @@ NOTIFICATION_SOUND_PACKS: dict[str, NotificationSoundPack] = {
         pack_id="soft_a",
         start_b64=_SOFT_A_START,
         stop_b64=_SOFT_A_STOP,
+        on_b64=SOFT_A_TOGGLE_ON,
+        off_b64=SOFT_A_TOGGLE_OFF,
         label_en="Soft A (Chime)",
         label_ko="소프트 A (차임)",
     ),
@@ -52,6 +70,8 @@ NOTIFICATION_SOUND_PACKS: dict[str, NotificationSoundPack] = {
         pack_id="soft_b",
         start_b64=_SOFT_B_START,
         stop_b64=_SOFT_B_STOP,
+        on_b64=SOFT_B_TOGGLE_ON,
+        off_b64=SOFT_B_TOGGLE_OFF,
         label_en="Soft B (Minimal)",
         label_ko="소프트 B (미니멀)",
     ),
@@ -59,6 +79,8 @@ NOTIFICATION_SOUND_PACKS: dict[str, NotificationSoundPack] = {
         pack_id="soft_c",
         start_b64=_SOFT_C_START,
         stop_b64=_SOFT_C_STOP,
+        on_b64=SOFT_C_TOGGLE_ON,
+        off_b64=SOFT_C_TOGGLE_OFF,
         label_en="Soft C (Chord)",
         label_ko="소프트 C (코드)",
     ),

@@ -23,6 +23,8 @@ class TestNotificationSoundPackCatalog(unittest.TestCase):
         for pack in choices:
             self.assertTrue(pack.start_b64)
             self.assertTrue(pack.stop_b64)
+            self.assertTrue(pack.on_b64)
+            self.assertTrue(pack.off_b64)
 
     def test_normalize_and_get(self):
         self.assertEqual(normalize_notification_sound_pack(None), "classic")

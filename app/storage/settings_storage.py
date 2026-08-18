@@ -44,7 +44,7 @@ def _coerce_settings(raw: dict[str, Any]) -> UserSettings:
         value = raw[name]
         if name == "language":
             values[name] = normalize_language(value)
-        elif name == "notification_sound_pack":
+        elif name in ("notification_sound_pack", "runtime_toggle_sound_pack"):
             values[name] = normalize_notification_sound_pack(value)
         elif isinstance(default, bool):
             values[name] = _coerce_bool(name, value, default)
@@ -56,6 +56,9 @@ def _coerce_settings(raw: dict[str, Any]) -> UserSettings:
     settings.language = normalize_language(settings.language)
     settings.notification_sound_pack = normalize_notification_sound_pack(
         settings.notification_sound_pack
+    )
+    settings.runtime_toggle_sound_pack = normalize_notification_sound_pack(
+        settings.runtime_toggle_sound_pack
     )
     return settings
 

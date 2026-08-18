@@ -25,8 +25,8 @@ from app.utils.sounds import SoundPlayer
 from app.utils.window_state import StateUtils, WindowUtils
 from app.ui import theme
 
-SETTINGS_WINDOW_DEFAULT_GEOMETRY = "800x340"
-SETTINGS_WINDOW_MIN_SIZE = (700, 300)
+SETTINGS_WINDOW_DEFAULT_GEOMETRY = "800x400"
+SETTINGS_WINDOW_MIN_SIZE = (700, 360)
 
 
 class SettingsHost(Protocol):
@@ -59,6 +59,9 @@ class KeystrokeSettings(tk.Toplevel):
         self.start_stop_combo: ttk.Combobox
         self.language_combo: ttk.Combobox
         self.sound_pack_combo: ttk.Combobox
+        self.toggle_sound_pack_combo: ttk.Combobox
+        self.toggle_sound_preview_on: ttk.Button
+        self.toggle_sound_preview_off: ttk.Button
         self.button_dock: tk.Frame
         self.button_group: tk.Frame
         self._press_key_label = ""
@@ -391,6 +394,47 @@ class KeystrokeSettings(tk.Toplevel):
             command=self._preview_stop_sound,
         ).pack(side="left")
 
+        self.ui_vars["runtime_toggle_sound_enabled"] = tk.BooleanVar(
+            value=bool(self.settings.runtime_toggle_sound_enabled)
+        )
+        ttk.Checkbutton(
+            self.card_sound,
+            text=txt("Toggle alert", "토글 알림음"),
+            variable=self.ui_vars["runtime_toggle_sound_enabled"],
+        ).grid(row=1, column=0, padx=10, pady=5, sticky="w")
+
+        self.toggle_sound_pack_combo = ttk.Combobox(
+            self.card_sound, values=labels, state="readonly", width=28
+        )
+        toggle_current = normalize_notification_sound_pack(
+            self.settings.runtime_toggle_sound_pack
+        )
+        toggle_selected = next(
+            (
+                txt(pack.label_en, pack.label_ko)
+                for pack in packs
+                if pack.pack_id == toggle_current
+            ),
+            labels[0],
+        )
+        self.toggle_sound_pack_combo.set(toggle_selected)
+        self.toggle_sound_pack_combo.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+
+        toggle_preview = ttk.Frame(self.card_sound)
+        toggle_preview.grid(row=1, column=2, padx=10, pady=5, sticky="w")
+        self.toggle_sound_preview_on = ttk.Button(
+            toggle_preview,
+            text=txt("Preview On", "켜짐 미리듣기"),
+            command=self._preview_toggle_on_sound,
+        )
+        self.toggle_sound_preview_on.pack(side="left", padx=(0, 6))
+        self.toggle_sound_preview_off = ttk.Button(
+            toggle_preview,
+            text=txt("Preview Off", "꺼짐 미리듣기"),
+            command=self._preview_toggle_off_sound,
+        )
+        self.toggle_sound_preview_off.pack(side="left")
+
     def _selected_sound_pack_id(self) -> str:
         label = self.sound_pack_combo.get()
         pack_id = self._sound_pack_id_by_label.get(label)
@@ -419,6 +463,21 @@ class KeystrokeSettings(tk.Toplevel):
         player = self._preview_player_instance()
         player.set_notification_pack(self._selected_sound_pack_id())
         player.play_stop_sound()
+
+    def _selected_toggle_sound_pack_id(self) -> str:
+        label = self.toggle_sound_pack_combo.get()
+        pack_id = self._sound_pack_id_by_label.get(label)
+        return normalize_notification_sound_pack(pack_id)
+
+    def _preview_toggle_on_sound(self) -> None:
+        player = self._preview_player_instance()
+        player.set_runtime_toggle_pack(self._selected_toggle_sound_pack_id())
+        player.play_runtime_toggle_on_sound()
+
+    def _preview_toggle_off_sound(self) -> None:
+        player = self._preview_player_instance()
+        player.set_runtime_toggle_pack(self._selected_toggle_sound_pack_id())
+        player.play_runtime_toggle_off_sound()
 
     def _create_buttons(self) -> None:
         # Run-dock (bottom action band) — separator above + panel-tone strip
@@ -548,6 +607,10 @@ class KeystrokeSettings(tk.Toplevel):
             return self._warn(txt("Invalid numeric input.", "숫자 입력이 올바르지 않습니다."))
 
         self.settings.notification_sound_pack = self._selected_sound_pack_id()
+        self.settings.runtime_toggle_sound_pack = self._selected_toggle_sound_pack_id()
+        self.settings.runtime_toggle_sound_enabled = bool(
+            self._bool_var("runtime_toggle_sound_enabled").get()
+        )
 
         self._save_settings()
         self.on_close()

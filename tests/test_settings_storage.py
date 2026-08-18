@@ -96,6 +96,42 @@ class TestUserSettingsStorage(unittest.TestCase):
             self.assertTrue(can_save)
             self.assertEqual(loaded.notification_sound_pack, "classic")
 
+    def test_runtime_toggle_sound_roundtrip_and_fallback(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "user_settings.json"
+            settings = UserSettings(
+                runtime_toggle_sound_pack="soft_c",
+                runtime_toggle_sound_enabled=False,
+            )
+            save_user_settings(settings, path)
+            loaded, can_save = load_user_settings(path)
+            self.assertTrue(can_save)
+            self.assertEqual(loaded.runtime_toggle_sound_pack, "soft_c")
+            self.assertFalse(loaded.runtime_toggle_sound_enabled)
+
+            path.write_text(
+                json.dumps({"runtime_toggle_sound_pack": "not-a-pack"}),
+                encoding="utf-8",
+            )
+            loaded, can_save = load_user_settings(path)
+            self.assertTrue(can_save)
+            self.assertEqual(loaded.runtime_toggle_sound_pack, "classic")
+            self.assertTrue(loaded.runtime_toggle_sound_enabled)
+
+            path.write_text(
+                json.dumps(
+                    {
+                        "runtime_toggle_sound_pack": 123,
+                        "runtime_toggle_sound_enabled": "nope",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            loaded, can_save = load_user_settings(path)
+            self.assertTrue(can_save)
+            self.assertEqual(loaded.runtime_toggle_sound_pack, "classic")
+            self.assertTrue(loaded.runtime_toggle_sound_enabled)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,10 +11,6 @@ from typing import Any, TypeAlias, cast
 
 from loguru import logger
 
-from app.utils.sound_assets import (
-    RUNTIME_TOGGLE_OFF_SOUND,
-    RUNTIME_TOGGLE_ON_SOUND,
-)
 from app.utils.notification_sound_packs import (
     DEFAULT_NOTIFICATION_SOUND_PACK,
     get_notification_sound_pack,
@@ -59,7 +55,11 @@ class SoundPlayer:
         self._device: Any | None = None
         self._stream: Generator[bytes | SampleArray, int, None] | None = None
         self._pack_cache: dict[str, tuple[_SoundHandle | None, _SoundHandle | None]] = {}
+        self._toggle_pack_cache: dict[
+            str, tuple[_SoundHandle | None, _SoundHandle | None]
+        ] = {}
         self.notification_sound_pack: str = DEFAULT_NOTIFICATION_SOUND_PACK
+        self.runtime_toggle_sound_pack: str = DEFAULT_NOTIFICATION_SOUND_PACK
         # Idle stop must never run inside the miniaudio data callback. A generation
         # token cancels stale stop workers when new audio is queued.
         self._idle_generation: int = 0
@@ -70,9 +70,8 @@ class SoundPlayer:
         # self._lock while calling into miniaudio stop/close).
         self._device_io = threading.Lock()
         try:
-            self.runtime_toggle_on_sound = self._load_sound(RUNTIME_TOGGLE_ON_SOUND)
-            self.runtime_toggle_off_sound = self._load_sound(RUNTIME_TOGGLE_OFF_SOUND)
             self.set_notification_pack(pack_id)
+            self.set_runtime_toggle_pack(None)
             # Playback device starts on first play and stops when idle (no always-on audio thread).
             atexit.register(self.close)
         except Exception as e:
@@ -92,6 +91,21 @@ class SoundPlayer:
         self.start_sound = start_h
         self.stop_sound = stop_h
         self.notification_sound_pack = applied
+        return applied
+
+    def set_runtime_toggle_pack(self, pack_id: str | None) -> str:
+        """Bind toggle ON/OFF handles to a known pack; returns the applied id."""
+        applied = normalize_notification_sound_pack(pack_id)
+        if applied in self._toggle_pack_cache:
+            on_h, off_h = self._toggle_pack_cache[applied]
+        else:
+            pack = get_notification_sound_pack(applied)
+            on_h = self._load_sound(pack.on_b64)
+            off_h = self._load_sound(pack.off_b64)
+            self._toggle_pack_cache[applied] = (on_h, off_h)
+        self.runtime_toggle_on_sound = on_h
+        self.runtime_toggle_off_sound = off_h
+        self.runtime_toggle_sound_pack = applied
         return applied
 
     def _load_sound(self, b64_data: str) -> _SoundHandle | None:
@@ -175,7 +189,9 @@ class SoundPlayer:
         self.runtime_toggle_on_sound = None
         self.runtime_toggle_off_sound = None
         self._pack_cache.clear()
+        self._toggle_pack_cache.clear()
         self.notification_sound_pack = DEFAULT_NOTIFICATION_SOUND_PACK
+        self.runtime_toggle_sound_pack = DEFAULT_NOTIFICATION_SOUND_PACK
         self.close()
 
     def __del__(self) -> None:

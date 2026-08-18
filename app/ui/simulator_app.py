@@ -535,6 +535,10 @@ class KeystrokeSimulatorApp(tk.Tk):
                 sound_player.set_notification_pack,
                 self.settings.notification_sound_pack,
             )
+            safe_call(
+                sound_player.set_runtime_toggle_pack,
+                self.settings.runtime_toggle_sound_pack,
+            )
         self._refresh_ui_texts()
 
         # Load state
@@ -1634,10 +1638,11 @@ class KeystrokeSimulatorApp(tk.Tk):
         next_state = not self.runtime_toggle_active
         safe_call(self.keystroke_processor.set_runtime_toggle_active, next_state)
         self.runtime_toggle_active = next_state
-        if next_state:
-            self.sound_player.play_runtime_toggle_on_sound()
-        else:
-            self.sound_player.play_runtime_toggle_off_sound()
+        if self.settings.runtime_toggle_sound_enabled:
+            if next_state:
+                self.sound_player.play_runtime_toggle_on_sound()
+            else:
+                self.sound_player.play_runtime_toggle_off_sound()
         self._update_main_status()
         hotkey_hint = self.__dict__.get("lbl_hotkey_hint")
         if hotkey_hint is not None:

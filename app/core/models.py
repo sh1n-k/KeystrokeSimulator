@@ -21,6 +21,9 @@ class UserSettings:
     use_alt_shift_hotkey: bool = False
     # Start/stop notification sound pack id (classic | soft_a | soft_b | soft_c)
     notification_sound_pack: str = "classic"
+    # Runtime toggle ON/OFF alert pack; independent of start/stop.
+    runtime_toggle_sound_pack: str = "classic"
+    runtime_toggle_sound_enabled: bool = True
 
 
 @dataclass

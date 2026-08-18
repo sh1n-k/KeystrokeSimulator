@@ -113,6 +113,7 @@ def _make_app_stub(run_profiles=None) -> KeystrokeSimulatorApp:
             "toggle_start_stop_mac": False,
             "use_alt_shift_hotkey": False,
             "start_stop_key": "DISABLED",
+            "runtime_toggle_sound_enabled": True,
         },
     )()
     app.run_set_frame = FakeRunSetFrame(list(run_profiles or []))
@@ -503,6 +504,19 @@ class TestToggleAndStopSimulation(unittest.TestCase):
         app.keystroke_processor.set_runtime_toggle_active.assert_called_with(False)
         app.sound_player.play_runtime_toggle_off_sound.assert_called_once()
         self.assertFalse(app.runtime_toggle_active)
+
+    def test_toggle_runtime_event_group_skips_sound_when_disabled(self):
+        app = _make_app_stub()
+        app.is_running.set(True)
+        app.keystroke_processor = MagicMock()
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = "F6"
+        app.settings.runtime_toggle_sound_enabled = False
+
+        self.assertTrue(KeystrokeSimulatorApp.toggle_runtime_event_group(app))
+        app.keystroke_processor.set_runtime_toggle_active.assert_called_once_with(True)
+        app.sound_player.play_runtime_toggle_on_sound.assert_not_called()
+        self.assertTrue(app.runtime_toggle_active)
 
     @patch("app.ui.simulator_app.platform.system", return_value="Darwin")
     def test_stop_simulation_keeps_mac_polling_thread_when_option_shift_enabled(
