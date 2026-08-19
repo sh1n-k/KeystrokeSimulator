@@ -87,8 +87,9 @@ class MssScreenBackend:
         self._lock = threading.Lock()
 
     def open(self) -> None:
-        import mss
-
+        # Quartz/ScreenCaptureKit 과 같은 이유로 동적 import 한다. mss 는
+        # Windows 전용 의존성이라 macOS 에는 설치되지 않는다.
+        mss: Any = _framework("mss")
         self._sct = mss.mss()
 
     def close(self) -> None:

@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import Any, NotRequired, Protocol, TypedDict, cast
 
 from loguru import logger
-from mss.screenshot import ScreenShot
 from PIL import Image
 
 from app.core.models import EventModel, ModificationKeys, UserSettings
@@ -33,6 +32,18 @@ KeyAction = Callable[[int], None]
 ImageBytes = bytes | bytearray | memoryview
 
 
+class ScreenShotLike(Protocol):
+    """mss.screenshot.ScreenShot 중 실제로 쓰는 부분.
+
+    mss 는 Windows 전용 의존성이라 macOS 에는 설치되지 않는다. 타입 검사가
+    그 패키지를 필요로 하지 않도록 구조만 적어 둔다.
+    """
+
+    width: int
+    height: int
+    raw: bytearray
+
+
 @dataclass(frozen=True)
 class ImageFrame:
     width: int
@@ -43,7 +54,7 @@ class ImageFrame:
     offset: int = 0
 
     @classmethod
-    def from_screenshot(cls, screenshot: ScreenShot) -> "ImageFrame":
+    def from_screenshot(cls, screenshot: ScreenShotLike) -> "ImageFrame":
         return cls(
             width=screenshot.width,
             height=screenshot.height,
