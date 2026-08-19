@@ -40,8 +40,13 @@ class ScreenshotCapturer:
 
     def set_current_mouse_position(self, position: tuple[int, int]) -> None:
         mouse_x, mouse_y = position
+        # 실행 루프는 화면 밖 좌표의 이벤트를 버리므로(processor._clamp_to_screen)
+        # 편집기도 같은 범위만 받아야 한다. 그러지 않으면 고를 수는 있는데
+        # 실행 중에는 절대 매칭되지 않는 기준색이 만들어진다.
         if (
-            mouse_x + self.box_w >= self.screen_width
+            mouse_x < 0
+            or mouse_y < 0
+            or mouse_x + self.box_w >= self.screen_width
             or mouse_y + self.box_h >= self.screen_height
         ):
             return

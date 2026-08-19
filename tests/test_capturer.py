@@ -204,6 +204,19 @@ class TestCapturerAttributes(unittest.TestCase):
         self.assertEqual(opener.call_args.kwargs["fps"], PREVIEW_STREAM_FPS)
         self.assertLess(PREVIEW_STREAM_FPS, 30)
 
+    def test_negative_positions_are_rejected(self):
+        """실행 루프가 버리는 좌표는 편집기도 받지 않아야 한다."""
+        capturer = self._make_capturer()
+        capturer.set_capture_size(100, 100)
+        capturer.current_position = (10, 10)
+
+        capturer.set_current_mouse_position((-1, 500))
+        self.assertEqual(capturer.current_position, (10, 10))
+        capturer.set_current_mouse_position((500, -1))
+        self.assertEqual(capturer.current_position, (10, 10))
+        capturer.set_current_mouse_position((500, 500))
+        self.assertEqual(capturer.current_position, (500, 500))
+
     def test_capture_group_keeps_the_requested_coordinates(self):
         """미리보기 좌표를 보정하면 저장되는 기준 좌표와 어긋난다."""
         capturer = self._make_capturer()
@@ -221,7 +234,7 @@ class TestCapturerAttributes(unittest.TestCase):
         dead = MagicMock()
         dead.is_dead.return_value = True
 
-        def slow_open(_groups):
+        def slow_open(_groups, **_kwargs):
             time.sleep(0.05)
             return dead
 
@@ -233,6 +246,8 @@ class TestCapturerAttributes(unittest.TestCase):
 
         self.assertEqual(opener.call_count, 1)
         self.assertGreater(first, 0.0)
+        # 예외로 실패 경로를 타면 옛 백엔드가 돌아온다. 성공 경로여야 한다.
+        self.assertIs(backend, dead)
 
     def test_dead_backend_is_reopened(self):
         capturer = self._make_capturer()
