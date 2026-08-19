@@ -1,9 +1,9 @@
+import time
 import unittest
 from unittest.mock import patch, MagicMock
 
-from PIL import Image
-
 from app.core.capturer import ScreenshotCapturer
+from tests.helpers import make_image_frame
 
 
 class TestSetCaptureSize(unittest.TestCase):
@@ -126,21 +126,13 @@ class TestCapturerAttributes(unittest.TestCase):
         )
         capturer.capturing.set()
 
-        fake_image = MagicMock()
-        fake_image.size = (10, 10)
-        fake_image.bgra = b"\x00" * 400
-        fake_sct = MagicMock()
-        fake_sct.grab.return_value = fake_image
-        fake_ctx = MagicMock()
-        fake_ctx.__enter__.return_value = fake_sct
-        fake_ctx.__exit__.return_value = False
+        frame = make_image_frame(10, 10, channels=4)
+        backend = MagicMock()
+        backend.is_dead.return_value = False
+        backend.grab.return_value = [frame]
 
         with (
-            patch("app.core.capturer.mss.mss", return_value=fake_ctx),
-            patch(
-                "app.core.capturer.Image.frombytes",
-                return_value=Image.new("RGB", (10, 10)),
-            ),
+            patch("app.core.capturer.open_screen_backend", return_value=backend),
             patch("app.core.capturer.time.sleep", return_value=None),
         ):
             capturer._last_capture_signature = (
@@ -151,7 +143,97 @@ class TestCapturerAttributes(unittest.TestCase):
             capturer._idle_cycles = 5
             capturer.capture_screenshot()
 
-        fake_sct.grab.assert_called_once()
+        backend.grab.assert_called_once()
+        capturer.screenshot_callback.assert_called_once()
+        backend.close.assert_called_once()
+        _pos, image = capturer.screenshot_callback.call_args[0]
+        self.assertEqual(image.size, (10, 10))
+
+    def test_preview_uses_the_same_backend_as_the_run_loop(self):
+        """편집기 기준색과 실행 매칭이 어긋나지 않으려면 캡처 경로가 같아야 한다."""
+        capturer = self._make_capturer()
+        capturer.capturing.set()
+        capturer.screenshot_callback = MagicMock(
+            side_effect=lambda *_: capturer.capturing.clear()
+        )
+        backend = MagicMock()
+        backend.is_dead.return_value = False
+        backend.grab.return_value = [make_image_frame(4, 4, channels=4)]
+
+        with (
+            patch(
+                "app.core.capturer.open_screen_backend", return_value=backend
+            ) as opener,
+            patch("app.core.capturer.time.sleep", return_value=None),
+        ):
+            capturer.capture_screenshot()
+
+        opener.assert_called_once()
+        (groups,) = opener.call_args[0]
+        self.assertEqual(
+            groups[0]["rect"],
+            {
+                "left": 0,
+                "top": 0,
+                "width": capturer.screen_width,
+                "height": capturer.screen_height,
+            },
+        )
+
+    def test_capture_group_is_clamped_to_the_screen(self):
+        capturer = self._make_capturer()
+        capturer.set_capture_size(100, 100)
+        group = capturer._capture_group(
+            (capturer.screen_width - 10, capturer.screen_height - 10)
+        )
+
+        assert group is not None
+        self.assertEqual(group["rect"]["width"], 10)
+        self.assertEqual(group["rect"]["height"], 10)
+
+    def test_reopen_interval_starts_after_the_attempt(self):
+        """실패 경로가 수 초 걸려도 스로틀이 무력화되면 안 된다."""
+        capturer = self._make_capturer()
+        dead = MagicMock()
+        dead.is_dead.return_value = True
+
+        def slow_open(_groups):
+            time.sleep(0.05)
+            return dead
+
+        with patch(
+            "app.core.capturer.open_screen_backend", side_effect=slow_open
+        ) as opener:
+            backend, first = capturer._reopen(dead, 0.0)
+            capturer._reopen(backend, first)
+
+        self.assertEqual(opener.call_count, 1)
+        self.assertGreater(first, 0.0)
+
+    def test_dead_backend_is_reopened(self):
+        capturer = self._make_capturer()
+        capturer.current_position = (10, 10)
+        capturer.capturing.set()
+        capturer.screenshot_callback = MagicMock(
+            side_effect=lambda *_: capturer.capturing.clear()
+        )
+        dead = MagicMock()
+        dead.is_dead.return_value = True
+        dead.grab.return_value = [None]
+        fresh = MagicMock()
+        fresh.is_dead.return_value = False
+        fresh.grab.return_value = [make_image_frame(4, 4, channels=4)]
+
+        with (
+            patch(
+                "app.core.capturer.open_screen_backend", side_effect=[dead, fresh]
+            ) as opener,
+            patch("app.core.capturer.time.sleep", return_value=None),
+        ):
+            capturer.capture_screenshot()
+
+        self.assertEqual(opener.call_count, 2)
+        dead.close.assert_called()
         capturer.screenshot_callback.assert_called_once()
 
 

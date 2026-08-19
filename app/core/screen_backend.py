@@ -15,11 +15,38 @@ if TYPE_CHECKING:
 Rect = dict[str, int]
 
 BGRA = 0x42475241
+# 백엔드가 죽었을 때 다시 여는 최소 간격. 디스플레이 슬립처럼 원인이 지속되는
+# 동안 매 사이클 재시도하지 않도록 한다.
+BACKEND_RETRY_INTERVAL_S = 2.0
 _STREAM_FPS = 30
-_START_TIMEOUT_S = 8.0
-_MAX_FRAME_AGE_S = 0.5
-_MAX_UNION_AREA = 2_000_000
+_START_TIMEOUT_S = 12.0
+# 콜백 도착은 생존 신호로 쓸 수 없다. 화면이 오래 정지해 있으면 macOS가
+# Idle 샘플 전달을 아예 멈춘다(실측: 정지 영역에서 30초 넘는 공백, 화면이
+# 다시 바뀌면 즉시 재개). 공백 길이가 예측 불가라 임계값을 올려도 오탐이
+# 남으므로, 생존은 명시 신호(Stopped/에러/Blank/프레임 고장)로만 판정한다.
+# Idle 침묵은 "마지막 프레임이 그대로 유효하다"는 뜻 그대로 받아들인다.
+#
+# 쓸 수 있는 프레임이 아예 없는 상태를 무매칭으로 방치하지 않기 위한 상한.
+_NO_FRAME_TIMEOUT_S = 2.0
+# Blank/Suspended(보여줄 화면이 없는 상태)에서 빠져나올 때 감시 영역의 내용이
+# 그대로면 SCStream은 Idle만 보내고 Complete를 주지 않아 프레임이 영영 돌아오지
+# 않는다(실측 확인). 그래서 상한을 두고, 넘기면 사망 처리해 스트림을 다시 연다.
+# 잠금이 길어지는 동안 불필요하게 자주 다시 열지 않도록 넉넉히 잡는다.
+# (참고: 디스플레이 슬립은 이 경로가 아니라 didStopWithError로 관측됐다.)
+_BLANK_TIMEOUT_S = 90.0
+
+# 프레임이 없는 이유. 기한을 얼마로 걸지, 이미 걸린 기한을 덮어써도 되는지가
+# 이유마다 다르다. 기동 직후는 이유 없이 기한만 걸린 상태다.
+_GAP_BLANK = "blank"
+_GAP_FAULT = "fault"
+
+# SCStreamFrameInfoStatus
+_FRAME_IDLE = 1
+_FRAME_BLANK = 2
+_FRAME_SUSPENDED = 3
+_FRAME_STOPPED = 5
 _SCK_CLASSES: dict[str, Any] = {}
+_WARNED: set[str] = set()
 
 
 class ScreenBackend(Protocol):
@@ -28,6 +55,8 @@ class ScreenBackend(Protocol):
     def close(self) -> None: ...
 
     def grab(self, groups: Sequence[Any]) -> list[ImageFrame | None]: ...
+
+    def is_dead(self) -> bool: ...
 
 
 class NullScreenBackend:
@@ -39,6 +68,9 @@ class NullScreenBackend:
 
     def grab(self, groups: Sequence[Any]) -> list[ImageFrame | None]:
         return [None] * len(groups)
+
+    def is_dead(self) -> bool:
+        return False
 
 
 class MssScreenBackend:
@@ -68,6 +100,9 @@ class MssScreenBackend:
             return [
                 ImageFrame.from_screenshot(sct.grab(group["rect"])) for group in groups
             ]
+
+    def is_dead(self) -> bool:
+        return False
 
 
 def union_group_rects(groups: Sequence[Any]) -> Rect:
@@ -112,8 +147,15 @@ def _framework(name: str) -> Any:
     return importlib.import_module(name)
 
 
+def _warn_once(key: str, message: str) -> None:
+    if key in _WARNED:
+        return
+    _WARNED.add(key)
+    logger.warning(message)
+
+
 def frame_from_bgra(
-    src: bytes,
+    src: bytes | memoryview,
     src_w: int,
     src_h: int,
     stride: int,
@@ -124,38 +166,29 @@ def frame_from_bgra(
 
     if src_w < 1 or src_h < 1 or dest_w < 1 or dest_h < 1 or stride < src_w * 4:
         return None
+    if src_w != dest_w or src_h != dest_h:
+        # 스트림 설정이 요청한 크기를 그대로 내주지 않는 상황. 리샘플하면
+        # 색이 달라져 완전 일치 매칭이 조용히 어긋나므로 프레임을 버린다.
+        _warn_once(
+            f"size-{src_w}x{src_h}-{dest_w}x{dest_h}",
+            f"SCStream frame {src_w}x{src_h} does not match requested "
+            f"{dest_w}x{dest_h}; dropping frame",
+        )
+        return None
     packed = dest_w * 4
-    if src_w == dest_w and src_h == dest_h:
-        if stride == packed:
-            return ImageFrame(
-                width=dest_w,
-                height=dest_h,
-                data=bytearray(src[: dest_h * packed]),
-                row_stride=packed,
-                pixel_stride=4,
-            )
-        dest = bytearray(dest_h * packed)
-        for y in range(dest_h):
-            start = y * stride
-            dest_row = y * packed
-            dest[dest_row : dest_row + packed] = src[start : start + packed]
+    if stride == packed:
         return ImageFrame(
             width=dest_w,
             height=dest_h,
-            data=dest,
+            data=bytearray(src[: dest_h * packed]),
             row_stride=packed,
             pixel_stride=4,
         )
     dest = bytearray(dest_h * packed)
     for y in range(dest_h):
-        src_y = min(src_h - 1, y * src_h // dest_h)
-        src_row = src_y * stride
+        start = y * stride
         dest_row = y * packed
-        for x in range(dest_w):
-            src_x = min(src_w - 1, x * src_w // dest_w)
-            src_i = src_row + src_x * 4
-            dest_i = dest_row + x * 4
-            dest[dest_i : dest_i + 4] = src[src_i : src_i + 4]
+        dest[dest_row : dest_row + packed] = src[start : start + packed]
     return ImageFrame(
         width=dest_w,
         height=dest_h,
@@ -165,19 +198,19 @@ def frame_from_bgra(
     )
 
 
-def _copy_bytes(base: Any, nbytes: int) -> bytes:
+def _buffer_view(base: Any, nbytes: int) -> memoryview:
+    """픽셀 버퍼를 복사 없이 바이트 단위로 읽는 뷰."""
     source: Any = base
     as_buffer = getattr(source, "as_buffer", None)
     if callable(as_buffer):
         source = as_buffer(nbytes)
-    elif hasattr(source, "__getitem__"):
-        source = source[:nbytes]
-    else:
+    try:
+        return memoryview(source).cast("B")[:nbytes]
+    except TypeError:
         import ctypes
 
-        source = (ctypes.c_ubyte * nbytes).from_address(int(source))
-    copied: bytes = bytes(source)
-    return copied
+        buf = (ctypes.c_ubyte * nbytes).from_address(int(source))
+        return memoryview(buf).cast("B")
 
 
 def _copy_pixelbuffer(buffer: Any, dest_w: int, dest_h: int) -> ImageFrame | None:
@@ -192,10 +225,59 @@ def _copy_pixelbuffer(buffer: Any, dest_w: int, dest_h: int) -> ImageFrame | Non
         base = quartz.CVPixelBufferGetBaseAddress(buffer)
         if not base or src_w < 1 or src_h < 1:
             return None
-        src = _copy_bytes(base, stride * src_h)
+        src = _buffer_view(base, stride * src_h)
         return frame_from_bgra(src, src_w, src_h, stride, dest_w, dest_h)
     finally:
         quartz.CVPixelBufferUnlockBaseAddress(buffer, 0)
+
+
+def _handle_sample_buffer(
+    backend: Any, sample_buffer: Any, core_media: Any, status_key: Any
+) -> None:
+    # 샘플 버퍼가 실린 이유(Complete/Idle/Blank/Suspended/Stopped).
+    attachments = core_media.CMSampleBufferGetSampleAttachmentsArray(
+        sample_buffer, False
+    )
+    raw_status = attachments[0].get(status_key) if attachments else None
+    status = None if raw_status is None else int(raw_status)
+
+    if status == _FRAME_STOPPED:
+        backend.mark_dead()
+        return
+
+    if status == _FRAME_IDLE:
+        # 화면이 바뀌지 않았다는 뜻. 마지막 프레임이 그대로 유효하다.
+        return
+    if status in (_FRAME_BLANK, _FRAME_SUSPENDED):
+        # 잠금 화면·디스플레이 슬립처럼 보여줄 화면이 없는 상태. 대개 스스로
+        # 복구되므로 프레임만 버리고 넉넉한 기한을 준다. 앱이 멈춘 것처럼
+        # 보이는 구간이라 이유는 한 번 남긴다.
+        _warn_once(
+            "blank-frame",
+            f"SCStream has no displayable content (status={status}); "
+            "matching paused until it returns",
+        )
+        backend.drop_frame(fault=False)
+        return
+
+    buffer = core_media.CMSampleBufferGetImageBuffer(sample_buffer)
+    if buffer is None:
+        # 상태를 읽을 수 없는 환경에서의 idle 프레임과 같다.
+        return
+    frame = _copy_pixelbuffer(buffer, backend.union["width"], backend.union["height"])
+    if frame is None:
+        # 이미지가 실려 왔는데 쓸 수 없다. 마지막 프레임을 계속 현재 화면인 양
+        # 내주면 옛 화면 기준으로 키가 나간다.
+        backend.drop_frame(fault=True)
+        return
+    with backend.lock:
+        if backend.is_dead_locked():
+            # 사망 처리 뒤 늦게 도착한 프레임. 보관하면 죽은 백엔드가 화면을
+            # 들고 있는 상태가 된다.
+            return
+        backend.frame = frame
+        backend.frame_deadline = 0.0
+        backend.frame_gap = ""
 
 
 def _sck_classes() -> dict[str, Any]:
@@ -203,7 +285,9 @@ def _sck_classes() -> dict[str, Any]:
         return _SCK_CLASSES
 
     core_media: Any = _framework("CoreMedia")
+    sck: Any = _framework("ScreenCaptureKit")
     ns_object: Any = _framework("Foundation").NSObject
+    status_key: Any = sck.SCStreamFrameInfoStatus
 
     class SCStreamOutput(ns_object):
         backend: Any = None
@@ -214,25 +298,31 @@ def _sck_classes() -> dict[str, Any]:
             backend: Any = self.backend
             if backend is None:
                 return
-            buffer = core_media.CMSampleBufferGetImageBuffer(sample_buffer)
-            frame = _copy_pixelbuffer(
-                buffer, backend.union["width"], backend.union["height"]
-            )
-            if frame is None:
-                return
-            with backend.lock:
-                backend.frame = frame
-                backend.frame_time = time.perf_counter()
+            # 콜백에서 예외가 새어 나가면 ObjC 예외로 승격돼 프로세스가 죽는다.
+            try:
+                _handle_sample_buffer(backend, sample_buffer, core_media, status_key)
+            except Exception as exc:
+                _warn_once("sample-buffer", f"SCStream frame dropped: {exc}")
+                # 프레임을 못 받는 상태가 이어지면 정체로 인식돼 승계되도록
+                # 마지막 프레임을 버린다. 두면 옛 화면으로 계속 매칭한다.
+                try:
+                    backend.drop_frame(fault=True)
+                except Exception:
+                    pass
 
     class SCStreamDelegate(ns_object):
         backend: Any = None
 
         def stream_didStopWithError_(self, _stream: Any, error: Any) -> None:
             backend: Any = self.backend
-            if backend is None or error is None:
+            if backend is None:
                 return
-            logger.warning(f"SCStream stopped: {error}")
-            backend.mark_dead()
+            try:
+                if error is not None:
+                    logger.warning(f"SCStream stopped: {error}")
+                backend.mark_dead()
+            except Exception as exc:
+                logger.warning(f"SCStream stop handler failed: {exc}")
 
     _SCK_CLASSES["output"] = SCStreamOutput
     _SCK_CLASSES["delegate"] = SCStreamDelegate
@@ -291,7 +381,8 @@ class MacStreamBackend:
         self._delegate: Any = None
         self._closed = False
         self._dead = False
-        self.frame_time = 0.0
+        self.frame_deadline = 0.0
+        self.frame_gap = ""
 
     @classmethod
     def from_groups(cls, groups: Sequence[Any]) -> MacStreamBackend:
@@ -299,8 +390,13 @@ class MacStreamBackend:
 
     def open(self) -> None:
         self._closed = False
-        self._dead = False
-        self.frame_time = 0.0
+        # 진단 경고는 실행 단위로 다시 볼 수 있어야 한다.
+        _WARNED.clear()
+        with self.lock:
+            self._dead = False
+            self.frame = None
+            self.frame_deadline = 0.0
+            self.frame_gap = ""
         self._stop.clear()
         self._ready.clear()
         self._error = None
@@ -315,6 +411,7 @@ class MacStreamBackend:
             message = self._error
             self.close()
             raise RuntimeError(message)
+        self._arm_initial_deadline()
 
     def close(self) -> None:
         if self._closed:
@@ -327,23 +424,74 @@ class MacStreamBackend:
         self._thread = None
         with self.lock:
             self.frame = None
-            self.frame_time = 0.0
+            self.frame_deadline = 0.0
+            self.frame_gap = ""
+
+    def _mark_dead_locked(self) -> None:
+        self._dead = True
+        self.frame = None
+        self.frame_deadline = 0.0
+        self.frame_gap = ""
 
     def mark_dead(self) -> None:
-        self._dead = True
+        with self.lock:
+            self._mark_dead_locked()
+
+    def _arm_initial_deadline(self) -> None:
+        """기동 직후 프레임이 오지 않는 경우의 기한.
+
+        정체 판정은 스트림이 살아난 시점부터 센다. open() 진입 시각을 쓰면
+        기동에 걸린 시간이 예산을 먹어 멀쩡한 스트림을 죽인다. 기동을 기다리는
+        동안 이미 Blank나 고장이 도착했다면 그쪽 기한을 존중한다 — 덮어쓰면
+        잠금 화면에서 2초마다 죽고 재기동을 반복한다.
+        """
+        with self.lock:
+            if self.frame is None and not self.frame_deadline:
+                self.frame_deadline = time.perf_counter() + _NO_FRAME_TIMEOUT_S
+
+    def drop_frame(self, *, fault: bool) -> None:
+        """현재 프레임을 버리고, 언제까지 못 받으면 사망으로 볼지 기한을 건다.
+
+        잠금 화면·슬립(fault=False)은 스스로 복구되므로 훨씬 긴 기한을 준다.
+        기한은 이유가 바뀔 때만 다시 건다 — 프레임마다 연장하면 복구되지 않는
+        스트림에 영원히 매달리고, Blank와 고장이 번갈아 와도 마찬가지가 된다.
+        고장은 잠금보다 급해서 Blank 기한을 당기지만, 그 반대는 없다.
+        """
+        now = time.perf_counter()
         with self.lock:
             self.frame = None
-            self.frame_time = 0.0
+            if fault:
+                if self.frame_gap != _GAP_FAULT:
+                    self.frame_gap = _GAP_FAULT
+                    self.frame_deadline = now + _NO_FRAME_TIMEOUT_S
+            elif self.frame_gap not in (_GAP_BLANK, _GAP_FAULT):
+                self.frame_gap = _GAP_BLANK
+                self.frame_deadline = now + _BLANK_TIMEOUT_S
+
+    def is_dead(self) -> bool:
+        with self.lock:
+            return self._dead
+
+    def is_dead_locked(self) -> bool:
+        """락을 이미 쥔 쪽에서 쓰는 사망 여부."""
+        return self._dead
 
     def grab(self, groups: Sequence[Any]) -> list[ImageFrame | None]:
+        now = time.perf_counter()
+        died = False
+        # 판정과 사망 처리를 한 락 안에서 끝낸다. 락을 놓고 처리하면 그 사이에
+        # 도착한 프레임을 무시하고 멀쩡한 스트림을 죽일 수 있다.
         with self.lock:
-            frame = self.frame
-            frame_time = self.frame_time
-        if (
-            self._dead
-            or frame is None
-            or (time.perf_counter() - frame_time) > _MAX_FRAME_AGE_S
-        ):
+            frame = None if self._dead else self.frame
+            if frame is None and not self._dead:
+                # 쓸 수 있는 프레임이 없는 상태가 기한을 넘기면 사망으로
+                # 승격시킨다. 그래야 mss 승계나 재기동이 걸린다.
+                if self.frame_deadline and now > self.frame_deadline:
+                    self._mark_dead_locked()
+                    died = True
+        if died:
+            logger.warning("SCStream has no usable frame; marking backend dead")
+        if frame is None:
             return [None] * len(groups)
         return crop_groups_from_union(frame, self.union, groups)
 
@@ -360,23 +508,33 @@ class MacStreamBackend:
             self._stop_stream()
 
     def _start_stream(self) -> None:
-        appkit: Any = _framework("AppKit")
         core_media: Any = _framework("CoreMedia")
         quartz: Any = _framework("Quartz")
         sck: Any = _framework("ScreenCaptureKit")
 
-        appkit.NSApplication.sharedApplication()
         content = _wait_shareable(5.0)
         displays = list(content.displays())
         if not displays:
             raise RuntimeError("no shareable displays")
         display = _display_for_union(displays, self.union)
         frame = display.frame()
+        left = self.union["left"] - float(frame.origin.x)
+        top = self.union["top"] - float(frame.origin.y)
+        if (
+            left < 0
+            or top < 0
+            or left + self.union["width"] > float(frame.size.width)
+            or top + self.union["height"] > float(frame.size.height)
+        ):
+            # 그대로 넘기면 SCStream이 "invalid parameter"만 돌려줘 원인을
+            # 알 수 없다. 다른 해상도에서 만든 프로필을 열면 흔히 생긴다.
+            raise RuntimeError(
+                f"capture area {self.union['width']}x{self.union['height']} at "
+                f"({self.union['left']},{self.union['top']}) is outside the display "
+                f"({int(frame.size.width)}x{int(frame.size.height)})"
+            )
         source = quartz.CGRectMake(
-            self.union["left"] - float(frame.origin.x),
-            self.union["top"] - float(frame.origin.y),
-            self.union["width"],
-            self.union["height"],
+            left, top, self.union["width"], self.union["height"]
         )
         filt = sck.SCContentFilter.alloc().initWithDisplay_excludingWindows_(
             display, []
@@ -423,11 +581,14 @@ class MacStreamBackend:
     def _stop_stream(self) -> None:
         stream = self._stream
         output = self._output
+        delegate = self._delegate
         self._stream = None
         self._output = None
         self._delegate = None
         if output is not None:
             output.backend = None
+        if delegate is not None:
+            delegate.backend = None
         if stream is None:
             return
         stopped: dict[str, bool] = {}
@@ -454,15 +615,9 @@ def create_screen_backend(
         return NullScreenBackend()
     name = os_name if os_name is not None else platform.system()
     if name == "Darwin":
-        union = union_group_rects(groups)
-        area = union["width"] * union["height"]
-        if area > _MAX_UNION_AREA:
-            logger.warning(
-                f"SCStream union {union['width']}x{union['height']} exceeds "
-                f"{_MAX_UNION_AREA}; using mss"
-            )
-            return MssScreenBackend()
-        return MacStreamBackend(union)
+        # macOS에서는 mss를 쓰지 않는다. 두 경로는 픽셀값이 달라, 기준색을
+        # SCStream으로 찍은 프로필이 mss에서는 아무것도 매칭되지 않는다.
+        return MacStreamBackend.from_groups(groups)
     return MssScreenBackend()
 
 
@@ -471,15 +626,20 @@ def open_screen_backend(
     *,
     os_name: str | None = None,
 ) -> ScreenBackend:
+    """백엔드를 열어 돌려준다.
+
+    SCStream 기동에 실패하면(디스플레이 슬립, 권한 등) 사망 상태로 표시해
+    돌려준다. 실행 루프가 그걸 보고 주기적으로 다시 열어보므로, 원인이
+    사라지면 스스로 복구된다.
+    """
     backend = create_screen_backend(groups, os_name=os_name)
     try:
         backend.open()
         return backend
     except Exception as exc:
-        if isinstance(backend, MssScreenBackend):
+        if not isinstance(backend, MacStreamBackend):
             raise
-        logger.warning(f"SCStream unavailable, falling back to mss: {exc}")
+        logger.warning(f"SCStream unavailable, will retry: {exc}")
         backend.close()
-        fallback = MssScreenBackend()
-        fallback.open()
-        return fallback
+        backend.mark_dead()
+        return backend

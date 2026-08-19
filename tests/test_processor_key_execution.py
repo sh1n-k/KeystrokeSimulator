@@ -11,6 +11,7 @@ from app.core.processor import KeystrokeProcessor, ModificationKeyHandler
 def _make_processor_stub() -> KeystrokeProcessor:
     proc = KeystrokeProcessor.__new__(KeystrokeProcessor)
     proc.term_event = threading.Event()
+    proc._stopped = threading.Event()
     proc.key_codes = {"A": 65}
     proc.key_lock = threading.Lock()
     proc.state_lock = threading.Lock()

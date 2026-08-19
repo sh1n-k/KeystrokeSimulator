@@ -16,7 +16,14 @@ from mss.screenshot import ScreenShot
 from PIL import Image
 
 from app.core.models import EventModel, ModificationKeys, UserSettings
-from app.core.screen_backend import ScreenBackend, open_screen_backend
+from app.core.screen_backend import (
+    BACKEND_RETRY_INTERVAL_S as _BACKEND_RETRY_INTERVAL_S,
+)
+from app.core.screen_backend import (
+    ScreenBackend,
+    create_screen_backend,
+    open_screen_backend,
+)
 from app.utils.keys import KeyUtils
 from app.utils.system import ProcessUtils
 
@@ -64,6 +71,18 @@ class ImageFrame:
             row_stride=self.row_stride,
             pixel_stride=self.pixel_stride,
             offset=self.offset + y * self.row_stride + x * self.pixel_stride,
+        )
+
+    def to_rgb_image(self) -> Image.Image:
+        """편집기 미리보기용 RGB 이미지. crop된 프레임의 패딩을 걷어낸다."""
+        packed = self.width * self.pixel_stride
+        rows = bytearray(self.height * packed)
+        for y in range(self.height):
+            start = self.offset + y * self.row_stride
+            rows[y * packed : (y + 1) * packed] = self.data[start : start + packed]
+        raw_mode = "BGRX" if self.pixel_stride == 4 else "BGR"
+        return Image.frombytes(
+            "RGB", (self.width, self.height), bytes(rows), "raw", raw_mode
         )
 
     def pixel_bgr(self, x: int, y: int) -> Pixel:
@@ -502,6 +521,9 @@ class KeystrokeProcessor:
     # While Pass/mod is held, skip capture but poll often so release leads
     # promptly into a fresh grab/match (not an extra 100ms back-off).
     MOD_ACTIVE_POLL_INTERVAL = 0.02
+    # 백엔드가 죽었을 때 다시 여는 최소 간격. 디스플레이 슬립처럼 원인이
+    # 지속되는 동안 매 사이클 재시도하지 않도록 한다.
+    BACKEND_RETRY_INTERVAL_S = _BACKEND_RETRY_INTERVAL_S
 
     def __init__(
         self,
@@ -560,6 +582,13 @@ class KeystrokeProcessor:
         )
 
         self._screen_backend: ScreenBackend | None = None
+        self._backend_retry_failed = False
+        self._last_backend_retry = 0.0
+        # term_event는 앱이 재시작할 때 clear한다(simulator_app). 그 사이 이
+        # 프로세서가 아직 살아 있으면 되살아나 새 프로세서와 동시에 키를
+        # 누르게 되므로, 자기 자신의 종료는 별도로 기억한다.
+        self._stopped = threading.Event()
+        self._backend_closers: list[threading.Thread] = []
         self.loop = asyncio.new_event_loop()
         self.main_thread = threading.Thread(target=self._run_loop, daemon=True)
 
@@ -567,8 +596,12 @@ class KeystrokeProcessor:
         logger.info(f"Processor starting... PID: {self.pid}")
         self.main_thread.start()
 
+    def _should_stop(self) -> bool:
+        return self._stopped.is_set() or self.term_event.is_set()
+
     def stop(self) -> None:
         logger.info("Processor stopping...")
+        self._stopped.set()
         self.term_event.set()
 
         if self.main_thread.is_alive():
@@ -577,10 +610,17 @@ class KeystrokeProcessor:
                 logger.warning(
                     "Processor thread did not stop within timeout; force-releasing keys"
                 )
-        backend = getattr(self, "_screen_backend", None)
-        if backend is not None:
-            backend.close()
-            self._screen_backend = None
+        # 루프가 백엔드 교체 중이었다면 join 타임아웃 뒤에 _screen_backend가
+        # 되살아날 수 있다. 스레드가 끝난 뒤 한 번 더 확인한다.
+        for _ in range(2):
+            backend = getattr(self, "_screen_backend", None)
+            if backend is not None:
+                backend.close()
+                self._screen_backend = None
+            if not self.main_thread.is_alive():
+                break
+            self.main_thread.join(timeout=1.0)
+        self._join_backend_closers()
         self._force_release_pressed_keys()
 
     def _force_release_pressed_keys(self) -> None:
@@ -775,7 +815,7 @@ class KeystrokeProcessor:
         backend = open_screen_backend(self.main_capture_groups)
         self._screen_backend = backend
         try:
-            while not self.term_event.is_set():
+            while not self._should_stop():
                 current_time = time.time()
                 if self.pid and (
                     current_time - last_proc_check_time > proc_check_interval
@@ -796,8 +836,11 @@ class KeystrokeProcessor:
 
                 try:
                     cycle_started = time.perf_counter()
+                    if backend.is_dead():
+                        backend = self._replace_dead_backend(backend)
                     local_match_states = self._capture_match_states(backend)
-                    await self._apply_local_match_states(local_match_states)
+                    if local_match_states is not None:
+                        await self._apply_local_match_states(local_match_states)
                     _log_perf("processor_main_cycle", cycle_started)
                 except Exception as e:
                     logger.error(f"Capture failed: {e}")
@@ -807,6 +850,7 @@ class KeystrokeProcessor:
             backend.close()
             if self._screen_backend is backend:
                 self._screen_backend = None
+            self._join_backend_closers()
 
     @staticmethod
     def _rect_area(rect: Rect) -> int:
@@ -1019,12 +1063,67 @@ class KeystrokeProcessor:
 
         return resolved
 
-    def _capture_match_states(self, backend: ScreenBackend) -> dict[str, bool]:
+    def _join_backend_closers(self) -> None:
+        """교체 직후 중지하면 이전 스트림이 정리되기 전에 끝날 수 있다."""
+        for closer in getattr(self, "_backend_closers", []):
+            closer.join(timeout=2.5)
+        self._backend_closers = []
+
+    def _replace_dead_backend(self, backend: ScreenBackend) -> ScreenBackend:
+        """죽은 백엔드를 다시 연다. 그대로 두면 조용히 무매칭이 된다.
+
+        macOS에서는 mss로 내려가지 않는다. 픽셀값이 달라 기준색과 맞지 않아
+        강등이 곧 무매칭이기 때문이다. 원인이 사라질 때까지 계속 다시 연다.
+        """
+        if self._should_stop():
+            # 종료 중에는 새 스트림을 열지 않는다. stop()이 이미 정리를 끝낸
+            # 뒤에 백엔드가 되살아나면 스트림이 정리되지 않은 채 남는다.
+            return backend
+        now = time.monotonic()
+        if now - self._last_backend_retry < self.BACKEND_RETRY_INTERVAL_S:
+            return backend
+        try:
+            replacement = create_screen_backend(self.main_capture_groups)
+            replacement.open()
+        except Exception as exc:
+            # 다음 주기에 다시 시도하되 로그는 한 번만 남긴다.
+            if not self._backend_retry_failed:
+                self._backend_retry_failed = True
+                logger.error(f"Screen backend restart failed: {exc}")
+            return backend
+        finally:
+            # 실패 경로가 수 초 걸릴 수 있다. 간격은 시도가 '끝난' 뒤부터
+            # 세야 루프가 open() 안에 갇히지 않는다.
+            self._last_backend_retry = time.monotonic()
+        if self._should_stop():
+            # 여는 동안 중지됐다. stop()이 이미 정리를 끝냈을 수 있으므로
+            # 새 백엔드를 남기지 않는다.
+            replacement.close()
+            return backend
+        # 죽은 백엔드의 close()는 스트림 스레드 조인으로 최대 2초가 걸린다.
+        # 실행 루프를 그동안 멈춰 세우지 않도록 분리한다. 여기서 이전 closer를
+        # 기다리면(join) 연속 교체 때 루프가 멈춰 눌린 키가 늘어지므로,
+        # 끝난 것만 걷어내고 정리는 중지 시점에 몰아서 한다.
+        self._backend_closers = [
+            closer for closer in self._backend_closers if closer.is_alive()
+        ]
+        closer = threading.Thread(target=backend.close, daemon=True)
+        self._backend_closers.append(closer)
+        closer.start()
+        logger.warning("Screen backend stopped; restarted")
+        self._backend_retry_failed = False
+        self._screen_backend = replacement
+        return replacement
+
+    def _capture_match_states(self, backend: ScreenBackend) -> dict[str, bool] | None:
+        """캡처가 온전한 사이클의 매칭 상태. 한 그룹이라도 못 읽으면 None."""
         local_match_states: dict[str, bool] = {}
         frames = backend.grab(self.main_capture_groups)
         for group, img in zip(self.main_capture_groups, frames, strict=True):
             if img is None:
-                continue
+                # 못 읽은 화면을 '불일치'로 단정하면 부정 조건(conds=False)이
+                # 참이 되어 screenless 이벤트의 키가 잘못 나간다.
+                return None
             local_match_states.update(
                 self._evaluate_capture_group(img, group["events"])
             )
