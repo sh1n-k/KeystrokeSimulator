@@ -3,6 +3,7 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
+import app.core.screen_backend as sb
 from app.core.screen_backend import (
     MacStreamBackend,
     MssScreenBackend,
@@ -10,8 +11,7 @@ from app.core.screen_backend import (
     _handle_sample_buffer,
     _sck_classes,
     create_screen_backend,
-    crop_groups_from_union,
-    frame_from_bgra,
+    frame_from_region,
     open_screen_backend,
     union_group_rects,
 )
@@ -41,24 +41,17 @@ class TestUnionAndCrop(unittest.TestCase):
         )
         self.assertEqual(union, {"left": 10, "top": 18, "width": 25, "height": 8})
 
-    def test_crop_keeps_group_relative_pixels(self):
-        union = {"left": 10, "top": 20, "width": 20, "height": 10}
-        frame = make_image_frame(20, 10)
-        fill_frame_rect(frame, 5, 2, 1, 1, (9, 8, 7))
-        groups = [_group(15, 22, 3, 3)]
+    def test_region_copy_takes_only_the_requested_rect(self):
+        stride = 20 * 4 + 12          # 패딩 있는 행
+        src = bytearray(stride * 10)
+        off = 2 * stride + 5 * 4
+        src[off : off + 4] = b"\x09\x08\x07\xff"
 
-        cropped = crop_groups_from_union(frame, union, groups)
+        frame = frame_from_region(memoryview(src), stride, 5, 2, 3, 3)
 
-        self.assertEqual(len(cropped), 1)
-        self.assertIsNotNone(cropped[0])
-        assert cropped[0] is not None
-        self.assertEqual(cropped[0].pixel_bgr(0, 0), (9, 8, 7))
-
-    def test_crop_out_of_bounds_returns_none(self):
-        union = {"left": 0, "top": 0, "width": 4, "height": 4}
-        frame = make_image_frame(4, 4)
-        cropped = crop_groups_from_union(frame, union, [_group(0, 0, 8, 8)])
-        self.assertEqual(cropped, [None])
+        self.assertEqual(frame.width, 3)
+        self.assertEqual(frame.row_stride, 3 * 4)
+        self.assertEqual(frame.pixel_bgr(0, 0), (9, 8, 7))
 
 
 class TestCreateScreenBackend(unittest.TestCase):
@@ -107,37 +100,57 @@ class TestMacStreamGrab(unittest.TestCase):
         backend = MacStreamBackend({"left": 0, "top": 0, "width": 4, "height": 4})
         self.assertEqual(backend.grab([_group(0, 0, 1, 1)]), [None])
 
-    def test_grab_crops_latest_union_frame(self):
+    def test_grab_copies_requested_rect_from_held_buffer(self):
+        _patch_quartz(self)
         backend = MacStreamBackend({"left": 10, "top": 20, "width": 8, "height": 6})
-        frame = make_image_frame(8, 6)
-        fill_frame_rect(frame, 2, 1, 1, 1, (4, 5, 6))
-        backend.frame = frame
-        cropped = backend.grab([_group(12, 21, 1, 1)])
-        self.assertEqual(len(cropped), 1)
+        backend.buffer = object()
+        wanted = make_image_frame(1, 1)
+        fill_frame_rect(wanted, 0, 0, 1, 1, (4, 5, 6))
+        groups = [_group(12, 21, 1, 1)]
+
+        with patch(
+            "app.core.screen_backend.copy_rects", return_value=[wanted]
+        ) as copier:
+            cropped = backend.grab(groups)
+
+        copier.assert_called_once_with(backend.buffer, backend.union, groups)
         assert cropped[0] is not None
         self.assertEqual(cropped[0].pixel_bgr(0, 0), (4, 5, 6))
 
+    def test_grab_escalates_when_the_frame_is_unusable(self):
+        _patch_quartz(self)
+        backend = MacStreamBackend({"left": 0, "top": 0, "width": 2, "height": 2})
+        backend.buffer = object()
+
+        with patch("app.core.screen_backend.copy_rects", return_value=None):
+            self.assertEqual(backend.grab([_group(0, 0, 1, 1)]), [None])
+
+        self.assertIsNone(backend.buffer)
+        self.assertLess(backend.frame_deadline - time.perf_counter(), 3.0)
+
     def test_static_screen_keeps_last_frame(self):
         """화면이 오래 정지하면 콜백 자체가 끊긴다. 그래도 마지막 프레임을 쓴다."""
+        _patch_quartz(self)
         backend = MacStreamBackend({"left": 0, "top": 0, "width": 2, "height": 2})
-        frame = make_image_frame(2, 2)
-        fill_frame_rect(frame, 0, 0, 1, 1, (7, 7, 7))
-        backend.frame = frame
+        backend.buffer = object()
+        wanted = make_image_frame(1, 1)
+        fill_frame_rect(wanted, 0, 0, 1, 1, (7, 7, 7))
 
-        grabbed = backend.grab([_group(0, 0, 1, 1)])
+        with patch("app.core.screen_backend.copy_rects", return_value=[wanted]):
+            grabbed = backend.grab([_group(0, 0, 1, 1)])
 
-        self.assertEqual(len(grabbed), 1)
         assert grabbed[0] is not None
         self.assertEqual(grabbed[0].pixel_bgr(0, 0), (7, 7, 7))
         self.assertFalse(backend.is_dead())
 
     def test_dead_stream_returns_none(self):
+        _patch_quartz(self)
         backend = MacStreamBackend({"left": 0, "top": 0, "width": 2, "height": 2})
-        backend.frame = make_image_frame(2, 2)
+        backend.buffer = object()
         backend.mark_dead()
         self.assertEqual(backend.grab([_group(0, 0, 1, 1)]), [None])
         self.assertTrue(backend.is_dead())
-        self.assertIsNone(backend.frame)
+        self.assertIsNone(backend.buffer)
 
     def test_mss_and_null_backends_are_never_dead(self):
         self.assertFalse(MssScreenBackend().is_dead())
@@ -197,10 +210,33 @@ class _FakeCoreMedia:
         return self._image
 
 
-def _live_backend(frame=None):
+class _FakeQuartz:
+    """retain/release만 흉내낸다. 유닛 테스트는 실제 픽셀 버퍼를 쓰지 않는다."""
+
+    @staticmethod
+    def CVPixelBufferRetain(buffer):
+        return buffer
+
+    @staticmethod
+    def CVPixelBufferRelease(buffer):
+        return None
+
+
+def _patch_quartz(case):
+    real = sb._framework
+
+    def fake(name):
+        return _FakeQuartz if name == "Quartz" else real(name)
+
+    patcher = patch("app.core.screen_backend._framework", side_effect=fake)
+    patcher.start()
+    case.addCleanup(patcher.stop)
+
+
+def _live_backend(buffer=None):
     backend = MacStreamBackend({"left": 0, "top": 0, "width": 2, "height": 2})
-    backend.frame = frame
-    backend.frame_deadline = 0.0 if frame is not None else time.perf_counter() + 2.0
+    backend.buffer = buffer
+    backend.frame_deadline = 0.0 if buffer is not None else time.perf_counter() + 2.0
     return backend
 
 
@@ -211,91 +247,68 @@ class TestSampleBufferStatus(unittest.TestCase):
 
         _handle_sample_buffer(backend, object(), _FakeCoreMedia(1), "status")
 
-        self.assertIs(backend.frame, frame)
+        self.assertIs(backend.buffer, frame)
         self.assertEqual(backend.frame_deadline, 0.0)
 
     def test_blank_status_drops_frame_without_escalating(self):
         """잠금 화면·슬립은 스스로 복구되므로 사망 승격 대상이 아니다."""
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
 
         _handle_sample_buffer(backend, object(), _FakeCoreMedia(2), "status")
 
-        self.assertIsNone(backend.frame)
+        self.assertIsNone(backend.buffer)
         # 짧은 fault 기한이 아니라 넉넉한 blank 기한이 걸려야 한다.
         self.assertGreater(backend.frame_deadline - time.perf_counter(), 60.0)
         self.assertEqual(backend.grab([_group(0, 0, 1, 1)]), [None])
         self.assertFalse(backend.is_dead())
 
     def test_suspended_status_drops_frame_without_escalating(self):
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
 
         _handle_sample_buffer(backend, object(), _FakeCoreMedia(3), "status")
 
-        self.assertIsNone(backend.frame)
+        self.assertIsNone(backend.buffer)
         self.assertGreater(backend.frame_deadline - time.perf_counter(), 60.0)
         self.assertFalse(backend.is_dead())
 
     def test_content_returns_after_blank(self):
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
         _handle_sample_buffer(backend, object(), _FakeCoreMedia(2), "status")
         restored = make_image_frame(2, 2)
         fill_frame_rect(restored, 0, 0, 1, 1, (3, 3, 3))
 
-        with patch(
-            "app.core.screen_backend._copy_pixelbuffer", return_value=restored
-        ):
-            _handle_sample_buffer(
-                backend, object(), _FakeCoreMedia(0, image=object()), "status"
-            )
+        image = object()
+        _handle_sample_buffer(backend, object(), _FakeCoreMedia(0, image=image), "status")
 
-        grabbed = backend.grab([_group(0, 0, 1, 1)])
-        assert grabbed[0] is not None
-        self.assertEqual(grabbed[0].pixel_bgr(0, 0), (3, 3, 3))
+        self.assertIs(backend.buffer, image)
+        self.assertEqual(backend.frame_gap, "")
+        self.assertEqual(backend.frame_deadline, 0.0)
 
     def test_stopped_status_marks_dead(self):
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
 
         _handle_sample_buffer(backend, object(), _FakeCoreMedia(5), "status")
 
         self.assertTrue(backend.is_dead())
 
-    def test_complete_status_stores_frame(self):
+    def test_complete_status_holds_the_buffer(self):
         backend = _live_backend()
-        new_frame = make_image_frame(2, 2)
-        with patch(
-            "app.core.screen_backend._copy_pixelbuffer", return_value=new_frame
-        ):
-            _handle_sample_buffer(
-                backend, object(), _FakeCoreMedia(0, image=object()), "status"
-            )
+        image = object()
 
-        self.assertIs(backend.frame, new_frame)
+        _handle_sample_buffer(backend, object(), _FakeCoreMedia(0, image=image), "status")
+
+        self.assertIs(backend.buffer, image)
         self.assertEqual(backend.frame_deadline, 0.0)
-
-    def test_unusable_image_escalates(self):
-        backend = _live_backend(make_image_frame(2, 2))
-        with patch("app.core.screen_backend._copy_pixelbuffer", return_value=None):
-            _handle_sample_buffer(
-                backend, object(), _FakeCoreMedia(0, image=object()), "status"
-            )
-
-        self.assertIsNone(backend.frame)
-        # 고장이므로 짧은 기한이 걸린다.
-        self.assertLess(backend.frame_deadline - time.perf_counter(), 3.0)
 
     def test_frame_after_death_is_discarded(self):
         backend = _live_backend()
         backend.mark_dead()
 
-        with patch(
-            "app.core.screen_backend._copy_pixelbuffer",
-            return_value=make_image_frame(2, 2),
-        ):
-            _handle_sample_buffer(
-                backend, object(), _FakeCoreMedia(0, image=object()), "status"
-            )
+        _handle_sample_buffer(
+            backend, object(), _FakeCoreMedia(0, image=object()), "status"
+        )
 
-        self.assertIsNone(backend.frame)
+        self.assertIsNone(backend.buffer)
 
     def test_missing_status_falls_back_to_image_presence(self):
         frame = make_image_frame(2, 2)
@@ -303,7 +316,7 @@ class TestSampleBufferStatus(unittest.TestCase):
 
         _handle_sample_buffer(backend, object(), _FakeCoreMedia(None), "status")
 
-        self.assertIs(backend.frame, frame)
+        self.assertIs(backend.buffer, frame)
 
     def test_screenless_only_profile_has_no_capture_groups(self):
         proc = make_processor_stub()
@@ -314,7 +327,7 @@ class TestSampleBufferStatus(unittest.TestCase):
         self.assertEqual(proc._capture_match_states(backend), {})
 
     def test_repeated_fault_keeps_first_stall_timestamp(self):
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
         backend.drop_frame(fault=True)
         first = backend.frame_deadline
         backend.drop_frame(fault=True)
@@ -324,7 +337,7 @@ class TestSampleBufferStatus(unittest.TestCase):
     def test_callback_exception_drops_stale_frame(self):
         classes = _sck_classes()
         output = classes["output"].alloc().init()
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
         output.backend = backend
 
         with patch(
@@ -333,7 +346,7 @@ class TestSampleBufferStatus(unittest.TestCase):
         ):
             output.stream_didOutputSampleBuffer_ofType_(None, object(), 0)
 
-        self.assertIsNone(backend.frame)
+        self.assertIsNone(backend.buffer)
         self.assertGreater(backend.frame_deadline, 0.0)
 
     def test_callback_exception_does_not_escape(self):
@@ -360,16 +373,19 @@ class TestStallEscalation(unittest.TestCase):
 
     def test_callback_silence_alone_never_marks_dead(self):
         """콜백 침묵은 정상이다(정지 화면에서 30초 넘게 끊기는 것을 실측)."""
-        backend = _live_backend(make_image_frame(2, 2))
+        _patch_quartz(self)
+        backend = _live_backend(object())
+        wanted = [make_image_frame(1, 1)]
 
-        for _ in range(5):
-            self.assertIsNotNone(backend.grab([_group(0, 0, 1, 1)])[0])
+        with patch("app.core.screen_backend.copy_rects", return_value=wanted):
+            for _ in range(5):
+                self.assertIsNotNone(backend.grab([_group(0, 0, 1, 1)])[0])
 
         self.assertFalse(backend.is_dead())
 
     def test_repeated_blank_does_not_extend_deadline(self):
         """blank 기한은 진입 시 한 번만 건다. 매번 연장하면 탈출구가 없다."""
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
         _handle_sample_buffer(backend, object(), _FakeCoreMedia(2), "status")
         first = backend.frame_deadline
 
@@ -381,7 +397,7 @@ class TestStallEscalation(unittest.TestCase):
 
     def test_blank_does_not_extend_fault_deadline(self):
         """Blank와 고장이 번갈아 와도 기한이 무한 연장되면 안 된다."""
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
         backend.drop_frame(fault=True)
         fault_deadline = backend.frame_deadline
 
@@ -421,7 +437,7 @@ class TestStallEscalation(unittest.TestCase):
 
     def test_fault_during_blank_shortens_deadline(self):
         """잠금 중 고장이 나면 90초를 기다리지 않고 짧은 기한으로 당긴다."""
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
         _handle_sample_buffer(backend, object(), _FakeCoreMedia(2), "status")
         self.assertGreater(backend.frame_deadline - time.perf_counter(), 60.0)
 
@@ -432,7 +448,7 @@ class TestStallEscalation(unittest.TestCase):
 
     def test_persistent_blank_eventually_marks_dead(self):
         """복구되지 않는 잠금 상태에서 빠져나올 수 있어야 한다(재기동으로)."""
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
         _handle_sample_buffer(backend, object(), _FakeCoreMedia(2), "status")
         backend.frame_deadline = time.perf_counter() - 1.0
 
@@ -440,13 +456,13 @@ class TestStallEscalation(unittest.TestCase):
         self.assertTrue(backend.is_dead())
 
     def test_complete_frame_clears_blank_state(self):
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
         _handle_sample_buffer(backend, object(), _FakeCoreMedia(2), "status")
         self.assertEqual(backend.frame_gap, "blank")
 
         with patch(
-            "app.core.screen_backend._copy_pixelbuffer",
-            return_value=make_image_frame(2, 2),
+            "app.core.screen_backend.copy_rects",
+            return_value=[make_image_frame(2, 2)],
         ):
             _handle_sample_buffer(
                 backend, object(), _FakeCoreMedia(0, image=object()), "status"
@@ -461,7 +477,7 @@ class TestStallEscalation(unittest.TestCase):
         self.assertFalse(backend.is_dead())
 
     def test_blank_within_deadline_does_not_mark_dead(self):
-        backend = _live_backend(make_image_frame(2, 2))
+        backend = _live_backend(object())
         _handle_sample_buffer(backend, object(), _FakeCoreMedia(2), "status")
 
         self.assertEqual(backend.grab([_group(0, 0, 1, 1)]), [None])
@@ -699,26 +715,22 @@ class TestCopyPixelbufferScale(unittest.TestCase):
         src[4:8] = b"\x04\x05\x06\xff"
         src[stride : stride + 4] = b"\x07\x08\x09\xff"
         src[stride + 4 : stride + 8] = b"\x0a\x0b\x0c\xff"
-        frame = frame_from_bgra(bytes(src), width, height, stride, width, height)
-        self.assertIsNotNone(frame)
-        assert frame is not None
+
+        frame = frame_from_region(memoryview(src), stride, 0, 0, width, height)
+
         self.assertEqual(frame.pixel_bgr(0, 0), (1, 2, 3))
         self.assertEqual(frame.pixel_bgr(1, 1), (10, 11, 12))
         self.assertEqual(frame.row_stride, width * 4)
 
-    def test_memoryview_source_is_accepted(self):
-        width, height, stride = 2, 1, 16
-        src = bytearray(stride * height)
-        src[0:4] = b"\x01\x02\x03\xff"
-        frame = frame_from_bgra(
-            memoryview(src), width, height, stride, width, height
-        )
-        assert frame is not None
-        self.assertEqual(frame.pixel_bgr(0, 0), (1, 2, 3))
+    def test_region_offset_is_applied(self):
+        stride = 32
+        src = bytearray(stride * 4)
+        off = 3 * stride + 2 * 4
+        src[off : off + 4] = b"\x11\x22\x33\xff"
 
-    def test_size_mismatch_drops_frame(self):
-        src = bytes(4 * 4 * 4)
-        self.assertIsNone(frame_from_bgra(src, 4, 4, 16, 2, 2))
+        frame = frame_from_region(memoryview(src), stride, 2, 3, 1, 1)
+
+        self.assertEqual(frame.pixel_bgr(0, 0), (17, 34, 51))
 
 
 class TestMssGrabImportsImageFrame(unittest.TestCase):

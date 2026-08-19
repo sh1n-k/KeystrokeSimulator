@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 Rect = dict[str, int]
 
 BGRA = 0x42475241
+# kCVPixelBufferLock_ReadOnly — 읽기만 하므로 IOSurface 비용이 낮다.
+_LOCK_READ_ONLY = 1
 # 백엔드가 죽었을 때 다시 여는 최소 간격. 디스플레이 슬립처럼 원인이 지속되는
 # 동안 매 사이클 재시도하지 않도록 한다.
 BACKEND_RETRY_INTERVAL_S = 2.0
@@ -125,30 +127,6 @@ def union_group_rects(groups: Sequence[Any]) -> Rect:
     }
 
 
-def crop_groups_from_union(
-    frame: ImageFrame, union: Rect, groups: Sequence[Any]
-) -> list[ImageFrame | None]:
-    frames: list[ImageFrame | None] = []
-    for group in groups:
-        rect = group["rect"]
-        x = rect["left"] - union["left"]
-        y = rect["top"] - union["top"]
-        width = rect["width"]
-        height = rect["height"]
-        if (
-            x < 0
-            or y < 0
-            or width < 1
-            or height < 1
-            or x + width > frame.width
-            or y + height > frame.height
-        ):
-            frames.append(None)
-            continue
-        frames.append(frame.crop(x, y, width, height))
-    return frames
-
-
 def _framework(name: str) -> Any:
     return importlib.import_module(name)
 
@@ -158,50 +136,6 @@ def _warn_once(key: str, message: str) -> None:
         return
     _WARNED.add(key)
     logger.warning(message)
-
-
-def frame_from_bgra(
-    src: bytes | memoryview,
-    src_w: int,
-    src_h: int,
-    stride: int,
-    dest_w: int,
-    dest_h: int,
-) -> ImageFrame | None:
-    from app.core.processor import ImageFrame
-
-    if src_w < 1 or src_h < 1 or dest_w < 1 or dest_h < 1 or stride < src_w * 4:
-        return None
-    if src_w != dest_w or src_h != dest_h:
-        # 스트림 설정이 요청한 크기를 그대로 내주지 않는 상황. 리샘플하면
-        # 색이 달라져 완전 일치 매칭이 조용히 어긋나므로 프레임을 버린다.
-        _warn_once(
-            f"size-{src_w}x{src_h}-{dest_w}x{dest_h}",
-            f"SCStream frame {src_w}x{src_h} does not match requested "
-            f"{dest_w}x{dest_h}; dropping frame",
-        )
-        return None
-    packed = dest_w * 4
-    if stride == packed:
-        return ImageFrame(
-            width=dest_w,
-            height=dest_h,
-            data=bytearray(src[: dest_h * packed]),
-            row_stride=packed,
-            pixel_stride=4,
-        )
-    dest = bytearray(dest_h * packed)
-    for y in range(dest_h):
-        start = y * stride
-        dest_row = y * packed
-        dest[dest_row : dest_row + packed] = src[start : start + packed]
-    return ImageFrame(
-        width=dest_w,
-        height=dest_h,
-        data=dest,
-        row_stride=packed,
-        pixel_stride=4,
-    )
 
 
 def _buffer_view(base: Any, nbytes: int) -> memoryview:
@@ -219,22 +153,74 @@ def _buffer_view(base: Any, nbytes: int) -> memoryview:
         return memoryview(buf).cast("B")
 
 
-def _copy_pixelbuffer(buffer: Any, dest_w: int, dest_h: int) -> ImageFrame | None:
+def frame_from_region(
+    view: memoryview, stride: int, x: int, y: int, width: int, height: int
+) -> ImageFrame:
+    """픽셀 버퍼에서 요청한 영역만 잘라 담는다."""
+    from app.core.processor import ImageFrame
+
+    packed = width * 4
+    dest = bytearray(height * packed)
+    start = y * stride + x * 4
+    for row in range(height):
+        src_row = start + row * stride
+        dest_row = row * packed
+        dest[dest_row : dest_row + packed] = view[src_row : src_row + packed]
+    return ImageFrame(
+        width=width, height=height, data=dest, row_stride=packed, pixel_stride=4
+    )
+
+
+def copy_rects(
+    buffer: Any, union: Rect, groups: Sequence[Any]
+) -> list[ImageFrame | None] | None:
+    """붙잡아 둔 프레임에서 요청한 영역들만 복사한다.
+
+    콜백에서 union 전체를 복사하면 대부분을 버리게 된다. 편집기 미리보기는
+    화면 전체를 스트리밍하면서 100x100만 쓰므로 차이가 크고, 영역이 마우스를
+    따라 바뀌어도 읽는 시점에 자르므로 어긋나지 않는다.
+
+    프레임을 쓸 수 없으면(크기 불일치 등) None을 돌려준다.
+    """
     quartz: Any = _framework("Quartz")
-    if buffer is None or dest_w < 1 or dest_h < 1:
-        return None
-    quartz.CVPixelBufferLockBaseAddress(buffer, 0)
+    quartz.CVPixelBufferLockBaseAddress(buffer, _LOCK_READ_ONLY)
     try:
         src_w = int(quartz.CVPixelBufferGetWidth(buffer))
         src_h = int(quartz.CVPixelBufferGetHeight(buffer))
         stride = int(quartz.CVPixelBufferGetBytesPerRow(buffer))
         base = quartz.CVPixelBufferGetBaseAddress(buffer)
-        if not base or src_w < 1 or src_h < 1:
+        if not base or stride < src_w * 4:
             return None
-        src = _buffer_view(base, stride * src_h)
-        return frame_from_bgra(src, src_w, src_h, stride, dest_w, dest_h)
+        if src_w != union["width"] or src_h != union["height"]:
+            # 리샘플하면 색이 달라져 완전 일치 매칭이 조용히 어긋난다.
+            _warn_once(
+                f"size-{src_w}x{src_h}-{union['width']}x{union['height']}",
+                f"SCStream frame {src_w}x{src_h} does not match requested "
+                f"{union['width']}x{union['height']}; dropping frame",
+            )
+            return None
+        view = _buffer_view(base, stride * src_h)
+        frames: list[ImageFrame | None] = []
+        for group in groups:
+            rect = group["rect"]
+            x = rect["left"] - union["left"]
+            y = rect["top"] - union["top"]
+            width = rect["width"]
+            height = rect["height"]
+            if (
+                x < 0
+                or y < 0
+                or width < 1
+                or height < 1
+                or x + width > src_w
+                or y + height > src_h
+            ):
+                frames.append(None)
+                continue
+            frames.append(frame_from_region(view, stride, x, y, width, height))
+        return frames
     finally:
-        quartz.CVPixelBufferUnlockBaseAddress(buffer, 0)
+        quartz.CVPixelBufferUnlockBaseAddress(buffer, _LOCK_READ_ONLY)
 
 
 def _handle_sample_buffer(
@@ -270,20 +256,9 @@ def _handle_sample_buffer(
     if buffer is None:
         # 상태를 읽을 수 없는 환경에서의 idle 프레임과 같다.
         return
-    frame = _copy_pixelbuffer(buffer, backend.union["width"], backend.union["height"])
-    if frame is None:
-        # 이미지가 실려 왔는데 쓸 수 없다. 마지막 프레임을 계속 현재 화면인 양
-        # 내주면 옛 화면 기준으로 키가 나간다.
-        backend.drop_frame(fault=True)
-        return
-    with backend.lock:
-        if backend.is_dead_locked():
-            # 사망 처리 뒤 늦게 도착한 프레임. 보관하면 죽은 백엔드가 화면을
-            # 들고 있는 상태가 된다.
-            return
-        backend.frame = frame
-        backend.frame_deadline = 0.0
-        backend.frame_gap = ""
+    # 여기서 복사하지 않는다. 읽는 쪽이 필요한 영역만 잘라 가면 되고,
+    # 그래야 마우스를 따라 움직이는 미리보기 영역도 어긋나지 않는다.
+    backend.hold_buffer(buffer)
 
 
 def _sck_classes() -> dict[str, Any]:
@@ -383,7 +358,7 @@ class MacStreamBackend:
         self.union = union
         self.fps = fps
         self.lock = threading.Lock()
-        self.frame: ImageFrame | None = None
+        self.buffer: Any = None
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
         self._stop = threading.Event()
@@ -408,7 +383,7 @@ class MacStreamBackend:
         _WARNED.clear()
         with self.lock:
             self._dead = False
-            self.frame = None
+            self._replace_buffer_locked(None)
             self.frame_deadline = 0.0
             self.frame_gap = ""
         self._stop.clear()
@@ -437,13 +412,13 @@ class MacStreamBackend:
             thread.join(timeout=2.0)
         self._thread = None
         with self.lock:
-            self.frame = None
+            self._replace_buffer_locked(None)
             self.frame_deadline = 0.0
             self.frame_gap = ""
 
     def _mark_dead_locked(self) -> None:
         self._dead = True
-        self.frame = None
+        self._replace_buffer_locked(None)
         self.frame_deadline = 0.0
         self.frame_gap = ""
 
@@ -460,8 +435,28 @@ class MacStreamBackend:
         잠금 화면에서 2초마다 죽고 재기동을 반복한다.
         """
         with self.lock:
-            if self.frame is None and not self.frame_deadline:
+            if self.buffer is None and not self.frame_deadline:
                 self.frame_deadline = time.perf_counter() + _NO_FRAME_TIMEOUT_S
+
+    def hold_buffer(self, buffer: Any) -> None:
+        """콜백이 새 프레임을 넘겨준다. 복사는 읽는 쪽에서 한다."""
+        quartz: Any = _framework("Quartz")
+        quartz.CVPixelBufferRetain(buffer)
+        with self.lock:
+            if self._dead:
+                # 사망 처리 뒤 늦게 도착한 프레임. 보관하면 죽은 백엔드가
+                # 화면을 들고 있는 상태가 된다.
+                quartz.CVPixelBufferRelease(buffer)
+                return
+            self._replace_buffer_locked(buffer)
+            self.frame_deadline = 0.0
+            self.frame_gap = ""
+
+    def _replace_buffer_locked(self, buffer: Any) -> None:
+        old = self.buffer
+        self.buffer = buffer
+        if old is not None:
+            _framework("Quartz").CVPixelBufferRelease(old)
 
     def drop_frame(self, *, fault: bool) -> None:
         """현재 프레임을 버리고, 언제까지 못 받으면 사망으로 볼지 기한을 건다.
@@ -473,7 +468,7 @@ class MacStreamBackend:
         """
         now = time.perf_counter()
         with self.lock:
-            self.frame = None
+            self._replace_buffer_locked(None)
             if fault:
                 if self.frame_gap != _GAP_FAULT:
                     self.frame_gap = _GAP_FAULT
@@ -493,21 +488,33 @@ class MacStreamBackend:
     def grab(self, groups: Sequence[Any]) -> list[ImageFrame | None]:
         now = time.perf_counter()
         died = False
+        quartz: Any = _framework("Quartz")
         # 판정과 사망 처리를 한 락 안에서 끝낸다. 락을 놓고 처리하면 그 사이에
         # 도착한 프레임을 무시하고 멀쩡한 스트림을 죽일 수 있다.
         with self.lock:
-            frame = None if self._dead else self.frame
-            if frame is None and not self._dead:
+            buffer = None if self._dead else self.buffer
+            if buffer is not None:
+                quartz.CVPixelBufferRetain(buffer)
+            elif not self._dead:
                 # 쓸 수 있는 프레임이 없는 상태가 기한을 넘기면 사망으로
-                # 승격시킨다. 그래야 mss 승계나 재기동이 걸린다.
+                # 승격시킨다. 그래야 재기동이 걸린다.
                 if self.frame_deadline and now > self.frame_deadline:
                     self._mark_dead_locked()
                     died = True
         if died:
             logger.warning("SCStream has no usable frame; marking backend dead")
-        if frame is None:
+        if buffer is None:
             return [None] * len(groups)
-        return crop_groups_from_union(frame, self.union, groups)
+        try:
+            frames = copy_rects(buffer, self.union, groups)
+        finally:
+            quartz.CVPixelBufferRelease(buffer)
+        if frames is None:
+            # 프레임이 실려 왔는데 쓸 수 없다. 그대로 두면 옛 화면 기준으로
+            # 키가 나가므로 버리고 기한을 건다.
+            self.drop_frame(fault=True)
+            return [None] * len(groups)
+        return frames
 
     def _run(self) -> None:
         try:

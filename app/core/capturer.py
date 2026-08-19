@@ -14,6 +14,10 @@ from app.core.screen_backend import (
 )
 from app.utils.system import MonitorUtils
 
+# grab이 25us라 폴링을 자주 해도 부담이 없다(mss 시절엔 1회 21ms였다).
+_POLL_ACTIVE_S = 0.1
+_POLL_IDLE_S = 0.2
+
 
 class ScreenshotCapturer:
     def __init__(self) -> None:
@@ -113,7 +117,7 @@ class ScreenshotCapturer:
                     break
                 except Exception as e:
                     logger.error(f"Preview capture failed: {e}")
-                time.sleep(0.2 if self._idle_cycles == 0 else 0.3)
+                time.sleep(_POLL_ACTIVE_S if self._idle_cycles == 0 else _POLL_IDLE_S)
         finally:
             backend.close()
 
