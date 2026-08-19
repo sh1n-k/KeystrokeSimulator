@@ -50,7 +50,7 @@ class ScreenshotCapturer:
         self.capturing.set()
         self._last_capture_signature = None
         self._idle_cycles = 0
-        self.capture_thread = Thread(target=self.capture_screenshot)
+        self.capture_thread = Thread(target=self.capture_screenshot, daemon=True)
         self.capture_thread.start()
 
     def stop_capture(self) -> None:
@@ -67,16 +67,16 @@ class ScreenshotCapturer:
             "events": [],
         }
 
-    def _capture_group(self, position: tuple[int, int]) -> dict[str, object] | None:
-        """화면 안으로 잘라낸 캡처 영역. 화면을 벗어나면 None."""
-        left = max(0, min(position[0], self.screen_width - 1))
-        top = max(0, min(position[1], self.screen_height - 1))
-        width = min(self.box_w, self.screen_width - left)
-        height = min(self.box_h, self.screen_height - top)
-        if width < 1 or height < 1:
-            return None
+    def _capture_group(self, position: tuple[int, int]) -> dict[str, object]:
+        """미리보기 영역. 좌표를 손대지 않는다 — 여기서 보정하면 저장되는
+        기준 좌표와 어긋나 엉뚱한 픽셀이 기준색으로 남는다."""
         return {
-            "rect": {"left": left, "top": top, "width": width, "height": height},
+            "rect": {
+                "left": position[0],
+                "top": position[1],
+                "width": self.box_w,
+                "height": self.box_h,
+            },
             "events": [],
         }
 
@@ -91,7 +91,7 @@ class ScreenshotCapturer:
                     position = self.get_current_mouse_position()
                     callback = self.screenshot_callback
                     group = self._capture_group(position) if position else None
-                    if group and callback:
+                    if group is not None and callback:
                         capture_signature = (position, self.box_w, self.box_h)
                         if capture_signature == self._last_capture_signature:
                             self._idle_cycles = min(self._idle_cycles + 1, 5)

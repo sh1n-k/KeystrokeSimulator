@@ -180,16 +180,16 @@ class TestCapturerAttributes(unittest.TestCase):
             },
         )
 
-    def test_capture_group_is_clamped_to_the_screen(self):
+    def test_capture_group_keeps_the_requested_coordinates(self):
+        """미리보기 좌표를 보정하면 저장되는 기준 좌표와 어긋난다."""
         capturer = self._make_capturer()
         capturer.set_capture_size(100, 100)
-        group = capturer._capture_group(
-            (capturer.screen_width - 10, capturer.screen_height - 10)
-        )
 
-        assert group is not None
-        self.assertEqual(group["rect"]["width"], 10)
-        self.assertEqual(group["rect"]["height"], 10)
+        group = capturer._capture_group((-50, -50))
+
+        self.assertEqual(
+            group["rect"], {"left": -50, "top": -50, "width": 100, "height": 100}
+        )
 
     def test_reopen_interval_starts_after_the_attempt(self):
         """실패 경로가 수 초 걸려도 스로틀이 무력화되면 안 된다."""

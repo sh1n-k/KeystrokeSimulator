@@ -46,6 +46,8 @@ _FRAME_BLANK = 2
 _FRAME_SUSPENDED = 3
 _FRAME_STOPPED = 5
 _SCK_CLASSES: dict[str, Any] = {}
+# 실행 루프와 편집기가 동시에 첫 스트림을 열면 ObjC 클래스가 중복 정의된다.
+_SCK_CLASSES_LOCK = threading.Lock()
 _WARNED: set[str] = set()
 
 
@@ -281,6 +283,11 @@ def _handle_sample_buffer(
 
 
 def _sck_classes() -> dict[str, Any]:
+    with _SCK_CLASSES_LOCK:
+        return _sck_classes_locked()
+
+
+def _sck_classes_locked() -> dict[str, Any]:
     if _SCK_CLASSES:
         return _SCK_CLASSES
 

@@ -468,6 +468,61 @@ class TestStallEscalation(unittest.TestCase):
         self.assertFalse(backend.is_dead())
 
 
+class TestOffscreenCaptureRects(unittest.TestCase):
+    """화면 밖 좌표가 프로필 전체를 죽이면 안 된다."""
+
+    def _proc(self, events):
+        proc = make_processor_stub(events)
+        return proc
+
+    def test_offscreen_event_is_dropped_not_fatal(self):
+        proc = make_processor_stub()
+        good = {
+            "name": "GOOD", "mode": "pixel", "invert": False, "key": None,
+            "center_x": 100, "center_y": 100, "dur": None, "rand": None,
+            "exec": False, "group": None, "priority": 1, "conds": {},
+            "runtime_toggle_member": False, "region_w": 1, "region_h": 1,
+            "rel_x": 0, "rel_y": 0,
+        }
+        offscreen = dict(good, name="OFFSCREEN", center_x=-50, center_y=-50)
+
+        with patch(
+            "app.core.processor.MonitorUtils.get_primary_size",
+            return_value=(1000, 800),
+        ):
+            groups = proc._build_capture_groups([good, offscreen])
+
+        names = [e["name"] for g in groups for e in g["events"]]
+        self.assertEqual(names, ["GOOD"])
+        for g in groups:
+            r = g["rect"]
+            self.assertGreaterEqual(r["left"], 0)
+            self.assertGreaterEqual(r["top"], 0)
+
+    def test_edge_region_is_clamped_into_the_screen(self):
+        proc = make_processor_stub()
+        edge = {
+            "name": "EDGE", "mode": "region", "invert": False, "key": None,
+            "center_x": 10, "center_y": 10, "dur": None, "rand": None,
+            "exec": False, "group": None, "priority": 1, "conds": {},
+            "runtime_toggle_member": False, "region_w": 100, "region_h": 100,
+            "rel_x": 0, "rel_y": 0,
+        }
+
+        with patch(
+            "app.core.processor.MonitorUtils.get_primary_size",
+            return_value=(1000, 800),
+        ):
+            groups = proc._build_capture_groups([edge])
+
+        self.assertEqual(len(groups), 1)
+        rect = groups[0]["rect"]
+        self.assertEqual(rect["left"], 0)
+        self.assertEqual(rect["top"], 0)
+        self.assertLessEqual(rect["left"] + rect["width"], 1000)
+        self.assertLessEqual(rect["top"] + rect["height"], 800)
+
+
 class TestDeadBackendRecovery(unittest.TestCase):
     def _stub(self):
         proc = make_processor_stub()

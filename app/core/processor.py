@@ -25,7 +25,7 @@ from app.core.screen_backend import (
     open_screen_backend,
 )
 from app.utils.keys import KeyUtils
-from app.utils.system import ProcessUtils
+from app.utils.system import MonitorUtils, ProcessUtils
 
 Pixel = tuple[int, int, int]
 Rect = dict[str, int]
@@ -853,6 +853,22 @@ class KeystrokeProcessor:
             self._join_backend_closers()
 
     @staticmethod
+    def _clamp_to_screen(rect: Rect, screen_w: int, screen_h: int) -> Rect | None:
+        """화면 안으로 잘라낸 캡처 영역. 완전히 벗어나면 None."""
+        left = max(0, rect["left"])
+        top = max(0, rect["top"])
+        right = min(screen_w, rect["left"] + rect["width"])
+        bottom = min(screen_h, rect["top"] + rect["height"])
+        if right - left < 1 or bottom - top < 1:
+            return None
+        return {
+            "left": left,
+            "top": top,
+            "width": right - left,
+            "height": bottom - top,
+        }
+
+    @staticmethod
     def _rect_area(rect: Rect) -> int:
         return max(1, rect["width"]) * max(1, rect["height"])
 
@@ -887,10 +903,22 @@ class KeystrokeProcessor:
         )
         groups: list[CaptureGroup] = []
 
+        screen_w, screen_h = MonitorUtils.get_primary_size()
         for evt in sorted_events:
             if evt.get("screenless"):
                 continue
-            evt_rect = self._build_capture_rect(evt)
+            clamped = self._clamp_to_screen(
+                self._build_capture_rect(evt), screen_w, screen_h
+            )
+            if clamped is None:
+                # 화면 밖 좌표를 그대로 캡처 영역에 넣으면 스트림이 아예 열리지
+                # 않아 프로필 전체가 무매칭이 된다. 해당 이벤트만 뺀다.
+                logger.warning(
+                    f"Event '{evt.get('name', '?')}': capture point is outside the "
+                    f"screen ({screen_w}x{screen_h}); event will never match"
+                )
+                continue
+            evt_rect = clamped
             evt["capture_rect"] = evt_rect
             if not groups:
                 groups.append({"rect": evt_rect.copy(), "events": [evt]})
