@@ -8,6 +8,7 @@ from loguru import logger
 
 from app.core.screen_backend import (
     BACKEND_RETRY_INTERVAL_S,
+    PREVIEW_STREAM_FPS,
     ScreenBackend,
     open_screen_backend,
 )
@@ -83,7 +84,9 @@ class ScreenshotCapturer:
     def capture_screenshot(self) -> None:
         # 실행 루프와 같은 백엔드로 찍는다. 경로가 다르면 여기서 고른 기준색이
         # 실행 중에는 픽셀값이 달라 맞지 않는다.
-        backend: ScreenBackend = open_screen_backend([self._screen_group()])
+        backend: ScreenBackend = open_screen_backend(
+            [self._screen_group()], fps=PREVIEW_STREAM_FPS
+        )
         last_retry = 0.0  # 죽은 채로 시작하면 곧바로 다시 열어본다
         try:
             while self.capturing.is_set():
@@ -121,7 +124,9 @@ class ScreenshotCapturer:
             return backend, last_retry
         backend.close()
         try:
-            fresh: ScreenBackend = open_screen_backend([self._screen_group()])
+            fresh: ScreenBackend = open_screen_backend(
+                [self._screen_group()], fps=PREVIEW_STREAM_FPS
+            )
         except Exception as exc:
             logger.error(f"Preview backend restart failed: {exc}")
             fresh = backend

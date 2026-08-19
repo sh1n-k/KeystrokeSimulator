@@ -180,6 +180,30 @@ class TestCapturerAttributes(unittest.TestCase):
             },
         )
 
+    def test_preview_uses_the_lower_preview_fps(self):
+        """전체 화면을 스트리밍하므로 실행 루프와 같은 fps는 낭비다."""
+        from app.core.screen_backend import PREVIEW_STREAM_FPS
+
+        capturer = self._make_capturer()
+        capturer.capturing.set()
+        capturer.screenshot_callback = MagicMock(
+            side_effect=lambda *_: capturer.capturing.clear()
+        )
+        backend = MagicMock()
+        backend.is_dead.return_value = False
+        backend.grab.return_value = [make_image_frame(4, 4, channels=4)]
+
+        with (
+            patch(
+                "app.core.capturer.open_screen_backend", return_value=backend
+            ) as opener,
+            patch("app.core.capturer.time.sleep", return_value=None),
+        ):
+            capturer.capture_screenshot()
+
+        self.assertEqual(opener.call_args.kwargs["fps"], PREVIEW_STREAM_FPS)
+        self.assertLess(PREVIEW_STREAM_FPS, 30)
+
     def test_capture_group_keeps_the_requested_coordinates(self):
         """미리보기 좌표를 보정하면 저장되는 기준 좌표와 어긋난다."""
         capturer = self._make_capturer()

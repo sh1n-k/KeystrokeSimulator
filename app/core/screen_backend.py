@@ -19,6 +19,10 @@ BGRA = 0x42475241
 # 동안 매 사이클 재시도하지 않도록 한다.
 BACKEND_RETRY_INTERVAL_S = 2.0
 _STREAM_FPS = 30
+# 편집기 미리보기는 화면 전체를 스트리밍하므로 프레임당 복사량이 크다. 소비
+# 주기가 0.2초라 30fps는 대부분 낭비다. 실측(3440x1440): 30fps 9.4% CPU →
+# 10fps 2.5%, 그 아래로는 CPU가 더 줄지 않고 프레임 나이만 나빠진다.
+PREVIEW_STREAM_FPS = 10
 _START_TIMEOUT_S = 12.0
 # 콜백 도착은 생존 신호로 쓸 수 없다. 화면이 오래 정지해 있으면 macOS가
 # Idle 샘플 전달을 아예 멈춘다(실측: 정지 영역에서 30초 넘는 공백, 화면이
@@ -375,8 +379,9 @@ def _display_for_union(displays: Sequence[Any], union: Rect) -> Any:
 
 
 class MacStreamBackend:
-    def __init__(self, union: Rect) -> None:
+    def __init__(self, union: Rect, fps: int = _STREAM_FPS) -> None:
         self.union = union
+        self.fps = fps
         self.lock = threading.Lock()
         self.frame: ImageFrame | None = None
         self._thread: threading.Thread | None = None
@@ -392,8 +397,10 @@ class MacStreamBackend:
         self.frame_gap = ""
 
     @classmethod
-    def from_groups(cls, groups: Sequence[Any]) -> MacStreamBackend:
-        return cls(union_group_rects(groups))
+    def from_groups(
+        cls, groups: Sequence[Any], fps: int = _STREAM_FPS
+    ) -> MacStreamBackend:
+        return cls(union_group_rects(groups), fps)
 
     def open(self) -> None:
         self._closed = False
@@ -553,7 +560,7 @@ class MacStreamBackend:
         cfg.setShowsCursor_(False)
         cfg.setPixelFormat_(BGRA)
         cfg.setQueueDepth_(3)
-        cfg.setMinimumFrameInterval_(core_media.CMTimeMake(1, _STREAM_FPS))
+        cfg.setMinimumFrameInterval_(core_media.CMTimeMake(1, self.fps))
         classes = _sck_classes()
         output = classes["output"].alloc().init()
         output.backend = self
@@ -617,6 +624,7 @@ def create_screen_backend(
     groups: Sequence[Any],
     *,
     os_name: str | None = None,
+    fps: int = _STREAM_FPS,
 ) -> ScreenBackend:
     if not groups:
         return NullScreenBackend()
@@ -624,7 +632,7 @@ def create_screen_backend(
     if name == "Darwin":
         # macOS에서는 mss를 쓰지 않는다. 두 경로는 픽셀값이 달라, 기준색을
         # SCStream으로 찍은 프로필이 mss에서는 아무것도 매칭되지 않는다.
-        return MacStreamBackend.from_groups(groups)
+        return MacStreamBackend.from_groups(groups, fps)
     return MssScreenBackend()
 
 
@@ -632,6 +640,7 @@ def open_screen_backend(
     groups: Sequence[Any],
     *,
     os_name: str | None = None,
+    fps: int = _STREAM_FPS,
 ) -> ScreenBackend:
     """백엔드를 열어 돌려준다.
 
@@ -639,7 +648,7 @@ def open_screen_backend(
     돌려준다. 실행 루프가 그걸 보고 주기적으로 다시 열어보므로, 원인이
     사라지면 스스로 복구된다.
     """
-    backend = create_screen_backend(groups, os_name=os_name)
+    backend = create_screen_backend(groups, os_name=os_name, fps=fps)
     try:
         backend.open()
         return backend
