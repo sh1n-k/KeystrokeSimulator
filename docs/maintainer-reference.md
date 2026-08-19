@@ -13,6 +13,7 @@
 | `app/core/processor.py` | capture → match → condition → group priority → keystroke 처리 |
 | `app/core/models.py` | `EventModel`, `ProfileModel`, `UserSettings` 계약 |
 | `app/core/capturer.py` | 화면 캡처 스레드 |
+| `app/core/screen_backend.py` | 실행 루프 화면 백엔드. Windows는 mss, macOS는 SCStream |
 | `app/ui/capture_session.py` | 캡처 스레드와 편집 UI 사이의 상태 경계 |
 | `app/storage/profile_storage.py` | `profiles/*.json` 직렬화와 호환 로딩 |
 | `app/storage/modkey_sets_storage.py` | `modkey_sets.json` 수정키 세트 저장 |

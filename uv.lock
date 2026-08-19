@@ -15,7 +15,7 @@ name = "cffi"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "(implementation_name != 'PyPy' and sys_platform == 'darwin') or (implementation_name != 'PyPy' and sys_platform == 'win32')" },
+    { name = "pycparser", marker = "implementation_name != 'PyPy'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz", hash = "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529", size = 523588, upload-time = "2025-09-08T23:24:04.541Z" }
 wheels = [
@@ -87,23 +87,24 @@ name = "keystroke-simulator"
 version = "3.0.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "loguru", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "miniaudio", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "mss", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "pillow", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "pynput", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-coretext", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
+    { name = "loguru" },
+    { name = "miniaudio" },
+    { name = "mss" },
+    { name = "pillow" },
+    { name = "pynput" },
+    { name = "pyobjc-framework-applicationservices", marker = "sys_platform != 'win32'" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform != 'win32'" },
+    { name = "pyobjc-framework-coretext", marker = "sys_platform != 'win32'" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform != 'win32'" },
+    { name = "pyobjc-framework-screencapturekit", marker = "sys_platform != 'win32'" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "pre-commit", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "pyright", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "ruff", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
+    { name = "pre-commit" },
+    { name = "pyright" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -117,6 +118,7 @@ requires-dist = [
     { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = "==12.2.1" },
     { name = "pyobjc-framework-coretext", marker = "sys_platform == 'darwin'", specifier = "==12.2.1" },
     { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'", specifier = "==12.2.1" },
+    { name = "pyobjc-framework-screencapturekit", marker = "sys_platform == 'darwin'", specifier = "==12.2.1" },
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = "==312" },
 ]
 
@@ -145,7 +147,7 @@ name = "miniaudio"
 version = "1.71"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
+    { name = "cffi" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d8/d5/e5439dc08561f73656bfeb3340fc64ab63163e101426593d8fb9a025ff1e/miniaudio-1.71.tar.gz", hash = "sha256:ff51e2887bb673e2e757752b586b3dc924d59aa5fbcae9bbc45f4a111bd3262b", size = 1116480, upload-time = "2026-04-29T21:20:38.182Z" }
 wheels = [
@@ -208,11 +210,11 @@ name = "pre-commit"
 version = "4.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cfgv", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "identify", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "nodeenv", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "pyyaml", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "virtualenv", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
+    { name = "cfgv" },
+    { name = "identify" },
+    { name = "nodeenv" },
+    { name = "pyyaml" },
+    { name = "virtualenv" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/8e/22/2de9408ac81acbb8a7d05d4cc064a152ccf33b3d480ebe0cd292153db239/pre_commit-4.6.0.tar.gz", hash = "sha256:718d2208cef53fdc38206e40524a6d4d9576d103eb16f0fec11c875e7716e9d9", size = 198525, upload-time = "2026-04-21T20:31:41.613Z" }
 wheels = [
@@ -233,11 +235,11 @@ name = "pynput"
 version = "1.8.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "evdev", marker = "(sys_platform == 'darwin' and 'linux' in sys_platform) or (sys_platform == 'win32' and 'linux' in sys_platform)" },
-    { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
-    { name = "python-xlib", marker = "(sys_platform == 'darwin' and 'linux' in sys_platform) or (sys_platform == 'win32' and 'linux' in sys_platform)" },
-    { name = "six", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
+    { name = "evdev", marker = "'linux' in sys_platform" },
+    { name = "pyobjc-framework-applicationservices", marker = "sys_platform != 'win32'" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform != 'win32'" },
+    { name = "python-xlib", marker = "'linux' in sys_platform" },
+    { name = "six" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/86/c6/e2d415610cfbc78308bee44218a46124aaa3301b1df08814df819b2254a1/pynput-1.8.2.tar.gz", hash = "sha256:f493c87157cd3861b4468f7f896857051762f44ed26f1b641e7cc5840a457087", size = 82818, upload-time = "2026-05-12T19:11:39.464Z" }
 wheels = [
@@ -259,10 +261,10 @@ name = "pyobjc-framework-applicationservices"
 version = "12.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-coretext", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+    { name = "pyobjc-framework-coretext" },
+    { name = "pyobjc-framework-quartz" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5e/4d/0ebdd8144aba94b8fe9828ccee5616a4bf53d1f8bc51cff55f3cce86d695/pyobjc_framework_applicationservices-12.2.1.tar.gz", hash = "sha256:048ea663c9ac75c44a15dc7d5b8d78cbb4c97bf1c76e83835e8d5498e184001f", size = 109342, upload-time = "2026-06-19T16:19:46.149Z" }
 wheels = [
@@ -275,7 +277,7 @@ name = "pyobjc-framework-cocoa"
 version = "12.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-core" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/51/34/fbe38a204643aa4e1b91391cdce07a34da565a69171ebcad08de7438a556/pyobjc_framework_cocoa-12.2.1.tar.gz", hash = "sha256:b94b37fe5730e5ae1fb0052912cd174e6ec329b0bfba4a012ae5db1014b5864b", size = 3125751, upload-time = "2026-06-19T16:20:05.159Z" }
 wheels = [
@@ -284,13 +286,27 @@ wheels = [
 ]
 
 [[package]]
+name = "pyobjc-framework-coremedia"
+version = "12.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e3/79/f501d730a9c320e0b2b3916e95f57e66dd6736d210a1aa5b63eb6c43e605/pyobjc_framework_coremedia-12.2.1.tar.gz", hash = "sha256:71b45f7cd52bd997d836c15a0e1016db90815a219dc87fd20435a6f08b87df7b", size = 98252, upload-time = "2026-06-19T16:20:15.75Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/dc/7083e6781fcd843d210ec6d247d28c6e1032ea1c5655b9e1182d0a85f331/pyobjc_framework_coremedia-12.2.1-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:84e9fb3f7b6420fc3865a5812604c63546b5777f4999e0e0e830a9a0816e8743", size = 29468, upload-time = "2026-06-19T16:08:56.129Z" },
+    { url = "https://files.pythonhosted.org/packages/11/74/edb3ec87d2e5f962c75af990207e4df39b290f11b4f4c3cc446ee141e4e7/pyobjc_framework_coremedia-12.2.1-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:541d64d2fc7576054bdc3508a94f37671e81e5ca1582e16ebec2c0e05dd75412", size = 29519, upload-time = "2026-06-19T16:08:56.956Z" },
+]
+
+[[package]]
 name = "pyobjc-framework-coretext"
 version = "12.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+    { name = "pyobjc-framework-quartz" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5a/9c/4c7f452059dc1d3845b8e627b9113c247a997b9b07518e848c2ab7ff3149/pyobjc_framework_coretext-12.2.1.tar.gz", hash = "sha256:af740e784d7c592c34025ec7165f4f6c1a69b5a2d9075f06e41e4f77c212aed2", size = 97349, upload-time = "2026-06-19T16:20:22.508Z" }
 wheels = [
@@ -303,8 +319,8 @@ name = "pyobjc-framework-quartz"
 version = "12.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3b/f6/2a8b84dbf1fe7c04dd96ea73d991678d4e09a909f51971ecc51629bb2ab4/pyobjc_framework_quartz-12.2.1.tar.gz", hash = "sha256:b3b8b6f71e66147f8ff9e6213864cc8527e3a0b1ee90835b93ce221f4802d9b0", size = 3215521, upload-time = "2026-06-19T16:21:30.199Z" }
 wheels = [
@@ -313,12 +329,27 @@ wheels = [
 ]
 
 [[package]]
+name = "pyobjc-framework-screencapturekit"
+version = "12.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+    { name = "pyobjc-framework-coremedia" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/64/a6/b7e72e32d3334e13eae592cbcd9f3c060c43adf78ddfebd0eb9c6be0ab05/pyobjc_framework_screencapturekit-12.2.1.tar.gz", hash = "sha256:e419cbf9c2f9cbd172d1c6e5bc69a44e0a7d9e45cf43058d48eeda4f785ce860", size = 37840, upload-time = "2026-06-19T16:21:36.099Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/30/1a/efebaf2d5f48ecbd231b2b79df2be4c25a7ebe1804a7c36c3902acd81457/pyobjc_framework_screencapturekit-12.2.1-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:fd1cc27066b907726389bde47aca1afd27c2af13c4eb88b40f3b813082987e01", size = 11673, upload-time = "2026-06-19T16:16:55.347Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/95/55ce785f8e619d4e953b3672ccb5b81b16b11c48509dbe38689426022b8a/pyobjc_framework_screencapturekit-12.2.1-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:9d4493a95a5eca7b8d5287fda6b2614a1d62def22b24f01eb743fc371c018ae6", size = 11876, upload-time = "2026-06-19T16:16:56.285Z" },
+]
+
+[[package]]
 name = "pyright"
 version = "1.1.411"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nodeenv", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "typing-extensions", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
+    { name = "nodeenv" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7e/ab/265f7dc69d28113ebba19092e57b075f41543b2ed048429c5f56e2b88eac/pyright-1.1.411.tar.gz", hash = "sha256:d885a0551f2e763b089a02702174e7f4ba77548cddabc972ab86d1f7f1b0f998", size = 4112861, upload-time = "2026-06-25T02:14:06.37Z" }
 wheels = [
@@ -330,8 +361,8 @@ name = "python-discovery"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "filelock", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "platformdirs", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
+    { name = "filelock" },
+    { name = "platformdirs" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a6/12/38c1a0b1e64806780c9563e3fc9f6e472251839662587cfbe9bfaf2ae10a/python_discovery-1.4.0.tar.gz", hash = "sha256:eb8bc7daad3c226c147e45bb4e970a1feb1bf4048ee178e6db59e197b8010ce3", size = 68455, upload-time = "2026-05-28T01:15:37.639Z" }
 wheels = [
@@ -343,7 +374,7 @@ name = "python-xlib"
 version = "0.33"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "six", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
+    { name = "six" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/86/f5/8c0653e5bb54e0cbdfe27bf32d41f27bc4e12faa8742778c17f2a71be2c0/python-xlib-0.33.tar.gz", hash = "sha256:55af7906a2c75ce6cb280a584776080602444f75815a7aff4d287bb2d7018b32", size = 269068, upload-time = "2022-12-25T18:53:00.824Z" }
 wheels = [
@@ -412,10 +443,10 @@ name = "virtualenv"
 version = "21.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "distlib", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "filelock", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "platformdirs", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
-    { name = "python-discovery", marker = "sys_platform == 'darwin' or sys_platform == 'win32'" },
+    { name = "distlib" },
+    { name = "filelock" },
+    { name = "platformdirs" },
+    { name = "python-discovery" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/95/f0/b47ecf438211a25a97f8f0e4b23c22bc2496ebfea18dd6ec16210f09cc36/virtualenv-21.4.1.tar.gz", hash = "sha256:2ca543c713b72840ceffd94e9bdedfbd09a661defa1f7f69e5429ad4059442e2", size = 7613344, upload-time = "2026-05-28T04:12:49.905Z" }
 wheels = [

@@ -8,16 +8,15 @@ import re
 import threading
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, NotRequired, Protocol, TypedDict, cast
 
-import mss
 from loguru import logger
 from mss.screenshot import ScreenShot
 from PIL import Image
 
 from app.core.models import EventModel, ModificationKeys, UserSettings
+from app.core.screen_backend import ScreenBackend, open_screen_backend
 from app.utils.keys import KeyUtils
 from app.utils.system import ProcessUtils
 
@@ -560,6 +559,7 @@ class KeystrokeProcessor:
             self.event_data_list
         )
 
+        self._screen_backend: ScreenBackend | None = None
         self.loop = asyncio.new_event_loop()
         self.main_thread = threading.Thread(target=self._run_loop, daemon=True)
 
@@ -577,6 +577,10 @@ class KeystrokeProcessor:
                 logger.warning(
                     "Processor thread did not stop within timeout; force-releasing keys"
                 )
+        backend = getattr(self, "_screen_backend", None)
+        if backend is not None:
+            backend.close()
+            self._screen_backend = None
         self._force_release_pressed_keys()
 
     def _force_release_pressed_keys(self) -> None:
@@ -768,9 +772,9 @@ class KeystrokeProcessor:
         last_proc_check_time = 0
         is_proc_active_cached = True
         proc_check_interval = 0.3
-        capture_cm = mss.mss() if self.main_capture_groups else nullcontext()
-
-        with capture_cm as sct:
+        backend = open_screen_backend(self.main_capture_groups)
+        self._screen_backend = backend
+        try:
             while not self.term_event.is_set():
                 current_time = time.time()
                 if self.pid and (
@@ -792,19 +796,17 @@ class KeystrokeProcessor:
 
                 try:
                     cycle_started = time.perf_counter()
-                    local_match_states: dict[str, bool] = {}
-                    if sct is not None:
-                        for group in self.main_capture_groups:
-                            img = ImageFrame.from_screenshot(sct.grab(group["rect"]))
-                            local_match_states.update(
-                                self._evaluate_capture_group(img, group["events"])
-                            )
+                    local_match_states = self._capture_match_states(backend)
                     await self._apply_local_match_states(local_match_states)
                     _log_perf("processor_main_cycle", cycle_started)
                 except Exception as e:
                     logger.error(f"Capture failed: {e}")
 
                 await asyncio.sleep(random.uniform(*self.delays))
+        finally:
+            backend.close()
+            if self._screen_backend is backend:
+                self._screen_backend = None
 
     @staticmethod
     def _rect_area(rect: Rect) -> int:
@@ -1016,6 +1018,17 @@ class KeystrokeProcessor:
             resolve(evt_name)
 
         return resolved
+
+    def _capture_match_states(self, backend: ScreenBackend) -> dict[str, bool]:
+        local_match_states: dict[str, bool] = {}
+        frames = backend.grab(self.main_capture_groups)
+        for group, img in zip(self.main_capture_groups, frames, strict=True):
+            if img is None:
+                continue
+            local_match_states.update(
+                self._evaluate_capture_group(img, group["events"])
+            )
+        return local_match_states
 
     def _evaluate_capture_group(
         self, img: ImageFrame, events: list[EventData]
