@@ -167,6 +167,24 @@ class TestForceRelease(unittest.TestCase):
         proc.sim.release.assert_called_once_with(65)
         self.assertEqual(proc.pressed_keys, set())
 
+    def test_backend_close_failure_does_not_block_force_release(self):
+        """close 예외가 force-release 를 막으면 키가 눌린 채 남는다."""
+        proc = _make_processor_stub()
+        proc.main_thread = MagicMock()
+        proc.main_thread.is_alive.return_value = False
+        proc.pressed_keys = {"A"}
+        proc.pressed_key_codes = {"A": 65}
+        backend = MagicMock()
+        backend.close.side_effect = AttributeError("thread-local handles")
+        proc._screen_backend = backend
+        proc._backend_closers = []
+
+        KeystrokeProcessor.stop(proc)
+
+        backend.close.assert_called_once()
+        proc.sim.release.assert_called_once_with(65)
+        self.assertEqual(proc.pressed_keys, set())
+
     def test_force_release_retains_tracking_if_release_fails(self):
         proc = _make_processor_stub()
         proc.pressed_keys = {"A"}

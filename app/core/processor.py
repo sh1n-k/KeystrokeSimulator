@@ -615,7 +615,11 @@ class KeystrokeProcessor:
         for _ in range(2):
             backend = getattr(self, "_screen_backend", None)
             if backend is not None:
-                backend.close()
+                # 닫기 실패가 아래 force-release 를 막으면 키가 눌린 채 남는다.
+                try:
+                    backend.close()
+                except Exception as exc:
+                    logger.warning(f"Screen backend close failed: {exc}")
                 self._screen_backend = None
             if not self.main_thread.is_alive():
                 break
@@ -903,19 +907,26 @@ class KeystrokeProcessor:
         )
         groups: list[CaptureGroup] = []
 
-        screen_w, screen_h = MonitorUtils.get_primary_size()
+        # 화면 밖 영역을 거부하는 것은 SCStream 제약이다. mss 는 전역 좌표를
+        # 그대로 잡으므로 Windows 에서는 손대지 않는다.
+        bounds = (
+            MonitorUtils.get_primary_size() if self.os_type == "Darwin" else None
+        )
         for evt in sorted_events:
             if evt.get("screenless"):
                 continue
-            clamped = self._clamp_to_screen(
-                self._build_capture_rect(evt), screen_w, screen_h
+            clamped = (
+                self._clamp_to_screen(self._build_capture_rect(evt), *bounds)
+                if bounds
+                else self._build_capture_rect(evt)
             )
             if clamped is None:
                 # 화면 밖 좌표를 그대로 캡처 영역에 넣으면 스트림이 아예 열리지
                 # 않아 프로필 전체가 무매칭이 된다. 해당 이벤트만 뺀다.
+                size = f"{bounds[0]}x{bounds[1]}" if bounds else "screen"
                 logger.warning(
                     f"Event '{evt.get('name', '?')}': capture point is outside the "
-                    f"screen ({screen_w}x{screen_h}); event will never match"
+                    f"screen ({size}); event will never match"
                 )
                 continue
             evt_rect = clamped

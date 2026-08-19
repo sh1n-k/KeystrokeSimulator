@@ -95,8 +95,15 @@ class MssScreenBackend:
         with self._lock:
             sct = self._sct
             self._sct = None
-        if sct is not None:
+        if sct is None:
+            return
+        try:
             sct.close()
+        except Exception as exc:
+            # mss 의 Windows 백엔드는 핸들을 threading.local 에 둬서, 만든
+            # 스레드가 아닌 곳에서 닫으면 AttributeError 가 난다. 실제 정리는
+            # 그 스레드가 끝날 때 이뤄지므로 여기서 막지 않는다.
+            logger.debug(f"mss close failed: {exc}")
 
     def grab(self, groups: Sequence[Any]) -> list[ImageFrame | None]:
         from app.core.processor import ImageFrame

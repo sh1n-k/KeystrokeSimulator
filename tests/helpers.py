@@ -1,3 +1,4 @@
+import platform
 import threading
 
 from app.core.processor import ImageFrame, KeystrokeProcessor, Pixel
@@ -10,6 +11,7 @@ def make_processor_stub(event_data_list=None) -> KeystrokeProcessor:
     proc.current_states = {}
     proc.term_event = threading.Event()
     proc._stopped = threading.Event()
+    proc.os_type = platform.system()
     proc.default_press_times = (0.1, 0.1)
     proc.event_data_list = event_data_list or []
     proc.runtime_toggle_active = False
