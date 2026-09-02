@@ -496,12 +496,12 @@ class MacStreamBackend:
     def grab(self, groups: Sequence[Any]) -> list[ImageFrame | None]:
         now = time.perf_counter()
         died = False
-        quartz: Any = _framework("Quartz")
         # 판정과 사망 처리를 한 락 안에서 끝낸다. 락을 놓고 처리하면 그 사이에
         # 도착한 프레임을 무시하고 멀쩡한 스트림을 죽일 수 있다.
         with self.lock:
             buffer = None if self._dead else self.buffer
             if buffer is not None:
+                quartz: Any = _framework("Quartz")
                 quartz.CVPixelBufferRetain(buffer)
             elif not self._dead:
                 # 쓸 수 있는 프레임이 없는 상태가 기한을 넘기면 사망으로
@@ -513,6 +513,7 @@ class MacStreamBackend:
             logger.warning("SCStream has no usable frame; marking backend dead")
         if buffer is None:
             return [None] * len(groups)
+        quartz = _framework("Quartz")
         try:
             frames = copy_rects(buffer, self.union, groups)
         finally:

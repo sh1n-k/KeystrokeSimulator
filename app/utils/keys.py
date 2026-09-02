@@ -248,20 +248,18 @@ class KeyUtils:
         On macOS, physical HID keycodes (left/right) are checked first. Flag-mask
         fallback is used only when physical_only=False — chord hotkeys should pass
         physical_only=True so sticky flags cannot keep a latch armed forever.
+
+        Physical state always uses the host OS APIs. ``os_name`` only selects the
+        keycode map (e.g. Windows-compat layouts).
         """
-        normalized_os = KeyUtils._normalize_os_name(os_name)
-        if normalized_os == "windows":
-            if not IS_WIN:
-                return False
-            code = KeyUtils.get_keycode(key, os_name=normalized_os)
+        if IS_WIN:
+            code = KeyUtils.get_keycode(key, os_name=os_name)
             return (
                 (windows_windll().user32.GetAsyncKeyState(code) & 0x8000 != 0)
                 if code
                 else False
             )
-        if normalized_os == "darwin":
-            if not IS_MAC:
-                return False
+        if IS_MAC:
             codes = KeyUtils._MAC_MODIFIER_KEYCODES.get(key.lower())
             if not codes:
                 return False
@@ -293,18 +291,13 @@ class KeyUtils:
         if not key_name:
             return False
 
-        normalized_os = KeyUtils._normalize_os_name(os_name)
-        code = KeyUtils.get_keycode(key_name, os_name=normalized_os)
+        code = KeyUtils.get_keycode(key_name, os_name=os_name)
         if code is None:
             return False
 
-        if normalized_os == "windows":
-            if not IS_WIN:
-                return False
+        if IS_WIN:
             return bool(windows_windll().user32.GetAsyncKeyState(code) & 0x8000)
-        if normalized_os == "darwin":
-            if not IS_MAC:
-                return False
+        if IS_MAC:
             key_state = quartz_symbol("CGEventSourceKeyState")
             hid_system_state = quartz_symbol("kCGEventSourceStateHIDSystemState")
             return bool(key_state(hid_system_state, code))

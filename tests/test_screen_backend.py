@@ -1,3 +1,4 @@
+import sys
 import threading
 import time
 import unittest
@@ -79,6 +80,7 @@ class TestCreateScreenBackend(unittest.TestCase):
 
     def test_failed_stream_open_returns_dead_backend(self):
         """mss로 대체하지 않고, 실행 루프가 다시 열 수 있도록 사망 상태로 준다."""
+        _patch_quartz(self)
         with patch(
             "app.core.screen_backend.MacStreamBackend.open",
             side_effect=RuntimeError("no permission"),
@@ -96,12 +98,14 @@ class TestCreateScreenBackend(unittest.TestCase):
 
 
 class TestMacStreamGrab(unittest.TestCase):
+    def setUp(self) -> None:
+        _patch_quartz(self)
+
     def test_grab_returns_none_before_first_frame(self):
         backend = MacStreamBackend({"left": 0, "top": 0, "width": 4, "height": 4})
         self.assertEqual(backend.grab([_group(0, 0, 1, 1)]), [None])
 
     def test_grab_copies_requested_rect_from_held_buffer(self):
-        _patch_quartz(self)
         backend = MacStreamBackend({"left": 10, "top": 20, "width": 8, "height": 6})
         backend.buffer = object()
         wanted = make_image_frame(1, 1)
@@ -118,7 +122,6 @@ class TestMacStreamGrab(unittest.TestCase):
         self.assertEqual(cropped[0].pixel_bgr(0, 0), (4, 5, 6))
 
     def test_grab_escalates_when_the_frame_is_unusable(self):
-        _patch_quartz(self)
         backend = MacStreamBackend({"left": 0, "top": 0, "width": 2, "height": 2})
         backend.buffer = object()
 
@@ -130,7 +133,6 @@ class TestMacStreamGrab(unittest.TestCase):
 
     def test_static_screen_keeps_last_frame(self):
         """화면이 오래 정지하면 콜백 자체가 끊긴다. 그래도 마지막 프레임을 쓴다."""
-        _patch_quartz(self)
         backend = MacStreamBackend({"left": 0, "top": 0, "width": 2, "height": 2})
         backend.buffer = object()
         wanted = make_image_frame(1, 1)
@@ -144,7 +146,6 @@ class TestMacStreamGrab(unittest.TestCase):
         self.assertFalse(backend.is_dead())
 
     def test_dead_stream_returns_none(self):
-        _patch_quartz(self)
         backend = MacStreamBackend({"left": 0, "top": 0, "width": 2, "height": 2})
         backend.buffer = object()
         backend.mark_dead()
@@ -241,6 +242,9 @@ def _live_backend(buffer=None):
 
 
 class TestSampleBufferStatus(unittest.TestCase):
+    def setUp(self) -> None:
+        _patch_quartz(self)
+
     def test_idle_status_keeps_last_frame(self):
         frame = make_image_frame(2, 2)
         backend = _live_backend(frame)
@@ -334,6 +338,10 @@ class TestSampleBufferStatus(unittest.TestCase):
 
         self.assertEqual(backend.frame_deadline, first)
 
+    @unittest.skipUnless(
+        sys.platform == "darwin",
+        "SCStream output class requires macOS frameworks",
+    )
     def test_callback_exception_drops_stale_frame(self):
         classes = _sck_classes()
         output = classes["output"].alloc().init()
@@ -349,6 +357,10 @@ class TestSampleBufferStatus(unittest.TestCase):
         self.assertIsNone(backend.buffer)
         self.assertGreater(backend.frame_deadline, 0.0)
 
+    @unittest.skipUnless(
+        sys.platform == "darwin",
+        "SCStream output class requires macOS frameworks",
+    )
     def test_callback_exception_does_not_escape(self):
         classes = _sck_classes()
         output = classes["output"].alloc().init()
@@ -363,6 +375,9 @@ class TestSampleBufferStatus(unittest.TestCase):
 
 
 class TestStallEscalation(unittest.TestCase):
+    def setUp(self) -> None:
+        _patch_quartz(self)
+
     def test_missing_frame_eventually_marks_dead(self):
         """기동 후든 도중이든, 쓸 수 있는 프레임이 없는 채 기한을 넘기면 승격."""
         backend = MacStreamBackend({"left": 0, "top": 0, "width": 2, "height": 2})
@@ -373,7 +388,6 @@ class TestStallEscalation(unittest.TestCase):
 
     def test_callback_silence_alone_never_marks_dead(self):
         """콜백 침묵은 정상이다(정지 화면에서 30초 넘게 끊기는 것을 실측)."""
-        _patch_quartz(self)
         backend = _live_backend(object())
         wanted = [make_image_frame(1, 1)]
 

@@ -5,7 +5,7 @@ import selectors
 import socket
 import threading
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Protocol
 
 from loguru import logger
 
@@ -20,11 +20,8 @@ class InputListener(Protocol):
 class TkScheduler(Protocol):
     def after(self, ms: int, func: Callable[[], object], /) -> str: ...
     def after_cancel(self, after_id: str, /) -> object: ...
-    # Optional on some Tk builds; file type is platform-specific (socket fd).
-    def createfilehandler(
-        self, file: Any, mask: int, func: Callable[..., object], /
-    ) -> Any: ...
-    def deletefilehandler(self, file: Any, /) -> Any: ...
+    # createfilehandler/deletefilehandler exist on macOS/Unix Tk only.
+    # Windows Tk omits them; callers must use hasattr/getattr.
 
 
 class InputListenerSession:
@@ -91,8 +88,9 @@ class InputListenerSession:
         if self._wake_r is not None:
             return
         # Socketpair + createfilehandler is the reliable bg wake on macOS/Unix.
-        # Skip on platforms without the Tk hook.
-        if not hasattr(self.root, "createfilehandler"):
+        # Skip on platforms without the Tk hook (notably Windows).
+        createfilehandler = getattr(self.root, "createfilehandler", None)
+        if createfilehandler is None:
             return
         try:
             wake_r, wake_w = socket.socketpair()
@@ -102,7 +100,7 @@ class InputListenerSession:
             self._wake_w = wake_w
             # tk.READABLE == 1 on Tk; use selectors.EVENT_READ value (1) as mask.
             mask = getattr(self.root, "READABLE", selectors.EVENT_READ)
-            self.root.createfilehandler(wake_r, mask, self._on_wake_readable)
+            createfilehandler(wake_r, mask, self._on_wake_readable)
             self._filehandler_installed = True
         except Exception:
             logger.debug("InputListenerSession wake pipe unavailable", exc_info=True)
@@ -114,10 +112,12 @@ class InputListenerSession:
         self._wake_r = None
         self._wake_w = None
         if self._filehandler_installed and wake_r is not None:
-            try:
-                self.root.deletefilehandler(wake_r)
-            except Exception:
-                pass
+            deletefilehandler = getattr(self.root, "deletefilehandler", None)
+            if deletefilehandler is not None:
+                try:
+                    deletefilehandler(wake_r)
+                except Exception:
+                    pass
         self._filehandler_installed = False
         for sock in (wake_r, wake_w):
             if sock is not None:
