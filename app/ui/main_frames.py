@@ -763,7 +763,7 @@ class RunSetFrame(tk.Frame):
         btn_row = tk.Frame(body, bg=theme.SURFACE_PAPER)
         btn_row.pack(fill="x", pady=(theme.SPACE_3, 0))
 
-        def apply_and_close() -> None:
+        def apply_and_close(_event: object | None = None) -> str | None:
             chosen = [n for n in self._available if vars_by_name[n].get()]
             if not chosen:
                 messagebox.showwarning(
@@ -774,7 +774,7 @@ class RunSetFrame(tk.Frame):
                     ),
                     parent=win,
                 )
-                return
+                return "break"
             try:
                 on_save(name_var.get(), chosen)
             except Exception as e:
@@ -783,8 +783,9 @@ class RunSetFrame(tk.Frame):
                     txt("Save failed: {error}", "저장 실패: {error}", error=e),
                     parent=win,
                 )
-                return
+                return "break"
             win.destroy()
+            return "break"
 
         def cancel(_event: object | None = None) -> None:
             win.destroy()
@@ -815,6 +816,11 @@ class RunSetFrame(tk.Frame):
         btn_cancel.pack(side=tk.RIGHT, padx=(theme.SPACE_1, 0))
         btn_apply.pack(side=tk.RIGHT)
 
+        # Enter applies even while the name Entry has focus (bind on both).
+        win.bind("<Return>", apply_and_close)
+        win.bind("<KP_Enter>", apply_and_close)
+        name_entry.bind("<Return>", apply_and_close)
+        name_entry.bind("<KP_Enter>", apply_and_close)
         win.bind("<Escape>", cancel)
         win.protocol("WM_DELETE_WINDOW", cancel)
         WindowUtils.center_window(win)
@@ -823,6 +829,9 @@ class RunSetFrame(tk.Frame):
         except tk.TclError:
             pass
         win.focus_force()
+        if rename_allowed:
+            name_entry.focus_set()
+            name_entry.selection_range(0, tk.END)
 
 
 class ButtonFrame(tk.Frame):

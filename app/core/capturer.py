@@ -3,11 +3,20 @@ import tkinter as tk
 from threading import Event, Thread
 from collections.abc import Callable
 
-import mss
 from PIL import Image
 from loguru import logger
 
+from app.core.screen_backend import (
+    BACKEND_RETRY_INTERVAL_S,
+    PREVIEW_STREAM_FPS,
+    ScreenBackend,
+    open_screen_backend,
+)
 from app.utils.system import MonitorUtils
+
+# grab이 25us라 폴링을 자주 해도 부담이 없다(mss 시절엔 1회 21ms였다).
+_POLL_ACTIVE_S = 0.1
+_POLL_IDLE_S = 0.2
 
 
 class ScreenshotCapturer:
@@ -31,8 +40,13 @@ class ScreenshotCapturer:
 
     def set_current_mouse_position(self, position: tuple[int, int]) -> None:
         mouse_x, mouse_y = position
+        # 실행 루프는 화면 밖 좌표의 이벤트를 버리므로(processor._clamp_to_screen)
+        # 편집기도 같은 범위만 받아야 한다. 그러지 않으면 고를 수는 있는데
+        # 실행 중에는 절대 매칭되지 않는 기준색이 만들어진다.
         if (
-            mouse_x + self.box_w >= self.screen_width
+            mouse_x < 0
+            or mouse_y < 0
+            or mouse_x + self.box_w >= self.screen_width
             or mouse_y + self.box_h >= self.screen_height
         ):
             return
@@ -46,41 +60,84 @@ class ScreenshotCapturer:
         self.capturing.set()
         self._last_capture_signature = None
         self._idle_cycles = 0
-        self.capture_thread = Thread(target=self.capture_screenshot)
+        self.capture_thread = Thread(target=self.capture_screenshot, daemon=True)
         self.capture_thread.start()
 
     def stop_capture(self) -> None:
         self.capturing.clear()
 
+    def _screen_group(self) -> dict[str, object]:
+        return {
+            "rect": {
+                "left": 0,
+                "top": 0,
+                "width": self.screen_width,
+                "height": self.screen_height,
+            },
+            "events": [],
+        }
+
+    def _capture_group(self, position: tuple[int, int]) -> dict[str, object]:
+        """미리보기 영역. 좌표를 손대지 않는다 — 여기서 보정하면 저장되는
+        기준 좌표와 어긋나 엉뚱한 픽셀이 기준색으로 남는다."""
+        return {
+            "rect": {
+                "left": position[0],
+                "top": position[1],
+                "width": self.box_w,
+                "height": self.box_h,
+            },
+            "events": [],
+        }
+
     def capture_screenshot(self) -> None:
-        with mss.mss() as sct:
+        # 실행 루프와 같은 백엔드로 찍는다. 경로가 다르면 여기서 고른 기준색이
+        # 실행 중에는 픽셀값이 달라 맞지 않는다.
+        backend: ScreenBackend = open_screen_backend(
+            [self._screen_group()], fps=PREVIEW_STREAM_FPS
+        )
+        last_retry = 0.0  # 죽은 채로 시작하면 곧바로 다시 열어본다
+        try:
             while self.capturing.is_set():
                 try:
                     position = self.get_current_mouse_position()
                     callback = self.screenshot_callback
-                    if position and callback:
-                        box_w, box_h = self.box_w, self.box_h
-                        capture_signature = (position, box_w, box_h)
+                    group = self._capture_group(position) if position else None
+                    if group is not None and callback:
+                        capture_signature = (position, self.box_w, self.box_h)
                         if capture_signature == self._last_capture_signature:
                             self._idle_cycles = min(self._idle_cycles + 1, 5)
                         else:
                             self._last_capture_signature = capture_signature
                             self._idle_cycles = 0
 
-                        image = sct.grab(
-                            {
-                                "top": position[1],
-                                "left": position[0],
-                                "width": box_w,
-                                "height": box_h,
-                            }
-                        )
-                        pil_image = Image.frombytes(
-                            "RGB", image.size, image.bgra, "raw", "BGRX"
-                        )
-                        callback(position, pil_image)
+                        if backend.is_dead():
+                            backend, last_retry = self._reopen(backend, last_retry)
+                        frame = backend.grab([group])[0]
+                        if frame is not None:
+                            callback(position, frame.to_rgb_image())
                 except tk.TclError as e:
                     logger.error(f"Event windows has been destroyed: {e}")
                     self.capturing.clear()
                     break
-                time.sleep(0.2 if self._idle_cycles == 0 else 0.3)
+                except Exception as e:
+                    logger.error(f"Preview capture failed: {e}")
+                time.sleep(_POLL_ACTIVE_S if self._idle_cycles == 0 else _POLL_IDLE_S)
+        finally:
+            backend.close()
+
+    def _reopen(
+        self, backend: ScreenBackend, last_retry: float
+    ) -> tuple[ScreenBackend, float]:
+        if time.monotonic() - last_retry < BACKEND_RETRY_INTERVAL_S:
+            return backend, last_retry
+        backend.close()
+        try:
+            fresh: ScreenBackend = open_screen_backend(
+                [self._screen_group()], fps=PREVIEW_STREAM_FPS
+            )
+        except Exception as exc:
+            logger.error(f"Preview backend restart failed: {exc}")
+            fresh = backend
+        # 실패 경로가 수 초 걸릴 수 있다. 간격은 시도가 '끝난' 뒤부터 센다.
+        return fresh, time.monotonic()

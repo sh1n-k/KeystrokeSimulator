@@ -114,6 +114,65 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pressed, ["ACTION"])
         self.assertEqual(proc.current_states, {"COND": True, "ACTION": True})
 
+    async def test_screenless_input_runs_when_and_conditions_match(self):
+        proc = make_processor_stub()
+        proc.event_data_list = [
+            {"name": "A", "conds": {}, "group": None, "priority": 0, "exec": False},
+            {"name": "C", "conds": {}, "group": None, "priority": 0, "exec": False},
+            {
+                "name": "B",
+                "conds": {"A": True, "C": False},
+                "group": None,
+                "priority": 0,
+                "exec": True,
+                "screenless": True,
+            },
+        ]
+        match_map = {"A": True, "C": False}
+        pressed = []
+
+        proc._check_match = lambda _img, evt: match_map.get(evt["name"], False)
+
+        async def fake_press(evt, _local_states):
+            pressed.append(evt["name"])
+
+        proc._press_key_async = fake_press
+
+        await evaluate_processor_events(proc)
+
+        self.assertEqual(pressed, ["B"])
+        self.assertEqual(
+            proc.current_states, {"A": True, "C": False, "B": True}
+        )
+
+    async def test_screenless_input_stays_inactive_when_condition_fails(self):
+        proc = make_processor_stub()
+        proc.event_data_list = [
+            {"name": "A", "conds": {}, "group": None, "priority": 0, "exec": False},
+            {
+                "name": "B",
+                "conds": {"A": True},
+                "group": None,
+                "priority": 0,
+                "exec": True,
+                "screenless": True,
+            },
+        ]
+        match_map = {"A": False}
+        pressed = []
+
+        proc._check_match = lambda _img, evt: match_map.get(evt["name"], False)
+
+        async def fake_press(evt, _local_states):
+            pressed.append(evt["name"])
+
+        proc._press_key_async = fake_press
+
+        await evaluate_processor_events(proc)
+
+        self.assertEqual(pressed, [])
+        self.assertEqual(proc.current_states, {"A": False, "B": False})
+
     async def test_evaluate_and_execute_strict_chain_blocks_child(self):
         proc = make_processor_stub()
         proc.event_data_list = [

@@ -171,6 +171,23 @@ class TestBuildCaptureGroups(unittest.TestCase):
         self.assertEqual(groups[0]["events"][0]["name"], "A")
         self.assertEqual(groups[1]["events"][0]["name"], "B")
 
+    def test_screenless_events_are_excluded_from_capture_groups(self):
+        events = [
+            {"name": "A", "center_x": 10, "center_y": 10, "mode": "pixel"},
+            {
+                "name": "B",
+                "center_x": 0,
+                "center_y": 0,
+                "mode": "none",
+                "screenless": True,
+            },
+        ]
+
+        groups = self.proc._build_capture_groups(events)
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual([evt["name"] for evt in groups[0]["events"]], ["A"])
+
 
 class TestCheckMatchRegionROIIntegration(unittest.TestCase):
     """_check_match + _extract_roi 통합: 영역 매칭 시 ROI 추출 후 체크포인트 검증"""

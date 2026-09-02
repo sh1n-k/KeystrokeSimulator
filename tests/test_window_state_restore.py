@@ -7,6 +7,7 @@ from app.ui.event_importer import EventImporter
 from app.ui.profiles import KeystrokeProfiles
 from app.ui.quick_event_editor import KeystrokeQuickEventEditor
 from app.ui.settings import KeystrokeSettings
+from app.ui.simulator_app import KeystrokeSimulatorApp
 from app.ui.sort_events import KeystrokeSortEvents
 
 
@@ -85,6 +86,19 @@ class TestWindowStateRestore(unittest.TestCase):
         KeystrokeSettings._restore_window_position(stub)
 
         mock_center.assert_called_once_with(stub)
+
+    @patch("app.ui.simulator_app.WindowUtils.center_window")
+    @patch("app.ui.simulator_app.StateUtils.load_main_app_state")
+    def test_main_window_centers_on_invalid_main_pos(
+        self, mock_load_state, mock_center
+    ):
+        stub = MagicMock()
+        mock_load_state.return_value = {"main_pos": "bad"}
+
+        KeystrokeSimulatorApp._restore_window_position(stub)
+
+        mock_center.assert_called_once_with(stub)
+        stub.geometry.assert_not_called()
 
 
 class TestSortWindowStateRestore(unittest.TestCase):

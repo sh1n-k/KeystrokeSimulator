@@ -21,6 +21,9 @@ class UserSettings:
     use_alt_shift_hotkey: bool = False
     # Start/stop notification sound pack id (classic | soft_a | soft_b | soft_c)
     notification_sound_pack: str = "classic"
+    # Runtime toggle ON/OFF alert pack; independent of start/stop.
+    runtime_toggle_sound_pack: str = "classic"
+    runtime_toggle_sound_enabled: bool = True
 
 
 @dataclass
@@ -50,8 +53,17 @@ class EventModel:
     priority: int = 0
     # 조건 목록: { '다른_이벤트_이름': True/False } (True: 활성 기대, False: 비활성 기대)
     conditions: dict[str, bool] = field(default_factory=lambda: {})
-    # 실행 중 토글되는 추가 이벤트 묶음에 포함되는지 여부
+    # 토글 세트(실행 중 ON/OFF)에 포함되는지 여부
     runtime_toggle_member: bool = False
+
+    def is_screenless_input(self) -> bool:
+        """화면 좌표 없이 조건 AND만으로 키를 실행하는 입력 이벤트인지."""
+        return (
+            bool(self.execute_action)
+            and bool(self.conditions)
+            and self.latest_position is None
+            and self.clicked_position is None
+        )
 
 
 @dataclass

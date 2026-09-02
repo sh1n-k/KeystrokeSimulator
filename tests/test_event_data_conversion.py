@@ -141,6 +141,41 @@ class TestInitEventDataFiltering(unittest.TestCase):
         ])
         self.assertEqual(len(events), 0)
 
+    def test_screenless_input_is_included(self):
+        proc = _make_processor_with_key_codes()
+        events = proc._init_event_data([
+            _make_basic_event(
+                latest_position=None,
+                clicked_position=None,
+                ref_pixel_value=None,
+                conditions={"Other": True},
+            )
+        ])
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0]["screenless"])
+        self.assertEqual(events[0]["conds"], {"Other": True})
+        self.assertEqual(events[0]["key"], "A")
+        self.assertTrue(events[0]["exec"])
+
+    def test_missing_positions_without_conditions_still_skipped(self):
+        proc = _make_processor_with_key_codes()
+        events = proc._init_event_data([
+            _make_basic_event(latest_position=None, clicked_position=None)
+        ])
+        self.assertEqual(events, [])
+
+    def test_condition_only_without_screen_is_skipped(self):
+        proc = _make_processor_with_key_codes()
+        events = proc._init_event_data([
+            _make_basic_event(
+                latest_position=None,
+                clicked_position=None,
+                execute_action=False,
+                conditions={"Other": True},
+            )
+        ])
+        self.assertEqual(events, [])
+
     def test_missing_ref_pixel_skipped(self):
         """pixel 모드에서 ref_pixel_value가 None이면 건너뛴다"""
         proc = _make_processor_with_key_codes()

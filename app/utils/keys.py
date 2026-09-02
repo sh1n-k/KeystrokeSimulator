@@ -229,8 +229,26 @@ class KeyUtils:
             return False
         return key_name in cls.WINDOWS_EXTENDED_KEY_NAMES
 
+    # macOS HID keycodes: (left, right). Prefer physical key state over modifier
+    # flags so Option/Shift chords match what the user is actually holding.
+    _MAC_MODIFIER_KEYCODES: ClassVar[dict[str, tuple[int, ...]]] = {
+        "shift": (56, 60),
+        "alt": (58, 61),
+        "option": (58, 61),
+        "ctrl": (59, 62),
+        "control": (59, 62),
+    }
+
     @staticmethod
-    def mod_key_pressed(key: str, os_name: str | None = None) -> bool:
+    def mod_key_pressed(
+        key: str, os_name: str | None = None, *, physical_only: bool = False
+    ) -> bool:
+        """Return whether a modifier is down.
+
+        On macOS, physical HID keycodes (left/right) are checked first. Flag-mask
+        fallback is used only when physical_only=False — chord hotkeys should pass
+        physical_only=True so sticky flags cannot keep a latch armed forever.
+        """
         normalized_os = KeyUtils._normalize_os_name(os_name)
         if normalized_os == "windows":
             if not IS_WIN:
@@ -244,21 +262,30 @@ class KeyUtils:
         if normalized_os == "darwin":
             if not IS_MAC:
                 return False
+            codes = KeyUtils._MAC_MODIFIER_KEYCODES.get(key.lower())
+            if not codes:
+                return False
+            key_state = quartz_symbol("CGEventSourceKeyState")
+            hid_system_state = quartz_symbol("kCGEventSourceStateHIDSystemState")
+            if any(bool(key_state(hid_system_state, code)) for code in codes):
+                return True
+            if physical_only:
+                return False
+            # Fallback: flag mask when key-state is unavailable/inconsistent.
             mask_shift = quartz_symbol("kCGEventFlagMaskShift")
             mask_alt = quartz_symbol("kCGEventFlagMaskAlternate")
             mask_control = quartz_symbol("kCGEventFlagMaskControl")
             mask = {
                 "shift": mask_shift,
                 "alt": mask_alt,
+                "option": mask_alt,
                 "ctrl": mask_control,
+                "control": mask_control,
             }.get(key.lower())
+            if mask is None:
+                return False
             event_source_flags_state = quartz_symbol("CGEventSourceFlagsState")
-            hid_system_state = quartz_symbol("kCGEventSourceStateHIDSystemState")
-            return (
-                (event_source_flags_state(hid_system_state) & mask) != 0
-                if mask
-                else False
-            )
+            return (event_source_flags_state(hid_system_state) & mask) != 0
         return False
 
     @staticmethod

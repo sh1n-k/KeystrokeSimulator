@@ -383,6 +383,20 @@ class TestEventRoundtrip(unittest.TestCase):
         self.assertIsNone(restored.held_screenshot)
         self.assertIsNone(restored.ref_pixel_value)
 
+    def test_screenless_input_roundtrip(self):
+        evt = EventModel(
+            event_name="Fire",
+            key_to_enter="A",
+            execute_action=True,
+            conditions={"Gate": True, "Quiet": False},
+        )
+        restored = event_from_dict(event_to_dict(evt))
+        self.assertTrue(restored.is_screenless_input())
+        self.assertEqual(restored.key_to_enter, "A")
+        self.assertEqual(restored.conditions, {"Gate": True, "Quiet": False})
+        self.assertIsNone(restored.latest_position)
+        self.assertIsNone(restored.held_screenshot)
+
     def test_missing_capture_size_defaults_to_100(self):
         """구버전 데이터에 capture_size가 없어도 100x100으로 복원"""
         raw = {

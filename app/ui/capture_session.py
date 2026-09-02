@@ -112,6 +112,14 @@ class CaptureSession:
             self._held_position = self._latest_position
             return True
 
+    def clear_hold(self) -> None:
+        with self._lock:
+            self._held_image = None
+            self._held_position = None
+            self._selected_position = None
+            self._reference_color = None
+            self._generation += 1
+
     def select(self, position: Position, display_size: Position) -> bool:
         display_width, display_height = display_size
         with self._lock:

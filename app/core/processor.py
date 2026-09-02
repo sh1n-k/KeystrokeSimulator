@@ -11,19 +11,37 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, NotRequired, Protocol, TypedDict, cast
 
-import mss
 from loguru import logger
-from mss.screenshot import ScreenShot
 from PIL import Image
 
 from app.core.models import EventModel, ModificationKeys, UserSettings
+from app.core.screen_backend import (
+    BACKEND_RETRY_INTERVAL_S as _BACKEND_RETRY_INTERVAL_S,
+)
+from app.core.screen_backend import (
+    ScreenBackend,
+    create_screen_backend,
+    open_screen_backend,
+)
 from app.utils.keys import KeyUtils
-from app.utils.system import ProcessUtils
+from app.utils.system import MonitorUtils, ProcessUtils
 
 Pixel = tuple[int, int, int]
 Rect = dict[str, int]
 KeyAction = Callable[[int], None]
 ImageBytes = bytes | bytearray | memoryview
+
+
+class ScreenShotLike(Protocol):
+    """mss.screenshot.ScreenShot 중 실제로 쓰는 부분.
+
+    mss 는 Windows 전용 의존성이라 macOS 에는 설치되지 않는다. 타입 검사가
+    그 패키지를 필요로 하지 않도록 구조만 적어 둔다.
+    """
+
+    width: int
+    height: int
+    raw: bytearray
 
 
 @dataclass(frozen=True)
@@ -36,7 +54,7 @@ class ImageFrame:
     offset: int = 0
 
     @classmethod
-    def from_screenshot(cls, screenshot: ScreenShot) -> "ImageFrame":
+    def from_screenshot(cls, screenshot: ScreenShotLike) -> "ImageFrame":
         return cls(
             width=screenshot.width,
             height=screenshot.height,
@@ -64,6 +82,18 @@ class ImageFrame:
             row_stride=self.row_stride,
             pixel_stride=self.pixel_stride,
             offset=self.offset + y * self.row_stride + x * self.pixel_stride,
+        )
+
+    def to_rgb_image(self) -> Image.Image:
+        """편집기 미리보기용 RGB 이미지. crop된 프레임의 패딩을 걷어낸다."""
+        packed = self.width * self.pixel_stride
+        rows = bytearray(self.height * packed)
+        for y in range(self.height):
+            start = self.offset + y * self.row_stride
+            rows[y * packed : (y + 1) * packed] = self.data[start : start + packed]
+        raw_mode = "BGRX" if self.pixel_stride == 4 else "BGR"
+        return Image.frombytes(
+            "RGB", (self.width, self.height), bytes(rows), "raw", raw_mode
         )
 
     def pixel_bgr(self, x: int, y: int) -> Pixel:
@@ -116,6 +146,7 @@ class EventData(TypedDict):
     region_h: int
     rel_x: int
     rel_y: int
+    screenless: NotRequired[bool]
     ref_img: NotRequired[ImageFrame]
     check_points: NotRequired[list[CheckPoint]]
     ref_bgr: NotRequired[Pixel]
@@ -541,6 +572,9 @@ class KeystrokeProcessor:
     # While Pass/mod is held, skip capture but poll often so release leads
     # promptly into a fresh grab/match (not an extra 100ms back-off).
     MOD_ACTIVE_POLL_INTERVAL = 0.02
+    # 백엔드가 죽었을 때 다시 여는 최소 간격. 디스플레이 슬립처럼 원인이
+    # 지속되는 동안 매 사이클 재시도하지 않도록 한다.
+    BACKEND_RETRY_INTERVAL_S = _BACKEND_RETRY_INTERVAL_S
 
     def __init__(
         self,
@@ -598,6 +632,14 @@ class KeystrokeProcessor:
             self.event_data_list
         )
 
+        self._screen_backend: ScreenBackend | None = None
+        self._backend_retry_failed = False
+        self._last_backend_retry = 0.0
+        # term_event는 앱이 재시작할 때 clear한다(simulator_app). 그 사이 이
+        # 프로세서가 아직 살아 있으면 되살아나 새 프로세서와 동시에 키를
+        # 누르게 되므로, 자기 자신의 종료는 별도로 기억한다.
+        self._stopped = threading.Event()
+        self._backend_closers: list[threading.Thread] = []
         self.loop = asyncio.new_event_loop()
         self.main_thread = threading.Thread(target=self._run_loop, daemon=True)
 
@@ -605,8 +647,12 @@ class KeystrokeProcessor:
         logger.info(f"Processor starting... PID: {self.pid}")
         self.main_thread.start()
 
+    def _should_stop(self) -> bool:
+        return self._stopped.is_set() or self.term_event.is_set()
+
     def stop(self) -> None:
         logger.info("Processor stopping...")
+        self._stopped.set()
         self.term_event.set()
 
         if self.main_thread.is_alive():
@@ -615,6 +661,21 @@ class KeystrokeProcessor:
                 logger.warning(
                     "Processor thread did not stop within timeout; force-releasing keys"
                 )
+        # 루프가 백엔드 교체 중이었다면 join 타임아웃 뒤에 _screen_backend가
+        # 되살아날 수 있다. 스레드가 끝난 뒤 한 번 더 확인한다.
+        for _ in range(2):
+            backend = getattr(self, "_screen_backend", None)
+            if backend is not None:
+                # 닫기 실패가 아래 force-release 를 막으면 키가 눌린 채 남는다.
+                try:
+                    backend.close()
+                except Exception as exc:
+                    logger.warning(f"Screen backend close failed: {exc}")
+                self._screen_backend = None
+            if not self.main_thread.is_alive():
+                break
+            self.main_thread.join(timeout=1.0)
+        self._join_backend_closers()
         self._force_release_pressed_keys()
 
     def _force_release_pressed_keys(self) -> None:
@@ -656,6 +717,39 @@ class KeystrokeProcessor:
 
         for e in raw_events:
             if not e.use_event:
+                continue
+
+            if e.is_screenless_input():
+                raw_key = e.key_to_enter
+                key = (
+                    _normalize_key_name(self.key_codes, raw_key) if raw_key else None
+                )
+                if raw_key and raw_key.strip() and key is None:
+                    self._warn_unsupported_key(
+                        e.event_name or "Unknown", raw_key.strip()
+                    )
+                events_data.append(
+                    {
+                        "name": e.event_name or "Unknown",
+                        "mode": "none",
+                        "invert": False,
+                        "key": key,
+                        "center_x": 0,
+                        "center_y": 0,
+                        "dur": e.press_duration_ms,
+                        "rand": e.randomization_ms,
+                        "exec": True,
+                        "group": e.group_id,
+                        "priority": e.priority,
+                        "conds": e.conditions,
+                        "runtime_toggle_member": bool(e.runtime_toggle_member),
+                        "region_w": 1,
+                        "region_h": 1,
+                        "rel_x": 0,
+                        "rel_y": 0,
+                        "screenless": True,
+                    }
+                )
                 continue
 
             mode = e.match_mode or "pixel"
@@ -767,15 +861,16 @@ class KeystrokeProcessor:
             self.loop.close()
 
     async def _process_main(self) -> None:
-        if not self.event_data_list or not self.main_capture_groups:
+        if not self.event_data_list:
             return
 
         last_proc_check_time = 0
         is_proc_active_cached = True
         proc_check_interval = 0.3
-
-        with mss.mss() as sct:
-            while not self.term_event.is_set():
+        backend = open_screen_backend(self.main_capture_groups)
+        self._screen_backend = backend
+        try:
+            while not self._should_stop():
                 current_time = time.time()
                 if self.pid and (
                     current_time - last_proc_check_time > proc_check_interval
@@ -796,18 +891,37 @@ class KeystrokeProcessor:
 
                 try:
                     cycle_started = time.perf_counter()
-                    local_match_states: dict[str, bool] = {}
-                    for group in self.main_capture_groups:
-                        img = ImageFrame.from_screenshot(sct.grab(group["rect"]))
-                        local_match_states.update(
-                            self._evaluate_capture_group(img, group["events"])
-                        )
-                    await self._apply_local_match_states(local_match_states)
+                    if backend.is_dead():
+                        backend = self._replace_dead_backend(backend)
+                    local_match_states = self._capture_match_states(backend)
+                    if local_match_states is not None:
+                        await self._apply_local_match_states(local_match_states)
                     _log_perf("processor_main_cycle", cycle_started)
                 except Exception as e:
                     logger.error(f"Capture failed: {e}")
 
                 await asyncio.sleep(random.uniform(*self.delays))
+        finally:
+            backend.close()
+            if self._screen_backend is backend:
+                self._screen_backend = None
+            self._join_backend_closers()
+
+    @staticmethod
+    def _clamp_to_screen(rect: Rect, screen_w: int, screen_h: int) -> Rect | None:
+        """화면 안으로 잘라낸 캡처 영역. 완전히 벗어나면 None."""
+        left = max(0, rect["left"])
+        top = max(0, rect["top"])
+        right = min(screen_w, rect["left"] + rect["width"])
+        bottom = min(screen_h, rect["top"] + rect["height"])
+        if right - left < 1 or bottom - top < 1:
+            return None
+        return {
+            "left": left,
+            "top": top,
+            "width": right - left,
+            "height": bottom - top,
+        }
 
     @staticmethod
     def _rect_area(rect: Rect) -> int:
@@ -844,8 +958,29 @@ class KeystrokeProcessor:
         )
         groups: list[CaptureGroup] = []
 
+        # 화면 밖 영역을 거부하는 것은 SCStream 제약이다. mss 는 전역 좌표를
+        # 그대로 잡으므로 Windows 에서는 손대지 않는다.
+        bounds = (
+            MonitorUtils.get_primary_size() if self.os_type == "Darwin" else None
+        )
         for evt in sorted_events:
-            evt_rect = self._build_capture_rect(evt)
+            if evt.get("screenless"):
+                continue
+            clamped = (
+                self._clamp_to_screen(self._build_capture_rect(evt), *bounds)
+                if bounds
+                else self._build_capture_rect(evt)
+            )
+            if clamped is None:
+                # 화면 밖 좌표를 그대로 캡처 영역에 넣으면 스트림이 아예 열리지
+                # 않아 프로필 전체가 무매칭이 된다. 해당 이벤트만 뺀다.
+                size = f"{bounds[0]}x{bounds[1]}" if bounds else "screen"
+                logger.warning(
+                    f"Event '{evt.get('name', '?')}': capture point is outside the "
+                    f"screen ({size}); event will never match"
+                )
+                continue
+            evt_rect = clamped
             evt["capture_rect"] = evt_rect
             if not groups:
                 groups.append({"rect": evt_rect.copy(), "events": [evt]})
@@ -1018,6 +1153,72 @@ class KeystrokeProcessor:
 
         return resolved
 
+    def _join_backend_closers(self) -> None:
+        """교체 직후 중지하면 이전 스트림이 정리되기 전에 끝날 수 있다."""
+        for closer in getattr(self, "_backend_closers", []):
+            closer.join(timeout=2.5)
+        self._backend_closers = []
+
+    def _replace_dead_backend(self, backend: ScreenBackend) -> ScreenBackend:
+        """죽은 백엔드를 다시 연다. 그대로 두면 조용히 무매칭이 된다.
+
+        macOS에서는 mss로 내려가지 않는다. 픽셀값이 달라 기준색과 맞지 않아
+        강등이 곧 무매칭이기 때문이다. 원인이 사라질 때까지 계속 다시 연다.
+        """
+        if self._should_stop():
+            # 종료 중에는 새 스트림을 열지 않는다. stop()이 이미 정리를 끝낸
+            # 뒤에 백엔드가 되살아나면 스트림이 정리되지 않은 채 남는다.
+            return backend
+        now = time.monotonic()
+        if now - self._last_backend_retry < self.BACKEND_RETRY_INTERVAL_S:
+            return backend
+        try:
+            replacement = create_screen_backend(self.main_capture_groups)
+            replacement.open()
+        except Exception as exc:
+            # 다음 주기에 다시 시도하되 로그는 한 번만 남긴다.
+            if not self._backend_retry_failed:
+                self._backend_retry_failed = True
+                logger.error(f"Screen backend restart failed: {exc}")
+            return backend
+        finally:
+            # 실패 경로가 수 초 걸릴 수 있다. 간격은 시도가 '끝난' 뒤부터
+            # 세야 루프가 open() 안에 갇히지 않는다.
+            self._last_backend_retry = time.monotonic()
+        if self._should_stop():
+            # 여는 동안 중지됐다. stop()이 이미 정리를 끝냈을 수 있으므로
+            # 새 백엔드를 남기지 않는다.
+            replacement.close()
+            return backend
+        # 죽은 백엔드의 close()는 스트림 스레드 조인으로 최대 2초가 걸린다.
+        # 실행 루프를 그동안 멈춰 세우지 않도록 분리한다. 여기서 이전 closer를
+        # 기다리면(join) 연속 교체 때 루프가 멈춰 눌린 키가 늘어지므로,
+        # 끝난 것만 걷어내고 정리는 중지 시점에 몰아서 한다.
+        self._backend_closers = [
+            closer for closer in self._backend_closers if closer.is_alive()
+        ]
+        closer = threading.Thread(target=backend.close, daemon=True)
+        self._backend_closers.append(closer)
+        closer.start()
+        logger.warning("Screen backend stopped; restarted")
+        self._backend_retry_failed = False
+        self._screen_backend = replacement
+        return replacement
+
+    def _capture_match_states(self, backend: ScreenBackend) -> dict[str, bool] | None:
+        """캡처가 온전한 사이클의 매칭 상태. 한 그룹이라도 못 읽으면 None."""
+        local_match_states: dict[str, bool] = {}
+        frames = backend.grab(self.main_capture_groups)
+        for group, img in zip(self.main_capture_groups, frames, strict=True):
+            if img is None:
+                # 못 읽은 화면을 '불일치'로 단정하면 부정 조건(conds=False)이
+                # 참이 되어 screenless 이벤트의 키가 잘못 나간다.
+                return None
+            local_match_states.update(
+                self._evaluate_capture_group(img, group["events"])
+            )
+        return local_match_states
+
     def _evaluate_capture_group(
         self, img: ImageFrame, events: list[EventData]
     ) -> dict[str, bool]:
@@ -1029,7 +1230,11 @@ class KeystrokeProcessor:
     async def _apply_local_match_states(
         self, local_match_states: dict[str, bool]
     ) -> None:
-        local_states = self._resolve_effective_states(local_match_states)
+        match_states = dict(local_match_states)
+        for evt in self.event_data_list:
+            if evt.get("screenless"):
+                match_states[evt["name"]] = True
+        local_states = self._resolve_effective_states(match_states)
 
         with self.state_lock:
             self.current_states.update(local_states)
@@ -1084,6 +1289,8 @@ class KeystrokeProcessor:
         return img.crop(x, y, w, h)
 
     def _check_match(self, img: ImageFrame, evt: EventData) -> bool:
+        if evt.get("screenless"):
+            return True
         matched = False
         evaluated = False
         try:

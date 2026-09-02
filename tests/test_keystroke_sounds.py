@@ -72,6 +72,38 @@ class TestKeystrokeSounds(unittest.TestCase):
 
     @patch("app.utils.sounds.miniaudio.PlaybackDevice")
     @patch("app.utils.sounds.miniaudio.decode")
+    def test_set_runtime_toggle_pack_switches_and_caches(
+        self, mock_decode, _mock_device
+    ):
+        sample_seq = [
+            array.array("h", [1, 1]),
+            array.array("h", [2, 2]),
+            array.array("h", [3, 3]),
+            array.array("h", [4, 4]),
+            array.array("h", [5, 5]),
+            array.array("h", [6, 6]),
+        ]
+        mock_decode.side_effect = [
+            type("D", (), {"samples": s})() for s in sample_seq
+        ]
+        player = SoundPlayer("classic")
+        classic_on = player.runtime_toggle_on_sound
+        self.assertEqual(player.runtime_toggle_sound_pack, "classic")
+
+        applied = player.set_runtime_toggle_pack("soft_a")
+        self.assertEqual(applied, "soft_a")
+        self.assertIsNot(player.runtime_toggle_on_sound, classic_on)
+        soft_on = player.runtime_toggle_on_sound._samples  # type: ignore[union-attr]
+
+        applied = player.set_runtime_toggle_pack("not-real")
+        self.assertEqual(applied, "classic")
+        self.assertIs(player.runtime_toggle_on_sound, classic_on)
+
+        player.set_runtime_toggle_pack("soft_a")
+        self.assertIs(player.runtime_toggle_on_sound._samples, soft_on)  # type: ignore[union-attr]
+
+    @patch("app.utils.sounds.miniaudio.PlaybackDevice")
+    @patch("app.utils.sounds.miniaudio.decode")
     def test_play_sound_when_not_loaded(self, mock_decode, _mock_device):
         mock_decode.return_value.samples = array.array("h", [0, 1, -1, 0])
         player = SoundPlayer()

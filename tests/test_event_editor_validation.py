@@ -66,6 +66,8 @@ class TestValidateRequiredFields(unittest.TestCase):
         ref_pixel=None,
         key_to_enter=None,
         execute_action=True,
+        conditions=None,
+        held_position=None,
     ):
         stub = SimpleNamespace(
             latest_pos=latest_pos,
@@ -74,7 +76,25 @@ class TestValidateRequiredFields(unittest.TestCase):
             ref_pixel=ref_pixel,
             key_to_enter=key_to_enter,
             execute_action_var=SimpleNamespace(get=lambda: execute_action),
+            temp_conditions=dict(conditions or {}),
+            capture_session=SimpleNamespace(
+                held_position=latest_pos if held_position is None else held_position
+            ),
         )
+        stub._held_screen_position = (
+            lambda s=stub: KeystrokeEventEditor._held_screen_position(s)
+        )
+        stub._has_complete_screen = (
+            lambda s=stub: KeystrokeEventEditor._has_complete_screen(s)
+        )
+        stub._has_partial_screen = (
+            lambda s=stub: KeystrokeEventEditor._has_partial_screen(s)
+        )
+        stub._required_field_error = (
+            lambda s=stub: KeystrokeEventEditor._required_field_error(s)
+        )
+        stub._required_focus_widget = lambda: None
+        stub._report_validation_error = lambda *_args, **_kwargs: None
         return stub
 
     @patch("app.ui.event_editor.messagebox")
@@ -128,6 +148,31 @@ class TestValidateRequiredFields(unittest.TestCase):
         )
         result = KeystrokeEventEditor._validate_required_fields(stub)
         self.assertTrue(result)
+
+    def test_screenless_input_with_conditions_passes(self):
+        stub = self._make_editor_stub(
+            key_to_enter="A",
+            conditions={"Other": True},
+        )
+        result = KeystrokeEventEditor._validate_required_fields(stub)
+        self.assertTrue(result)
+
+    @patch("app.ui.event_editor.messagebox")
+    def test_screenless_input_without_conditions_fails(self, mock_msgbox):
+        stub = self._make_editor_stub(key_to_enter="A")
+        result = KeystrokeEventEditor._validate_required_fields(stub)
+        self.assertFalse(result)
+        mock_msgbox.showerror.assert_called()
+
+    @patch("app.ui.event_editor.messagebox")
+    def test_screenless_condition_only_event_fails(self, mock_msgbox):
+        stub = self._make_editor_stub(
+            execute_action=False,
+            conditions={"Other": True},
+        )
+        result = KeystrokeEventEditor._validate_required_fields(stub)
+        self.assertFalse(result)
+        mock_msgbox.showerror.assert_called()
 
 
 class TestUniqueEventNameValidation(unittest.TestCase):
@@ -296,6 +341,27 @@ class TestLivePreviewUpdates(unittest.TestCase):
         self.assertEqual(editor._safe_update_img_lbl.call_count, 2)
 
 
+class TestOverlayBounds(unittest.TestCase):
+    def test_draw_overlay_clears_stale_pixel_outside_image(self):
+        """Capture shrink / stale pixel must not IndexError on overlay."""
+        editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+        editor.capture_session = CaptureSession()
+        interp = tk.Tcl()
+        editor.match_mode_var = tk.StringVar(master=interp, value="pixel")
+        editor.clicked_pos = (265, 70)  # outside 135x100
+        editor.lbl_img2 = object()
+        editor._update_img_lbl = MagicMock()
+
+        img = Image.new("RGB", (135, 100), color=(0, 0, 0))
+        with patch.object(
+            KeystrokeEventEditor, "_scale_for_display", side_effect=lambda im: im
+        ):
+            KeystrokeEventEditor._draw_overlay(editor, img, editor.lbl_img2)
+
+        self.assertIsNone(editor.clicked_pos)
+        editor._update_img_lbl.assert_called_once()
+
+
 class TestBasicGuidanceSafety(unittest.TestCase):
     def test_refresh_basic_guidance_ignores_destroyed_label(self):
         editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
@@ -310,6 +376,7 @@ class TestBasicGuidanceSafety(unittest.TestCase):
         editor.clicked_pos = None
         editor.key_to_enter = None
         editor.execute_action_var = tk.BooleanVar(master=interp, value=True)
+        editor._guidance = lambda: ("info", "short", "detail", False)
 
         KeystrokeEventEditor._refresh_basic_guidance(editor)
 

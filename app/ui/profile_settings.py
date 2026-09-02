@@ -21,6 +21,8 @@ from app.utils.runtime_toggle import (
 UI_PAD_XS = theme.SPACE_1
 UI_PAD_SM = theme.SPACE_1
 UI_PAD_MD = theme.SPACE_2
+# Keep in step with the event-name delay in profile_event_list.
+NAME_COMMIT_DELAY_MS = 700
 
 class ProfileFrame(ttk.Frame):
     def __init__(
@@ -35,6 +37,8 @@ class ProfileFrame(ttk.Frame):
         super().__init__(master)
         self.on_change = on_change
         self._original_name = name
+        self._committed_name = name
+        self._name_after_id: str | None = None
         self._profiles_dir = profiles_dir
         self.fav_var = tk.BooleanVar(value=fav)
 
@@ -50,18 +54,57 @@ class ProfileFrame(ttk.Frame):
         self.lbl_warn = ttk.Label(self, text="", foreground=theme.STATUS_ERROR_FG)
         self.lbl_warn.pack(side=tk.LEFT, padx=(UI_PAD_SM, 0))
 
-        def on_entry_changed(_event: tk.Event[tk.Misc]) -> None:
-            self._notify_changed()
-
         def on_favorite_changed(*_args: str) -> None:
             self._notify_changed()
 
-        self.entry.bind("<KeyRelease>", on_entry_changed)
-        self.entry.bind("<FocusOut>", on_entry_changed)
+        # Saving a renamed profile renames its file, so typing must not save
+        # on every keystroke. Validation feedback stays immediate.
+        self.entry.bind("<KeyRelease>", self._on_name_typed)
+        self.entry.bind("<FocusOut>", self._on_name_commit)
+        self.entry.bind("<Return>", self._on_name_commit)
+        self.entry.bind("<KP_Enter>", self._on_name_commit)
         self.fav_var.trace_add("write", on_favorite_changed)
 
     def get_data(self) -> tuple[str, bool]:
         return self.entry.get(), self.fav_var.get()
+
+    def _cancel_name_timer(self) -> None:
+        if self._name_after_id:
+            try:
+                self.after_cancel(self._name_after_id)
+            except (ValueError, tk.TclError):
+                pass
+            self._name_after_id = None
+
+    def _on_name_typed(self, _event: tk.Event[tk.Misc] | None = None) -> None:
+        """Show validation right away, but defer the save until typing stops."""
+        self._validate()
+        self._cancel_name_timer()
+        try:
+            self._name_after_id = self.after(
+                NAME_COMMIT_DELAY_MS, self._commit_name
+            )
+        except tk.TclError:
+            self._name_after_id = None
+
+    def _on_name_commit(self, _event: tk.Event[tk.Misc] | None = None) -> None:
+        self._cancel_name_timer()
+        self._commit_name()
+
+    def _commit_name(self) -> None:
+        self._name_after_id = None
+        try:
+            typed = self.entry.get()
+        except tk.TclError:
+            return
+        if typed == self._committed_name:
+            return
+        self._committed_name = typed
+        self._notify_changed()
+
+    def destroy(self) -> None:
+        self._cancel_name_timer()
+        super().destroy()
 
     def _validate(self) -> None:
         name = self.entry.get().strip()
@@ -91,7 +134,7 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         on_change: Optional[Callable[[], None]] = None,
     ) -> None:
         super().__init__(
-            master, text=txt("Runtime Event Group", "실행 중 추가 이벤트 묶음")
+            master, text=txt("Toggle set", "토글 세트")
         )
         self.on_change = on_change
         initial_trigger = normalize_runtime_toggle_trigger(
@@ -117,7 +160,8 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
             command=self._notify_changed,
         ).grid(row=0, column=0, padx=(UI_PAD_MD, UI_PAD_SM), pady=UI_PAD_SM, sticky="w")
 
-        ttk.Label(self, text=txt("Toggle trigger:", "토글 트리거:")).grid(
+        self.lbl_trigger = ttk.Label(self, text=txt("Toggle trigger:", "토글 트리거:"))
+        self.lbl_trigger.grid(
             row=0, column=1, padx=(0, UI_PAD_SM), pady=UI_PAD_SM, sticky="w"
         )
         self.key_entry = ttk.Entry(
@@ -168,11 +212,13 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         self.lbl_help = ttk.Label(
             self,
             text=txt(
-                "Checked events start disabled and can be toggled while the target app is active. Click Capture, then press a key or scroll the mouse wheel.",
-                "체크된 이벤트는 시작 시 비활성이고, 대상 앱이 활성일 때 토글할 수 있습니다. 입력 받기를 누른 뒤 키를 누르거나 마우스 휠을 움직이세요.",
+                "Checked events start off. While running, press the toggle key to enable or disable them together (CDs, optional skills, etc.). Click Capture, then press a key or scroll the mouse wheel.",
+                "체크한 이벤트는 시작 시 꺼져 있습니다. 실행 중 토글 키로 한 번에 켜고 끕니다(쿨기·옵션 스킬 등). 입력 받기를 누른 뒤 키를 누르거나 마우스 휠을 움직이세요.",
             ),
             foreground=theme.INK_MUTED,
         )
+        # Must be laid out once here: _set_detail_visible re-shows it with a
+        # bare grid(), which only restores previously supplied options.
         self.lbl_help.grid(
             row=2,
             column=0,
@@ -181,7 +227,42 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
             pady=(0, UI_PAD_SM),
             sticky="w",
         )
+        # One-line stand-in shown while the feature is off, so an unused
+        # toggle set costs a single row instead of the full panel.
+        self.lbl_collapsed_hint = ttk.Label(
+            self,
+            text=txt(
+                "Off — enable to turn a set of events on and off with one key while running.",
+                "사용 안 함 — 켜면 실행 중 키 하나로 이벤트 묶음을 한 번에 켜고 끕니다.",
+            ),
+            foreground=theme.INK_MUTED,
+        )
         self._sync_state()
+
+    def _set_detail_visible(self, visible: bool) -> None:
+        detail_widgets = (
+            self.lbl_trigger,
+            self.key_entry,
+            self.capture_button,
+            self.clear_button,
+            self.lbl_capture,
+            self.lbl_help,
+        )
+        if visible:
+            self.lbl_collapsed_hint.grid_remove()
+            for widget in detail_widgets:
+                widget.grid()
+            return
+        for widget in detail_widgets:
+            widget.grid_remove()
+        self.lbl_collapsed_hint.grid(
+            row=0,
+            column=1,
+            columnspan=4,
+            padx=(0, UI_PAD_MD),
+            pady=UI_PAD_SM,
+            sticky="w",
+        )
 
     def get_data(self) -> tuple[bool, Optional[str]]:
         return self.enabled_var.get(), (self._selected_trigger or None)
@@ -201,6 +282,7 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         self.key_entry.config(state="readonly" if enabled else "disabled")
         self.capture_button.config(state="normal" if enabled else "disabled")
         self.clear_button.config(state="normal" if enabled else "disabled")
+        self._set_detail_visible(enabled)
         if not enabled:
             self._stop_capture()
             self.capture_status_var.set("")
