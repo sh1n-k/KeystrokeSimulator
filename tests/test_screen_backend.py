@@ -11,6 +11,7 @@ from app.core.screen_backend import (
     NullScreenBackend,
     _handle_sample_buffer,
     _sck_classes,
+    choose_mss_grab_strategy,
     create_screen_backend,
     frame_from_region,
     open_screen_backend,
@@ -790,6 +791,218 @@ class TestMssGrabImportsImageFrame(unittest.TestCase):
         fake_sct.grab.assert_called_once_with(
             {"left": 3, "top": 4, "width": 1, "height": 1}
         )
+
+
+class TestChooseMssGrabStrategy(unittest.TestCase):
+    def test_uncalibrated_or_single_group_uses_per_group(self):
+        self.assertEqual(choose_mss_grab_strategy(1, 7.0, 35.0), "per_group")
+        self.assertEqual(choose_mss_grab_strategy(10, None, 35.0), "per_group")
+        self.assertEqual(choose_mss_grab_strategy(10, 7.0, None), "per_group")
+
+    def test_dual_cluster_style_prefers_per_group(self):
+        self.assertEqual(choose_mss_grab_strategy(2, 7.0, 35.0), "per_group")
+
+    def test_many_groups_prefers_union_crop(self):
+        self.assertEqual(choose_mss_grab_strategy(10, 7.0, 35.0), "union_crop")
+
+    def test_near_margin_prefers_per_group(self):
+        # N*C = 5*7=35, U_full*1.05=36.75 → still per_group
+        self.assertEqual(choose_mss_grab_strategy(5, 7.0, 35.0), "per_group")
+        # N*C = 6*7=42 > 36.75 → union
+        self.assertEqual(choose_mss_grab_strategy(6, 7.0, 35.0), "union_crop")
+
+
+class TestMssAdaptiveGrab(unittest.TestCase):
+    def test_uncalibrated_many_groups_still_per_group(self):
+        backend = MssScreenBackend()
+        # Skip lazy calib so this asserts the unset-cost fallback path only.
+        backend._calibration_attempted = True
+        fake_sct = MagicMock()
+        fake_sct.grab.side_effect = [
+            MagicMock(width=1, height=1, raw=bytearray(b"\x01\x02\x03\xff")),
+            MagicMock(width=1, height=1, raw=bytearray(b"\x04\x05\x06\xff")),
+        ]
+        backend._sct = fake_sct
+
+        frames = backend.grab([_group(0, 0, 1, 1), _group(10, 10, 1, 1)])
+
+        self.assertEqual(len(frames), 2)
+        self.assertEqual(fake_sct.grab.call_count, 2)
+
+    def test_calibrated_many_groups_uses_one_union_grab(self):
+        backend = MssScreenBackend()
+        backend._call_cost_ms = 7.0
+        backend._full_cost_ms = 35.0
+        backend._calibration_attempted = True
+        # 10x1 BGRA strip; groups at x=0..9
+        width = 10
+        raw = bytearray(width * 1 * 4)
+        for x in range(width):
+            raw[x * 4 : x * 4 + 4] = bytes((x, x + 1, x + 2, 255))
+        fake_sct = MagicMock()
+        fake_sct.grab.return_value = MagicMock(width=width, height=1, raw=raw)
+        backend._sct = fake_sct
+
+        groups = [_group(x, 0, 1, 1, f"p{x}") for x in range(width)]
+        frames = backend.grab(groups)
+
+        fake_sct.grab.assert_called_once_with(
+            {"left": 0, "top": 0, "width": width, "height": 1}
+        )
+        self.assertEqual(len(frames), width)
+        assert frames[0] is not None and frames[9] is not None
+        self.assertEqual(frames[0].pixel_bgr(0, 0), (0, 1, 2))
+        self.assertEqual(frames[9].pixel_bgr(0, 0), (9, 10, 11))
+
+    def test_union_and_per_group_match_same_pixels(self):
+        backend = MssScreenBackend()
+        backend._call_cost_ms = 7.0
+        backend._full_cost_ms = 35.0
+        backend._calibration_attempted = True
+        width, height = 10, 1
+        raw = bytearray(width * height * 4)
+        for x in range(width):
+            raw[x * 4 : x * 4 + 4] = bytes((x, 20, 30, 255))
+
+        def grab_rect(rect):
+            left, top, w, h = rect["left"], rect["top"], rect["width"], rect["height"]
+            out = bytearray(w * h * 4)
+            for y in range(h):
+                for x in range(w):
+                    src = ((top + y) * width + (left + x)) * 4
+                    dst = (y * w + x) * 4
+                    out[dst : dst + 4] = raw[src : src + 4]
+            return MagicMock(width=w, height=h, raw=out)
+
+        groups = [_group(x, 0, 1, 1, f"p{x}") for x in range(width)]
+        fake_sct = MagicMock()
+        fake_sct.grab.side_effect = grab_rect
+        backend._sct = fake_sct
+
+        union_frames = backend.grab(groups)
+        self.assertEqual(fake_sct.grab.call_count, 1)
+
+        backend._call_cost_ms = None  # force per_group; do not re-calibrate
+        fake_sct.reset_mock()
+        fake_sct.grab.side_effect = grab_rect
+        per_frames = backend.grab(groups)
+        self.assertEqual(fake_sct.grab.call_count, width)
+
+        for u_frame, p_frame in zip(union_frames, per_frames, strict=True):
+            assert u_frame is not None and p_frame is not None
+            self.assertEqual(u_frame.pixel_bgr(0, 0), p_frame.pixel_bgr(0, 0))
+
+    def test_single_group_grab_skips_calibration(self):
+        backend = MssScreenBackend()
+        fake_sct = MagicMock()
+        fake_sct.grab.return_value = MagicMock(
+            width=1, height=1, raw=bytearray(b"\x01\x02\x03\xff")
+        )
+        backend._sct = fake_sct
+
+        backend.grab([_group(0, 0, 1, 1)])
+
+        self.assertFalse(backend._calibration_attempted)
+        self.assertEqual(fake_sct.grab.call_count, 1)
+
+    def test_multi_group_grab_calibrates_once_then_unions(self):
+        backend = MssScreenBackend()
+        width = 10
+        raw = bytearray(width * 4)
+        for x in range(width):
+            raw[x * 4 : x * 4 + 4] = bytes((x, 1, 2, 255))
+        calls: list[dict[str, int]] = []
+
+        def grab_rect(rect):
+            calls.append(dict(rect))
+            # Calibration probes: 1x1 and full screen — return matching sizes.
+            w, h = rect["width"], rect["height"]
+            if w == 1 and h == 1:
+                return MagicMock(width=1, height=1, raw=bytearray(b"\x00\x00\x00\xff"))
+            if w * h > width:
+                return MagicMock(
+                    width=w, height=h, raw=bytearray(w * h * 4)
+                )
+            return MagicMock(width=width, height=1, raw=raw)
+
+        fake_sct = MagicMock()
+        fake_sct.grab.side_effect = grab_rect
+        backend._sct = fake_sct
+        # Pre-set costs so after first calibrate attempt we still control strategy;
+        # instead drive calibrate via attempted flag with injected costs after.
+        backend._calibration_attempted = False
+
+        with patch.object(
+            backend,
+            "_calibrate_grab_costs",
+            side_effect=lambda: (
+                setattr(backend, "_calibration_attempted", True),
+                setattr(backend, "_call_cost_ms", 7.0),
+                setattr(backend, "_full_cost_ms", 35.0),
+            ),
+        ) as calibrate:
+            groups = [_group(x, 0, 1, 1, f"p{x}") for x in range(width)]
+            frames = backend.grab(groups)
+            calibrate.assert_called_once()
+            backend.grab(groups)
+            calibrate.assert_called_once()
+
+        self.assertEqual(len(frames), width)
+        # After costs are set, only one union grab per call (no calib grabs).
+        union_calls = [
+            c for c in calls if c.get("width") == width and c.get("height") == 1
+        ]
+        self.assertGreaterEqual(len(union_calls), 1)
+
+    def test_calibration_failure_leaves_costs_unset(self):
+        backend = MssScreenBackend()
+        fake_sct = MagicMock()
+        fake_sct.grab.side_effect = RuntimeError("nope")
+        backend._sct = fake_sct
+        backend._calibrate_grab_costs()
+        self.assertTrue(backend._calibration_attempted)
+        self.assertIsNone(backend._call_cost_ms)
+        self.assertIsNone(backend._full_cost_ms)
+
+    def test_failed_calibration_then_grab_stays_per_group(self):
+        backend = MssScreenBackend()
+        backend._calibration_attempted = True
+        backend._call_cost_ms = None
+        backend._full_cost_ms = None
+        fake_sct = MagicMock()
+        fake_sct.grab.side_effect = [
+            MagicMock(width=1, height=1, raw=bytearray(b"\x01\x02\x03\xff")),
+            MagicMock(width=1, height=1, raw=bytearray(b"\x04\x05\x06\xff")),
+            MagicMock(width=1, height=1, raw=bytearray(b"\x07\x08\x09\xff")),
+            MagicMock(width=1, height=1, raw=bytearray(b"\x0a\x0b\x0c\xff")),
+        ]
+        backend._sct = fake_sct
+
+        backend.grab([_group(0, 0, 1, 1), _group(5, 5, 1, 1)])
+        backend.grab([_group(0, 0, 1, 1), _group(5, 5, 1, 1)])
+
+        self.assertEqual(fake_sct.grab.call_count, 4)
+        self.assertIsNone(backend._call_cost_ms)
+
+    def test_union_crop_out_of_bounds_returns_none(self):
+        backend = MssScreenBackend()
+        # Force union_crop even with N=2 (2*20 > 35*1.05).
+        backend._call_cost_ms = 20.0
+        backend._full_cost_ms = 35.0
+        backend._calibration_attempted = True
+        # Union grab returns a buffer smaller than the group extents.
+        fake_sct = MagicMock()
+        fake_sct.grab.return_value = MagicMock(
+            width=2, height=1, raw=bytearray(b"\x01\x02\x03\xff\x04\x05\x06\xff")
+        )
+        backend._sct = fake_sct
+
+        frames = backend.grab([_group(0, 0, 1, 1), _group(5, 0, 1, 1)])
+
+        self.assertEqual(len(frames), 2)
+        assert frames[0] is not None
+        self.assertIsNone(frames[1])
+        fake_sct.grab.assert_called_once()
 
 
 if __name__ == "__main__":

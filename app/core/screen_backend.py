@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import importlib
 import platform
+import statistics
 import threading
 import time
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from loguru import logger
 
@@ -41,6 +42,11 @@ _NO_FRAME_TIMEOUT_S = 2.0
 # (참고: 디스플레이 슬립은 이 경로가 아니라 didStopWithError로 관측됐다.)
 _BLANK_TIMEOUT_S = 90.0
 
+# Windows mss: 호출 단가(C) vs primary 전체(U_full). 근접 구간은 per_group.
+_MSS_CALL_SAMPLES = 5
+_MSS_FULL_SAMPLES = 2
+_MSS_NEAR_MARGIN = 1.05
+
 # 프레임이 없는 이유. 기한을 얼마로 걸지, 이미 걸린 기한을 덮어써도 되는지가
 # 이유마다 다르다. 기동 직후는 이유 없이 기한만 걸린 상태다.
 _GAP_BLANK = "blank"
@@ -55,6 +61,33 @@ _SCK_CLASSES: dict[str, Any] = {}
 # 실행 루프와 편집기가 동시에 첫 스트림을 열면 ObjC 클래스가 중복 정의된다.
 _SCK_CLASSES_LOCK = threading.Lock()
 _WARNED: set[str] = set()
+
+MssGrabStrategy = Literal["per_group", "union_crop"]
+
+
+def choose_mss_grab_strategy(
+    group_count: int,
+    call_cost_ms: float | None,
+    full_cost_ms: float | None,
+    *,
+    near_margin: float = _MSS_NEAR_MARGIN,
+) -> MssGrabStrategy:
+    """Return whether mss should grab per group or once via union crop.
+
+    Calibrated costs missing → per_group (safe degrade). N<=1 → per_group.
+    Prefer per_group when N*C is within near_margin of U_full.
+    """
+    if (
+        group_count <= 1
+        or call_cost_ms is None
+        or full_cost_ms is None
+        or call_cost_ms <= 0
+        or full_cost_ms <= 0
+    ):
+        return "per_group"
+    if group_count * call_cost_ms <= full_cost_ms * near_margin:
+        return "per_group"
+    return "union_crop"
 
 
 class ScreenBackend(Protocol):
@@ -85,17 +118,27 @@ class MssScreenBackend:
     def __init__(self) -> None:
         self._sct: Any = None
         self._lock = threading.Lock()
+        self._call_cost_ms: float | None = None
+        self._full_cost_ms: float | None = None
+        self._calibration_attempted = False
 
     def open(self) -> None:
         # Quartz/ScreenCaptureKit 과 같은 이유로 동적 import 한다. mss 는
         # Windows 전용 의존성이라 macOS 에는 설치되지 않는다.
+        # 보정은 미리보기(N=1)까지 늦추지 않도록, 다그룹 grab 때 1회만 한다.
         mss: Any = _framework("mss")
         self._sct = mss.mss()
+        self._call_cost_ms = None
+        self._full_cost_ms = None
+        self._calibration_attempted = False
 
     def close(self) -> None:
         with self._lock:
             sct = self._sct
             self._sct = None
+            self._call_cost_ms = None
+            self._full_cost_ms = None
+            self._calibration_attempted = False
         if sct is None:
             return
         try:
@@ -106,6 +149,45 @@ class MssScreenBackend:
             # 그 스레드가 끝날 때 이뤄지므로 여기서 막지 않는다.
             logger.debug(f"mss close failed: {exc}")
 
+    def _calibrate_grab_costs(self) -> None:
+        """Measure per-call and primary-full grab costs once (lazy, multi-group)."""
+        sct = self._sct
+        self._calibration_attempted = True
+        self._call_cost_ms = None
+        self._full_cost_ms = None
+        if sct is None:
+            return
+        try:
+            from app.utils.system import MonitorUtils
+
+            screen_w, screen_h = MonitorUtils.get_primary_size()
+            call_samples: list[float] = []
+            for _ in range(_MSS_CALL_SAMPLES):
+                started = time.perf_counter()
+                sct.grab({"left": 0, "top": 0, "width": 1, "height": 1})
+                call_samples.append((time.perf_counter() - started) * 1000.0)
+            full_samples: list[float] = []
+            full_rect = {
+                "left": 0,
+                "top": 0,
+                "width": max(1, screen_w),
+                "height": max(1, screen_h),
+            }
+            for _ in range(_MSS_FULL_SAMPLES):
+                started = time.perf_counter()
+                sct.grab(full_rect)
+                full_samples.append((time.perf_counter() - started) * 1000.0)
+            self._call_cost_ms = float(statistics.median(call_samples))
+            self._full_cost_ms = float(statistics.median(full_samples))
+            logger.debug(
+                f"mss grab calibration: C={self._call_cost_ms:.3f}ms "
+                f"U_full={self._full_cost_ms:.3f}ms"
+            )
+        except Exception as exc:
+            logger.debug(f"mss grab calibration skipped: {exc}")
+            self._call_cost_ms = None
+            self._full_cost_ms = None
+
     def grab(self, groups: Sequence[Any]) -> list[ImageFrame | None]:
         from app.core.processor import ImageFrame
 
@@ -113,9 +195,54 @@ class MssScreenBackend:
             sct = self._sct
             if sct is None:
                 return [None] * len(groups)
-            return [
-                ImageFrame.from_screenshot(sct.grab(group["rect"])) for group in groups
-            ]
+            if not groups:
+                return []
+            if len(groups) > 1 and not self._calibration_attempted:
+                self._calibrate_grab_costs()
+            strategy = choose_mss_grab_strategy(
+                len(groups), self._call_cost_ms, self._full_cost_ms
+            )
+            try:
+                if strategy == "union_crop":
+                    return self._grab_union_crop_locked(sct, groups, ImageFrame)
+                return self._grab_per_group_locked(sct, groups, ImageFrame)
+            except Exception as exc:
+                logger.debug(f"mss grab failed ({strategy}): {exc}")
+                return [None] * len(groups)
+
+    @staticmethod
+    def _grab_per_group_locked(
+        sct: Any, groups: Sequence[Any], image_frame_cls: Any
+    ) -> list[ImageFrame | None]:
+        return [
+            image_frame_cls.from_screenshot(sct.grab(group["rect"])) for group in groups
+        ]
+
+    @staticmethod
+    def _grab_union_crop_locked(
+        sct: Any, groups: Sequence[Any], image_frame_cls: Any
+    ) -> list[ImageFrame | None]:
+        union = union_group_rects(groups)
+        big = image_frame_cls.from_screenshot(sct.grab(union))
+        frames: list[ImageFrame | None] = []
+        for group in groups:
+            rect = group["rect"]
+            x = rect["left"] - union["left"]
+            y = rect["top"] - union["top"]
+            width = rect["width"]
+            height = rect["height"]
+            if (
+                x < 0
+                or y < 0
+                or width < 1
+                or height < 1
+                or x + width > big.width
+                or y + height > big.height
+            ):
+                frames.append(None)
+                continue
+            frames.append(big.crop(x, y, width, height))
+        return frames
 
     def is_dead(self) -> bool:
         return False
