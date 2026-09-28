@@ -11,6 +11,7 @@ from loguru import logger
 
 from app.utils.i18n import dual_text_width, txt
 from app.core.models import ColorTuple, EventModel, Position
+from app.core.profile_events import next_numbered_event_name
 from app.ui.capture_session import CaptureSession
 from app.storage.profile_storage import ensure_quick_profile, load_profile, save_profile
 from app.utils.keys import KeyUtils
@@ -36,8 +37,6 @@ class KeystrokeQuickEventEditor:
         self.win.protocol("WM_DELETE_WINDOW", self.close)
 
         self.capture_session = CaptureSession()
-        self.event_idx = 1
-        self.events: list[EventModel] = []
         self.saved_count = 0
 
         self.capture_w_var = tk.IntVar(value=100)
@@ -557,9 +556,14 @@ class KeystrokeQuickEventEditor:
             and self.held_img is not None
             and self.ref_pixel is not None
         ):
-            self.events.append(
+            # 매번 다시 읽어 뒤에 추가한다. 이전 세션의 이벤트와 사용자가
+            # 프로필 관리자에서 지정한 키를 덮어쓰지 않기 위해서다.
+            p = load_profile(self.prof_dir, "Quick", migrate=True)
+            p.event_list.append(
                 EventModel(
-                    event_name=str(self.event_idx),
+                    event_name=next_numbered_event_name(
+                        e.event_name or "" for e in p.event_list
+                    ),
                     capture_size=(self.capture_w_var.get(), self.capture_h_var.get()),
                     latest_position=self.capture_session.held_position,
                     clicked_position=self.clicked_pos,
@@ -569,9 +573,6 @@ class KeystrokeQuickEventEditor:
                     region_size=None,
                 )
             )
-            self.event_idx += 1
-            p = load_profile(self.prof_dir, "Quick", migrate=True)
-            p.event_list = self.events
             save_profile(self.prof_dir, p, name="Quick")
             self.saved_count += 1
             self._set_feedback(

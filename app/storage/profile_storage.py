@@ -12,6 +12,7 @@ from loguru import logger
 from PIL import Image
 
 from app.core.models import EventModel, ProfileModel
+from app.core.profile_events import next_available_event_name
 from app.core.validation import normalized_event_name
 from app.utils.runtime_toggle import normalize_runtime_toggle_trigger
 
@@ -236,15 +237,6 @@ def _to_conditions(v: object) -> dict[str, bool]:
     return conditions
 
 
-def _next_available_event_name(base_name: str, used_names: set[str]) -> str:
-    candidate = base_name
-    suffix = 2
-    while candidate in used_names:
-        candidate = f"{base_name} ({suffix})"
-        suffix += 1
-    return candidate
-
-
 def _normalize_loaded_event_names(profile: ProfileModel) -> bool:
     events = list(getattr(profile, "event_list", []) or [])
     if not events:
@@ -265,7 +257,7 @@ def _normalize_loaded_event_names(profile: ProfileModel) -> bool:
         current_name = normalized_event_name(getattr(evt, "event_name", None))
         base_name = current_name or f"Event {index}"
         if current_name in duplicates or not current_name:
-            final_name = _next_available_event_name(base_name, used_names)
+            final_name = next_available_event_name(base_name, used_names)
         else:
             final_name = base_name
 

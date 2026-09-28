@@ -1,4 +1,5 @@
 import os
+import tempfile
 import tkinter as tk
 import unittest
 from pathlib import Path
@@ -6,7 +7,8 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from app.core.models import ProfileModel
+from app.core.models import EventModel, ProfileModel
+from app.storage.profile_storage import load_profile, save_profile
 from app.ui.capture_session import CaptureSession
 from app.ui.quick_event_editor import KeystrokeQuickEventEditor
 from app.utils.i18n import set_language
@@ -96,14 +98,8 @@ class TestQuickEventEditorStatus(unittest.TestCase):
         self.assertEqual(stub.entries[1].value, "22")
         stub.save_event.assert_called_once()
 
-    @patch("app.ui.quick_event_editor.save_profile")
-    @patch("app.ui.quick_event_editor.load_profile")
-    def test_save_event_updates_feedback_and_count(
-        self, mock_load_profile, mock_save_profile
-    ):
+    def _make_saveable_stub(self, prof_dir):
         stub = self._make_stub()
-        stub.event_idx = 1
-        stub.events = []
         stub.latest_pos = (10, 20)
         stub.clicked_pos = (3, 4)
         stub.latest_img = Image.new("RGB", (8, 8), "blue")
@@ -111,20 +107,51 @@ class TestQuickEventEditorStatus(unittest.TestCase):
         stub.ref_pixel = (0, 0, 255)
         stub.capture_w_var = FakeVar(120)
         stub.capture_h_var = FakeVar(80)
-        stub.prof_dir = "profiles"
-        mock_load_profile.return_value = ProfileModel(name="Quick", event_list=[])
+        stub.prof_dir = prof_dir
+        return stub
 
-        stub.save_event()
+    def test_save_event_updates_feedback_and_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prof_dir = Path(tmp)
+            stub = self._make_saveable_stub(prof_dir)
 
+            stub.save_event()
+
+            saved = load_profile(prof_dir, "Quick", migrate=False).event_list
         self.assertEqual(stub.saved_count, 1)
-        self.assertEqual(len(stub.events), 1)
-        self.assertEqual(stub.events[0].capture_size, (120, 80))
-        mock_save_profile.assert_called_once()
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0].capture_size, (120, 80))
         self.assertIn("Quick event #1 saved", stub.lbl_feedback.cget("text"))
         self.assertEqual(
             stub.lbl_session.cget("text"),
             "1 Quick event(s) saved in this session.",
         )
+
+    def test_save_event_appends_to_existing_quick_profile(self):
+        """B-01: a new session keeps earlier events and user-assigned keys."""
+        with tempfile.TemporaryDirectory() as tmp:
+            prof_dir = Path(tmp)
+            save_profile(
+                prof_dir,
+                ProfileModel(
+                    name="Quick",
+                    event_list=[
+                        EventModel(event_name="1", key_to_enter="A"),
+                        EventModel(event_name="2", key_to_enter="B"),
+                    ],
+                ),
+                name="Quick",
+            )
+
+            first_session = self._make_saveable_stub(prof_dir)
+            first_session.save_event()
+            second_session = self._make_saveable_stub(prof_dir)
+            second_session.save_event()
+
+            saved = load_profile(prof_dir, "Quick", migrate=False).event_list
+        self.assertEqual([e.event_name for e in saved], ["1", "2", "3", "4"])
+        self.assertEqual([e.key_to_enter for e in saved[:2]], ["A", "B"])
+
 
     def test_close_notifies_parent_once(self):
         stub = self._make_stub()

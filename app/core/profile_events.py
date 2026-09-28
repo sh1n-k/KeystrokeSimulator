@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 
 from app.core.models import EventModel
@@ -51,6 +52,49 @@ def rename_condition_references(
 def remove_condition_references(events: list[EventModel], removed_name: str) -> None:
     for event in events:
         event.conditions.pop(removed_name, None)
+
+
+def next_available_event_name(base_name: str, used_names: set[str]) -> str:
+    candidate = base_name
+    suffix = 2
+    while candidate in used_names:
+        candidate = f"{base_name} ({suffix})"
+        suffix += 1
+    return candidate
+
+
+def next_numbered_event_name(used_names: Iterable[str]) -> str:
+    """Quick 연속 캡처의 자동 이름. 기존 숫자 이름 중 가장 큰 값의 다음 번호."""
+    numbers = [int(name) for name in used_names if name.isdigit()]
+    return str(max(numbers, default=0) + 1)
+
+
+def rename_colliding_events(
+    events: list[EventModel], existing_names: Iterable[str]
+) -> dict[str, str]:
+    """`events`를 기존 이름과 겹치지 않게 바꾸고, `events` 안의 조건 참조를 함께 옮긴다.
+
+    가져온 이벤트끼리의 조건은 원래 프로필의 같은 이름 이벤트를 가리키므로,
+    이름이 바뀐 이벤트를 참조하던 조건도 새 이름으로 바꾼다.
+    """
+    existing = set(existing_names)
+    reserved = existing | {event.event_name or "" for event in events}
+    renamed: dict[str, str] = {}
+    for event in events:
+        old_name = event.event_name or ""
+        if old_name not in existing:
+            continue
+        new_name = next_available_event_name(old_name, reserved)
+        reserved.add(new_name)
+        renamed[old_name] = new_name
+        event.event_name = new_name
+    if renamed:
+        for event in events:
+            event.conditions = {
+                renamed.get(name, name): state
+                for name, state in event.conditions.items()
+            }
+    return renamed
 
 
 def event_type_sort_order(event: EventModel) -> int:
