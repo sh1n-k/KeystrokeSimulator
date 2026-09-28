@@ -8,7 +8,7 @@ from pathlib import Path
 from tkinter import font as tkfont
 from tkinter import messagebox
 from tkinter import ttk
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -741,15 +741,53 @@ class RunSetFrame(tk.Frame):
             justify="left",
         ).pack(fill="x", pady=(0, theme.SPACE_2))
 
-        list_frame = tk.Frame(body, bg=theme.SURFACE_CANVAS, height=220)
-        list_frame.pack(fill="both", expand=True)
-        list_frame.pack_propagate(False)
+        # 프로필이 많으면 고정 높이를 넘으므로 스크롤한다.
+        list_box = tk.Frame(body, bg=theme.SURFACE_CANVAS)
+        list_box.pack(fill="both", expand=True)
+        list_canvas = tk.Canvas(
+            list_box,
+            height=220,
+            bg=theme.SURFACE_CANVAS,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        list_scrollbar = ttk.Scrollbar(
+            list_box, orient="vertical", command=cast(Any, list_canvas).yview
+        )
+        list_canvas.configure(yscrollcommand=list_scrollbar.set)
+        list_scrollbar.pack(side=tk.RIGHT, fill="y")
+        list_canvas.pack(side=tk.LEFT, fill="both", expand=True)
+        list_frame = tk.Frame(list_canvas, bg=theme.SURFACE_CANVAS)
+        list_window = list_canvas.create_window(
+            (0, 0), window=list_frame, anchor="nw"
+        )
+        list_frame.bind(
+            "<Configure>",
+            lambda _e: list_canvas.configure(
+                scrollregion=list_canvas.bbox("all")
+            ),
+        )
+        list_canvas.bind(
+            "<Configure>",
+            lambda e: list_canvas.itemconfigure(list_window, width=e.width),
+        )
+
+        def scroll_list(event: tk.Event[tk.Misc]) -> str:
+            num = getattr(event, "num", None)
+            if num in (4, 5):
+                step = -1 if num == 4 else 1
+            else:
+                step = -1 if event.delta > 0 else 1
+            list_canvas.yview_scroll(step, "units")
+            return "break"
+
         vars_by_name: dict[str, tk.BooleanVar] = {}
         selected = set(initial_members)
+        scroll_targets: list[tk.Misc] = [list_canvas, list_frame]
         for name in self._available:
             var = tk.BooleanVar(value=name in selected)
             vars_by_name[name] = var
-            tk.Checkbutton(
+            check = tk.Checkbutton(
                 list_frame,
                 text=name,
                 variable=var,
@@ -758,7 +796,12 @@ class RunSetFrame(tk.Frame):
                 activebackground=theme.SURFACE_CANVAS,
                 fg=theme.INK_PRIMARY,
                 selectcolor=theme.SURFACE_PAPER,
-            ).pack(fill="x", padx=theme.SPACE_1, pady=1)
+            )
+            check.pack(fill="x", padx=theme.SPACE_1, pady=1)
+            scroll_targets.append(check)
+        for widget in scroll_targets:
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                widget.bind(seq, scroll_list)
 
         btn_row = tk.Frame(body, bg=theme.SURFACE_PAPER)
         btn_row.pack(fill="x", pady=(theme.SPACE_3, 0))
