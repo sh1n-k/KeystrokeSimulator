@@ -124,6 +124,34 @@ class TestKeystrokeSettings(unittest.TestCase):
         self.assertLess(right_gap, settings_win.button_group.winfo_x())
         settings_win.destroy()
 
+    @patch("app.ui.settings.Path.write_text")
+    @patch("app.ui.settings.Path.exists", return_value=True)
+    @patch("app.ui.settings.Path.read_text")
+    @patch("app.ui.settings.messagebox.askokcancel", return_value=True)
+    @patch("app.ui.settings.WindowUtils.center_window")
+    def test_reset_shows_defaults_without_saving(
+        self, _mock_center, _mock_ask, mock_read_text, _mock_exists, mock_write_text
+    ):
+        """B-05: reset must not reload the saved file or save before OK."""
+        mock_read_text.return_value = json.dumps(
+            {"key_pressed_time_min": 200, "key_pressed_time_max": 300}
+        )
+        settings_win = KeystrokeSettings(self.root)
+
+        settings_win.on_reset()
+
+        defaults = UserSettings()
+        self.assertEqual(
+            settings_win.ui_vars["key_pressed_time_min"].get(),
+            str(defaults.key_pressed_time_min),
+        )
+        self.assertEqual(
+            settings_win.ui_vars["key_pressed_time_max"].get(),
+            str(defaults.key_pressed_time_max),
+        )
+        mock_write_text.assert_not_called()
+        settings_win.destroy()
+
 class TestValidateNumeric(unittest.TestCase):
     """_validate_numeric: Tk 불필요한 static method 테스트"""
 

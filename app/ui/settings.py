@@ -621,14 +621,38 @@ class KeystrokeSettings(tk.Toplevel):
             txt("Reset settings?", "설정을 초기화하시겠습니까?"),
             parent=self,
         ):
-            self._save_window_position()
+            # 창을 다시 만들면 저장된 파일을 다시 읽으므로 화면 값만 기본값으로
+            # 바꾼다. 저장은 OK를 눌렀을 때만 한다.
             self.settings = UserSettings()
-            replacement = KeystrokeSettings(self.master)
-            if self.app_master is not None and hasattr(
-                self.app_master, "settings_window"
-            ):
-                cast(SettingsHost, self.app_master).settings_window = replacement
-            self.destroy()
+            self._apply_settings_to_widgets()
+
+    def _apply_settings_to_widgets(self) -> None:
+        if self.is_windows:
+            self._bool_var("use_alt_shift").set(self.settings.use_alt_shift_hotkey)
+        else:
+            self._bool_var("enable_key").set(self.settings.toggle_start_stop_mac)
+        self._toggle_combo_state()
+        self.language_combo.set(
+            LANGUAGE_LABELS.get(
+                normalize_language(self.settings.language), LANGUAGE_LABELS["en"]
+            )
+        )
+        for prefix in ("key_pressed_time", "delay_between_loop"):
+            for suffix in ("min", "max"):
+                key = f"{prefix}_{suffix}"
+                self._str_var(key).set(str(getattr(self.settings, key)))
+        label_by_pack_id = {v: k for k, v in self._sound_pack_id_by_label.items()}
+        for combo, pack_id in (
+            (self.sound_pack_combo, self.settings.notification_sound_pack),
+            (self.toggle_sound_pack_combo, self.settings.runtime_toggle_sound_pack),
+        ):
+            label = label_by_pack_id.get(normalize_notification_sound_pack(pack_id))
+            if label is not None:
+                combo.set(label)
+        self._bool_var("runtime_toggle_sound_enabled").set(
+            self.settings.runtime_toggle_sound_enabled
+        )
+        self._update_warning_text()
 
     def on_close(self, event: tk.Event[tk.Misc] | None = None) -> None:
         self._save_window_position()
