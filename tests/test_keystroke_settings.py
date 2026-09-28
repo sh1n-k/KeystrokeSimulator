@@ -124,6 +124,23 @@ class TestKeystrokeSettings(unittest.TestCase):
         self.assertLess(right_gap, settings_win.button_group.winfo_x())
         settings_win.destroy()
 
+    @patch("app.ui.settings.WindowUtils.center_window")
+    def test_ok_with_invalid_timing_shows_warning_in_timing(self, _mock_center):
+        settings_win = KeystrokeSettings(self.root)
+        settings_win.ui_vars["key_pressed_time_min"].set("300")
+        settings_win.ui_vars["key_pressed_time_max"].set("200")
+
+        with patch.object(settings_win, "_save_settings") as mock_save:
+            settings_win.on_ok()
+        settings_win.update()
+
+        mock_save.assert_not_called()
+        self.assertEqual(settings_win.card_timing.winfo_manager(), "grid")
+        self.assertEqual(settings_win.card_keys.winfo_manager(), "")
+        self.assertEqual(settings_win.warning_label.winfo_manager(), "grid")
+        self.assertIn("Min must be less", settings_win.warning_label.cget("text"))
+        settings_win.destroy()
+
     @patch("app.ui.settings.Path.write_text")
     @patch("app.ui.settings.Path.exists", return_value=True)
     @patch("app.ui.settings.Path.read_text")
@@ -201,6 +218,30 @@ class TestKeystrokeSettingsNavRail(unittest.TestCase):
         stub.card_sound.grid_remove.assert_called_once()
         stub.card_timing.grid.assert_called_once()
         stub._settings_nav_labels["timing"].config.assert_called_once()
+
+    def test_timing_warning_moves_to_timing_section(self):
+        """B-07: a timing validation error is shown inside the Timing section."""
+        stub = KeystrokeSettings.__new__(KeystrokeSettings)
+        stub.card_keys = MagicMock()
+        stub.card_lang = MagicMock()
+        stub.card_timing = MagicMock()
+        stub.card_sound = MagicMock()
+        stub.warning_label = MagicMock()
+        stub._settings_nav_labels = {}
+
+        with patch(
+            "app.ui.settings.theme.fonts",
+            return_value={"body": "body-font", "body_bold": "bold-font"},
+        ):
+            KeystrokeSettings._warn(stub, "Min must be less than Max.", "timing")
+
+        stub.warning_label.config.assert_called_once_with(
+            text="Min must be less than Max."
+        )
+        stub.card_timing.grid.assert_called_once()
+        stub.card_keys.grid_remove.assert_called_once()
+        stub.warning_label.grid.assert_called_once()
+        stub.warning_label.grid_remove.assert_not_called()
 
 
 class TestKeystrokeSettingsWindowState(unittest.TestCase):
