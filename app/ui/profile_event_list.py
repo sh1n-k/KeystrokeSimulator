@@ -21,6 +21,7 @@ from app.core.profile_events import (
     filter_event_indices,
     key_sort_order,
     remove_condition_references,
+    rename_colliding_events,
     rename_condition_references,
 )
 from app.core.validation import normalized_event_name
@@ -1904,6 +1905,10 @@ class EventListFrame(ttk.Frame):
         self._delete_indices(indices)
 
     def _import(self, evts: list[EventModel]) -> None:
+        # 이름이 겹치면 자동 저장이 중복 이름 검사에 걸려 조용히 실패한다.
+        renamed = rename_colliding_events(
+            evts, (e.event_name or "" for e in self.profile.event_list)
+        )
         self.profile.event_list.extend(evts)
         for e in evts:
             self._add_row(event=e)
@@ -1912,6 +1917,14 @@ class EventListFrame(ttk.Frame):
         self.save_cb()
         if evts:
             self.reveal_event(len(self.profile.event_list) - 1)
+        if renamed and self.status_cb:
+            self.status_cb(
+                txt(
+                    "Renamed {count} imported event(s) to avoid duplicate names",
+                    "이름이 겹치는 가져온 이벤트 {count}개의 이름을 바꿨습니다",
+                    count=len(renamed),
+                )
+            )
 
     def _update_row_indices(self) -> None:
         """행 인덱스 라벨 갱신 + 현재 필터에 맞춰 표시/숨김 재배치."""

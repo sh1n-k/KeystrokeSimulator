@@ -19,6 +19,7 @@ from app.core.profile_events import (
     event_group_name_sort_key,
     event_needs_attention,
     filter_event_indices,
+    rename_colliding_events,
 )
 from app.ui.profiles import KeystrokeProfiles, _profile_fingerprint
 from app.utils.i18n import set_language
@@ -1230,6 +1231,45 @@ class TestBulkActions(unittest.TestCase):
         stub._bulk_set_use(False)
 
         self.assertEqual([e.use_event for e in stub.profile.event_list], [True] * 3)
+
+
+class TestImportRenamesCollidingEvents(unittest.TestCase):
+    """B-04: imported names never collide, so autosave does not fail silently."""
+
+    def setUp(self):
+        set_language("en")
+
+    def test_rename_colliding_events_updates_references_inside_batch(self):
+        imported = [
+            EventModel(event_name="A"),
+            EventModel(event_name="B", conditions={"A": True, "C": False}),
+        ]
+
+        renamed = rename_colliding_events(imported, ["A", "C", "A (2)"])
+
+        self.assertEqual(renamed, {"A": "A (3)"})
+        self.assertEqual([e.event_name for e in imported], ["A (3)", "B"])
+        self.assertEqual(imported[1].conditions, {"A (3)": True, "C": False})
+
+    def test_import_renames_duplicates_and_reports(self):
+        stub = _make_event_list_frame_stub()
+        stub.profile = ProfileModel(
+            name="P", event_list=[EventModel(event_name="A")]
+        )
+        stub._add_row = MagicMock()
+        stub._sync_empty_state = MagicMock()
+        stub._refresh_row_layout = MagicMock()
+        stub.reveal_event = MagicMock()
+        stub.save_cb = MagicMock()
+        stub.status_cb = MagicMock()
+
+        stub._import([EventModel(event_name="A"), EventModel(event_name="B")])
+
+        self.assertEqual(
+            [e.event_name for e in stub.profile.event_list], ["A", "A (2)", "B"]
+        )
+        stub.save_cb.assert_called_once()
+        self.assertIn("Renamed 1 imported", stub.status_cb.call_args.args[0])
 
 
 if __name__ == "__main__":
