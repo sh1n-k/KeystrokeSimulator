@@ -472,11 +472,11 @@ class CaptureHud:
                 )
                 if kind == "pos":
                     entry.bind("<FocusOut>", self._on_pos_entry)
-                    entry.bind("<Return>", self._on_pos_entry)
+                    self._bind_commit(entry, self._on_pos_entry)
                     self.pos_entries.append(entry)
                 else:
                     entry.bind("<KeyRelease>", self._on_pixel_entry)
-                    entry.bind("<Return>", self._on_pixel_entry)
+                    self._bind_commit(entry, self._on_pixel_entry)
                     self.pixel_entries.append(entry)
         tk.Label(
             parent,
@@ -498,8 +498,20 @@ class CaptureHud:
                 width=5,
             )
             spin.grid(row=2, column=2 + col * 2, sticky="w", pady=1)
-            for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<Return>"):
+            for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>"):
                 spin.bind(seq, self._on_capture_size_change)
+            self._bind_commit(spin, self._on_capture_size_change)
+
+    @staticmethod
+    def _bind_commit(widget: tk.Misc, handler: Callable[[], None]) -> None:
+        """입력칸의 Enter는 값만 확정한다. 창의 Enter(적용)로 번지지 않게 끊는다."""
+
+        def on_return(_event: object) -> str:
+            handler()
+            return "break"
+
+        widget.bind("<Return>", on_return)
+        widget.bind("<KP_Enter>", on_return)
 
     @staticmethod
     def _make_image_label(parent: tk.Misc) -> tk.Label:

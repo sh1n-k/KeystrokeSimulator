@@ -381,6 +381,36 @@ class TestCaptureHudLayout(unittest.TestCase):
                     self.assertEqual(hud.lbl_info.cget("text"), "255,0,255  (510, 410)")
                     hud.close()
 
+    @patch("app.ui.capture_hud.KeyUtils.mod_key_pressed", return_value=False)
+    @patch("app.ui.capture_hud.StateUtils.save_main_app_state")
+    @patch("app.ui.capture_hud.StateUtils.load_main_app_state", return_value={})
+    def test_enter_in_advanced_entry_does_not_apply(self, *_mocks):
+        self.root.deiconify()  # synthetic key events need a focusable window
+        capturer = FakeCapturer()
+        on_apply = MagicMock()
+        hud = CaptureHud(self.root, mode="single", capturer=capturer, on_apply=on_apply)
+        self.root.update()
+        capturer.emit((0, 0, 255))
+        hud.capture()
+        hud._select((3, 4))
+        hud._toggle_advanced()
+        self.root.update()
+
+        for widget in (hud.pos_entries[0], hud.pixel_entries[0]):
+            widget.focus_force()
+            self.root.update()
+            widget.event_generate("<Return>", when="tail")
+            self.root.update()
+
+        on_apply.assert_not_called()
+        self.assertTrue(hud.is_open())
+        # Control: Enter elsewhere in the HUD still applies.
+        hud.btn_apply.focus_force()
+        self.root.update()
+        hud.btn_apply.event_generate("<Return>", when="tail")
+        self.root.update()
+        on_apply.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
