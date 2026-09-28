@@ -12,7 +12,7 @@ from loguru import logger
 
 from app.utils.i18n import txt
 from app.core.models import ColorTuple, EventModel, Position
-from app.ui.capture_session import CaptureSession
+from app.ui.capture_session import CaptureSession, capture_rect, rects_overlap
 from app.utils.keys import KeyUtils
 from app.utils.system import PermissionUtils
 from app.utils.window_state import StateUtils, WindowUtils
@@ -1130,12 +1130,8 @@ class KeystrokeEventEditor:
             return False
         if not pointer or win_w <= 1 or win_h <= 1:
             return False
-        left, top = pointer[0] - cap_w // 2, pointer[1] - cap_h // 2
-        return not (
-            left + cap_w <= win_x
-            or left >= win_x + win_w
-            or top + cap_h <= win_y
-            or top >= win_y + win_h
+        return rects_overlap(
+            capture_rect(pointer, (cap_w, cap_h)), (win_x, win_y, win_w, win_h)
         )
 
     def _required_field_error(self) -> tuple[str, str] | None:
