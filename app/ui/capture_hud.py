@@ -180,6 +180,63 @@ def hud_position(
     return clamped[0]
 
 
+def border_rects(box: Rect, thickness: int) -> list[Rect]:
+    """캡처 박스 바깥쪽 테두리 4개(위, 아래, 왼쪽, 오른쪽). 박스 안은 덮지 않는다."""
+    x, y, w, h = box
+    t = thickness
+    return [
+        (x - t, y - t, w + 2 * t, t),
+        (x - t, y + h, w + 2 * t, t),
+        (x - t, y, t, h),
+        (x + w, y, t, h),
+    ]
+
+
+class CaptureBorder:
+    """캡처 박스를 게임 화면 위에 표시하는 얇은 창 4개."""
+
+    def __init__(self, master: tk.Misc) -> None:
+        self._box: Rect | None = None
+        self.windows: list[tk.Toplevel] = []
+        for _ in range(4):
+            win = tk.Toplevel(master, bg=theme.CAPTURE_BORDER)
+            win.overrideredirect(True)
+            win.withdraw()
+            self.windows.append(win)
+
+    def show(self, box: Rect) -> None:
+        if box == self._box:
+            return
+        self._box = box
+        rects = border_rects(box, theme.CAPTURE_BORDER_WIDTH)
+        for win, (x, y, w, h) in zip(self.windows, rects, strict=True):
+            try:
+                win.geometry(f"{max(1, w)}x{max(1, h)}+{x}+{y}")
+                if win.state() == "withdrawn":
+                    win.deiconify()
+                    win.update_idletasks()
+                    cast(Any, win).attributes("-topmost", True)
+            except tk.TclError:
+                continue
+        # macOS는 메뉴바 영역 등에 놓인 창을 스스로 옮긴다. 옮겨진 조각은
+        # 캡처 박스 안으로 들어올 수 있으므로 숨긴다.
+        for win, (x, y, _w, _h) in zip(self.windows, rects, strict=True):
+            try:
+                win.update_idletasks()
+                if (win.winfo_x(), win.winfo_y()) != (x, y):
+                    win.withdraw()
+            except tk.TclError:
+                continue
+
+    def destroy(self) -> None:
+        for win in self.windows:
+            try:
+                win.destroy()
+            except tk.TclError:
+                pass
+        self.windows = []
+
+
 def ctrl_capture_allowed(focus: tk.Misc | None) -> bool:
     """텍스트 입력 중에는 CTRL을 캡처로 받지 않는다."""
     if focus is None:
@@ -236,6 +293,7 @@ class CaptureHud:
         capture_size: Position = (100, 100),
         region_size: Position | None = None,
         grab: bool = False,
+        border: bool = True,
         on_close: Callable[[], object] | None = None,
         capturer: CaptureBackend | None = None,
     ) -> None:
@@ -267,6 +325,8 @@ class CaptureHud:
 
         self.capture_session = CaptureSession(capturer)
         self.win = tk.Toplevel(master)
+        # 실행 중에는 테두리를 만들지 않는다(호출부가 border=False로 연다).
+        self.border: CaptureBorder | None = CaptureBorder(self.win) if border else None
         self.win.title(
             txt("Capture", "캡처")
             if mode == "single"
@@ -777,6 +837,7 @@ class CaptureHud:
         self._ctrl_was_pressed = ctrl
 
         self._avoid_capture_box()
+        self._sync_border()
 
         self._permission_ticks -= 1
         if self._permission_ticks <= 0:
@@ -827,6 +888,15 @@ class CaptureHud:
         target = hud_position(hud, box, screen)
         if target is not None:
             self.win.geometry(f"+{target[0]}+{target[1]}")
+
+    def _sync_border(self) -> None:
+        if self.border is None:
+            return
+        self.border.show(
+            capture_rect(
+                self.capture_session.current_position(), self._current_capture_size()
+            )
+        )
 
     @staticmethod
     def _compute_permission_message() -> str | None:
@@ -1024,6 +1094,8 @@ class CaptureHud:
                 except tk.TclError:
                     pass
         self.capture_session.stop()
+        if self.border is not None:
+            self.border.destroy()
         try:
             StateUtils.save_main_app_state(
                 capture_hud_pos=f"{self.win.winfo_x()}/{self.win.winfo_y()}",

@@ -15,6 +15,7 @@ from app.ui.capture_hud import (
     CaptureHud,
     CaptureResult,
     append_quick_event,
+    border_rects,
     ctrl_capture_allowed,
     display_to_image,
     hud_position,
@@ -24,7 +25,7 @@ from app.ui.capture_hud import (
     render_overlay,
 )
 from app.ui import theme
-from app.ui.capture_session import CaptureSession
+from app.ui.capture_session import CaptureSession, rects_overlap
 from app.utils.i18n import set_language
 
 _RUN_GUI_TESTS = os.environ.get("RUN_GUI_TESTS", "0") == "1"
@@ -169,6 +170,27 @@ class TestHudPosition(unittest.TestCase):
         self.assertEqual((x, y), (1920 - 260 - 16, 16))
 
 
+class TestBorderRects(unittest.TestCase):
+    """O-01: the outline sits outside the capture box and never covers it."""
+
+    def test_border_surrounds_box_from_outside(self):
+        box = (100, 50, 40, 30)
+
+        rects = border_rects(box, 2)
+
+        self.assertEqual(
+            rects,
+            [(98, 48, 44, 2), (98, 80, 44, 2), (98, 50, 2, 30), (140, 50, 2, 30)],
+        )
+        for rect in rects:
+            self.assertFalse(rects_overlap(rect, box))
+
+    def test_border_at_screen_edge_keeps_positive_size(self):
+        for _x, _y, w, h in border_rects((0, 0, 100, 100), 2):
+            self.assertGreater(w, 0)
+            self.assertGreater(h, 0)
+
+
 class TestCtrlFocusGuard(unittest.TestCase):
     def test_text_inputs_block_ctrl_capture(self):
         self.assertFalse(ctrl_capture_allowed(FakeFocus("TEntry")))
@@ -213,6 +235,7 @@ def _make_hud_stub(session, *, mode, profiles_dir=None):
     hud.capture_w_var = FakeVar(100)
     hud.capture_h_var = FakeVar(100)
     hud.win = MagicMock()
+    hud.border = None
     hud.close = MagicMock()
     hud._render = MagicMock()
     hud._render_info = MagicMock()
@@ -376,6 +399,13 @@ class TestCaptureHudLayout(unittest.TestCase):
                     self.root.update()
 
                     self.assertLessEqual(hud.win.winfo_width(), 300)
+                    hud._sync_border()
+                    self.root.update()
+                    top = hud.border.windows[0]
+                    self.assertEqual(
+                        (top.winfo_x(), top.winfo_y(), top.winfo_width()),
+                        (498, 398, 104),
+                    )
                     self.assertEqual(int(hud.win.attributes("-topmost")), 1)
                     self.assertTrue(hud.is_ready())
                     self.assertEqual(hud.lbl_info.cget("text"), "255,0,255  (510, 410)")

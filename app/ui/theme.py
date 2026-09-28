@@ -81,6 +81,11 @@ ROW_SELECTED_BG = SIGNAL_TINT
 ROW_MARKER_SELECTED = "#3A8F63"
 ROW_MARKER_WIDTH = 4
 
+# Capture box outline drawn over the game while the capture HUD is open.
+# Saturated so it reads on both dark and bright game scenes.
+CAPTURE_BORDER = "#FF2D55"
+CAPTURE_BORDER_WIDTH = 2
+
 
 # ---------------------------------------------------------------------------
 # Spacing — 4px base grid (use these instead of arbitrary padx/pady)
