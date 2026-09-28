@@ -1,34 +1,34 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+from app.ui.capture_hud import CaptureHud
 from app.ui.capture_session import CaptureSession
 from app.ui.event_editor import KeystrokeEventEditor
 from app.ui.event_importer import EventImporter
 from app.ui.profiles import KeystrokeProfiles
-from app.ui.quick_event_editor import KeystrokeQuickEventEditor
 from app.ui.settings import KeystrokeSettings
 from app.ui.simulator_app import KeystrokeSimulatorApp
 from app.ui.sort_events import KeystrokeSortEvents
 
 
 class TestWindowStateRestore(unittest.TestCase):
-    @patch("app.ui.quick_event_editor.WindowUtils.center_window")
-    @patch("app.ui.quick_event_editor.StateUtils.load_main_app_state")
-    def test_quick_editor_centers_on_invalid_quick_pos(
+    @patch("app.ui.capture_hud.WindowUtils.center_window")
+    @patch("app.ui.capture_hud.StateUtils.load_main_app_state")
+    def test_capture_hud_centers_on_invalid_position(
         self, mock_load_state, mock_center
     ):
-        stub = KeystrokeQuickEventEditor.__new__(KeystrokeQuickEventEditor)
+        stub = CaptureHud.__new__(CaptureHud)
         stub.win = MagicMock()
-        stub.entries = [MagicMock(), MagicMock()]
-        stub._set_entries = MagicMock()
         stub.capture_session = CaptureSession(MagicMock())
-        stub._refresh_status_text = MagicMock()
-        mock_load_state.return_value = {"quick_pos": "bad", "quick_ptr": "(10, 20)"}
+        stub._pointer_state_key = "quick_ptr"
+        mock_load_state.return_value = {
+            "capture_hud_pos": "bad",
+            "quick_ptr": "(10, 20)",
+        }
 
-        KeystrokeQuickEventEditor._load_pos(stub)
+        CaptureHud._restore_state(stub, restore_pointer=True)
 
         mock_center.assert_called_once_with(stub.win)
-        stub._set_entries.assert_called_once_with(stub.entries[:2], 10, 20)
         stub.capture_session.capturer.set_current_mouse_position.assert_called_once_with(
             (10, 20)
         )

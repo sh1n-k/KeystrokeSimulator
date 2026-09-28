@@ -51,8 +51,8 @@ from app.storage.profile_storage import (
 )
 from app.storage.settings_storage import load_user_settings, save_user_settings
 from app.core.processor import KeystrokeProcessor
+from app.ui.capture_hud import CaptureHud
 from app.ui.profiles import KeystrokeProfiles
-from app.ui.quick_event_editor import KeystrokeQuickEventEditor
 from app.ui.settings import KeystrokeSettings
 from app.ui.sort_events import KeystrokeSortEvents
 from app.utils.sounds import SoundPlayer
@@ -121,6 +121,9 @@ def safe_call(func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R | No
 
 
 class KeystrokeSimulatorApp(tk.Tk):
+    # Class-level default: Tk.__getattr__ recurses on instances without .tk.
+    _quick_hud: CaptureHud | None = None
+
     def __init__(self) -> None:
         super().__init__()
         install_exception_hooks(self)
@@ -1562,6 +1565,11 @@ class KeystrokeSimulatorApp(tk.Tk):
                     self.toggle_start_stop()
 
     def start_simulation(self) -> bool:
+        # 빠른 캡처 HUD는 모달이 아니다. 실행 중 전역 CTRL을 캡처·저장으로
+        # 받지 않도록 실행 전에 닫는다.
+        quick_hud = self._quick_hud
+        if quick_hud is not None and quick_hud.is_open():
+            quick_hud.close()
         if not (
             self.selected_process.get()
             and "(" in self.selected_process.get()
@@ -1751,8 +1759,14 @@ class KeystrokeSimulatorApp(tk.Tk):
     def open_quick_events(self) -> None:
         if self.is_running.get():
             return
-        KeystrokeQuickEventEditor(
+        # HUD는 모달이 아니므로 두 번 열지 않고 기존 창을 앞으로 가져온다.
+        existing = self._quick_hud
+        if existing is not None and existing.is_open():
+            safe_call(cast(Any, existing.win).lift)
+            return
+        self._quick_hud = CaptureHud(
             self,
+            mode="continuous",
             profiles_dir=self.profiles_dir,
             on_close=self.update_ui,
         )

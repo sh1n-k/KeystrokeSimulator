@@ -19,7 +19,7 @@
 | `app/storage/modkey_sets_storage.py` | `modkey_sets.json` 수정키 세트 저장 |
 | `app/storage/run_sets_storage.py` | `run_sets.json` 이름 있는 실행 세트 저장 |
 | `app/ui/event_editor.py` | 상세 이벤트 편집 |
-| `app/ui/quick_event_editor.py` | Quick 프로필 캡처 |
+| `app/ui/capture_hud.py` | 캡처 HUD (편집기 화면 지정, 빠른 이벤트 연속 캡처 → Quick 추가) |
 | `app/core/profile_events.py` | 이벤트 복사·조건 참조·정렬 연산 |
 | `app/core/run_composition.py` | 다중 프로필 실행 시 이벤트/group 네임스페이스 합성 |
 | `app/ui/profiles.py` | 프로필 창 조정과 저장 |
@@ -58,11 +58,11 @@
 
 | 변경 종류 | 필수 구현 확인 | 최소 자동 테스트 | 필요 E2E |
 | --- | --- | --- | --- |
-| 이벤트 스키마·복사/import | `app/core/models.py`, `app/core/profile_events.py`, `app/storage/profile_storage.py`, `app/ui/event_editor.py`, `app/ui/quick_event_editor.py`, `app/ui/event_importer.py`, `app/ui/profile_event_list.py`, `app/core/processor.py`, `app/ui/profiles.py` (`EVENT_DIRTY_FIELD_NAMES` / `_event_fingerprint` dirty detection) | `test_event_data_conversion.py`, `test_event_copy_sync.py`, `test_profile_json_storage.py`, `test_event_dirty_fingerprint.py` | 캡처·편집 또는 실행 의미가 바뀌면 앱과 프로필, 실제 실행 |
+| 이벤트 스키마·복사/import | `app/core/models.py`, `app/core/profile_events.py`, `app/storage/profile_storage.py`, `app/ui/event_editor.py`, `app/ui/capture_hud.py`, `app/ui/event_importer.py`, `app/ui/profile_event_list.py`, `app/core/processor.py`, `app/ui/profiles.py` (`EVENT_DIRTY_FIELD_NAMES` / `_event_fingerprint` dirty detection) | `test_event_data_conversion.py`, `test_event_copy_sync.py`, `test_profile_json_storage.py`, `test_event_dirty_fingerprint.py` | 캡처·편집 또는 실행 의미가 바뀌면 앱과 프로필, 실제 실행 |
 | 설정 | `UserSettings` (incl. `notification_sound_pack`, `runtime_toggle_sound_pack`, `runtime_toggle_sound_enabled`), `app/storage/settings_storage.py`, `app/ui/settings.py`, `app/utils/sounds.py` / `notification_sound_packs.py`, 설정 소비 경로 | `test_settings_storage.py`, `test_keystroke_settings.py`, `test_notification_sound_packs.py`, `test_keystroke_sounds.py` | 표시·재시작 복원·실행 동작이 바뀌면 설정과 복원 |
 | runtime toggle | 모델·저장 필드, `app/utils/runtime_toggle.py`, `app/ui/profile_settings.py`, `app/ui/profile_event_list.py`, `app/ui/simulator_app.py`, `app/core/processor.py` | `test_profile_json_storage.py`, `test_resolve_effective_states.py`, `test_condition_and_core_logic.py`, `test_keystroke_simulator_app_flow.py` | 실제 실행; Windows system/hotkey 변경은 Windows 필수 |
 | 프로필 경로·저장 | `app/storage/profile_storage.py`, `app/storage/profile_display.py`, 프로필 선택·편집 호출부 | `test_profile_json_storage.py`, `test_profile_display.py`, 필요 시 `test_keystroke_simulator_app_flow.py` | 앱과 프로필 |
-| 캡처 UI | `app/core/capturer.py`, `app/ui/capture_session.py`, `app/ui/event_editor.py` 또는 `app/ui/quick_event_editor.py`, processor 입력 형식 | `test_capturer.py`, `test_capture_session.py`, `test_event_editor_validation.py` 또는 `test_quick_event_editor.py`, `test_extract_roi_and_capture.py` | 앱과 프로필, 실제 화면 캡처 |
+| 캡처 UI | `app/core/capturer.py`, `app/ui/capture_session.py`, `app/ui/capture_hud.py`, `app/ui/event_editor.py`, processor 입력 형식 | `test_capturer.py`, `test_capture_session.py`, `test_capture_hud.py`, `test_event_editor_validation.py`, `test_extract_roi_and_capture.py` | 앱과 프로필, 실제 화면 캡처 |
 | OS listener·권한 | `app/ui/input_listener_session.py`, `app/ui/simulator_app.py`, `app/utils/system.py`, 관련 설정과 main-thread UI 갱신 | `test_input_listener_session.py`, `test_keystroke_simulator_app_flow.py`, `test_keystroke_utils.py` | 실제 실행; 변경 대상 OS에서 수행하고 Windows system/hotkey 변경은 Windows 필수 |
 
 표의 자동 테스트는 시작점이다. 공용 계약을 추가로 건드렸다면 해당 구현을 직접 검증하는 기존 테스트까지 확장한다.

@@ -733,27 +733,51 @@ class TestMainUiState(unittest.TestCase):
 
 
 class TestRuntimeEditGuards(unittest.TestCase):
-    @patch("app.ui.simulator_app.KeystrokeQuickEventEditor")
-    def test_open_quick_events_noop_when_running(self, mock_editor):
+    @patch("app.ui.simulator_app.CaptureHud")
+    def test_open_quick_events_noop_when_running(self, mock_hud):
         app = _make_app_stub()
         app.is_running = FakeVar(True)
 
         KeystrokeSimulatorApp.open_quick_events(app)
 
-        mock_editor.assert_not_called()
+        mock_hud.assert_not_called()
 
-    @patch("app.ui.simulator_app.KeystrokeQuickEventEditor")
-    def test_open_quick_events_opens_when_stopped(self, mock_editor):
+    @patch("app.ui.simulator_app.CaptureHud")
+    def test_open_quick_events_opens_continuous_hud_when_stopped(self, mock_hud):
         app = _make_app_stub()
         app.is_running = FakeVar(False)
 
         KeystrokeSimulatorApp.open_quick_events(app)
 
-        mock_editor.assert_called_once_with(
+        mock_hud.assert_called_once_with(
             app,
+            mode="continuous",
             profiles_dir=app.profiles_dir,
             on_close=app.update_ui,
         )
+
+    def test_start_simulation_closes_open_quick_hud(self):
+        app = _make_app_stub()
+        hud = MagicMock()
+        hud.is_open.return_value = True
+        app._quick_hud = hud
+
+        KeystrokeSimulatorApp.start_simulation(app)
+
+        hud.close.assert_called_once()
+
+    @patch("app.ui.simulator_app.CaptureHud")
+    def test_open_quick_events_reuses_open_hud(self, mock_hud):
+        app = _make_app_stub()
+        app.is_running = FakeVar(False)
+        existing = MagicMock()
+        existing.is_open.return_value = True
+        app._quick_hud = existing
+
+        KeystrokeSimulatorApp.open_quick_events(app)
+
+        mock_hud.assert_not_called()
+        existing.win.lift.assert_called_once()
 
 
 class TestReadinessSnapshotSideEffects(unittest.TestCase):

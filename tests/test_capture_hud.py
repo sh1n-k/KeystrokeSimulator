@@ -309,6 +309,7 @@ class TestCaptureFlow(unittest.TestCase):
 
 class TestAppendQuickEvent(unittest.TestCase):
     def test_appends_after_existing_events_with_next_number(self):
+        """B-01: earlier Quick events and their keys survive a new session."""
         with tempfile.TemporaryDirectory() as tmp:
             prof_dir = Path(tmp)
             save_profile(
