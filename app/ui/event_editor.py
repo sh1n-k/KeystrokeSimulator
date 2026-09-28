@@ -3,16 +3,17 @@ from __future__ import annotations
 import copy
 import tkinter as tk
 import tkinter.ttk as ttk
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from tkinter import messagebox
 from typing import Any, ClassVar, TypeAlias, cast
 
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageTk
 from loguru import logger
 
 from app.utils.i18n import txt
 from app.core.models import ColorTuple, EventModel, Position
-from app.ui.capture_session import CaptureSession, capture_rect, rects_overlap
+from app.ui.capture_hud import CaptureHud, CaptureResult, render_overlay
+from app.ui.capture_session import CaptureSession
 from app.utils.keys import KeyUtils
 from app.utils.system import PermissionUtils
 from app.utils.window_state import StateUtils, WindowUtils
@@ -43,11 +44,10 @@ class KeystrokeEventEditor:
         self.win.transient(profiles_window)
         self.win.grab_set()
         self.win.focus_force()
-        cast(Any, self.win).attributes("-topmost", True)
+        # 항상 위는 캡처 HUD만 쓴다. 편집기는 게임 화면을 가리지 않는다.
 
         self.match_mode_var = tk.StringVar(value="pixel")
-        self.capture_w_var = tk.IntVar(value=100)
-        self.capture_h_var = tk.IntVar(value=100)
+        self.capture_size: Position = (100, 100)
         self.region_w_var = tk.IntVar(value=100)
         self.region_h_var = tk.IntVar(value=100)
         self.invert_match_var = tk.BooleanVar(value=False)
@@ -56,7 +56,9 @@ class KeystrokeEventEditor:
         self.priority_var = tk.IntVar(value=0)
 
         self.save_cb: SaveCallback | None = save_callback
+        # 화면 데이터 보관용. 캡처 스트림은 HUD가 자기 세션으로 연다.
         self.capture_session = CaptureSession()
+        self.capture_hud: CaptureHud | None = None
 
         self.event_name: str = ""
         self.key_to_enter: str | None = None
@@ -71,18 +73,13 @@ class KeystrokeEventEditor:
         self.lbl_group_hint: ttk.Label | None = None
         self.lbl_basic_step: ttk.Label | None = None
         self.lbl_bottom_hint: tk.Label | None = None
-        self.entry_capture_w: ttk.Spinbox | None = None
-        self.entry_capture_h: ttk.Spinbox | None = None
         self.entry_region_w: ttk.Spinbox | None = None
         self.entry_region_h: ttk.Spinbox | None = None
         self.entry_priority: ttk.Spinbox | None = None
-        self.coord_entries: list[tk.Entry] = []
         self._error_message: tuple[str, str] | None = None
         self._error_fingerprint: tuple[object, ...] = ()
         self._suppress_dirty_prompt: bool = False
-        self._capture_blocked: bool = False
         self._permission_message: str | None = self._compute_permission_message()
-        self._permission_ticks: int = self._PERMISSION_POLL_TICKS
 
         self._create_layout()
         self.bind_events()
@@ -94,13 +91,6 @@ class KeystrokeEventEditor:
         # Baseline for the discard prompt on close.
         self._initial_fingerprint: tuple[object, ...] = self._form_fingerprint()
         self._is_closing: bool = False
-        self._capture_generation = -1
-        self._ctrl_was_pressed = False
-        self._capture_after_id: str | None = None
-        self._modifier_after_id: str | None = None
-        self.capture_session.start()
-        self._poll_capture_frame()
-        self.check_key_states()
 
         self.load_latest_position()
 
@@ -116,28 +106,12 @@ class KeystrokeEventEditor:
         self.priority_var.trace_add("write", self._trace_refresh_step_indicators)
 
     @property
-    def latest_pos(self) -> Position | None:
-        return self.capture_session.latest_position
-
-    @latest_pos.setter
-    def latest_pos(self, value: Position | None) -> None:
-        self.capture_session.latest_position = value
-
-    @property
     def clicked_pos(self) -> Position | None:
         return self.capture_session.selected_position
 
     @clicked_pos.setter
     def clicked_pos(self, value: Position | None) -> None:
         self.capture_session.selected_position = value
-
-    @property
-    def latest_img(self) -> Image.Image | None:
-        return self.capture_session.latest_image
-
-    @latest_img.setter
-    def latest_img(self, value: Image.Image | None) -> None:
-        self.capture_session.latest_image = value
 
     @property
     def held_img(self) -> Image.Image | None:
@@ -156,7 +130,7 @@ class KeystrokeEventEditor:
         self.capture_session.reference_color = value
 
     def _trace_redraw_overlay(self, *_args: object) -> None:
-        self._redraw_overlay()
+        self._refresh_screen_summary()
 
     def _trace_refresh_basic_guidance(self, *_args: object) -> None:
         self._refresh_basic_guidance()
@@ -193,8 +167,8 @@ class KeystrokeEventEditor:
         self.lbl_stepper_hint: tk.Label = tk.Label(
             self.stepper_bar,
             text=txt(
-                "ALT  move pointer · CTRL  capture image · click right image to set target",
-                "ALT  마우스 이동 · CTRL  이미지 캡처 · 오른쪽 이미지 클릭으로 대상 지정",
+                "Set the screen with Capture (opens the capture HUD)",
+                "화면은 '캡처'를 눌러 HUD에서 지정합니다",
             ),
             bg=theme.SURFACE_PANEL,
             fg=theme.INK_MUTED,
@@ -425,99 +399,54 @@ class KeystrokeEventEditor:
         _paint("cond_only", cond_only)
 
     def _setup_basic_tab(self) -> None:
-        # Two-pane layout: left = visual references, right = form inputs.
+        # Two-pane layout: left = screen summary, right = form inputs.
         self.tab_basic.grid_columnconfigure(0, weight=0)
         self.tab_basic.grid_columnconfigure(1, weight=1)
         self.tab_basic.grid_rowconfigure(0, weight=1)
 
-        # ---------------- Left: live/captured previews + ref pixel --------
-        left = ttk.Frame(self.tab_basic)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, theme.SPACE_3))
+        # ---------------- Left: screen summary + capture button -----------
+        # 캡처 자체는 항상 위 HUD에서 한다. 편집기는 결과만 요약한다.
+        left = ttk.LabelFrame(self.tab_basic, text=txt("Screen", "화면"))
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, theme.SPACE_3))
 
-        ttk.Label(
-            left, text=txt("Live View", "실시간 화면"), foreground=theme.INK_MUTED
-        ).grid(row=0, column=0, padx=theme.SPACE_2, sticky="w")
-        ttk.Label(
-            left, text=txt("Captured", "캡처본"), foreground=theme.INK_MUTED
-        ).grid(row=0, column=1, padx=theme.SPACE_2, sticky="w")
-        # macOS Tk draws a light L-box/cross inside PhotoImage previews when a
-        # Label uses highlightthickness>0 together with configure(width=…,
-        # height=…). Keep highlight off and put a 1px Frame border around it.
-        self.lbl_img1 = self._make_preview_label(left)
-        cast(tk.Frame, self.lbl_img1.master).grid(
-            row=1, column=0, padx=theme.SPACE_2
+        thumb_border = tk.Frame(left, bg=theme.SURFACE_DIVIDER, padx=1, pady=1)
+        thumb_border.pack(padx=theme.SPACE_2, pady=(theme.SPACE_2, 0))
+        self.lbl_thumb: tk.Label = tk.Label(
+            thumb_border, bg=theme.SURFACE_SUNKEN, highlightthickness=0, bd=0
         )
-        self.lbl_img2 = self._make_preview_label(left)
-        cast(tk.Frame, self.lbl_img2.master).grid(
-            row=1, column=1, padx=theme.SPACE_2
-        )
-        for seq in ("<Button-1>", "<B1-Motion>"):
-            self.lbl_img2.bind(seq, self.get_coordinates_of_held_image)
-
-        # Capture actions live next to the previews they act on, not in the
-        # window-wide bottom dock where they applied to every tab.
-        f_capture_actions = ttk.Frame(left)
-        f_capture_actions.grid(
-            row=2, column=0, columnspan=2, sticky="we", pady=(theme.SPACE_2, 0)
-        )
-        ttk.Button(
-            f_capture_actions,
-            text=txt("Capture (Ctrl)", "캡처 (Ctrl)"),
-            command=self.hold_image,
-            style="Outline.TButton",
-        ).pack(side="left", padx=(theme.SPACE_2, theme.SPACE_1))
-        ttk.Button(
-            f_capture_actions,
-            text=txt("Clear Screen", "화면 지우기"),
-            command=self._clear_capture,
-            style="Outline.TButton",
-        ).pack(side="left")
+        self.lbl_thumb.pack()
 
         f_ref = ttk.Frame(left)
-        f_ref.grid(row=3, column=0, columnspan=2, sticky="w", pady=(theme.SPACE_2, 0))
-        ttk.Label(
-            f_ref,
-            text=txt("Reference pixel:", "기준 픽셀:"),
-            foreground=theme.INK_MUTED,
-        ).grid(row=0, column=0, padx=(theme.SPACE_2, theme.SPACE_1))
+        f_ref.pack(fill="x", padx=theme.SPACE_2, pady=(theme.SPACE_1, 0))
         self.lbl_ref: tk.Label = tk.Label(
             f_ref,
             width=2,
-            height=1,
             bg=theme.SURFACE_SUNKEN,
             highlightthickness=1,
             highlightbackground=theme.SURFACE_DIVIDER,
         )
-        self.lbl_ref.grid(row=0, column=1, padx=theme.SPACE_1)
+        self.lbl_ref.pack(side="left")
+        self.lbl_screen_info: ttk.Label = ttk.Label(
+            f_ref, text="", foreground=theme.INK_SECONDARY, justify="left"
+        )
+        self.lbl_screen_info.pack(side="left", padx=(theme.SPACE_1, 0))
 
-        # Capture Size sits under the previews it resizes.
-        f_cap = ttk.LabelFrame(left, text=txt("Capture Size", "캡처 크기"))
-        f_cap.grid(
-            row=4,
-            column=0,
-            columnspan=2,
-            sticky="we",
-            padx=theme.SPACE_2,
-            pady=(theme.SPACE_2, 0),
-        )
-        f_cap_row = ttk.Frame(f_cap)
-        f_cap_row.pack(pady=theme.SPACE_1, padx=theme.SPACE_2)
-        ttk.Label(f_cap_row, text=txt("Width:", "너비:")).pack(side="left", padx=5)
-        self.entry_capture_w = ttk.Spinbox(
-            f_cap_row, textvariable=self.capture_w_var, from_=50, to=1000, width=5
-        )
-        self.entry_capture_w.pack(side="left", padx=5)
-        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
-            self.entry_capture_w.bind(seq, self._on_capture_size_change)
-        ttk.Label(f_cap_row, text=txt("Height:", "높이:")).pack(side="left", padx=5)
-        self.entry_capture_h = ttk.Spinbox(
-            f_cap_row, textvariable=self.capture_h_var, from_=50, to=1000, width=5
-        )
-        self.entry_capture_h.pack(side="left", padx=5)
-        for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>", "<KeyRelease>"):
-            self.entry_capture_h.bind(seq, self._on_capture_size_change)
+        f_capture_actions = ttk.Frame(left)
+        f_capture_actions.pack(fill="x", padx=theme.SPACE_2, pady=theme.SPACE_2)
+        ttk.Button(
+            f_capture_actions,
+            text=txt("Capture…", "캡처…"),
+            command=self._open_capture_hud,
+            style="Accent.TButton",
+        ).pack(side="left", padx=(0, theme.SPACE_1))
+        ttk.Button(
+            f_capture_actions,
+            text=txt("Clear", "지우기"),
+            command=self._clear_capture,
+            style="Outline.TButton",
+        ).pack(side="left")
 
-        # ---------------- Right: name / coords / key ----------------------
+        # ---------------- Right: name / key -------------------------------
         right = ttk.Frame(self.tab_basic)
         right.grid(row=0, column=1, sticky="nsew")
         right.grid_columnconfigure(0, weight=1)
@@ -529,28 +458,8 @@ class KeystrokeEventEditor:
         self.entry_name.pack(side="left", fill="x", expand=True, padx=theme.SPACE_2)
         self.entry_name.bind("<KeyRelease>", self._trace_refresh_basic_guidance)
 
-        # The two coordinate pairs use different coordinate systems, so they
-        # are labelled as separate groups instead of one undifferentiated row.
-        coord_frame = ttk.Frame(right)
-        coord_frame.grid(row=1, column=0, sticky="we", pady=(0, theme.SPACE_2))
-        gb_screen = ttk.LabelFrame(
-            coord_frame,
-            text=txt("Screen position (ALT to move)", "화면 위치 (ALT로 이동)"),
-        )
-        gb_screen.grid(row=0, column=0, sticky="w", padx=(0, theme.SPACE_2))
-        gb_pixel = ttk.LabelFrame(
-            coord_frame,
-            text=txt("Target pixel (capture space)", "대상 픽셀 (캡처본 기준)"),
-        )
-        gb_pixel.grid(row=0, column=1, sticky="w")
-        self.coord_entries = self.create_coord_entries(
-            gb_screen, [txt("X:", "X:"), txt("Y:", "Y:")]
-        ) + self.create_coord_entries(
-            gb_pixel, [txt("X:", "X:"), txt("Y:", "Y:")], pixel=True
-        )
-
         f_key = ttk.Frame(right)
-        f_key.grid(row=2, column=0, sticky="we", pady=(0, theme.SPACE_2))
+        f_key.grid(row=1, column=0, sticky="we", pady=(0, theme.SPACE_2))
         ttk.Label(f_key, text=txt("Key:", "키:"), anchor="w").pack(
             side="left", padx=(0, theme.SPACE_2)
         )
@@ -563,10 +472,11 @@ class KeystrokeEventEditor:
             right,
             text="",
             foreground=theme.SIGNAL_BASE,
-            wraplength=420,
+            wraplength=320,
             justify="left",
         )
-        self.lbl_basic_step.grid(row=3, column=0, sticky="w", pady=(0, theme.SPACE_2))
+        self.lbl_basic_step.grid(row=2, column=0, sticky="w", pady=(0, theme.SPACE_2))
+        self._refresh_screen_summary()
 
     def _create_numeric_validator(self) -> tuple[str, str]:
         """숫자 입력 검증 함수 생성 (재사용)"""
@@ -698,19 +608,6 @@ class KeystrokeEventEditor:
         except tk.TclError:
             pass
 
-    def _on_capture_size_change(self, *_args: object) -> None:
-        """캡처 크기 변경 시 capturer 동기화"""
-        try:
-            w = max(50, min(1000, self.capture_w_var.get()))
-            h = max(50, min(1000, self.capture_h_var.get()))
-            if self.capture_w_var.get() != w:
-                self.capture_w_var.set(w)
-            if self.capture_h_var.get() != h:
-                self.capture_h_var.set(h)
-            self.capture_session.set_capture_size(w, h)
-        except (ValueError, tk.TclError):
-            pass
-
     def _on_region_size_change(self, *_args: object) -> None:
         """영역 크기 변경 시 오버레이 갱신"""
         try:
@@ -727,8 +624,7 @@ class KeystrokeEventEditor:
             if self.region_h_var.get() != h:
                 self.region_h_var.set(h)
             self._sync_region_constraints()
-            if self.held_img is not None:
-                self._draw_overlay(self.held_img, self.lbl_img2)
+            self._refresh_screen_summary()
         except (ValueError, tk.TclError):
             pass
 
@@ -1099,11 +995,9 @@ class KeystrokeEventEditor:
         "error": (theme.STATUS_ERROR_BG, theme.STATUS_ERROR_FG, theme.STATUS_ERROR_ICON),
     }
 
-    # 100ms 폴링 기준 3초. 권한 조회 한 번이 10ms를 넘기 때문에 캐시한다.
-    _PERMISSION_POLL_TICKS = 30
-
     def _compute_permission_message(self) -> str | None:
-        """macOS 권한 조회는 호출당 10ms 이상이라 폴링에서만 호출한다."""
+        """macOS 권한 조회는 호출당 10ms 이상이라 창을 열 때 한 번만 한다.
+        캡처 중 권한 변화는 HUD가 따로 확인한다."""
         missing_permissions = PermissionUtils.missing_macos_permissions()
         if not missing_permissions:
             return None
@@ -1116,22 +1010,6 @@ class KeystrokeEventEditor:
             "macOS permission required: {missing}. Grant access in System Settings before capturing or sending keys.",
             "macOS 권한 필요: {missing}. 캡처 또는 키 입력 전에 시스템 설정에서 권한을 허용하세요.",
             missing=", ".join(missing_labels),
-        )
-
-    def _window_blocks_capture(self) -> bool:
-        """캡처 영역이 에디터 창과 겹치는지 — 겹치면 창이 캡처본에 섞인다."""
-        try:
-            pointer = self.capture_session.current_position()
-            cap_w = max(50, min(1000, self.capture_w_var.get()))
-            cap_h = max(50, min(1000, self.capture_h_var.get()))
-            win_x, win_y = self.win.winfo_rootx(), self.win.winfo_rooty()
-            win_w, win_h = self.win.winfo_width(), self.win.winfo_height()
-        except (tk.TclError, TypeError, ValueError):
-            return False
-        if not pointer or win_w <= 1 or win_h <= 1:
-            return False
-        return rects_overlap(
-            capture_rect(pointer, (cap_w, cap_h)), (win_x, win_y, win_w, win_h)
         )
 
     def _required_field_error(self) -> tuple[str, str] | None:
@@ -1153,8 +1031,8 @@ class KeystrokeEventEditor:
                 return (
                     txt("Target pixel required", "대상 픽셀 필요"),
                     txt(
-                        "Click the captured image to choose the trigger pixel or region center.",
-                        "오른쪽 캡처본을 클릭해 트리거 픽셀 또는 영역 중심을 고르세요.",
+                        "Open Capture and click the trigger pixel or region center.",
+                        "'캡처'를 열어 트리거 픽셀 또는 영역 중심을 고르세요.",
                     ),
                 )
             return (
@@ -1212,19 +1090,6 @@ class KeystrokeEventEditor:
         if permission:
             return "warn", txt("macOS permission required", "macOS 권한 필요"), permission, can_save
 
-        # 화면이 아직 완성되지 않았을 때만 겹침을 경고한다. 캡처가 끝난 뒤에는
-        # 남은 저장 조건을 알리는 편이 더 쓸모 있다.
-        if self._capture_blocked and not self._has_complete_screen():
-            return (
-                "warn",
-                txt("Window covers capture area", "창이 캡처 영역을 가림"),
-                txt(
-                    "This window overlaps the area under the pointer, so a capture would include the editor itself. Move the window aside before pressing CTRL.",
-                    "이 창이 포인터 주변 캡처 영역과 겹쳐 있어 캡처본에 에디터 창이 함께 담깁니다. CTRL을 누르기 전에 창을 옆으로 옮기세요.",
-                ),
-                can_save,
-            )
-
         if self._error_message:
             # 값을 고치면 지난 실패 안내는 즉시 사라져야 한다.
             if self._form_fingerprint() == self._error_fingerprint:
@@ -1266,122 +1131,6 @@ class KeystrokeEventEditor:
             # 예약된 after/trace 콜백이 창 파괴 이후 도착할 수 있다.
             return
 
-    def create_coord_entries(
-        self, parent: tk.Misc, labels: Sequence[str], pixel: bool = False
-    ) -> list[tk.Entry]:
-        """좌표 한 쌍(X/Y)을 만든다.
-
-        pixel 그룹은 캡처본 안의 대상 지점이라 화면 위치와 반영 경로가 다르다.
-        """
-        entries: list[tk.Entry] = []
-
-        def make_adjust_handler(
-            entry: tk.Entry, delta: int
-        ) -> Callable[[tk.Event[tk.Entry]], str]:
-            def adjust(_event: tk.Event[tk.Entry]) -> str:
-                return self._adj_entry(entry, delta)
-
-            return adjust
-
-        for i, label_text in enumerate(labels):
-            tk.Label(parent, text=label_text).grid(
-                row=0, column=i * 2, padx=(theme.SPACE_2, 1), pady=theme.SPACE_1,
-                sticky=tk.E,
-            )
-            e = tk.Entry(parent, width=5)
-            e.grid(
-                row=0, column=i * 2 + 1, padx=(1, theme.SPACE_2), pady=theme.SPACE_1,
-                sticky=tk.W,
-            )
-            entries.append(e)
-
-        for e in entries:
-            e.bind("<Up>", make_adjust_handler(e, 1))
-            e.bind("<Down>", make_adjust_handler(e, -1))
-            if pixel:
-                # 타이핑하는 즉시 캡처본 크로스라인이 따라 움직인다.
-                e.bind("<KeyRelease>", self.update_clicked_position_from_entries)
-                e.bind("<FocusOut>", self._on_pixel_entry_focus_out)
-            else:
-                e.bind("<FocusOut>", self.update_position_from_entries)
-        return entries
-
-    def _is_pixel_entry(self, entry: tk.Entry) -> bool:
-        return len(self.coord_entries) >= 4 and entry in self.coord_entries[2:4]
-
-    def _pixel_entry_limit(self, entry: tk.Entry) -> int | None:
-        """대상 픽셀 입력의 상한 (캡처본 크기 기준)."""
-        img = self.held_img
-        if img is None or not self._is_pixel_entry(entry):
-            return None
-        is_x = entry is self.coord_entries[2]
-        return (img.width if is_x else img.height) - 1
-
-    def _adj_entry(self, entry: tk.Entry, delta: int) -> str:
-        try:
-            val = int(entry.get()) + delta
-        except ValueError:
-            return "break"
-        if self._is_pixel_entry(entry):
-            limit = self._pixel_entry_limit(entry)
-            if limit is None:
-                return "break"
-            val = max(0, min(limit, val))
-        entry.delete(0, tk.END)
-        entry.insert(0, str(val))
-        if entry in self.coord_entries[:2]:
-            self.update_position_from_entries()
-        else:
-            self.update_clicked_position_from_entries()
-        return "break"
-
-    def check_key_states(self) -> None:
-        if self._is_closing:
-            return
-        if KeyUtils.mod_key_pressed("alt"):
-            self.capture_session.set_position(self.win.winfo_pointerxy())
-            self._set_entries(
-                self.coord_entries[:2], *self.capture_session.current_position()
-            )
-
-        ctrl_pressed = KeyUtils.mod_key_pressed("ctrl")
-        if ctrl_pressed and not self._ctrl_was_pressed:
-            self.hold_image()
-        self._ctrl_was_pressed = ctrl_pressed
-
-        # Warn as soon as the editor starts covering the area about to be
-        # captured — an always-on-top window would end up inside the capture.
-        stale = False
-        blocked = self._window_blocks_capture()
-        if blocked != self._capture_blocked:
-            self._capture_blocked = blocked
-            stale = True
-
-        # 권한 조회는 비싸므로 3초에 한 번만 확인한다.
-        self._permission_ticks -= 1
-        if self._permission_ticks <= 0:
-            self._permission_ticks = self._PERMISSION_POLL_TICKS
-            permission = self._compute_permission_message()
-            if permission != self._permission_message:
-                self._permission_message = permission
-                stale = True
-
-        if stale:
-            self._refresh_basic_guidance()
-
-        self._modifier_after_id = self.win.after(100, self.check_key_states)
-
-    def _poll_capture_frame(self) -> None:
-        if self._is_closing:
-            return
-        snapshot = self.capture_session.snapshot()
-        if snapshot.generation != self._capture_generation:
-            self._capture_generation = snapshot.generation
-            self.update_capture_image(
-                snapshot.latest_position, snapshot.latest_image
-            )
-        self._capture_after_id = self.win.after(50, self._poll_capture_frame)
-
     def bind_events(self) -> None:
         self.win.bind("<Escape>", self.close_window)
         self.win.bind("<Return>", self.save_event)
@@ -1409,205 +1158,6 @@ class KeystrokeEventEditor:
         if isinstance(values, str):
             return tuple(values.split())
         return tuple(str(value) for value in values)
-
-    def update_capture_image(self, pos: Position | None, img: Image.Image | None) -> None:
-        """
-        스레드 안전한 이미지 업데이트
-        - 윈도우가 닫힌 후 호출될 수 있으므로 위젯 존재 여부 확인
-        """
-        if not pos or not img:
-            return
-
-        # 윈도우와 위젯이 모두 존재하는지 확인
-        try:
-            if (
-                hasattr(self, "win")
-                and self.win.winfo_exists()
-                and hasattr(self, "lbl_img1")
-                and self.lbl_img1.winfo_exists()
-            ):
-                self._safe_update_img_lbl(self.lbl_img1, self._scale_for_display(img))
-                self._refresh_basic_guidance()
-        except (tk.TclError, AttributeError, RuntimeError):
-            # 윈도우가 이미 파괴된 경우 무시
-            pass
-
-    def hold_image(self) -> None:
-        if (
-            self.capture_session.hold()
-            and self.capture_session.held_position
-            and self.held_img
-        ):
-            self._set_entries(
-                self.coord_entries[:2], *self.capture_session.held_position
-            )
-            self._update_img_lbl(
-                self.lbl_img2, self._scale_for_display(self.held_img)
-            )
-            if self.clicked_pos and not self._clicked_pos_in_image(self.held_img):
-                # Capture size shrank or stale pixel from a previous frame.
-                self.clicked_pos = None
-                self.ref_pixel = None
-            if self.clicked_pos:
-                self._sync_region_constraints()
-                self._on_region_size_change()
-                self._draw_overlay(self.held_img, self.lbl_img2)
-                if self.clicked_pos:
-                    self._update_ref_pixel(self.held_img, self.clicked_pos)
-            self._refresh_basic_guidance()
-
-    def get_coordinates_of_held_image(self, event: tk.Event[tk.Label]) -> None:
-        if (
-            not self.held_img
-            or event.x >= self.lbl_img2.winfo_width()  # 라벨 크기 기준으로 체크
-            or event.y >= self.lbl_img2.winfo_height()
-        ):
-            return
-
-        if not self.capture_session.select(
-            (event.x, event.y),
-            (self.lbl_img2.winfo_width(), self.lbl_img2.winfo_height()),
-        ):
-            return
-        if self.clicked_pos is None:
-            return
-        ix, iy = self.clicked_pos
-        self._update_ref_pixel(self.held_img, self.clicked_pos)
-        self._set_entries(self.coord_entries[2:], ix, iy)
-        self._sync_region_constraints()
-        self._on_region_size_change()
-        self._draw_overlay(self.held_img, self.lbl_img2)
-        self._refresh_basic_guidance()
-
-    def _clicked_pos_in_image(self, img: Image.Image) -> bool:
-        if not self.clicked_pos:
-            return False
-        cx, cy = self.clicked_pos
-        w, h = img.size
-        return 0 <= cx < w and 0 <= cy < h
-
-    def _draw_overlay(self, img: Image.Image, lbl: tk.Label) -> None:
-        if not self.clicked_pos:
-            return
-        if not self._clicked_pos_in_image(img):
-            # e.g. pixel (265, y) after capture width shrank below 265
-            self.clicked_pos = None
-            self._update_img_lbl(lbl, self._scale_for_display(img))
-            return
-
-        res_img = img.copy()  # copy.deepcopy → copy()
-        draw = ImageDraw.Draw(res_img)
-        cx, cy = self.clicked_pos
-        w, h = res_img.size
-
-        if self.match_mode_var.get() == "region":
-            try:
-                limits = self._get_region_limits()
-                if limits and (limits[0] < 20 or limits[1] < 20):
-                    marker = 6
-                    draw.line(
-                        [(max(0, cx - marker), cy), (min(w - 1, cx + marker), cy)],
-                        fill="red",
-                        width=2,
-                    )
-                    draw.line(
-                        [(cx, max(0, cy - marker)), (cx, min(h - 1, cy + marker))],
-                        fill="red",
-                        width=2,
-                    )
-                    self._update_img_lbl(lbl, self._scale_for_display(res_img))
-                    return
-                rw = self.region_w_var.get() // 2
-                rh = self.region_h_var.get() // 2
-                x1, y1 = max(0, cx - rw), max(0, cy - rh)
-                x2, y2 = min(w, cx + rw), min(h, cy + rh)
-                draw.rectangle([x1, y1, x2, y2], outline="yellow", width=2)
-            except Exception as exc:
-                logger.debug(f"Preview overlay failed: {exc}")
-        else:
-            # 이미지 모드에 관계없이 안전하게 처리
-            pixels = res_img.load()
-            if pixels is None:
-                return
-            pixel_access = cast(Any, pixels)
-            num_channels = len(res_img.getbands())
-
-            def inverted_pixel(raw_pixel: object) -> tuple[int, int, int] | tuple[int, int, int, int]:
-                if isinstance(raw_pixel, tuple):
-                    values = [
-                        int(channel)
-                        for channel in cast(Sequence[int | float], raw_pixel)
-                    ]
-                elif isinstance(raw_pixel, int | float):
-                    base = int(raw_pixel)
-                    values = [base, base, base]
-                else:
-                    values = [0, 0, 0]
-                while len(values) < 4:
-                    values.append(255)
-                inverted = (
-                    255 - values[0],
-                    255 - values[1],
-                    255 - values[2],
-                )
-                if num_channels == 3:
-                    return inverted
-                return inverted + (values[3],)
-
-            for x in range(w):
-                pixel_access[x, cy] = inverted_pixel(cast(object, pixel_access[x, cy]))
-
-            for y in range(h):
-                pixel_access[cx, y] = inverted_pixel(cast(object, pixel_access[cx, y]))
-
-        self._update_img_lbl(lbl, self._scale_for_display(res_img))
-
-    def _redraw_overlay(self) -> None:
-        if self.held_img and self.clicked_pos:
-            self._draw_overlay(self.held_img, self.lbl_img2)
-
-    @staticmethod
-    def _make_preview_label(parent: tk.Misc) -> tk.Label:
-        """Image preview label safe on macOS Tk (no interior L-box artifact)."""
-        border = tk.Frame(parent, bg=theme.SURFACE_DIVIDER, padx=1, pady=1)
-        label = tk.Label(
-            border,
-            bg=theme.SURFACE_SUNKEN,
-            highlightthickness=0,
-            bd=0,
-        )
-        label.pack()
-        return label
-
-    @staticmethod
-    def _scale_for_display(img: Image.Image) -> Image.Image:
-        """표시용 이미지 스케일 다운 (원본 크기 유지: MAX_DISPLAY=400px 기준)"""
-        MAX_DISPLAY = 400
-        scale = min(MAX_DISPLAY / img.width, MAX_DISPLAY / img.height, 1.0)
-        if scale < 1.0:
-            resize = cast(Any, img).resize
-            return cast(
-                Image.Image,
-                resize(
-                    (int(img.width * scale), int(img.height * scale)),
-                    Image.Resampling.LANCZOS,
-                ),
-            )
-        return img
-
-    def _update_ref_pixel(self, img: Image.Image, coords: Position) -> None:
-        pixel = img.getpixel(coords)
-        if isinstance(pixel, int | float):
-            value = int(pixel)
-            self.ref_pixel = (value, value, value)
-        else:
-            channels = cast(Sequence[int | float], pixel)
-            self.ref_pixel = tuple(int(channel) for channel in channels)
-        if len(self.ref_pixel) == 3:
-            color = self.ref_pixel + (255,)  # 알파 채널 추가
-        else:
-            color = self.ref_pixel
-        self._update_img_lbl(self.lbl_ref, Image.new("RGBA", (25, 25), color=color))
 
     def _get_condition_display(self, state_val: bool | None) -> str:
         """조건 상태 값을 표시 문자열로 변환"""
@@ -1968,8 +1518,8 @@ class KeystrokeEventEditor:
             or ref_pixel is None
         ):
             return
-        cap_w = max(50, min(1000, self.capture_w_var.get()))
-        cap_h = max(50, min(1000, self.capture_h_var.get()))
+        cap_w = max(50, min(1000, self.capture_size[0]))
+        cap_h = max(50, min(1000, self.capture_size[1]))
 
         if not self._validate_timing_values(dur, rand):
             return
@@ -2015,8 +1565,6 @@ class KeystrokeEventEditor:
             logger.error("Event save callback is not configured")
             return
         self.save_cb(evt, self.is_edit, self.row_num)
-        if held_img is not None:
-            self._update_img_lbl(self.lbl_img2, held_img)
         self._suppress_dirty_prompt = True
         self.close_window()
 
@@ -2033,8 +1581,7 @@ class KeystrokeEventEditor:
                 None if held is None else (id(held), held.size, held.mode),
                 self.entry_dur.get(),
                 self.entry_rand.get(),
-                self.capture_w_var.get(),
-                self.capture_h_var.get(),
+                self.capture_size,
                 self.region_w_var.get(),
                 self.region_h_var.get(),
                 self.match_mode_var.get(),
@@ -2068,18 +1615,11 @@ class KeystrokeEventEditor:
         if not self._confirm_discard():
             return
         self._is_closing = True
-        for after_id in (self._capture_after_id, self._modifier_after_id):
-            if after_id is not None:
-                try:
-                    self.win.after_cancel(after_id)
-                except tk.TclError:
-                    pass
-        self.capture_session.stop()
+        if self.capture_hud is not None:
+            self.capture_hud.close()
 
         StateUtils.save_main_app_state(
             event_position=f"{self.win.winfo_x()}/{self.win.winfo_y()}",
-            event_pointer=str(self.capture_session.current_position()),
-            clicked_position=str(self.clicked_pos),
         )
         self.win.grab_release()
         self.win.destroy()
@@ -2092,67 +1632,6 @@ class KeystrokeEventEditor:
             self.win.geometry(f"+{pos[0]}+{pos[1]}")
         else:
             WindowUtils.center_window(self.win)
-        if not self.is_edit and (ptr := state.get("event_pointer")):
-            point = StateUtils.parse_position_tuple(ptr)
-            if point is not None:
-                self.capture_session.set_position(point)
-
-    def update_position_from_entries(self, event: object | None = None) -> None:
-        try:
-            self.capture_session.set_position(
-                (int(self.coord_entries[0].get()), int(self.coord_entries[1].get()))
-            )
-        except ValueError:
-            pass
-
-    def update_clicked_position_from_entries(
-        self, event: object | None = None
-    ) -> None:
-        """대상 픽셀 입력을 반영하고 캡처본의 크로스라인을 옮긴다.
-
-        타이핑 도중의 범위 밖 값은 무시한다. 확정은 포커스가 빠질 때 한다.
-        """
-        img = self.held_img
-        if img is None or len(self.coord_entries) < 4:
-            return
-        try:
-            position = (
-                int(self.coord_entries[2].get()),
-                int(self.coord_entries[3].get()),
-            )
-        except ValueError:
-            return
-        if not (0 <= position[0] < img.width and 0 <= position[1] < img.height):
-            return
-        if self.clicked_pos == position:
-            return
-
-        self.clicked_pos = position
-        self._update_ref_pixel(img, position)
-        self._sync_region_constraints()
-        self._on_region_size_change()
-        self._draw_overlay(img, self.lbl_img2)
-        self._refresh_basic_guidance()
-
-    def _on_pixel_entry_focus_out(self, event: object | None = None) -> None:
-        """포커스를 벗어날 때 범위 밖 값이나 빈 칸을 정리한다."""
-        img = self.held_img
-        if img is None or len(self.coord_entries) < 4:
-            return
-        try:
-            x = int(self.coord_entries[2].get())
-            y = int(self.coord_entries[3].get())
-        except ValueError:
-            if self.clicked_pos:
-                self._set_entries(self.coord_entries[2:], *self.clicked_pos)
-            return
-        clamped = (
-            max(0, min(img.width - 1, x)),
-            max(0, min(img.height - 1, y)),
-        )
-        if (x, y) != clamped:
-            self._set_entries(self.coord_entries[2:], *clamped)
-        self.update_clicked_position_from_entries()
 
     def load_stored_event(self, func: EventFactory) -> None:
         if not (evt := func()):
@@ -2163,41 +1642,21 @@ class KeystrokeEventEditor:
             return
 
         self.event_name = evt.event_name or ""
-        self.latest_pos = evt.latest_position
-        self.clicked_pos = evt.clicked_position
-        self.latest_img, self.held_img, self.key_to_enter = (
-            None,  # left preview is always live capture
-            evt.held_screenshot,
-            evt.key_to_enter,
-        )
+        self.key_to_enter = evt.key_to_enter
 
         self.entry_name.delete(0, tk.END)
         self.entry_name.insert(0, self.event_name or "")
 
-        if self.latest_pos is not None:
-            self.capture_session.set_position(self.latest_pos, force=True)
-            self._set_entries(self.coord_entries[:2], *self.latest_pos)
-        if self.clicked_pos is not None:
-            self._set_entries(self.coord_entries[2:], *self.clicked_pos)
-
-        # 원본 ref_pixel 값이 있으면 사용
-        if hasattr(evt, "ref_pixel_value") and evt.ref_pixel_value:
-            self.ref_pixel = evt.ref_pixel_value
-            self._update_img_lbl(
-                self.lbl_ref,
-                Image.new(
-                    "RGBA",
-                    (25, 25),
-                    color=(
-                        self.ref_pixel[:4]
-                        if len(self.ref_pixel) >= 4
-                        else self.ref_pixel + (255,)
-                    ),
-                ),
-            )
-        else:
-            if self.held_img is not None and self.clicked_pos is not None:
-                self._update_ref_pixel(self.held_img, self.clicked_pos)
+        self.capture_session.restore(
+            latest_position=evt.latest_position,
+            held_image=evt.held_screenshot,
+            selected_position=evt.clicked_position,
+            reference_color=evt.ref_pixel_value or None,
+        )
+        held, clicked = evt.held_screenshot, evt.clicked_position
+        if not evt.ref_pixel_value and held is not None and clicked is not None:
+            # 원본 기준색이 없으면 캡처본에서 다시 읽는다.
+            self.capture_session.select(clicked, held.size)
 
         if self.key_to_enter in self._key_values():
             self.key_combobox.set(self.key_to_enter)
@@ -2210,9 +1669,7 @@ class KeystrokeEventEditor:
         self.match_mode_var.set(getattr(evt, "match_mode", "pixel"))
         self.invert_match_var.set(getattr(evt, "invert_match", False))
         cap_size = getattr(evt, "capture_size", (100, 100)) or (100, 100)
-        self.capture_w_var.set(cap_size[0])
-        self.capture_h_var.set(cap_size[1])
-        self.capture_session.set_capture_size(cap_size[0], cap_size[1])
+        self.capture_size = (int(cap_size[0]), int(cap_size[1]))
         if r_size := getattr(evt, "region_size", None):
             self.region_w_var.set(r_size[0])
             self.region_h_var.set(r_size[1])
@@ -2230,25 +1687,110 @@ class KeystrokeEventEditor:
         self._on_match_mode_change()
         self._sync_region_constraints()
         self._on_region_size_change()
-
-        if self.held_img is not None:
-            self._draw_overlay(self.held_img, self.lbl_img2)
+        self._refresh_screen_summary()
         self._refresh_basic_guidance()
 
-    @staticmethod
-    def _set_entries(entries: Sequence[tk.Entry], x: int, y: int) -> None:
-        for i, val in enumerate((x, y)):
-            entries[i].delete(0, tk.END)
-            entries[i].insert(0, str(val))
+    # ------------------------------------------------------------------
+    # Screen (capture HUD)
+    # ------------------------------------------------------------------
+    _THUMB_MAX = 120
 
-    def _safe_update_img_lbl(self, lbl: tk.Label, img: Image.Image) -> None:
-        """위젯 존재 확인 후 안전하게 이미지 업데이트"""
+    def _region_overlay_size(self) -> Position | None:
         try:
-            if lbl.winfo_exists():
-                self._update_img_lbl(lbl, img)
-        except (tk.TclError, AttributeError):
-            # 위젯이 파괴된 경우 무시
-            pass
+            if self.match_mode_var.get() != "region":
+                return None
+            return (self.region_w_var.get(), self.region_h_var.get())
+        except (tk.TclError, ValueError):
+            return None
+
+    def _refresh_screen_summary(self) -> None:
+        """화면 요약: 썸네일(대상 표시 포함), 기준색, 좌표."""
+        thumb = getattr(self, "lbl_thumb", None)
+        info = getattr(self, "lbl_screen_info", None)
+        if thumb is None or info is None:
+            return
+        snap = self.capture_session.snapshot()
+        img, pixel, pos = snap.held_image, snap.selected_position, snap.held_position
+        color = snap.reference_color
+        try:
+            if img is None:
+                size = self._THUMB_MAX * 3 // 4
+                self._update_img_lbl(
+                    thumb, Image.new("RGB", (size, size), theme.SURFACE_SUNKEN)
+                )
+            else:
+                shown = render_overlay(img, pixel, self._region_overlay_size())
+                shown.thumbnail((self._THUMB_MAX, self._THUMB_MAX))
+                self._update_img_lbl(thumb, shown)
+            self.lbl_ref.config(
+                bg="#{:02x}{:02x}{:02x}".format(*(int(c) for c in color[:3]))
+                if color
+                else theme.SURFACE_SUNKEN
+            )
+            if img is not None and pixel is not None and pos is not None and color:
+                rgb = ",".join(str(int(c)) for c in color[:3])
+                info.config(text=f"{rgb}\n({pos[0] + pixel[0]}, {pos[1] + pixel[1]})")
+            else:
+                info.config(text=txt("No screen", "화면 없음"))
+        except tk.TclError:
+            return
+
+    def _current_capture(self) -> CaptureResult | None:
+        snap = self.capture_session.snapshot()
+        if (
+            snap.held_image is None
+            or snap.held_position is None
+            or snap.selected_position is None
+            or snap.reference_color is None
+        ):
+            return None
+        return CaptureResult(
+            position=snap.held_position,
+            capture_size=self.capture_size,
+            image=snap.held_image,
+            pixel=snap.selected_position,
+            color=snap.reference_color,
+        )
+
+    def _open_capture_hud(self) -> None:
+        hud = self.capture_hud
+        if hud is not None and hud.is_open():
+            cast(Any, hud.win).lift()
+            return
+        # grab을 HUD로 넘긴다. HUD를 닫으면 편집기로 돌아온다.
+        self.capture_hud = CaptureHud(
+            self.win,
+            mode="single",
+            name=self.entry_name.get(),
+            on_name_change=self._on_hud_name_change,
+            on_apply=self._apply_capture,
+            initial=self._current_capture(),
+            capture_size=self.capture_size,
+            region_size=self._region_overlay_size(),
+            grab=True,
+            on_close=self._on_hud_closed,
+        )
+
+    def _on_hud_closed(self) -> None:
+        self.capture_hud = None
+
+    def _on_hud_name_change(self, name: str) -> None:
+        self.entry_name.delete(0, tk.END)
+        self.entry_name.insert(0, name)
+        self._refresh_basic_guidance()
+
+    def _apply_capture(self, result: CaptureResult) -> None:
+        self.capture_session.restore(
+            latest_position=result.position,
+            held_image=result.image,
+            selected_position=result.pixel,
+            reference_color=result.color,
+        )
+        self.capture_size = result.capture_size
+        self._sync_region_constraints()
+        self._on_region_size_change()
+        self._refresh_screen_summary()
+        self._refresh_basic_guidance()
 
     @staticmethod
     def _update_img_lbl(lbl: tk.Label, img: Image.Image) -> None:
@@ -2258,21 +1800,7 @@ class KeystrokeEventEditor:
         lbl.configure(image=photo, width=img.width, height=img.height)
         cast(Any, lbl).image = photo
 
-    def _clear_preview_label(self, lbl: tk.Label | None) -> None:
-        if lbl is None:
-            return
-        try:
-            if not lbl.winfo_exists():
-                return
-            lbl.configure(image="", width=1, height=1)
-            cast(Any, lbl).image = None
-        except tk.TclError:
-            return
-
     def _clear_capture(self) -> None:
         self.capture_session.clear_hold()
-        for entry in self.coord_entries[2:]:
-            entry.delete(0, tk.END)
-        self._clear_preview_label(getattr(self, "lbl_img2", None))
-        self._clear_preview_label(getattr(self, "lbl_ref", None))
+        self._refresh_screen_summary()
         self._refresh_basic_guidance()

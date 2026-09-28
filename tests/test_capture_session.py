@@ -1,10 +1,8 @@
 import unittest
-from unittest.mock import MagicMock
 
 from PIL import Image
 
 from app.ui.capture_session import CaptureSession, capture_rect, rects_overlap
-from app.ui.event_editor import KeystrokeEventEditor
 
 
 class FakeCapturer:
@@ -124,31 +122,6 @@ class TestCaptureGeometry(unittest.TestCase):
         self.assertTrue(rects_overlap((0, 0, 10, 10), (9, 9, 5, 5)))
         self.assertFalse(rects_overlap((0, 0, 10, 10), (10, 0, 5, 5)))
         self.assertFalse(rects_overlap((0, 0, 10, 10), (0, 10, 5, 5)))
-
-
-class TestEditorOverlapWarning(unittest.TestCase):
-    """B-03: the overlap check follows the capturer's top-left box."""
-
-    def _editor(self, pointer):
-        editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
-        editor.capture_session = MagicMock()
-        editor.capture_session.current_position.return_value = pointer
-        editor.capture_w_var = MagicMock(get=MagicMock(return_value=100))
-        editor.capture_h_var = MagicMock(get=MagicMock(return_value=100))
-        editor.win = MagicMock()
-        editor.win.winfo_rootx.return_value = 500
-        editor.win.winfo_rooty.return_value = 500
-        editor.win.winfo_width.return_value = 300
-        editor.win.winfo_height.return_value = 200
-        return editor
-
-    def test_box_right_of_window_does_not_overlap(self):
-        # The old center-based box (pointer - 50) reached into the window.
-        self.assertFalse(self._editor((810, 550))._window_blocks_capture())
-
-    def test_box_extending_into_window_overlaps(self):
-        # The old center-based box ended at x=450 and missed the window.
-        self.assertTrue(self._editor((440, 550))._window_blocks_capture())
 
 
 if __name__ == "__main__":

@@ -1,9 +1,12 @@
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 import tkinter as tk
 from PIL import Image
 
+from app.ui.capture_hud import CaptureResult
+from app.ui import theme
 from app.ui.capture_session import CaptureSession
 from app.ui.event_editor import KeystrokeEventEditor
 from app.core.models import EventModel
@@ -222,8 +225,7 @@ class TestRegionSizeClamp(unittest.TestCase):
         stub.region_h_var = tk.IntVar(master=interp, value=15)
         stub.held_img = None
         stub.clicked_pos = None
-        stub.lbl_img2 = None
-        stub._draw_overlay = MagicMock()
+        stub._refresh_screen_summary = MagicMock()
         stub._sync_region_constraints = MagicMock()
 
         KeystrokeEventEditor._on_region_size_change(stub)
@@ -239,8 +241,7 @@ class TestRegionSizeClamp(unittest.TestCase):
         stub.region_h_var = tk.IntVar(master=interp, value=70)
         stub.held_img = Image.new("RGB", (100, 100))
         stub.clicked_pos = (30, 30)
-        stub.lbl_img2 = None
-        stub._draw_overlay = MagicMock()
+        stub._refresh_screen_summary = MagicMock()
         stub._sync_region_constraints = MagicMock()
 
         KeystrokeEventEditor._on_region_size_change(stub)
@@ -313,55 +314,6 @@ class TestRegionBoundsValidation(unittest.TestCase):
         mock_messagebox.showerror.assert_not_called()
 
 
-class TestLivePreviewUpdates(unittest.TestCase):
-    def test_update_capture_image_does_not_skip_different_frame_with_same_sample_points(
-        self,
-    ):
-        editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
-        editor.capture_session = CaptureSession()
-        editor.win = SimpleNamespace(
-            winfo_exists=lambda: True, after=lambda _delay, cb: cb()
-        )
-        editor.lbl_img1 = SimpleNamespace(winfo_exists=lambda: True)
-        editor.latest_pos = None
-        editor.latest_img = None
-        editor._safe_update_img_lbl = MagicMock()
-        editor._refresh_basic_guidance = MagicMock()
-
-        img1 = Image.new("RGB", (20, 20), color=(0, 0, 0))
-        img2 = Image.new("RGB", (20, 20), color=(0, 0, 0))
-        img2.putpixel((5, 5), (255, 0, 0))
-
-        with patch.object(
-            KeystrokeEventEditor, "_scale_for_display", side_effect=lambda img: img
-        ):
-            KeystrokeEventEditor.update_capture_image(editor, (1, 1), img1)
-            KeystrokeEventEditor.update_capture_image(editor, (1, 1), img2)
-
-        self.assertEqual(editor._safe_update_img_lbl.call_count, 2)
-
-
-class TestOverlayBounds(unittest.TestCase):
-    def test_draw_overlay_clears_stale_pixel_outside_image(self):
-        """Capture shrink / stale pixel must not IndexError on overlay."""
-        editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
-        editor.capture_session = CaptureSession()
-        interp = tk.Tcl()
-        editor.match_mode_var = tk.StringVar(master=interp, value="pixel")
-        editor.clicked_pos = (265, 70)  # outside 135x100
-        editor.lbl_img2 = object()
-        editor._update_img_lbl = MagicMock()
-
-        img = Image.new("RGB", (135, 100), color=(0, 0, 0))
-        with patch.object(
-            KeystrokeEventEditor, "_scale_for_display", side_effect=lambda im: im
-        ):
-            KeystrokeEventEditor._draw_overlay(editor, img, editor.lbl_img2)
-
-        self.assertIsNone(editor.clicked_pos)
-        editor._update_img_lbl.assert_called_once()
-
-
 class TestBasicGuidanceSafety(unittest.TestCase):
     def test_refresh_basic_guidance_ignores_destroyed_label(self):
         editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
@@ -382,6 +334,131 @@ class TestBasicGuidanceSafety(unittest.TestCase):
 
         editor.lbl_basic_step.config.assert_called_once()
         editor.lbl_bottom_hint.config.assert_not_called()
+
+
+def _make_hud_host_stub():
+    editor = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
+    editor.capture_session = CaptureSession()
+    interp = tk.Tcl()
+    editor.match_mode_var = tk.StringVar(master=interp, value="pixel")
+    editor.region_w_var = tk.IntVar(master=interp, value=40)
+    editor.region_h_var = tk.IntVar(master=interp, value=30)
+    editor.capture_size = (100, 100)
+    editor.capture_hud = None
+    editor.win = MagicMock()
+    editor.entry_name = MagicMock(get=MagicMock(return_value="05 Rage"))
+    editor._sync_region_constraints = MagicMock()
+    editor._on_region_size_change = MagicMock()
+    editor._refresh_screen_summary = MagicMock()
+    editor._refresh_basic_guidance = MagicMock()
+    return editor
+
+
+class TestCaptureHudIntegration(unittest.TestCase):
+    """H-08: the editor delegates capture to the HUD and keeps only the result."""
+
+    @patch("app.ui.event_editor.CaptureHud")
+    def test_open_capture_hud_hands_over_grab_and_current_screen(self, mock_hud):
+        editor = _make_hud_host_stub()
+        editor.match_mode_var.set("region")
+        img = Image.new("RGB", (120, 80))
+        editor.capture_session.restore(
+            latest_position=(5, 6),
+            held_image=img,
+            selected_position=(7, 8),
+            reference_color=(1, 2, 3),
+        )
+        editor.capture_size = (120, 80)
+
+        editor._open_capture_hud()
+
+        kwargs = mock_hud.call_args.kwargs
+        self.assertEqual(kwargs["mode"], "single")
+        self.assertTrue(kwargs["grab"])
+        self.assertEqual(kwargs["name"], "05 Rage")
+        self.assertEqual(kwargs["region_size"], (40, 30))
+        initial = kwargs["initial"]
+        self.assertEqual(
+            (initial.position, initial.pixel, initial.color, initial.capture_size),
+            ((5, 6), (7, 8), (1, 2, 3), (120, 80)),
+        )
+
+    @patch("app.ui.event_editor.CaptureHud")
+    def test_open_capture_hud_without_screen_starts_empty(self, mock_hud):
+        editor = _make_hud_host_stub()
+
+        editor._open_capture_hud()
+
+        self.assertIsNone(mock_hud.call_args.kwargs["initial"])
+        self.assertIsNone(mock_hud.call_args.kwargs["region_size"])
+
+    def test_apply_capture_stores_complete_screen(self):
+        editor = _make_hud_host_stub()
+        result = CaptureResult(
+            position=(10, 20),
+            capture_size=(150, 90),
+            image=Image.new("RGB", (150, 90)),
+            pixel=(3, 4),
+            color=(9, 8, 7),
+        )
+
+        editor._apply_capture(result)
+
+        self.assertTrue(KeystrokeEventEditor._has_complete_screen(editor))
+        self.assertEqual(editor.capture_session.held_position, (10, 20))
+        self.assertEqual(editor.clicked_pos, (3, 4))
+        self.assertEqual(editor.ref_pixel, (9, 8, 7))
+        self.assertEqual(editor.capture_size, (150, 90))
+        editor._refresh_screen_summary.assert_called()
+
+    def test_hud_name_edit_syncs_editor_name(self):
+        editor = _make_hud_host_stub()
+
+        editor._on_hud_name_change("06 Kill")
+
+        editor.entry_name.delete.assert_called_once()
+        editor.entry_name.insert.assert_called_once_with(0, "06 Kill")
+
+
+@unittest.skipUnless(
+    os.environ.get("RUN_GUI_TESTS", "0") == "1", "GUI tests require RUN_GUI_TESTS=1"
+)
+class TestEditorCaptureHudWindow(unittest.TestCase):
+    def setUp(self):
+        self.root = tk.Tk()
+        # theme caches Font objects on the first root; earlier GUI tests
+        # destroyed theirs.
+        theme._cached_fonts = None
+
+    def tearDown(self):
+        self.root.destroy()
+
+    @patch("app.ui.capture_hud.KeyUtils.mod_key_pressed", return_value=False)
+    @patch("app.ui.capture_hud.StateUtils.save_main_app_state")
+    @patch("app.ui.capture_hud.StateUtils.load_main_app_state", return_value={})
+    @patch("app.ui.event_editor.StateUtils.save_main_app_state")
+    @patch("app.ui.event_editor.StateUtils.load_main_app_state", return_value={})
+    @patch("app.ui.capture_session.ScreenshotCapturer")
+    def test_hud_is_topmost_and_returns_grab_to_editor(self, mock_capturer, *_mocks):
+        mock_capturer.return_value.capture_thread = None
+        mock_capturer.return_value.get_current_mouse_position.return_value = (0, 0)
+        editor = KeystrokeEventEditor(self.root, 0, MagicMock(), None, existing_events=[])
+        self.root.update()
+
+        self.assertEqual(int(editor.win.attributes("-topmost")), 0)
+
+        editor._open_capture_hud()
+        self.root.update()
+        hud = editor.capture_hud
+        self.assertEqual(int(hud.win.attributes("-topmost")), 1)
+        self.assertEqual(self.root.grab_current(), hud.win)
+
+        hud.close()
+        self.root.update()
+        self.assertIsNone(editor.capture_hud)
+        self.assertEqual(self.root.grab_current(), editor.win)
+        editor._suppress_dirty_prompt = True
+        editor.close_window()
 
 
 if __name__ == "__main__":

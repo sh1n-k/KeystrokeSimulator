@@ -175,6 +175,7 @@ UI 문자열은 호출부에서 `txt(en, ko)`로 두 언어를 함께 바꾼다.
 - 관련 테스트: `test_capture_session.py`, `test_event_editor_validation.py`, `test_quick_event_editor.py`, `test_extract_roi_and_capture.py`. HUD 단위 테스트 신설(좌표 매핑, 자동 이동 위치 계산, 입력칸 포커스 시 CTRL 무시).
 - E2E: "앱과 프로필" 3·4번, "실제 실행" 2번. HUD 크기를 측정해 폭 300px 이하를 확인한다(캡처 100×100 기준).
 - 측정 기록: 개편 전 편집기 1004×453.
+- 측정 기록(1단계 후, macOS): HUD 폭 251~284px, 높이 332~440px(캡처 100×100, ko/en, 고급 펼침 포함). 편집기 873×453, topmost 해제.
 
 ### 2단계. 캡처 영역 테두리
 

@@ -275,7 +275,6 @@ class CaptureHud:
         if isinstance(master, tk.Tk | tk.Toplevel):
             self.win.transient(master)
         self.win.resizable(False, False)
-        cast(Any, self.win).attributes("-topmost", True)
         self.win.protocol("WM_DELETE_WINDOW", self.close)
         self.win.bind("<Escape>", self.close)
         self.win.bind("<Return>", self._on_return)
@@ -301,6 +300,10 @@ class CaptureHud:
             self._mag_center = initial.pixel
         self._restore_state(restore_pointer=initial is None)
         self._render()
+        # macOS Tk drops -topmost set on a transient window before it is
+        # mapped, so apply it after the pending geometry work.
+        self.win.update_idletasks()
+        cast(Any, self.win).attributes("-topmost", True)
 
         if grab:
             try:

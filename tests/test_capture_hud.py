@@ -23,6 +23,7 @@ from app.ui.capture_hud import (
     render_magnifier,
     render_overlay,
 )
+from app.ui import theme
 from app.ui.capture_session import CaptureSession
 from app.utils.i18n import set_language
 
@@ -341,6 +342,9 @@ class TestAppendQuickEvent(unittest.TestCase):
 class TestCaptureHudLayout(unittest.TestCase):
     def setUp(self):
         self.root = tk.Tk()
+        # theme caches Font objects on the first root; earlier GUI tests
+        # destroyed theirs.
+        theme._cached_fonts = None
         self.root.withdraw()
 
     def tearDown(self):
@@ -372,6 +376,7 @@ class TestCaptureHudLayout(unittest.TestCase):
                     self.root.update()
 
                     self.assertLessEqual(hud.win.winfo_width(), 300)
+                    self.assertEqual(int(hud.win.attributes("-topmost")), 1)
                     self.assertTrue(hud.is_ready())
                     self.assertEqual(hud.lbl_info.cget("text"), "255,0,255  (510, 410)")
                     hud.close()

@@ -40,16 +40,12 @@ class TestWindowStateRestore(unittest.TestCase):
     ):
         stub = KeystrokeEventEditor.__new__(KeystrokeEventEditor)
         stub.win = MagicMock()
-        stub.is_edit = False
-        stub.capture_session = CaptureSession(MagicMock())
-        mock_load_state.return_value = {"event_position": "bad", "event_pointer": "(3, 4)"}
+        mock_load_state.return_value = {"event_position": "bad"}
 
         KeystrokeEventEditor.load_latest_position(stub)
 
         mock_center.assert_called_once_with(stub.win)
-        stub.capture_session.capturer.set_current_mouse_position.assert_called_once_with(
-            (3, 4)
-        )
+        stub.win.geometry.assert_not_called()
 
     @patch("app.ui.profiles.WindowUtils.center_window")
     @patch("app.ui.profiles.StateUtils.load_main_app_state")
