@@ -604,3 +604,18 @@ def rename_profile_files(profiles_dir: Path, old_name: str, new_name: str) -> No
     prof = load_profile(profiles_dir, old_name, migrate=False)
     delete_profile_files(profiles_dir, old_name)
     save_profile(profiles_dir, prof, name=new_name)
+
+
+def ordered_profile_names(profiles_dir: Path) -> tuple[list[str], set[str]]:
+    """Quick, 즐겨찾기, 나머지 순서의 프로필 이름과 즐겨찾기 집합."""
+    ensure_quick_profile(profiles_dir)
+    quick = "Quick"
+    names = [n for n in list_profile_names(profiles_dir) if n != quick]
+    favorites_map = load_profile_favorites(profiles_dir, names)
+    favorites = {n for n in names if favorites_map.get(n)}
+    ordered = (
+        [quick]
+        + sorted(favorites, key=str.casefold)
+        + sorted((n for n in names if n not in favorites), key=str.casefold)
+    )
+    return ordered, favorites

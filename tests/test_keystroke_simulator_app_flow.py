@@ -5,8 +5,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.core.models import EventModel, ProfileModel
-from app.storage.profile_display import QUICK_PROFILE_NAME
-from app.ui.main_frames import ProfileFrame
 from app.ui.simulator_app import KeystrokeSimulatorApp
 from app.utils.keys import KeyUtils
 from app.utils.runtime_toggle import (
@@ -28,38 +26,17 @@ class FakeVar:
 
 
 
-class FakeRunSetFrame:
-    def __init__(self, names=None, set_id="__current__"):
+class FakeRunTargetFrame:
+    def __init__(self, names=None):
         self._names = list(names or [])
-        self._set_id = set_id
-        self.sets_combobox = MagicMock()
+        self.combobox = MagicMock()
         self.edit_button = MagicMock()
-        self.copy_button = MagicMock()
-        self.del_button = MagicMock()
-        self.set_ids = ["__current__"]
 
     def get_run_profiles(self):
         return list(self._names)
 
-    def get_selected_set_id(self):
-        return self._set_id
-
-    def set_selected_set(self, set_id):
-        self._set_id = set_id
-        return True
-
-    def set_available_profiles(self, names):
-        pass
-
-    def load_sets(self, select_id=None):
-        if select_id is not None:
-            self._set_id = select_id
-
-    def _update_action_states(self):
-        pass
-
-    def _refresh_display_value(self):
-        pass
+    def get_target(self):
+        return ("profile", self._names[0] if self._names else "")
 
 
 def _make_app_stub(run_profiles=None) -> KeystrokeSimulatorApp:
@@ -116,26 +93,8 @@ def _make_app_stub(run_profiles=None) -> KeystrokeSimulatorApp:
             "runtime_toggle_sound_enabled": True,
         },
     )()
-    app.run_set_frame = FakeRunSetFrame(list(run_profiles or []))
+    app.run_target_frame = FakeRunTargetFrame(list(run_profiles or []))
     return app
-
-
-class TestProfileProtection(unittest.TestCase):
-    @patch("app.ui.main_frames.delete_profile_files")
-    @patch("app.ui.simulator_app.messagebox.showinfo")
-    def test_quick_profile_cannot_be_deleted(
-        self, mock_showinfo, mock_delete_profile_files
-    ):
-        frame = ProfileFrame.__new__(ProfileFrame)
-        frame.profile_combobox = MagicMock()
-        frame.profile_combobox.current.return_value = -1
-        frame.profile_names = []
-        frame.selected_profile_var = FakeVar(QUICK_PROFILE_NAME)
-
-        ProfileFrame.delete_profile(frame)
-
-        mock_showinfo.assert_called_once()
-        mock_delete_profile_files.assert_not_called()
 
 
 class TestStartSimulation(unittest.TestCase):
@@ -541,23 +500,11 @@ class TestMainUiState(unittest.TestCase):
         app.process_frame.process_combobox = MagicMock()
         app.process_frame.refresh_button = MagicMock()
 
-        app.profile_frame = MagicMock()
-        app.profile_frame.profile_combobox = MagicMock()
-        app.profile_frame.edit_button = MagicMock()
-        app.profile_frame.copy_button = MagicMock()
-        app.profile_frame.del_button = MagicMock()
-
+        app.run_target_frame = MagicMock()
         app.modkey_set_frame = MagicMock()
-        app.modkey_set_frame.sets_combobox = MagicMock()
-        app.modkey_set_frame.edit_button = MagicMock()
-        app.modkey_set_frame.copy_button = MagicMock()
-        app.modkey_set_frame.del_button = MagicMock()
-
-        app.button_frame = MagicMock()
         app.run_start_button = MagicMock()
-        app.button_frame.quick_events_button = MagicMock()
-        app.button_frame.settings_button = MagicMock()
-        app.button_frame.clear_logs_button = MagicMock()
+        app.tools_menu = MagicMock()
+        app._tools_menus = [app.tools_menu]
 
         app._get_readiness_snapshot = MagicMock(
             return_value={
@@ -572,33 +519,39 @@ class TestMainUiState(unittest.TestCase):
         app._update_main_status = MagicMock()
         return app
 
-    def test_update_ui_disables_quick_events_and_modkey_set_when_running(self):
+    def _menu_states(self, app):
+        entries = KeystrokeSimulatorApp._tools_entries(app)
+        states = {}
+        for call in app.tools_menu.entryconfigure.call_args_list:
+            key = entries[call.args[0]][0]
+            states[key] = call.kwargs["state"]
+        return states
+
+    def test_update_ui_disables_idle_tools_and_selectors_when_running(self):
         app = self._make_ui_stub(running=True)
 
         KeystrokeSimulatorApp.update_ui(app)
 
-        app.button_frame.quick_events_button.config.assert_called_once_with(
-            state="disabled"
-        )
+        states = self._menu_states(app)
+        for key in ("quick", "settings", "clear_logs", "modkey_edit", "modkey_copy", "modkey_delete"):
+            self.assertEqual(states[key], "disabled", key)
+        # W-14: the workspace stays reachable while running.
+        self.assertEqual(states["workspace"], "normal")
+        app.run_target_frame.edit_button.config.assert_called_once_with(state="normal")
+        app.run_target_frame.combobox.config.assert_called_once_with(state="disabled")
         app.modkey_set_frame.sets_combobox.config.assert_called_once_with(
             state="disabled"
         )
-        app.modkey_set_frame.edit_button.config.assert_called_once_with(
-            state="disabled"
-        )
-        # W-14: the workspace stays reachable while running.
-        app.profile_frame.edit_button.config.assert_called_once_with(state="normal")
 
-    def test_update_ui_enables_quick_events_and_modkey_set_when_stopped(self):
+    def test_update_ui_enables_tools_when_stopped(self):
         app = self._make_ui_stub(running=False)
 
         KeystrokeSimulatorApp.update_ui(app)
 
-        app.button_frame.quick_events_button.config.assert_called_once_with(
-            state="normal"
+        self.assertEqual(set(self._menu_states(app).values()), {"normal"})
+        app.modkey_set_frame.sets_combobox.config.assert_called_once_with(
+            state="readonly"
         )
-        app.modkey_set_frame.edit_button.config.assert_called_once_with(state="normal")
-        app.profile_frame.edit_button.config.assert_called_once_with(state="normal")
 
     def test_update_ui_updates_start_button_label_for_running_state(self):
         app = self._make_ui_stub(running=True)
@@ -606,7 +559,7 @@ class TestMainUiState(unittest.TestCase):
         KeystrokeSimulatorApp.update_ui(app)
 
         app.run_start_button.config.assert_called_once_with(
-            text="Stop",
+            text="■ Stop",
             state="normal",
         )
 
@@ -617,7 +570,7 @@ class TestMainUiState(unittest.TestCase):
         KeystrokeSimulatorApp.update_ui(app)
 
         app.run_start_button.config.assert_called_once_with(
-            text="Start",
+            text="▶ Start",
             state="disabled",
         )
 
@@ -853,7 +806,7 @@ class TestReadinessSnapshotSideEffects(unittest.TestCase):
         self.assertIn("Dungeon", first)
         self.assertIn("Combat", first)
         self.assertIn("ModKey", first)
-        self.assertIn("Current profile", first)
+        self.assertIn("Run Dungeon", first)
 
         second = KeystrokeSimulatorApp._status_detail_with_selection(app, first)
         self.assertEqual(second, first)

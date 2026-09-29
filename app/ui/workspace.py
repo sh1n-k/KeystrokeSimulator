@@ -37,10 +37,9 @@ from app.storage.profile_display import QUICK_PROFILE_NAME
 from app.storage.profile_storage import (
     copy_profile,
     delete_profile_files,
-    ensure_quick_profile,
     list_profile_names,
     load_profile,
-    load_profile_favorites,
+    ordered_profile_names,
     rename_profile_files,
     save_profile,
 )
@@ -70,22 +69,6 @@ AUTOSAVE_DELAY_MS = 250
 UNDO_LIMIT = 30
 
 CatalogCallback = Callable[[str | None], None]
-
-
-def ordered_profile_names(
-    profiles_dir: Path,
-) -> tuple[list[str], set[str]]:
-    """Quick, 즐겨찾기, 나머지 순서. 메인 창 콤보와 같은 규칙이다."""
-    ensure_quick_profile(profiles_dir)
-    names = [n for n in list_profile_names(profiles_dir) if n != QUICK_PROFILE_NAME]
-    favorites_map = load_profile_favorites(profiles_dir, names)
-    favorites = {n for n in names if favorites_map.get(n)}
-    ordered = (
-        [QUICK_PROFILE_NAME]
-        + sorted(favorites, key=str.casefold)
-        + sorted((n for n in names if n not in favorites), key=str.casefold)
-    )
-    return ordered, favorites
 
 
 class GraphView(ttk.Frame):

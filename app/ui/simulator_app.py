@@ -25,11 +25,10 @@ from app.core.run_composition import (
 from app.ui.dialogs import ask_confirm
 from app.ui.modkeys import ModificationKeysWindow
 from app.ui.main_frames import (
-    ButtonFrame,
+    HoverTip,
     ModKeySetFrame,
     ProcessFrame,
-    ProfileFrame,
-    RunSetFrame,
+    RunTargetFrame,
 )
 from app.ui.input_listener_session import InputListener, InputListenerSession
 from app.ui.mac_hotkey_tap import MacHotkeyTapListener
@@ -44,6 +43,7 @@ from app.storage.run_sets_storage import (
     CURRENT_RUN_SET_ID,
     DEFAULT_RUN_SETS_PATH,
     is_current_run_set,
+    list_run_set_names,
     upsert_run_set,
 )
 from app.storage.profile_storage import (
@@ -109,6 +109,9 @@ class ReadinessSnapshot(TypedDict):
     bg: str
     fg: str
     missing_permissions: NotRequired[list[str]]
+    # One-line status text and the single fix action shown when blocked.
+    summary: NotRequired[str]
+    action: NotRequired[str]
 
 
 def safe_call(func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R | None:
@@ -175,7 +178,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.update_ui()
 
     def _create_ui(self) -> None:
-        # Workstation theme: paper-tone root + ttk styles.
+        # Paper-tone root + ttk styles.
         self.configure(bg=theme.SURFACE_PAPER)
         try:
             ttk.Style(self).theme_use("default")
@@ -184,7 +187,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         theme.install_styles(self)
         f = theme.fonts()
 
-        # --- Context Bar (top header) -----------------------------------
+        # --- Title bar with the ⚙ tools menu ---------------------------------
         self.context_bar: tk.Frame = tk.Frame(
             self,
             bg=theme.SURFACE_PANEL,
@@ -200,16 +203,30 @@ class KeystrokeSimulatorApp(tk.Tk):
             font=f["heading"],
         )
         self.lbl_app_title.pack(side=tk.LEFT)
-        self.lbl_app_subtitle: tk.Label = tk.Label(
+        # A plain Label: Aqua draws an up/down indicator on every Menubutton.
+        self.tools_button: tk.Label = tk.Label(
             self.context_bar,
+            text="⚙",
             bg=theme.SURFACE_PANEL,
-            fg=theme.INK_MUTED,
-            font=f["caption"],
+            fg=theme.INK_SECONDARY,
+            font=f["heading"],
+            cursor="hand2",
+            padx=theme.SPACE_1,
         )
-        self.lbl_app_subtitle.pack(side=tk.RIGHT)
+        self.tools_button.pack(side=tk.RIGHT)
+        self.tools_menu: tk.Menu = tk.Menu(self.tools_button, tearoff=0)
+        self.tools_button.bind("<Button-1>", self._show_tools_menu)
+        self._tools_menus: list[tk.Menu] = [self.tools_menu]
+        if platform.system() == "Darwin":
+            # macOS: the same tools live in the system menu bar.
+            menubar = tk.Menu(self)
+            self.menubar_tools: tk.Menu = tk.Menu(menubar, tearoff=0)
+            menubar.add_cascade(label=txt("Tools", "도구"), menu=self.menubar_tools)
+            self.config(menu=menubar)
+            self._tools_menus.append(self.menubar_tools)
         tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x", side="top")
 
-        # --- Run Dock (bottom, packed before body so it stays anchored) --
+        # --- Run dock (bottom, packed before body so it stays anchored) -------
         tk.Frame(self, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x", side="bottom")
         self.run_dock: tk.Frame = tk.Frame(
             self,
@@ -219,7 +236,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         self.run_dock.pack(fill="x", side="bottom")
 
-        # --- Body (cards live here) --------------------------------------
         self.body: tk.Frame = tk.Frame(
             self,
             bg=theme.SURFACE_PAPER,
@@ -227,29 +243,22 @@ class KeystrokeSimulatorApp(tk.Tk):
             pady=theme.SPACE_3,
         )
         self.body.pack(fill="both", expand=True, side="top")
-        self.workspace: tk.Frame = tk.Frame(self.body, bg=theme.SURFACE_PAPER)
-        self.workspace.pack(side=tk.TOP, fill="both", expand=True)
-
-        # TARGET card -----------------------------------------------------
         self.target_card: tk.Frame
-        self.status_frame: tk.Frame
-        self.tools_card: tk.Frame
-        self.target_card, target_body = self._make_card(
-            self.workspace, txt("Target", "대상")
-        )
-        self.target_card.pack(fill="x", pady=(0, theme.SPACE_3))
+        self.target_card, target_body = self._make_card(self.body, "")
+        self.target_card.pack(fill="x")
         self.process_frame: ProcessFrame = ProcessFrame(target_body, self.selected_process)
         self.process_frame.configure(bg=theme.SURFACE_CANVAS)
         self.process_frame.pack(fill="x", pady=(0, theme.SPACE_1))
-        self.profile_frame: ProfileFrame = ProfileFrame(
+        self.run_target_frame: RunTargetFrame = RunTargetFrame(
             target_body,
             self.selected_profile,
-            self.profiles_dir,
-            edit_cb=self.open_profile,
-            list_changed_cb=self._sync_run_set_available,
+            self.selected_run_set,
+            profiles_dir=self.profiles_dir,
+            sets_path=self.run_sets_path,
+            edit_cb=self.open_workspace_for,
         )
-        self.profile_frame.configure(bg=theme.SURFACE_CANVAS)
-        self.profile_frame.pack(fill="x", pady=(0, theme.SPACE_1))
+        self.run_target_frame.configure(bg=theme.SURFACE_CANVAS)
+        self.run_target_frame.pack(fill="x", pady=(0, theme.SPACE_1))
         self.modkey_set_frame: ModKeySetFrame = ModKeySetFrame(
             target_body,
             self.selected_modkey_set,
@@ -257,134 +266,43 @@ class KeystrokeSimulatorApp(tk.Tk):
             edit_cb=self.open_modkeys,
         )
         self.modkey_set_frame.configure(bg=theme.SURFACE_CANVAS)
-        self.modkey_set_frame.pack(fill="x", pady=(0, theme.SPACE_1))
-        self.run_set_frame: RunSetFrame = RunSetFrame(
-            target_body,
-            self.selected_run_set,
-            sets_path=self.run_sets_path,
-            profiles_dir=self.profiles_dir,
-            current_profile_getter=lambda: self.selected_profile.get(),
-            on_change=self._on_run_profiles_changed,
-            edit_cb=self.open_run_set_in_workspace,
-        )
-        self.run_set_frame.configure(bg=theme.SURFACE_CANVAS)
-        self.run_set_frame.pack(fill="x")
-        self._sync_run_set_available()
+        self.modkey_set_frame.pack(fill="x")
 
-        # STATE card ------------------------------------------------------
-        self.status_frame, status_body = self._make_card(
-            self.workspace, txt("State", "상태")
-        )
-        self.status_frame.pack(fill="x", pady=(0, theme.SPACE_3))
-        # Color-bar on the left + content stack on the right.
-        self.status_color_bar: tk.Frame = tk.Frame(
-            status_body, bg=theme.STATUS_READY_FG, width=4
-        )
-        self.status_color_bar.pack(side=tk.LEFT, fill="y", padx=(0, theme.SPACE_2))
-        status_stack = tk.Frame(status_body, bg=theme.SURFACE_CANVAS)
-        status_stack.pack(side=tk.LEFT, fill="both", expand=True)
-        # Pill: icon + badge text in one rounded background.
+        # --- Status: one line, plus one fix button only when blocked ---------
+        status_row = tk.Frame(self.body, bg=theme.SURFACE_PAPER)
+        status_row.pack(fill="x", pady=(theme.SPACE_3, 0))
         self.lbl_status_badge: tk.Label = tk.Label(
-            status_stack,
+            status_row,
             bg=theme.STATUS_READY_BG,
             fg=theme.STATUS_READY_FG,
             font=f["body_bold"],
             padx=theme.SPACE_2,
             pady=theme.SPACE_1,
             anchor="w",
-        )
-        self.lbl_status_badge.pack(anchor="w")
-        self.lbl_status_title: tk.Label = tk.Label(
-            status_stack,
-            font=f["heading"],
-            bg=theme.SURFACE_CANVAS,
-            fg=theme.INK_PRIMARY,
-            anchor="w",
             justify="left",
         )
-        self.lbl_status_title.pack(anchor="w", pady=(theme.SPACE_2, 0))
-        self.lbl_status_detail: tk.Label = tk.Label(
-            status_stack,
-            anchor="w",
-            justify="left",
-            bg=theme.SURFACE_CANVAS,
-            fg=theme.INK_SECONDARY,
-            wraplength=560,
-            font=f["body"],
+        self.lbl_status_badge.pack(side=tk.LEFT, fill="x", expand=True)
+        self.status_tooltip = HoverTip(self.lbl_status_badge)
+        self._status_action: str | None = None
+        self.btn_status_fix: tk.Button = tk.Button(
+            status_row, command=self._on_status_fix
         )
-        self.lbl_status_detail.pack(anchor="w", pady=(theme.SPACE_1, 0))
-        self.lbl_hotkey_hint: tk.Label = tk.Label(
-            status_stack,
-            anchor="w",
-            justify="left",
-            bg=theme.SURFACE_CANVAS,
-            fg=theme.INK_MUTED,
-            wraplength=560,
-            font=f["caption"],
-        )
-        self.lbl_hotkey_hint.pack(anchor="w", pady=(theme.SPACE_2, 0))
-        self.permission_actions_frame: tk.Frame = tk.Frame(
-            status_stack, bg=theme.SURFACE_CANVAS
-        )
-        self.btn_open_screen_permission: tk.Button = tk.Button(
-            self.permission_actions_frame,
-            command=lambda: self._open_macos_permission_setting("screen"),
-        )
-        self.btn_open_accessibility_permission: tk.Button = tk.Button(
-            self.permission_actions_frame,
-            command=lambda: self._open_macos_permission_setting("accessibility"),
-        )
-        for btn in (
-            self.btn_open_screen_permission,
-            self.btn_open_accessibility_permission,
-        ):
-            self._apply_outline_button(btn)
+        self._apply_outline_button(self.btn_status_fix)
 
-        # TOOLS card ------------------------------------------------------
-        self.tools_card, tools_body = self._make_card(
-            self.workspace, txt("Tools", "도구")
-        )
-        self.tools_card.pack(fill="x")
-        self.button_frame: ButtonFrame = ButtonFrame(
-            tools_body,
-            self.open_quick_events,
-            self.open_settings,
-            self.clear_local_logs,
-        )
-        self.button_frame.configure(bg=theme.SURFACE_CANVAS)
-        self.button_frame.pack(fill="x")
-
-        for sec in (
-            self.button_frame.quick_events_button,
-            self.button_frame.settings_button,
-            self.button_frame.clear_logs_button,
-            self.process_frame.refresh_button,
-            self.profile_frame.edit_button,
-            self.profile_frame.copy_button,
-            self.profile_frame.del_button,
-            self.run_set_frame.edit_button,
-            self.run_set_frame.copy_button,
-            self.run_set_frame.del_button,
-            self.modkey_set_frame.edit_button,
-            self.modkey_set_frame.copy_button,
-            self.modkey_set_frame.del_button,
-        ):
-            self._apply_outline_button(sec)
-
-        # Calm labels inside Process/Profile/ModKeys rows to the canvas tone.
-        for w in (
+        for widget in (
             self.process_frame.lbl_process,
-            self.profile_frame.lbl_profiles,
-            self.run_set_frame.lbl_run_set,
+            self.run_target_frame.lbl_target,
             self.modkey_set_frame.lbl_sets,
         ):
-            w.configure(
+            widget.configure(
                 bg=theme.SURFACE_CANVAS,
                 fg=theme.INK_SECONDARY,
                 font=f["body"],
             )
+        for btn in (self.process_frame.refresh_button, self.run_target_frame.edit_button):
+            self._apply_outline_button(btn)
 
-        # --- Run Dock contents ------------------------------------------
+        # --- Run dock contents ------------------------------------------------
         self.lbl_run_status: tk.Label = tk.Label(
             self.run_dock,
             bg=theme.SURFACE_PAPER,
@@ -409,9 +327,53 @@ class KeystrokeSimulatorApp(tk.Tk):
         self._refresh_ui_texts()
         self._restore_window_position()
 
-    # ---------------------------------------------------------------
-    # Helpers used by _create_ui
-    # ---------------------------------------------------------------
+    # Tools menu entries: (key, en, ko, command, idle_only).
+    def _tools_entries(self) -> list[tuple[str, str, str, VoidCallback, bool]]:
+        return [
+            ("workspace", "Open workspace…", "작업 공간 열기…", self.open_profile, False),
+            ("quick", "Quick events…", "빠른 이벤트…", self.open_quick_events, True),
+            ("sep", "", "", lambda: None, False),
+            ("modkey_edit", "Edit modifier keys…", "수정키 세트 편집…", self.open_modkeys, True),
+            ("modkey_copy", "Duplicate modifier keys", "수정키 세트 복사", self._copy_modkey_set, True),
+            ("modkey_delete", "Delete modifier keys", "수정키 세트 삭제", self._delete_modkey_set, True),
+            ("sep", "", "", lambda: None, False),
+            ("settings", "Settings…", "설정…", self.open_settings, True),
+            ("clear_logs", "Clear logs", "로그 삭제", self.clear_local_logs, True),
+        ]
+
+    def _show_tools_menu(self, _event: object | None = None) -> None:
+        button = self.tools_button
+        self.tools_menu.tk_popup(
+            button.winfo_rootx(), button.winfo_rooty() + button.winfo_height()
+        )
+
+    def _build_tools_menus(self) -> None:
+        for menu in getattr(self, "_tools_menus", []):
+            menu.delete(0, "end")
+            for key, en, ko, command, _idle in self._tools_entries():
+                if key == "sep":
+                    menu.add_separator()
+                else:
+                    menu.add_command(label=txt(en, ko), command=command)
+
+    def _sync_tools_menus(self, running: bool) -> None:
+        for menu in self.__dict__.get("_tools_menus", []):
+            for index, (key, _en, _ko, _cmd, idle_only) in enumerate(
+                self._tools_entries()
+            ):
+                if key == "sep":
+                    continue
+                state = "disabled" if running and idle_only else "normal"
+                safe_call(menu.entryconfigure, index, state=state)
+
+    def _copy_modkey_set(self) -> None:
+        self.modkey_set_frame.copy_set()
+        self._update_main_status()
+
+    def _delete_modkey_set(self) -> None:
+        self.modkey_set_frame.delete_set()
+        self._update_main_status()
+
     def _make_card(self, parent: tk.Misc, title: str) -> tuple[tk.Frame, tk.Frame]:
         """Create a workstation-style card with a thin divider title."""
         f = theme.fonts()
@@ -422,7 +384,8 @@ class KeystrokeSimulatorApp(tk.Tk):
             highlightbackground=theme.SURFACE_DIVIDER,
         )
         header = tk.Frame(outer, bg=theme.SURFACE_CANVAS)
-        header.pack(fill="x", padx=theme.SPACE_3, pady=(theme.SPACE_2, 0))
+        if title:
+            header.pack(fill="x", padx=theme.SPACE_3, pady=(theme.SPACE_2, 0))
         title_label = tk.Label(
             header,
             text=title,
@@ -438,7 +401,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         body.pack(
             fill="x",
             padx=theme.SPACE_3,
-            pady=(theme.SPACE_1, theme.SPACE_3),
+            pady=(theme.SPACE_1 if title else theme.SPACE_3, theme.SPACE_3),
         )
         return outer, body
 
@@ -560,61 +523,26 @@ class KeystrokeSimulatorApp(tk.Tk):
                 self.selected_process.set(match)
         prof = state.get("profile")
         if isinstance(prof, str) and prof:
-            self.profile_frame.set_selected_profile(prof)
-        self._sync_run_set_available()
-        self._restore_run_set_selection(state, prof if isinstance(prof, str) else None)
+            self.run_target_frame.set_target("profile", prof)
+        self._restore_run_set_selection(state)
         modkey_set = state.get("modkey_set")
         if isinstance(modkey_set, str) and modkey_set:
             self.modkey_set_frame.set_selected_set(modkey_set)
         self.update_ui()
 
     def _refresh_ui_texts(self) -> None:
-        self._set_card_title(
-            getattr(self, "target_card", None), txt("Target", "대상")
-        )
-        self._set_card_title(
-            getattr(self, "status_frame", None), txt("State", "상태")
-        )
-        self._set_card_title(
-            getattr(self, "tools_card", None), txt("Tools", "도구")
-        )
         if hasattr(self, "process_frame"):
             self.process_frame.refresh_texts()
-        if hasattr(self, "profile_frame"):
-            self.profile_frame.refresh_texts()
-        if hasattr(self, "run_set_frame"):
-            self.run_set_frame.refresh_texts()
+        if hasattr(self, "run_target_frame"):
+            self.run_target_frame.refresh_texts()
         if hasattr(self, "modkey_set_frame"):
             self.modkey_set_frame.refresh_texts()
-        if hasattr(self, "button_frame"):
-            self.button_frame.refresh_texts()
+        self._build_tools_menus()
         run_start_button = self.__dict__.get("run_start_button")
         if run_start_button is not None:
             self._apply_accent_button(run_start_button)
-        if hasattr(self, "lbl_hotkey_hint"):
-            self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
-        if hasattr(self, "btn_open_screen_permission"):
-            self.btn_open_screen_permission.config(
-                text=txt("Open Screen Recording Settings", "화면 기록 설정 열기")
-            )
-        if hasattr(self, "btn_open_accessibility_permission"):
-            self.btn_open_accessibility_permission.config(
-                text=txt("Open Accessibility Settings", "손쉬운 사용 설정 열기")
-            )
         if hasattr(self, "lbl_status_badge"):
             self._update_main_status()
-        if hasattr(self, "lbl_app_subtitle"):
-            self.lbl_app_subtitle.config(
-                text=txt("Workstation", "워크스테이션")
-            )
-
-    @staticmethod
-    def _set_card_title(card: tk.Misc | None, title: str) -> None:
-        if card is None:
-            return
-        label = getattr(card, "_title_label", None)
-        if label is not None:
-            label.config(text=title)
 
     def _get_hotkey_hint_text(self) -> str:
         if not hasattr(self, "settings"):
@@ -653,6 +581,21 @@ class KeystrokeSimulatorApp(tk.Tk):
             )
         return hint
 
+    def _hotkey_short(self) -> str:
+        """시작 버튼에 붙이는 짧은 단축키 표시. 꺼져 있으면 빈 문자열."""
+        settings = self.__dict__.get("settings")
+        if settings is None:
+            return ""
+        if platform.system() == "Darwin" and settings.toggle_start_stop_mac:
+            return "⌥⇧"
+        if platform.system() == "Windows" and settings.use_alt_shift_hotkey:
+            return "Alt+Shift"
+        key = str(settings.start_stop_key or "")
+        if key == "DISABLED":
+            return ""
+        wheel = {"W_UP": txt("wheel ↑", "휠 ↑"), "W_DN": txt("wheel ↓", "휠 ↓")}
+        return wheel.get(key, key)
+
     @staticmethod
     def _listener_key_name(key: object) -> str:
         return normalize_runtime_toggle_listener_key(key)
@@ -687,28 +630,19 @@ class KeystrokeSimulatorApp(tk.Tk):
             member_count if self.runtime_toggle_enabled else 0
         )
 
-    def _sync_run_set_available(self) -> None:
-        frame = self.__dict__.get("run_set_frame")
-        profile_frame = self.__dict__.get("profile_frame")
-        if frame is None or profile_frame is None:
-            return
-        names = list(getattr(profile_frame, "profile_names", []) or [])
-        frame.set_available_profiles(names)
+    def _restore_run_set_selection(self, state: dict[str, object]) -> None:
+        """Restore a named run set, or migrate the legacy run_profiles list.
 
-    def _on_run_profiles_changed(self, _names: list[str]) -> None:
-        if not self.is_running.get():
-            self.update_ui()
-
-    def _restore_run_set_selection(
-        self, state: dict[str, object], profile_name: str | None
-    ) -> None:
-        """Restore named run set or migrate legacy run_profiles list."""
-        frame = self.__dict__.get("run_set_frame")
+        Earlier versions stored the virtual "__current__" set for single-profile
+        runs; that simply means the profile stays selected.
+        """
+        frame = self.__dict__.get("run_target_frame")
         if frame is None:
             return
         run_set = state.get("run_set")
         if isinstance(run_set, str) and run_set.strip():
-            frame.set_selected_set(run_set.strip())
+            if not is_current_run_set(run_set):
+                frame.set_target("run_set", run_set.strip())
             return
         # Legacy: run_profiles list from earlier multi-select UI.
         run_profiles_raw = state.get("run_profiles")
@@ -725,25 +659,20 @@ class KeystrokeSimulatorApp(tk.Tk):
             migrated = "Migrated"
             try:
                 # Avoid clobbering an existing user set name if present.
-                existing = set(frame.set_ids)
+                existing = set(frame.run_set_names)
                 name = migrated
                 n = 2
-                while name in existing and name != CURRENT_RUN_SET_ID:
+                while name in existing:
                     name = f"{migrated} {n}"
                     n += 1
                 upsert_run_set(name, run_profiles, self.run_sets_path)
-                frame.load_sets(select_id=name)
-            except Exception:
-                frame.set_selected_set(CURRENT_RUN_SET_ID)
+                frame.load(select=("run_set", name))
+            except Exception as exc:
+                logger.warning(f"Legacy run profile migration failed: {exc}")
             return
-        if len(run_profiles) == 1 and profile_name and run_profiles[0] != profile_name:
-            # Single different profile → named one-member set is overkill; use current.
-            frame.set_selected_set(CURRENT_RUN_SET_ID)
-            return
-        frame.set_selected_set(CURRENT_RUN_SET_ID)
 
     def _get_run_profile_names(self) -> list[str]:
-        frame = self.__dict__.get("run_set_frame")
+        frame = self.__dict__.get("run_target_frame")
         if frame is not None:
             names = frame.get_run_profiles()
             if names:
@@ -752,16 +681,17 @@ class KeystrokeSimulatorApp(tk.Tk):
         return [selected] if selected else []
 
     def _run_set_status_label(self) -> str:
-        """Short label for status lines (avoids resizing the main window)."""
-        frame = self.__dict__.get("run_set_frame")
-        set_id = (
-            frame.get_selected_set_id()
-            if frame is not None
-            else self.selected_run_set.get()
-        )
-        if is_current_run_set(set_id):
-            return txt("Current profile", "현재 프로필")
-        return (set_id or "—").strip() or "—"
+        """Short label for status lines: the profile, or the named set."""
+        set_id = (self.selected_run_set.get() or "").strip()
+        if set_id and not is_current_run_set(set_id):
+            return txt("Set {name}", "세트 {name}", name=set_id)
+        return (self.selected_profile.get() or "—").strip() or "—"
+
+    def _run_target_label(self, profile_names: list[str] | None = None) -> str:
+        """"BM_야수" 또는 "세트 레이드 (프로필 2개)"."""
+        target = self._run_set_status_label()
+        members = self._run_set_members_status_label(profile_names)
+        return target if members in ("—", target) else f"{target} ({members})"
 
     def _run_set_members_status_label(self, profile_names: list[str] | None = None) -> str:
         """Compact member summary: profile name, count, or em dash."""
@@ -887,14 +817,15 @@ class KeystrokeSimulatorApp(tk.Tk):
     def _get_readiness_snapshot(self) -> ReadinessSnapshot:
         if self.is_running.get():
             detail = txt(
-                "Stop first if you want to change process, profile, ModKey set, or event settings.",
-                "프로세스, 프로필, 수정키 세트, 이벤트 설정을 바꾸려면 먼저 중지하세요.",
+                "Stop to change the target, run or modifier keys. Workspace edits apply from the next start.",
+                "대상·실행·수정키를 바꾸려면 중지하세요. 작업 공간 편집은 다음 시작부터 반영됩니다.",
             )
+            summary = self._run_target_label()
             if self.runtime_toggle_enabled and self.runtime_toggle_key:
-                detail = txt(
-                    "{detail}\nToggle set: {trigger} ({state})",
-                    "{detail}\n토글 세트: {trigger} ({state})",
-                    detail=detail,
+                summary = txt(
+                    "{target} · hotkey set {trigger} ({state})",
+                    "{target} · 단축키 묶음 {trigger} ({state})",
+                    target=summary,
                     trigger=display_runtime_toggle_trigger(self.runtime_toggle_key),
                     state=txt("ON", "켜짐")
                     if self.runtime_toggle_active
@@ -907,6 +838,7 @@ class KeystrokeSimulatorApp(tk.Tk):
                     "Simulation is active for the selected target.",
                     "선택한 대상에 대해 시뮬레이션이 실행 중입니다.",
                 ),
+                "summary": summary,
                 "detail": detail,
                 "bg": STATUS_BG_OK,
                 "fg": STATUS_FG_OK,
@@ -921,11 +853,12 @@ class KeystrokeSimulatorApp(tk.Tk):
                     "시작하기 전에 대상 앱을 선택하세요.",
                 ),
                 "detail": txt(
-                    "Pick the process you want to watch in the Process list.",
-                    "감시할 대상을 프로세스 목록에서 고르세요.",
+                    "Pick the process you want to watch in the Target list.",
+                    "감시할 대상을 대상 목록에서 고르세요.",
                 ),
                 "bg": STATUS_BG_WARN,
                 "fg": STATUS_FG_WARN,
+                "action": "process",
             }
 
         run_names = self._get_run_profile_names()
@@ -938,11 +871,12 @@ class KeystrokeSimulatorApp(tk.Tk):
                     "실행할 프로필을 하나 이상 선택하세요.",
                 ),
                 "detail": txt(
-                    "Use Run set to choose profiles. Edit profiles separately from the Profiles row.",
-                    "실행 세트에서 프로필을 고르세요. 프로필 행에서는 편집 대상을 고릅니다.",
+                    "Choose a profile or a run set in the Run list.",
+                    "실행 목록에서 프로필이나 실행 세트를 고르세요.",
                 ),
                 "bg": STATUS_BG_WARN,
                 "fg": STATUS_FG_WARN,
+                "action": "workspace",
             }
 
         session, compose_errors = self._compose_selected_run(migrate=False)
@@ -980,6 +914,7 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "detail": first,
                 "bg": STATUS_BG_ERR,
                 "fg": STATUS_FG_ERR,
+                "action": "workspace",
             }
 
         assert session is not None
@@ -992,32 +927,28 @@ class KeystrokeSimulatorApp(tk.Tk):
             return {
                 "can_start": False,
                 "badge_text": txt("Add Events", "이벤트 추가"),
-                "title": txt(
-                    "The run set has no events yet.",
-                    "실행 세트에 아직 이벤트가 없습니다.",
-                ),
+                "title": txt("Nothing to run yet.", "실행할 이벤트가 아직 없습니다."),
                 "detail": txt(
-                    "Open Profile Manager or Quick Events and save at least one event first.",
-                    "프로필 편집 또는 빠른 이벤트에서 이벤트를 먼저 하나 이상 저장하세요.",
+                    "Add at least one event in the workspace or with Quick events.",
+                    "작업 공간이나 빠른 이벤트에서 이벤트를 하나 이상 추가하세요.",
                 ),
                 "bg": STATUS_BG_WARN,
                 "fg": STATUS_FG_WARN,
+                "action": "workspace",
             }
 
         if enabled_count == 0:
             return {
                 "can_start": False,
                 "badge_text": txt("Enable Event", "이벤트 활성화"),
-                "title": txt(
-                    "All events in the run set are disabled.",
-                    "실행 세트의 모든 이벤트가 비활성화되어 있습니다.",
-                ),
+                "title": txt("Every event is turned off.", "모든 이벤트가 꺼져 있습니다."),
                 "detail": txt(
-                    "Turn on at least one event in Profile Manager before starting.",
-                    "시작하기 전에 프로필 편집에서 이벤트를 하나 이상 활성화하세요.",
+                    "Turn on at least one event in the workspace before starting.",
+                    "시작하기 전에 작업 공간에서 이벤트를 하나 이상 켜세요.",
                 ),
                 "bg": STATUS_BG_WARN,
                 "fg": STATUS_FG_WARN,
+                "action": "workspace",
             }
 
         if runnable_count == 0:
@@ -1025,15 +956,16 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "can_start": False,
                 "badge_text": txt("Check Events", "이벤트 확인"),
                 "title": txt(
-                    "Enabled events need a key or condition-only mode.",
-                    "활성 이벤트에는 입력 키 또는 조건 전용 설정이 필요합니다.",
+                    "Rules in use have no input key.",
+                    "사용 중인 규칙에 키가 없습니다.",
                 ),
                 "detail": txt(
-                    "Open Profile Manager and review events with missing input keys.",
-                    "프로필 편집에서 입력 키가 비어 있는 이벤트를 확인하세요.",
+                    "Open the workspace and set a key for rules marked 'no key'.",
+                    "작업 공간에서 '키 없음' 규칙에 키를 지정하세요.",
                 ),
                 "bg": STATUS_BG_WARN,
                 "fg": STATUS_FG_WARN,
+                "action": "workspace",
             }
 
         missing_permissions = PermissionUtils.missing_macos_permissions()
@@ -1046,6 +978,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             return {
                 "can_start": False,
                 "badge_text": txt("Permissions", "권한 필요"),
+                "summary": ", ".join(missing_labels),
                 "title": txt(
                     "macOS permissions are blocking capture or key control.",
                     "macOS 권한 부족으로 캡처 또는 키 제어가 차단되고 있습니다.",
@@ -1059,6 +992,7 @@ class KeystrokeSimulatorApp(tk.Tk):
                 "bg": STATUS_BG_ERR,
                 "fg": STATUS_FG_ERR,
                 "missing_permissions": missing_permissions,
+                "action": "permissions",
             }
 
         processor_ready_count = len(self._events_with_processor_inputs(runnable_events))
@@ -1071,61 +1005,60 @@ class KeystrokeSimulatorApp(tk.Tk):
                     "활성 이벤트에는 캡처 좌표와 기준 데이터가 필요합니다.",
                 ),
                 "detail": txt(
-                    "Open Profile Manager and recapture events with missing target positions or reference pixels.",
-                    "프로필 편집에서 대상 좌표나 기준 픽셀이 빠진 이벤트를 다시 캡처하세요.",
+                    "Open the workspace and capture a screen for events missing one.",
+                    "작업 공간에서 화면이 빠진 이벤트를 다시 캡처하세요.",
                 ),
                 "bg": STATUS_BG_WARN,
                 "fg": STATUS_FG_WARN,
+                "action": "workspace",
             }
 
-        set_label = self._run_set_status_label()
-        members_label = self._run_set_members_status_label(list(session.profile_names))
+        target_label = self._run_target_label(list(session.profile_names))
         modkey_set_name = self.selected_modkey_set.get() or DEFAULT_MODKEY_SET_NAME
+        rules = sum(1 for evt in runnable_events if evt.execute_action)
+        signals = len(runnable_events) - rules
         return {
             "can_start": True,
-            "badge_text": txt("Ready", "준비 완료"),
+            "badge_text": txt("Ready", "준비됨"),
             "title": txt(
                 "Everything is ready to start monitoring.",
                 "모니터링을 시작할 준비가 끝났습니다.",
             ),
+            "summary": txt(
+                "rules {rules} · signals {signals}",
+                "규칙 {rules} · 신호 {signals}",
+                rules=rules,
+                signals=signals,
+            ),
             "detail": txt(
-                "Run set {run_set} · {members} · ModKey {modkey_set} · {count} event(s).",
-                "실행 세트 {run_set} · {members} · 수정키 {modkey_set} · 이벤트 {count}개.",
-                run_set=set_label,
-                members=members_label,
+                "Run {target} · ModKey {modkey_set} · {count} event(s).",
+                "실행 {target} · 수정키 {modkey_set} · 이벤트 {count}개.",
+                target=target_label,
                 modkey_set=modkey_set_name,
                 count=runnable_count,
             ),
-            "bg": STATUS_BG_INFO,
-            "fg": STATUS_FG_INFO,
+            "bg": STATUS_BG_OK,
+            "fg": STATUS_FG_OK,
         }
 
     def _status_detail_with_selection(self, detail: str) -> str:
-        """Append run-set + modkey-set selection when not already present."""
+        """Append the run target + modkey set when not already present."""
         profile_name = (self.selected_profile.get() or "").strip()
         modkey_set_name = (self.selected_modkey_set.get() or "").strip()
         if not profile_name and not modkey_set_name:
             return detail
-        if (
-            "ModKey set" in detail
-            or "ModKey " in detail
-            or "수정키 세트" in detail
-            or "수정키 " in detail
-        ):
+        if "ModKey " in detail or "수정키 " in detail:
             return detail
-        set_label = self._run_set_status_label()
-        members_label = self._run_set_members_status_label()
         line = txt(
-            "Run set {run_set} · {members} · ModKey {modkey_set}",
-            "실행 세트 {run_set} · {members} · 수정키 {modkey_set}",
-            run_set=set_label or "—",
-            members=members_label,
+            "Run {target} · ModKey {modkey_set}",
+            "실행 {target} · 수정키 {modkey_set}",
+            target=self._run_target_label(),
             modkey_set=modkey_set_name or "—",
         )
         return f"{detail}\n{line}" if detail else line
 
-
     def _update_main_status(self) -> None:
+        """상태는 한 줄. 막혔을 때만 해결 버튼 하나를 보인다."""
         if not hasattr(self, "lbl_status_badge"):
             return
         snapshot = self._get_readiness_snapshot()
@@ -1135,47 +1068,47 @@ class KeystrokeSimulatorApp(tk.Tk):
         if running:
             bg, fg = STATUS_BG_RUN, STATUS_FG_RUN
         icon = self._icon_for_status(bg, running)
-        badge_text = (
-            f"{icon}  {snapshot['badge_text']}" if icon else snapshot["badge_text"]
-        )
+        summary = snapshot.get("summary") or snapshot["title"]
         self.lbl_status_badge.config(
-            text=badge_text,
+            text=f"{icon}  {snapshot['badge_text']} · {summary}",
             bg=bg,
             fg=fg,
         )
-        if hasattr(self, "status_color_bar"):
-            self.status_color_bar.config(bg=fg)
-        self.lbl_status_title.config(text=snapshot["title"])
-        self.lbl_status_detail.config(
-            text=self._status_detail_with_selection(snapshot["detail"])
-        )
-        self.lbl_hotkey_hint.config(text=self._get_hotkey_hint_text())
-        self._update_permission_actions(
-            [] if running else snapshot.get("missing_permissions", [])
-        )
+        tooltip = self.__dict__.get("status_tooltip")
+        if tooltip is not None:
+            hint = self._get_hotkey_hint_text()
+            detail = self._status_detail_with_selection(snapshot["detail"])
+            tooltip.update_text(f"{detail}\n{hint}" if hint else detail)
+        action = None if running else snapshot.get("action")
+        self._status_action = action
+        fix = self.__dict__.get("btn_status_fix")
+        if fix is not None:
+            if action:
+                fix.config(text=self._status_action_label(action))
+                fix.pack(side=tk.RIGHT, padx=(theme.SPACE_2, 0))
+            else:
+                fix.pack_forget()
+        self._missing_permissions = list(snapshot.get("missing_permissions", []))
         if hasattr(self, "lbl_run_status"):
             self.lbl_run_status.config(text=self._run_dock_text(snapshot, running))
 
-    def _update_permission_actions(self, missing_permissions: list[str]) -> None:
-        if not hasattr(self, "permission_actions_frame"):
-            return
+    @staticmethod
+    def _status_action_label(action: str) -> str:
+        return {
+            "permissions": txt("Open settings", "권한 설정 열기"),
+            "process": txt("Refresh", "새로고침"),
+        }.get(action, txt("Open workspace", "작업 공간에서 보기"))
 
-        buttons = {
-            "screen": self.btn_open_screen_permission,
-            "accessibility": self.btn_open_accessibility_permission,
-        }
-        visible = [
-            permission for permission in buttons if permission in missing_permissions
-        ]
-        if not visible:
-            self.permission_actions_frame.pack_forget()
-            return
-
-        self.permission_actions_frame.pack(anchor="w", pady=(theme.SPACE_2, 0))
-        for btn in buttons.values():
-            btn.grid_forget()
-        for col, permission in enumerate(visible):
-            buttons[permission].grid(row=0, column=col, padx=(0, theme.SPACE_2))
+    def _on_status_fix(self) -> None:
+        action = getattr(self, "_status_action", None)
+        if action == "permissions":
+            missing = getattr(self, "_missing_permissions", [])
+            if missing:
+                self._open_macos_permission_setting(missing[0])
+        elif action == "process":
+            self.process_frame.refresh_processes()
+        elif action == "workspace":
+            self.open_profile()
 
     def _open_macos_permission_setting(self, permission: str) -> None:
         if PermissionUtils.open_macos_permission_settings(permission):
@@ -1201,19 +1134,18 @@ class KeystrokeSimulatorApp(tk.Tk):
         }.get(bg, theme.STATUS_INFO_ICON)
 
     def _run_dock_text(self, snapshot: ReadinessSnapshot, running: bool) -> str:
+        """상태 줄과 겹치지 않게, 실행 중 멈추는 방법만 알린다."""
         if running:
             return txt(
-                "Running. Press the hotkey or Stop to halt.",
-                "실행 중. 단축키 또는 중지로 멈출 수 있습니다.",
+                "Press the hotkey or Stop to halt.",
+                "단축키나 중지로 멈춥니다.",
             )
-        if snapshot.get("can_start"):
-            return txt("Ready to start.", "시작할 준비가 되었습니다.")
-        return snapshot["badge_text"]
+        return ""
 
     def setup_event_handlers(self) -> None:
         self.unbind_events()
         self.input_listener_session.start()
-        self.bind("<Escape>", self.on_closing)
+        # Esc는 앱을 끄지 않는다(M-05). 창 닫기로만 종료한다.
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         runtime_toggle_trigger = normalize_runtime_toggle_trigger(
@@ -1652,9 +1584,6 @@ class KeystrokeSimulatorApp(tk.Tk):
             else:
                 self.sound_player.play_runtime_toggle_off_sound()
         self._update_main_status()
-        hotkey_hint = self.__dict__.get("lbl_hotkey_hint")
-        if hotkey_hint is not None:
-            hotkey_hint.config(text=self._get_hotkey_hint_text())
         return True
 
     def update_ui(self) -> None:
@@ -1665,33 +1594,19 @@ class KeystrokeSimulatorApp(tk.Tk):
 
         self.process_frame.process_combobox.config(state=readonly_state)
         self.process_frame.refresh_button.config(state=state)
-        self.profile_frame.profile_combobox.config(state=readonly_state)
+        self.run_target_frame.combobox.config(state=readonly_state)
         # 작업 공간은 실행 중에도 연다. 편집은 다음 시작부터 반영된다.
-        self.profile_frame.edit_button.config(state="normal")
-        self.profile_frame.copy_button.config(state=state)
-        self.profile_frame.del_button.config(state=state)
-        run_set_frame = self.__dict__.get("run_set_frame")
-        if run_set_frame is not None:
-            run_set_frame.sets_combobox.config(state=readonly_state)
-            if running:
-                run_set_frame.copy_button.config(state="disabled")
-                run_set_frame.del_button.config(state="disabled")
-            else:
-                run_set_frame._update_action_states()
-            # Keep "current profile" label in sync with profile combobox.
-            run_set_frame._refresh_display_value()
-        modkey_frame = self.__dict__.get("modkey_set_frame")
-        if modkey_frame is not None:
-            modkey_frame.sets_combobox.config(state=readonly_state)
-            modkey_frame.edit_button.config(state=state)
-            modkey_frame.copy_button.config(state=state)
-            modkey_frame.del_button.config(state=state)
+        self.run_target_frame.edit_button.config(state="normal")
+        self.modkey_set_frame.sets_combobox.config(state=readonly_state)
+        self._sync_tools_menus(running)
 
         run_start_button = self.__dict__.get("run_start_button")
         if run_start_button is not None:
             can_press = bool(running or readiness["can_start"])
             self._run_start_enabled = can_press
-            label = txt("Stop", "중지") if running else txt("Start", "시작")
+            label = txt("■ Stop", "■ 중지") if running else txt("▶ Start", "▶ 시작")
+            if hotkey := self._hotkey_short():
+                label = f"{label}  {hotkey}"
             start_state = "normal" if can_press else "disabled"
             # Prefer single config() for Button/mocks; Label ignores state=.
             try:
@@ -1708,9 +1623,6 @@ class KeystrokeSimulatorApp(tk.Tk):
                 self._apply_accent_button(run_start_button)
             else:
                 self._apply_run_disabled_button(run_start_button)
-        self.button_frame.quick_events_button.config(state=state)
-        self.button_frame.settings_button.config(state=state)
-        self.button_frame.clear_logs_button.config(state=state)
         workspace = self._workspace
         if workspace is not None and workspace.is_open():
             workspace.set_running(running)
@@ -1732,13 +1644,19 @@ class KeystrokeSimulatorApp(tk.Tk):
 
     def open_profile(self) -> None:
         """작업 공간을 연다. 모달이 아니며 실행 중에도 편집할 수 있다."""
+        frame = self.__dict__.get("run_target_frame")
+        if frame is not None:
+            self.open_workspace_for(frame.get_target())
+            return
         self._open_workspace(profile=self.selected_profile.get() or None)
 
-    def open_run_set_in_workspace(self, set_id: str) -> None:
-        self._open_workspace(
-            profile=self.selected_profile.get() or None,
-            run_set=None if is_current_run_set(set_id) else set_id,
-        )
+    def open_workspace_for(self, target: tuple[str, str]) -> None:
+        """"편집…": 실행 콤보에서 고른 프로필이나 실행 세트로 연다(M-06)."""
+        kind, name = target
+        if kind == "run_set":
+            self._open_workspace(profile=self.selected_profile.get() or None, run_set=name)
+        else:
+            self._open_workspace(profile=name or None)
 
     def _open_workspace(
         self, *, profile: str | None = None, run_set: str | None = None
@@ -1767,15 +1685,15 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.reload_profiles(None)
 
     def reload_profiles(self, new_name: str | None) -> None:
-        """작업 공간에서 프로필·실행 세트가 바뀌면 메인 콤보를 다시 읽는다.
-        지금 고른 프로필이 사라졌을 때만(이름 변경) 새 이름으로 옮긴다."""
-        current = self.selected_profile.get()
-        if new_name and current not in list_profile_names(self.profiles_dir):
-            target: str | None = new_name
-        else:
-            target = current or new_name
-        self.profile_frame.load_profiles(select_name=target)
-        self._sync_run_set_available()
+        """작업 공간에서 프로필·실행 세트가 바뀌면 실행 콤보를 다시 읽는다.
+        고른 프로필이 사라졌을 때만(이름 변경) 새 이름으로 옮긴다."""
+        frame = self.run_target_frame
+        kind, name = frame.get_target()
+        if kind == "profile" and new_name and name not in list_profile_names(self.profiles_dir):
+            name = new_name
+        if kind == "run_set" and name not in list_run_set_names(self.run_sets_path):
+            kind, name = "profile", self.selected_profile.get()
+        frame.load(select=(kind, name))
         self.update_ui()
 
     def open_quick_events(self) -> None:
@@ -1833,7 +1751,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
 
     def unbind_events(self) -> None:
-        safe_call(self.unbind, "<Escape>")
         self.input_listener_session.stop()
         self.keyboard_listener = None
         self.start_stop_mouse_listener = None
