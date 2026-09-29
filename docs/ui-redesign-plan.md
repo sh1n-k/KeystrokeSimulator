@@ -2,7 +2,7 @@
 
 **작성일:** 2026-09-28
 **백로그:** [`ui-redesign-backlog.md`](ui-redesign-backlog.md)
-**상태:** 계획 확정, 구현 전
+**상태:** 0~5단계 구현 완료(2026-09-29). 남은 확인은 백로그의 HOLD 항목과 `tests/E2E_TESTPLAN.md` 수동 E2E.
 
 이 문서는 UI 전면 개편의 목표 구조, 확정 결정, 단계별 계획과 검증 기준을 기록한다. 개별 작업 항목과 수용 기준은 백로그 문서에 있다. 모듈 경계와 저장 계약은 [`maintainer-reference.md`](maintainer-reference.md)를 따른다.
 
