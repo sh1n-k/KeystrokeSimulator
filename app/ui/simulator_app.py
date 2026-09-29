@@ -209,7 +209,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             text=theme.ICON_TOOLS,
             bg=theme.SURFACE_PANEL,
             fg=theme.INK_SECONDARY,
-            font=f["heading"],
+            font=f["icon"],
             cursor="hand2",
             padx=theme.SPACE_1,
         )
@@ -424,6 +424,9 @@ class KeystrokeSimulatorApp(tk.Tk):
             widget.configure(
                 bg=bg,
                 fg=fg,
+                # The control is set to state="disabled" when start is blocked;
+                # Tk's default disabled text is nearly invisible on the muted fill.
+                disabledforeground=fg,
                 relief="flat",
                 borderwidth=0,
                 highlightthickness=0,

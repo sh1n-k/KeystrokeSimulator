@@ -238,6 +238,7 @@ class Workspace:
             self.win.bind(seq, self._on_undo_key)
         for seq in ("<Command-f>", "<Control-f>"):
             self.win.bind(seq, lambda _e: (self.entry_search.focus_set(), "break")[1])
+        self.win.bind("<Escape>", lambda _e: self.close())
         self._restore_geometry()
         self.reload_catalog()
         if run_set and run_set in list_run_set_names(self.run_sets_path):
@@ -334,7 +335,7 @@ class Workspace:
         self.entry_search = ttk.Entry(toolbar, textvariable=self.search_var, width=18)
         self.entry_search.pack(side="left", padx=(theme.SPACE_1, theme.SPACE_2))
         self.search_var.trace_add("write", self._on_search_changed)
-        self.entry_search.bind("<Escape>", lambda _e: self.search_var.set(""))
+        self.entry_search.bind("<Escape>", self._on_search_escape)
         ttk.Button(toolbar, text=txt("＋ Rule", "＋ 규칙"), command=self.add_rule).pack(side="right")
         ttk.Button(toolbar, text=txt("＋ Signal", "＋ 신호"), command=self.add_signal).pack(
             side="right", padx=(0, theme.SPACE_1)
@@ -374,6 +375,13 @@ class Workspace:
 
     def _on_search_changed(self, *_args: str) -> None:
         self.tree.set_query(self.search_var.get())
+
+    def _on_search_escape(self, _event: object) -> str | None:
+        """Esc clears a non-empty search first; an empty one lets Esc close the window."""
+        if not self.search_var.get():
+            return None
+        self.search_var.set("")
+        return "break"
 
     # -- catalog / sidebar ------------------------------------------------------
 

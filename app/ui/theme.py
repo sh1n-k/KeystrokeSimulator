@@ -140,6 +140,8 @@ def make_fonts() -> dict[str, tkfont.Font]:
         "body_bold": tkfont.Font(family=sans, size=12, weight="bold"),
         "caption": tkfont.Font(family=sans, size=11, weight="normal"),
         "mono": tkfont.Font(family=mono, size=12, weight="normal"),
+        # Standalone glyph buttons (⚙): the glyph draws small at text sizes.
+        "icon": tkfont.Font(family=sans, size=22, weight="normal"),
     }
 
 

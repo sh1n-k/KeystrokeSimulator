@@ -218,6 +218,30 @@ class TestRunWindowBehaviour(unittest.TestCase):
         self.assertEqual((kwargs["profile"], kwargs["run_set"]), ("A", "Raid"))
 
 
+class TestRunControlDisabledText(unittest.TestCase):
+    def test_disabled_start_keeps_its_text_color(self):
+        """The disabled Start label must not fall back to Tk's faint disabled text."""
+        button = MagicMock()
+
+        KeystrokeSimulatorApp._apply_run_disabled_button(button)
+
+        kwargs = button.configure.call_args_list[0].kwargs
+        self.assertEqual(kwargs["disabledforeground"], kwargs["fg"])
+
+
+class TestWorkspaceEscape(unittest.TestCase):
+    def test_escape_clears_search_before_closing(self):
+        from app.ui.workspace import Workspace
+
+        ws = Workspace.__new__(Workspace)
+        ws.search_var = FakeVar("abc")
+
+        self.assertEqual(ws._on_search_escape(None), "break")
+        self.assertEqual(ws.search_var.get(), "")
+        # Empty search: Esc propagates to the window binding, which closes it.
+        self.assertIsNone(ws._on_search_escape(None))
+
+
 class TestRunSetRenameKeepsSelection(unittest.TestCase):
     """Review fix: renaming the selected run set must not fall back to a profile."""
 
