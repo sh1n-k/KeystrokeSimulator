@@ -82,7 +82,7 @@ def row_badges(
     if event.execute_action and referenced:
         badges.append(txt("referenced", "참조됨"))
     if toggle_enabled and event.runtime_toggle_member:
-        badges.append("⏻")
+        badges.append(txt("hotkey", "단축키"))
     return badges
 
 

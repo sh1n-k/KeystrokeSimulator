@@ -107,7 +107,7 @@ class WorkspaceSidebar(tk.Frame):
                     _ROOTS["profile"],
                     "end",
                     iid=item_iid("profile", name),
-                    text=f"★ {name}" if name in favorites else f"   {name}",
+                    text=f"{theme.ICON_FAVORITE} {name}" if name in favorites else f"   {name}",
                     tags=("favorite",) if name in favorites else (),
                 )
             for name in run_sets:

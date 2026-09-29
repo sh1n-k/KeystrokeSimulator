@@ -276,7 +276,7 @@ class TestListPresentation(unittest.TestCase):
 
         badges = row_badges(event, referenced=True, toggle_enabled=False)
         self.assertEqual(badges, ["off", "no key", "no trigger", "referenced"])
-        self.assertIn("⏻", row_badges(event, referenced=False, toggle_enabled=True))
+        self.assertIn("hotkey", row_badges(event, referenced=False, toggle_enabled=True))
 
     def test_quick_cannot_be_renamed_or_deleted(self):
         actions = {a for a, _ in sidebar_actions("profile", "Quick")}

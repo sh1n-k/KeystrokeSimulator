@@ -1,10 +1,10 @@
-import sys
 from collections.abc import Iterable, Mapping
 from typing import cast
 
 
 def get_favorite_prefix() -> str:
-    return "★ " if sys.platform == "win32" else "⭐ "
+    # One glyph on every platform (the ⭐ emoji rendered as a color image on macOS).
+    return "★ "
 
 
 FAVORITE_PREFIX = get_favorite_prefix()

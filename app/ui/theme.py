@@ -98,8 +98,16 @@ SPACE_3 = 12
 # ---------------------------------------------------------------------------
 # Icon vocabulary — unicode glyphs that render across macOS and Windows.
 # ---------------------------------------------------------------------------
-ICON_CONDITION = "◐"         # ◐
-ICON_INVERTED = "⇄"          # ⇄
+# Only glyphs that carry an affordance stay; feature emoji were removed in
+# favour of words and the status color dots above.
+ICON_FAVORITE = "★"
+ICON_SEARCH = "⌕"
+ICON_TOOLS = "⚙"
+ICON_START = "▶"
+ICON_STOP = "■"
+ICON_EXPANDED = "▾"
+ICON_COLLAPSED = "▸"
+ICON_REMOVE = "✕"
 
 
 # ---------------------------------------------------------------------------

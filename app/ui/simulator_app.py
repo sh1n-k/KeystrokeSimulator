@@ -206,7 +206,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         # A plain Label: Aqua draws an up/down indicator on every Menubutton.
         self.tools_button: tk.Label = tk.Label(
             self.context_bar,
-            text="⚙",
+            text=theme.ICON_TOOLS,
             bg=theme.SURFACE_PANEL,
             fg=theme.INK_SECONDARY,
             font=f["heading"],
@@ -1602,7 +1602,11 @@ class KeystrokeSimulatorApp(tk.Tk):
         if run_start_button is not None:
             can_press = bool(running or readiness["can_start"])
             self._run_start_enabled = can_press
-            label = txt("■ Stop", "■ 중지") if running else txt("▶ Start", "▶ 시작")
+            label = (
+                f"{theme.ICON_STOP} {txt('Stop', '중지')}"
+                if running
+                else f"{theme.ICON_START} {txt('Start', '시작')}"
+            )
             if hotkey := self._hotkey_short():
                 label = f"{label}  {hotkey}"
             start_state = "normal" if can_press else "disabled"

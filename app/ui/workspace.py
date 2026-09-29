@@ -248,8 +248,9 @@ class Workspace:
         self.lbl_running = tk.Label(
             top,
             text=txt(
-                "● Running — edits apply from the next start",
-                "● 실행 중 — 편집 내용은 다음 시작부터 반영됩니다",
+                "{icon} Running — edits apply from the next start",
+                "{icon} 실행 중 — 편집 내용은 다음 시작부터 반영됩니다",
+                icon=theme.STATUS_RUNNING_ICON,
             ),
             bg=theme.STATUS_RUNNING_BG,
             fg=theme.STATUS_RUNNING_FG,
@@ -319,7 +320,7 @@ class Workspace:
         self.profile_view = tk.Frame(self.center, bg=theme.SURFACE_PAPER)
         toolbar = tk.Frame(self.profile_view, bg=theme.SURFACE_PAPER)
         toolbar.pack(fill="x", padx=theme.SPACE_2, pady=(theme.SPACE_2, 0))
-        ttk.Label(toolbar, text="🔎").pack(side="left")
+        ttk.Label(toolbar, text=theme.ICON_SEARCH).pack(side="left")
         self.search_var = tk.StringVar(master=self.win)
         self.entry_search = ttk.Entry(toolbar, textvariable=self.search_var, width=18)
         self.entry_search.pack(side="left", padx=(theme.SPACE_1, theme.SPACE_2))
@@ -330,7 +331,7 @@ class Workspace:
             side="right", padx=(0, theme.SPACE_1)
         )
         ttk.Button(
-            toolbar, text=txt("↕ Sort by name", "↕ 이름순 정렬"), command=self.sort_by_name
+            toolbar, text=txt("Sort by name", "이름순 정렬"), command=self.sort_by_name
         ).pack(side="right", padx=(0, theme.SPACE_2))
 
         self.tabs = ttk.Notebook(self.profile_view)
@@ -617,7 +618,7 @@ class Workspace:
         self._sync_options_label()
 
     def _sync_options_label(self) -> None:
-        mark = "▾" if self._options_open else "▸"
+        mark = theme.ICON_EXPANDED if self._options_open else theme.ICON_COLLAPSED
         state = (
             txt("hotkey on/off: on", "단축키로 켜고 끄기: 사용")
             if self.profile.runtime_toggle_enabled

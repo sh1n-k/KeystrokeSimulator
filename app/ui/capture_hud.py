@@ -813,7 +813,7 @@ class CaptureHud:
         self._sync_advanced_label()
 
     def _sync_advanced_label(self) -> None:
-        mark = "▾" if self._advanced_open else "▸"
+        mark = theme.ICON_EXPANDED if self._advanced_open else theme.ICON_COLLAPSED
         self.lbl_advanced.config(text=f"{mark} {txt('Advanced', '고급')}")
 
     # -- polling --------------------------------------------------------------

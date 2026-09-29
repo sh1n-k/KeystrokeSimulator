@@ -559,7 +559,9 @@ class EventDetailPanel(ttk.Frame):
             self._refresh_screen()
             self._refresh_advanced()
             issues = event_issues(event)
-            self.lbl_issues.config(text="\n".join(f"⚠ {i}" for i in issues))
+            self.lbl_issues.config(
+            text="\n".join(f"{theme.STATUS_WARN_ICON} {i}" for i in issues)
+        )
         finally:
             self._syncing = False
 
@@ -618,7 +620,7 @@ class EventDetailPanel(ttk.Frame):
             )
             ttk.Button(
                 row,
-                text="✕",
+                text=theme.ICON_REMOVE,
                 width=2,
                 command=lambda n=name: self._remove_condition(n),
             ).pack(side="left", padx=(theme.SPACE_1, 0))
@@ -686,7 +688,7 @@ class EventDetailPanel(ttk.Frame):
             or event.invert_match
             or event.match_mode == "region"
         )
-        mark = "▾" if self._advanced_open else "▸"
+        mark = theme.ICON_EXPANDED if self._advanced_open else theme.ICON_COLLAPSED
         dot = " ·" if customized else ""
         self.lbl_advanced.config(text=f"{mark} {txt('Advanced', '고급')}{dot}")
 
