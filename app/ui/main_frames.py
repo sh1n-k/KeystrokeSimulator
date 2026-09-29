@@ -276,7 +276,7 @@ class RunTargetFrame(tk.Frame):
 
 
 class ModKeySetFrame(tk.Frame):
-    """Independent ModKey set selector. Edit/copy/delete live in the ⚙ menu."""
+    """Independent modifier key set selector. Edit/copy/delete live in the ⚙ menu."""
 
     def __init__(
         self,
@@ -344,7 +344,7 @@ class ModKeySetFrame(tk.Frame):
             self._on_set_selected()
 
     def refresh_texts(self) -> None:
-        self.lbl_sets.config(text=txt("ModKeys", "수정키"))
+        self.lbl_sets.config(text=txt("Modifier keys", "수정키"))
 
     def copy_set(self) -> None:
         curr = self.get_selected_set_name()
@@ -355,7 +355,7 @@ class ModKeySetFrame(tk.Frame):
             messagebox.showwarning(
                 txt("Warning", "경고"),
                 txt(
-                    "ModKey set '{name}' already exists.",
+                    "Modifier key set '{name}' already exists.",
                     "수정키 세트 '{name}'이(가) 이미 존재합니다.",
                     name=dst_name,
                 ),
@@ -366,7 +366,7 @@ class ModKeySetFrame(tk.Frame):
             copy_modkey_set(curr, dst_name, self.sets_path)
             self.load_sets(select_name=dst_name)
             messagebox.showinfo(
-                txt("ModKey Set Copied", "수정키 세트 복사 완료"),
+                txt("Modifier Key Set Copied", "수정키 세트 복사 완료"),
                 txt(
                     "Copied '{src}' to '{dst}' and selected it.",
                     "'{src}' 세트를 '{dst}'(으)로 복사하고 선택했습니다.",
@@ -390,7 +390,7 @@ class ModKeySetFrame(tk.Frame):
             messagebox.showinfo(
                 txt("Info", "안내"),
                 txt(
-                    "The last ModKey set cannot be deleted.",
+                    "The last modifier key set cannot be deleted.",
                     "마지막 수정키 세트는 삭제할 수 없습니다.",
                 ),
                 parent=self,
@@ -399,7 +399,7 @@ class ModKeySetFrame(tk.Frame):
         if not messagebox.askokcancel(
             txt("Warning", "경고"),
             txt(
-                "Delete ModKey set '{name}'?",
+                "Delete modifier key set '{name}'?",
                 "수정키 세트 '{name}'을(를) 삭제하시겠습니까?",
                 name=curr,
             ),
@@ -410,7 +410,7 @@ class ModKeySetFrame(tk.Frame):
             next_name = delete_modkey_set(curr, self.sets_path)
             self.load_sets(select_name=next_name)
             messagebox.showinfo(
-                txt("ModKey Set Deleted", "수정키 세트 삭제 완료"),
+                txt("Modifier Key Set Deleted", "수정키 세트 삭제 완료"),
                 txt(
                     "Deleted '{name}'.",
                     "'{name}' 세트를 삭제했습니다.",

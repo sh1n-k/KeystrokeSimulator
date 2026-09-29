@@ -42,7 +42,7 @@ class ModificationKeysWindow(tk.Toplevel):
         self.sets_path = Path(sets_path)
         self.title(
             txt(
-                "Modifier Keys — {name}",
+                "Modifier keys — {name}",
                 "수정 키 — {name}",
                 name=set_name,
             )
@@ -83,7 +83,7 @@ class ModificationKeysWindow(tk.Toplevel):
         title_col.pack(side="left", fill="x", expand=True)
         tk.Label(
             title_col,
-            text=txt("Modifier Keys", "수정 키"),
+            text=txt("Modifier keys", "수정키"),
             bg=theme.SURFACE_PANEL,
             fg=theme.INK_PRIMARY,
             font=f["heading"],
@@ -308,7 +308,7 @@ class ModificationKeysWindow(tk.Toplevel):
             messagebox.showerror(
                 txt("Error", "오류"),
                 txt(
-                    "Failed to save ModKey set: {error}",
+                    "Failed to save modifier key set: {error}",
                     "수정키 세트 저장 실패: {error}",
                     error=e,
                 ),

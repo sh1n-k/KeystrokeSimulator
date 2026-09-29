@@ -281,7 +281,7 @@ class TestStartSimulation(unittest.TestCase):
         result = KeystrokeSimulatorApp.start_simulation(app)
 
         self.assertFalse(snapshot["can_start"])
-        self.assertEqual(snapshot["badge_text"], "Toggle Conflict")
+        self.assertEqual(snapshot["badge_text"], "Hotkey Conflict")
         self.assertIn("missing an input key", snapshot["detail"])
         self.assertFalse(result)
         mock_processor_cls.assert_not_called()
@@ -600,7 +600,7 @@ class TestMainUiState(unittest.TestCase):
         snapshot = KeystrokeSimulatorApp._get_readiness_snapshot(app)
 
         self.assertFalse(snapshot["can_start"])
-        self.assertEqual(snapshot["badge_text"], "Toggle Conflict")
+        self.assertEqual(snapshot["badge_text"], "Hotkey Conflict")
         self.assertIn("conflicts with event input key", snapshot["detail"])
 
     @patch("app.ui.simulator_app.PermissionUtils.missing_macos_permissions", return_value=[])
@@ -805,7 +805,7 @@ class TestReadinessSnapshotSideEffects(unittest.TestCase):
         )
         self.assertIn("Dungeon", first)
         self.assertIn("Combat", first)
-        self.assertIn("ModKey", first)
+        self.assertIn("Modifier keys", first)
         self.assertIn("Run Dungeon", first)
 
         second = KeystrokeSimulatorApp._status_detail_with_selection(app, first)

@@ -406,7 +406,7 @@ class KeystrokeSettings(tk.Toplevel):
         )
         ttk.Checkbutton(
             self.card_sound,
-            text=txt("Toggle alert", "토글 알림음"),
+            text=txt("On/off alert", "켜고 끄기 알림음"),
             variable=self.ui_vars["runtime_toggle_sound_enabled"],
         ).grid(row=1, column=0, padx=10, pady=5, sticky="w")
 

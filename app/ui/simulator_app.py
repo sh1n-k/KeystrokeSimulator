@@ -573,8 +573,8 @@ class KeystrokeSimulatorApp(tk.Tk):
                 txt("ON", "켜짐") if self.runtime_toggle_active else txt("OFF", "꺼짐")
             )
             hint = txt(
-                "{base}\nToggle set: {trigger} ({state})",
-                "{base}\n토글 세트: {trigger} ({state})",
+                "{base}\nHotkey set: {trigger} ({state})",
+                "{base}\n단축키 묶음: {trigger} ({state})",
                 base=hint,
                 trigger=display_runtime_toggle_trigger(self.runtime_toggle_key),
                 state=toggle_state,
@@ -895,17 +895,15 @@ class KeystrokeSimulatorApp(tk.Tk):
                     "실행 프로필에서 중복 이벤트 이름이 발견되었습니다.",
                 )
             elif (
-                "toggle" in lower
-                or "토글" in first
-                or "runtime event group" in lower
-                or "toggle set" in lower
-                or "추가 이벤트 묶음" in first
-                or "토글 세트" in first
+                "on/off hotkey" in lower
+                or "hotkey set" in lower
+                or "켜고 끄는 단축키" in first
+                or "단축키 묶음" in first
             ):
-                badge = txt("Toggle Conflict", "토글 충돌")
+                badge = txt("Hotkey Conflict", "단축키 충돌")
                 title = txt(
-                    "Toggle set trigger settings need attention.",
-                    "토글 세트 트리거 설정을 확인해야 합니다.",
+                    "On/off hotkey settings need attention.",
+                    "켜고 끄는 단축키 설정을 확인해야 합니다.",
                 )
             return {
                 "can_start": False,
@@ -1031,7 +1029,7 @@ class KeystrokeSimulatorApp(tk.Tk):
                 signals=signals,
             ),
             "detail": txt(
-                "Run {target} · ModKey {modkey_set} · {count} event(s).",
+                "Run {target} · Modifier keys {modkey_set} · {count} event(s).",
                 "실행 {target} · 수정키 {modkey_set} · 이벤트 {count}개.",
                 target=target_label,
                 modkey_set=modkey_set_name,
@@ -1047,10 +1045,10 @@ class KeystrokeSimulatorApp(tk.Tk):
         modkey_set_name = (self.selected_modkey_set.get() or "").strip()
         if not profile_name and not modkey_set_name:
             return detail
-        if "ModKey " in detail or "수정키 " in detail:
+        if "Modifier keys " in detail or "수정키 " in detail:
             return detail
         line = txt(
-            "Run {target} · ModKey {modkey_set}",
+            "Run {target} · Modifier keys {modkey_set}",
             "실행 {target} · 수정키 {modkey_set}",
             target=self._run_target_label(),
             modkey_set=modkey_set_name or "—",
@@ -1526,7 +1524,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         try:
             mod_keys = get_modkey_set(set_name, self.modkey_sets_path)
         except Exception as exc:
-            logger.warning(f"ModKey set load failed for '{set_name}': {exc}")
+            logger.warning(f"Modifier key set load failed for '{set_name}': {exc}")
             mod_keys = default_modification_keys()
 
         self.terminate_event.clear()

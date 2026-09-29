@@ -158,8 +158,8 @@ def compose_run_session(
         if missing_key_profiles:
             errors.append(
                 txt(
-                    "Toggle set trigger is missing in: {profiles}",
-                    "토글 세트 트리거가 비어 있습니다: {profiles}",
+                    "On/off hotkey is missing in: {profiles}",
+                    "켜고 끄는 단축키가 비어 있습니다: {profiles}",
                     profiles=", ".join(missing_key_profiles),
                 )
             )
@@ -171,8 +171,8 @@ def compose_run_session(
             ]
             errors.append(
                 txt(
-                    "Toggle set triggers differ across profiles: {detail}",
-                    "프로필 간 토글 세트 트리거가 다릅니다: {detail}",
+                    "On/off hotkeys differ across profiles: {detail}",
+                    "프로필 간 켜고 끄는 단축키가 다릅니다: {detail}",
                     detail="; ".join(detail_parts),
                 )
             )
