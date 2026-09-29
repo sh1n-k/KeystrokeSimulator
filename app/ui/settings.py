@@ -88,8 +88,7 @@ class KeystrokeSettings(tk.Toplevel):
         theme.install_styles(self)
         self.geometry(SETTINGS_WINDOW_DEFAULT_GEOMETRY)
         self.minsize(*SETTINGS_WINDOW_MIN_SIZE)
-        # Top ContextBar mirrors the main window so each dialog reads as
-        # part of the same workstation surface.
+        # Top ContextBar mirrors the main window's title bar.
         self._build_context_bar().grid(
             row=0, column=0, columnspan=2, sticky="we"
         )
@@ -132,13 +131,6 @@ class KeystrokeSettings(tk.Toplevel):
             fg=theme.INK_PRIMARY,
             font=f["heading"],
         ).pack(side="left")
-        tk.Label(
-            bar,
-            text=txt("Workstation Defaults", "워크스테이션 기본값"),
-            bg=theme.SURFACE_PANEL,
-            fg=theme.INK_MUTED,
-            font=f["caption"],
-        ).pack(side="left", padx=(theme.SPACE_3, 0))
         return bar
 
     def _build_settings_nav_rail(self) -> tk.Frame:

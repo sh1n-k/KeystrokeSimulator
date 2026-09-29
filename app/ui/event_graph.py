@@ -30,7 +30,7 @@ def _rgb(hex_color: str) -> RGB:
     )
 
 
-# Workstation palette in RGB form, derived from app/ui/theme.py tokens.
+# App palette in RGB form, derived from app/ui/theme.py tokens.
 BACKGROUND = _rgb(theme.SURFACE_PAPER)
 PANEL_BG = _rgb(theme.SURFACE_PANEL)
 TEXT_COLOR = _rgb(theme.INK_PRIMARY)
