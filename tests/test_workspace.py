@@ -390,7 +390,8 @@ class TestWorkspaceWindow(unittest.TestCase):
         self.ws.run_set_view._on_toggle()
         self.ws.run_set_view.vars["Quick"].set(False)
         self.ws.run_set_view.vars["P"].set(False)
-        self.ws.run_set_view._on_toggle()  # emptying is refused
+        self.ws.run_set_view._on_toggle()  # emptying is refused and reverted
+        self.assertTrue(self.ws.run_set_view.vars["P"].get())
 
         data = json.loads((self.dir / "run_sets.json").read_text(encoding="utf-8"))
         self.assertEqual(data["sets"][0]["profiles"], ["Quick", "P"])

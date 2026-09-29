@@ -123,6 +123,7 @@ class RunSetEditor(ttk.Frame):
         self.name = ""
         self.available: list[str] = []
         self.vars: dict[str, tk.BooleanVar] = {}
+        self._saved: list[str] = []
         header = ttk.Frame(self)
         header.pack(fill="x", padx=theme.SPACE_3, pady=theme.SPACE_3)
         ttk.Label(header, text=txt("Run set", "실행 세트")).pack(side="left")
@@ -153,6 +154,7 @@ class RunSetEditor(ttk.Frame):
             child.destroy()
         self.vars = {}
         chosen = set(members)
+        self._saved = [p for p in available if p in chosen]
         for profile in available:
             var = tk.BooleanVar(master=self, value=profile in chosen)
             self.vars[profile] = var
@@ -169,7 +171,12 @@ class RunSetEditor(ttk.Frame):
     def _on_toggle(self) -> None:
         if self.on_members_changed(self.members()):
             self.lbl_error.config(text="")
+            self._saved = self.members()
             return
+        # 거부된 선택을 화면에 남기지 않는다. 남기면 다음 체크 때 빠진
+        # 구성원이 그대로 저장된다.
+        for name, var in self.vars.items():
+            var.set(name in self._saved)
         self.lbl_error.config(
             text=txt("Keep at least one profile.", "프로필을 하나 이상 남겨 두세요.")
         )
@@ -190,6 +197,7 @@ class Workspace:
         running_getter: Callable[[], bool],
         settings_getter: Callable[[], object | None] = lambda: None,
         on_catalog_changed: CatalogCallback | None = None,
+        on_run_set_renamed: Callable[[str, str], object] | None = None,
         on_close: Callable[[], object] | None = None,
         profile: str | None = None,
         run_set: str | None = None,
@@ -200,6 +208,7 @@ class Workspace:
         self.running_getter = running_getter
         self.settings_getter = settings_getter
         self.on_catalog_changed = on_catalog_changed
+        self.on_run_set_renamed = on_run_set_renamed
         self.on_close = on_close
         self.mode: ItemKind = "profile"
         self.prof_name = ""
@@ -492,6 +501,7 @@ class Workspace:
             if new is None or new == name:
                 return
             rename_run_set(name, new, self.run_sets_path)
+            self._announce_run_set_rename(name, new)
             if self.mode == "run_set" and self.run_set_name == name:
                 self.run_set_name = new
                 self.run_set_view.load(new, get_run_set(new, self.run_sets_path), self._all_profiles())
@@ -952,8 +962,14 @@ class Workspace:
             return
         self.run_set_name = new
         self.run_set_view.name = new
+        self._announce_run_set_rename(old, new)
         self._notify_catalog()
         self.open_run_set(new)
+
+    def _announce_run_set_rename(self, old: str, new: str) -> None:
+        """실행 창이 고른 세트를 따라가도록 카탈로그 갱신 전에 알린다."""
+        if self.on_run_set_renamed is not None:
+            self.on_run_set_renamed(old, new)
 
     # -- saving ---------------------------------------------------------------
 

@@ -218,5 +218,54 @@ class TestRunWindowBehaviour(unittest.TestCase):
         self.assertEqual((kwargs["profile"], kwargs["run_set"]), ("A", "Raid"))
 
 
+class TestRunSetRenameKeepsSelection(unittest.TestCase):
+    """Review fix: renaming the selected run set must not fall back to a profile."""
+
+    def test_main_window_follows_renamed_run_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            save_profile(d / "profiles", ProfileModel(name="A", event_list=[]), name="A")
+            upsert_run_set("Raid", ["A"], d / "run_sets.json")
+            frame = _frame(d)
+            frame.load(select=("run_set", "Raid"))
+            app = _make_app_stub()
+            app.profiles_dir = d / "profiles"
+            app.run_sets_path = d / "run_sets.json"
+            app.selected_profile = frame.profile_var
+            app.selected_run_set = frame.run_set_var
+            app.run_target_frame = frame
+
+            from app.storage.run_sets_storage import rename_run_set
+
+            rename_run_set("Raid", "Raid v2", app.run_sets_path)
+            KeystrokeSimulatorApp._on_run_set_renamed(app, "Raid", "Raid v2")
+            KeystrokeSimulatorApp.reload_profiles(app, None)
+
+            self.assertEqual(frame.get_target(), ("run_set", "Raid v2"))
+
+
+class TestRunSetEditorRefusal(unittest.TestCase):
+    """Review fix: a refused uncheck is reverted so it cannot leak into the next save."""
+
+    def test_refused_toggle_restores_checkboxes(self):
+        from app.ui.workspace import RunSetEditor
+
+        editor = RunSetEditor.__new__(RunSetEditor)
+        editor.available = ["A", "B"]
+        editor.vars = {"A": FakeVar(True), "B": FakeVar(False)}
+        editor._saved = ["A"]
+        editor.lbl_error = MagicMock()
+        saved = []
+        editor.on_members_changed = lambda members: bool(members) and not saved.append(members)
+
+        editor.vars["A"].set(False)
+        editor._on_toggle()  # refused: nothing left
+        self.assertTrue(editor.vars["A"].get())
+
+        editor.vars["B"].set(True)
+        editor._on_toggle()
+        self.assertEqual(saved, [["A", "B"]])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1677,10 +1677,16 @@ class KeystrokeSimulatorApp(tk.Tk):
             running_getter=self.is_running.get,
             settings_getter=lambda: getattr(self, "settings", None),
             on_catalog_changed=self.reload_profiles,
+            on_run_set_renamed=self._on_run_set_renamed,
             on_close=self._on_workspace_closed,
             profile=profile,
             run_set=run_set,
         )
+
+    def _on_run_set_renamed(self, old: str, new: str) -> None:
+        """고른 실행 세트의 이름이 바뀌면 새 이름을 계속 고른다."""
+        if (self.selected_run_set.get() or "").strip() == old:
+            self.selected_run_set.set(new)
 
     def _on_workspace_closed(self) -> None:
         self._workspace = None
