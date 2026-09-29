@@ -14,7 +14,12 @@ from app.storage.run_sets_storage import get_run_set, upsert_run_set
 from app.ui import theme
 from app.storage.profile_storage import ordered_profile_names
 from app.ui.workspace import Workspace
-from app.ui.workspace_list import condition_summary, row_badges, section_title
+from app.ui.workspace_list import (
+    condition_summary,
+    row_badges,
+    section_note,
+    section_title,
+)
 from app.ui.workspace_sidebar import sidebar_actions
 from app.core.profile_events import build_event_sections
 from app.utils.i18n import set_language
@@ -262,7 +267,11 @@ class TestListPresentation(unittest.TestCase):
 
         self.assertEqual(
             [section_title(s) for s in sections],
-            ["Signals (1)", "Rules · group g (1)", "Rules · no group — all run (1)"],
+            ["Signals (1)", "Rules · group g (1)", "Rules · no group (1)"],
+        )
+        self.assertEqual(
+            [section_note(s) for s in sections],
+            ["Conditions only", "Top match runs", "All matches run"],
         )
 
     def test_condition_summary_marks_off_states_and_truncates(self):

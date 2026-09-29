@@ -39,11 +39,16 @@ def section_title(section: EventSection) -> str:
             group=section.group,
             count=count,
         )
-    return txt(
-        "Rules · no group — all run ({count})",
-        "규칙 · 그룹 없음 — 모두 실행 ({count})",
-        count=count,
-    )
+    return txt("Rules · no group ({count})", "규칙 · 그룹 없음 ({count})", count=count)
+
+
+def section_note(section: EventSection) -> str:
+    """묶음 행의 설명 열. 제목은 이름 열에 들어가도록 짧게 두고 실행 방식은 여기 쓴다."""
+    if section.kind == "signal":
+        return txt("Conditions only", "조건에만 쓰임")
+    if section.kind == "group":
+        return txt("Top match runs", "맨 위 하나만 실행")
+    return txt("All matches run", "맞는 것 모두 실행")
 
 
 def condition_summary(event: EventModel, limit: int = _COND_SUMMARY_CHARS) -> str:
@@ -128,10 +133,11 @@ class EventTree(ttk.Frame):
         self.tree.heading("key", text=txt("Key", "키"), anchor="w")
         self.tree.heading("detail", text=txt("Conditions / screen", "조건 / 화면"), anchor="w")
         self.tree.heading("badges", text="", anchor="w")
-        self.tree.column("#0", width=220, minwidth=140, stretch=True)
-        self.tree.column("key", width=60, minwidth=40, stretch=False)
-        self.tree.column("detail", width=220, minwidth=100, stretch=True)
-        self.tree.column("badges", width=150, minwidth=80, stretch=False)
+        # Default widths sum to the list's default width so no column starts clipped.
+        self.tree.column("#0", width=200, minwidth=140, stretch=True)
+        self.tree.column("key", width=50, minwidth=40, stretch=False)
+        self.tree.column("detail", width=180, minwidth=100, stretch=True)
+        self.tree.column("badges", width=160, minwidth=80, stretch=True)
         f = theme.fonts()
         self.tree.tag_configure(
             "section", background=theme.SURFACE_PANEL, font=f["body_bold"]
@@ -206,6 +212,7 @@ class EventTree(ttk.Frame):
                 "end",
                 iid=section_iid,
                 text=section_title(section),
+                values=("", section_note(section), ""),
                 open=True,
                 tags=("section",),
             )
