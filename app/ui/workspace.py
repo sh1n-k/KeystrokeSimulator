@@ -322,6 +322,7 @@ class Workspace:
             running_getter=self.running_getter,
             on_change=self._on_event_changed,
             on_bulk=self._on_bulk,
+            before_screen_change=lambda: self.push_undo(txt("screen", "화면")),
         )
         self.detail.pack(fill="both", expand=True)
 

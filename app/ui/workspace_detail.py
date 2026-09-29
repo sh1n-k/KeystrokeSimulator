@@ -154,6 +154,7 @@ class EventDetailPanel(ttk.Frame):
         running_getter: Callable[[], bool],
         on_change: ChangeCallback,
         on_bulk: BulkCallback,
+        before_screen_change: Callable[[], object] = lambda: None,
     ) -> None:
         super().__init__(master)
         self.events_getter = events_getter
@@ -161,6 +162,8 @@ class EventDetailPanel(ttk.Frame):
         self.running_getter = running_getter
         self.on_change = on_change
         self.on_bulk = on_bulk
+        # 캡처본은 다시 입력할 수 없으므로 바꾸기 전에 되돌리기 지점을 남긴다.
+        self.before_screen_change = before_screen_change
         self.event: EventModel | None = None
         self.selection: list[EventModel] = []
         self.capture_hud: CaptureHud | None = None
@@ -901,6 +904,7 @@ class EventDetailPanel(ttk.Frame):
     def _on_clear_screen(self) -> None:
         if self.event is None:
             return
+        self.before_screen_change()
         clear_capture(self.event)
         self._changed("screen")
 
@@ -917,6 +921,7 @@ class EventDetailPanel(ttk.Frame):
         region = event.region_size if event.match_mode == "region" else None
 
         def on_apply(result: CaptureResult) -> None:
+            self.before_screen_change()
             apply_capture(event, result)
             if self.event is event:
                 self._changed("screen")

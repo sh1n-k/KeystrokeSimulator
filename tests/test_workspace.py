@@ -89,6 +89,71 @@ class TestListActions(WorkspaceStubCase):
         self.assertEqual([e.event_name for e in ws.profile.event_list], ["A", "B"])
         self.assertEqual(ws.profile.event_list[1].conditions, {"A": True})
 
+    def _panel(self, ws, event):
+        from app.ui.workspace_detail import EventDetailPanel
+
+        panel = EventDetailPanel.__new__(EventDetailPanel)
+        panel.event = event
+        panel.capture_hud = None
+        panel.running_getter = lambda: False
+        panel.before_screen_change = lambda: ws.push_undo("screen")
+        panel._changed = MagicMock()
+        panel.winfo_toplevel = MagicMock()
+        return panel
+
+    def _captured(self):
+        from PIL import Image
+
+        return signal(
+            "S",
+            latest_position=(10, 20),
+            clicked_position=(1, 2),
+            held_screenshot=Image.new("RGB", (5, 5), (255, 0, 0)),
+            ref_pixel_value=(255, 0, 0),
+        )
+
+    def test_clearing_a_capture_is_undoable(self):
+        event = self._captured()
+        image = event.held_screenshot
+        ws = self.make([event])
+
+        self._panel(ws, event)._on_clear_screen()
+
+        self.assertIsNone(event.held_screenshot)
+        self.assertTrue(ws.undo())
+        restored = ws.profile.event_list[0]
+        self.assertIs(restored.held_screenshot, image)
+        self.assertEqual(restored.latest_position, (10, 20))
+
+    def test_recapturing_is_undoable(self):
+        from PIL import Image
+
+        from app.ui.capture_hud import CaptureResult
+
+        event = self._captured()
+        image = event.held_screenshot
+        ws = self.make([event])
+        panel = self._panel(ws, event)
+        with patch("app.ui.workspace_detail.CaptureHud") as hud:
+            panel.open_capture()
+        on_apply = hud.call_args.kwargs["on_apply"]
+
+        on_apply(
+            CaptureResult(
+                position=(50, 60),
+                capture_size=(5, 5),
+                image=Image.new("RGB", (5, 5), (0, 0, 255)),
+                pixel=(3, 3),
+                color=(0, 0, 255),
+            )
+        )
+
+        self.assertEqual(event.latest_position, (50, 60))
+        self.assertTrue(ws.undo())
+        restored = ws.profile.event_list[0]
+        self.assertIs(restored.held_screenshot, image)
+        self.assertEqual(restored.ref_pixel_value, (255, 0, 0))
+
     def test_delete_keeps_reference_when_same_name_remains(self):
         a1, a2, b = rule("A"), rule("A"), rule("B", conditions={"A": True})
         ws = self.make([a1, a2, b], selected=[a1])

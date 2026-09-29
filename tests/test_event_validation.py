@@ -136,6 +136,7 @@ def _panel_stub(events, event):
     panel.refresh = MagicMock()
     panel.running_getter = lambda: False
     panel.capture_hud = None
+    panel.before_screen_change = MagicMock()
     return panel
 
 
