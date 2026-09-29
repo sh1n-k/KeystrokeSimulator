@@ -189,3 +189,18 @@ def rename_run_set(src: str, dst: str, path: Path | None = None) -> str:
     catalog[dst_name] = profiles
     save_run_sets(catalog, path)
     return dst_name
+
+
+def rename_profile_in_run_sets(
+    old_name: str, new_name: str, path: Path | None = None
+) -> int:
+    """프로필 이름이 바뀌면 그 프로필을 담은 실행 세트의 구성도 바꾼다."""
+    catalog = load_run_sets(path)
+    changed = 0
+    for name, profiles in catalog.items():
+        if old_name in profiles:
+            catalog[name] = [new_name if p == old_name else p for p in profiles]
+            changed += 1
+    if changed:
+        save_run_sets(catalog, path)
+    return changed

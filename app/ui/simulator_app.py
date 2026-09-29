@@ -47,14 +47,14 @@ from app.storage.run_sets_storage import (
     upsert_run_set,
 )
 from app.storage.profile_storage import (
+    list_profile_names,
     load_profile,
 )
 from app.storage.settings_storage import load_user_settings, save_user_settings
 from app.core.processor import KeystrokeProcessor
 from app.ui.capture_hud import CaptureHud
-from app.ui.profiles import KeystrokeProfiles
+from app.ui.workspace import Workspace
 from app.ui.settings import KeystrokeSettings
-from app.ui.sort_events import KeystrokeSortEvents
 from app.utils.sounds import SoundPlayer
 from app.utils.runtime_toggle import (
     MOUSE_BUTTON_3_TRIGGER,
@@ -123,6 +123,7 @@ def safe_call(func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R | No
 class KeystrokeSimulatorApp(tk.Tk):
     # Class-level default: Tk.__getattr__ recurses on instances without .tk.
     _quick_hud: CaptureHud | None = None
+    _workspace: Workspace | None = None
 
     def __init__(self) -> None:
         super().__init__()
@@ -245,7 +246,6 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.selected_profile,
             self.profiles_dir,
             edit_cb=self.open_profile,
-            sort_cb=self.sort_profile_events,
             list_changed_cb=self._sync_run_set_available,
         )
         self.profile_frame.configure(bg=theme.SURFACE_CANVAS)
@@ -265,6 +265,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             profiles_dir=self.profiles_dir,
             current_profile_getter=lambda: self.selected_profile.get(),
             on_change=self._on_run_profiles_changed,
+            edit_cb=self.open_run_set_in_workspace,
         )
         self.run_set_frame.configure(bg=theme.SURFACE_CANVAS)
         self.run_set_frame.pack(fill="x")
@@ -361,7 +362,6 @@ class KeystrokeSimulatorApp(tk.Tk):
             self.profile_frame.edit_button,
             self.profile_frame.copy_button,
             self.profile_frame.del_button,
-            self.profile_frame.sort_button,
             self.run_set_frame.edit_button,
             self.run_set_frame.copy_button,
             self.run_set_frame.del_button,
@@ -1666,15 +1666,14 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.process_frame.process_combobox.config(state=readonly_state)
         self.process_frame.refresh_button.config(state=state)
         self.profile_frame.profile_combobox.config(state=readonly_state)
-        self.profile_frame.edit_button.config(state=state)
+        # 작업 공간은 실행 중에도 연다. 편집은 다음 시작부터 반영된다.
+        self.profile_frame.edit_button.config(state="normal")
         self.profile_frame.copy_button.config(state=state)
         self.profile_frame.del_button.config(state=state)
-        self.profile_frame.sort_button.config(state=state)
         run_set_frame = self.__dict__.get("run_set_frame")
         if run_set_frame is not None:
             run_set_frame.sets_combobox.config(state=readonly_state)
             if running:
-                run_set_frame.edit_button.config(state="disabled")
                 run_set_frame.copy_button.config(state="disabled")
                 run_set_frame.del_button.config(state="disabled")
             else:
@@ -1712,6 +1711,9 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.button_frame.quick_events_button.config(state=state)
         self.button_frame.settings_button.config(state=state)
         self.button_frame.clear_logs_button.config(state=state)
+        workspace = self._workspace
+        if workspace is not None and workspace.is_open():
+            workspace.set_running(running)
         self._update_main_status()
 
     def open_modkeys(self) -> None:
@@ -1729,32 +1731,52 @@ class KeystrokeSimulatorApp(tk.Tk):
         self._update_main_status()
 
     def open_profile(self) -> None:
-        if self.is_running.get():
-            return
-        if self.selected_profile.get():
-            KeystrokeProfiles(
-                self,
-                self.selected_profile.get(),
-                self.reload_profiles,
-                profiles_dir=self.profiles_dir,
-            )
+        """작업 공간을 연다. 모달이 아니며 실행 중에도 편집할 수 있다."""
+        self._open_workspace(profile=self.selected_profile.get() or None)
 
-    def reload_profiles(self, new_name: str) -> None:
-        self.profile_frame.load_profiles(select_name=new_name)
+    def open_run_set_in_workspace(self, set_id: str) -> None:
+        self._open_workspace(
+            profile=self.selected_profile.get() or None,
+            run_set=None if is_current_run_set(set_id) else set_id,
+        )
+
+    def _open_workspace(
+        self, *, profile: str | None = None, run_set: str | None = None
+    ) -> None:
+        workspace = self._workspace
+        if workspace is not None and workspace.is_open():
+            if run_set:
+                workspace.select_item("run_set", run_set)
+            elif profile:
+                workspace.select_item("profile", profile)
+            return
+        self._workspace = Workspace(
+            self,
+            profiles_dir=self.profiles_dir,
+            run_sets_path=self.run_sets_path,
+            running_getter=self.is_running.get,
+            settings_getter=lambda: getattr(self, "settings", None),
+            on_catalog_changed=self.reload_profiles,
+            on_close=self._on_workspace_closed,
+            profile=profile,
+            run_set=run_set,
+        )
+
+    def _on_workspace_closed(self) -> None:
+        self._workspace = None
+        self.reload_profiles(None)
+
+    def reload_profiles(self, new_name: str | None) -> None:
+        """작업 공간에서 프로필·실행 세트가 바뀌면 메인 콤보를 다시 읽는다.
+        지금 고른 프로필이 사라졌을 때만(이름 변경) 새 이름으로 옮긴다."""
+        current = self.selected_profile.get()
+        if new_name and current not in list_profile_names(self.profiles_dir):
+            target: str | None = new_name
+        else:
+            target = current or new_name
+        self.profile_frame.load_profiles(select_name=target)
         self._sync_run_set_available()
         self.update_ui()
-
-    def sort_profile_events(self) -> None:
-        if self.is_running.get():
-            return
-        self.unbind_events()
-        if self.selected_profile.get():
-            KeystrokeSortEvents(
-                self,
-                self.selected_profile.get(),
-                self.reload_profiles,
-                profiles_dir=self.profiles_dir,
-            )
 
     def open_quick_events(self) -> None:
         if self.is_running.get():

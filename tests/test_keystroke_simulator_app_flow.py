@@ -546,7 +546,6 @@ class TestMainUiState(unittest.TestCase):
         app.profile_frame.edit_button = MagicMock()
         app.profile_frame.copy_button = MagicMock()
         app.profile_frame.del_button = MagicMock()
-        app.profile_frame.sort_button = MagicMock()
 
         app.modkey_set_frame = MagicMock()
         app.modkey_set_frame.sets_combobox = MagicMock()
@@ -587,8 +586,8 @@ class TestMainUiState(unittest.TestCase):
         app.modkey_set_frame.edit_button.config.assert_called_once_with(
             state="disabled"
         )
-        app.profile_frame.edit_button.config.assert_called_once_with(state="disabled")
-        app.profile_frame.sort_button.config.assert_called_once_with(state="disabled")
+        # W-14: the workspace stays reachable while running.
+        app.profile_frame.edit_button.config.assert_called_once_with(state="normal")
 
     def test_update_ui_enables_quick_events_and_modkey_set_when_stopped(self):
         app = self._make_ui_stub(running=False)
@@ -600,7 +599,6 @@ class TestMainUiState(unittest.TestCase):
         )
         app.modkey_set_frame.edit_button.config.assert_called_once_with(state="normal")
         app.profile_frame.edit_button.config.assert_called_once_with(state="normal")
-        app.profile_frame.sort_button.config.assert_called_once_with(state="normal")
 
     def test_update_ui_updates_start_button_label_for_running_state(self):
         app = self._make_ui_stub(running=True)

@@ -21,7 +21,7 @@ from app.utils.runtime_toggle import (
 UI_PAD_XS = theme.SPACE_1
 UI_PAD_SM = theme.SPACE_1
 UI_PAD_MD = theme.SPACE_2
-# Keep in step with the event-name delay in profile_event_list.
+# Renaming a profile renames its file, so typing waits for a pause.
 NAME_COMMIT_DELAY_MS = 700
 
 class ProfileFrame(ttk.Frame):

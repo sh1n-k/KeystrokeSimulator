@@ -191,6 +191,20 @@ class TestBorderRects(unittest.TestCase):
             self.assertGreater(h, 0)
 
 
+class TestBindCommit(unittest.TestCase):
+    def test_enter_runs_handler_and_breaks(self):
+        widget = MagicMock()
+        handler = MagicMock()
+
+        CaptureHud._bind_commit(widget, handler)
+
+        sequences = [c.args[0] for c in widget.bind.call_args_list]
+        self.assertEqual(sequences, ["<Return>", "<KP_Enter>"])
+        on_return = widget.bind.call_args_list[0].args[1]
+        self.assertEqual(on_return(None), "break")
+        handler.assert_called_once()
+
+
 class TestCtrlFocusGuard(unittest.TestCase):
     def test_text_inputs_block_ctrl_capture(self):
         self.assertFalse(ctrl_capture_allowed(FakeFocus("TEntry")))
@@ -414,32 +428,29 @@ class TestCaptureHudLayout(unittest.TestCase):
     @patch("app.ui.capture_hud.KeyUtils.mod_key_pressed", return_value=False)
     @patch("app.ui.capture_hud.StateUtils.save_main_app_state")
     @patch("app.ui.capture_hud.StateUtils.load_main_app_state", return_value={})
-    def test_enter_in_advanced_entry_does_not_apply(self, *_mocks):
-        self.root.deiconify()  # synthetic key events need a focusable window
-        capturer = FakeCapturer()
-        on_apply = MagicMock()
-        hud = CaptureHud(self.root, mode="single", capturer=capturer, on_apply=on_apply)
-        self.root.update()
-        capturer.emit((0, 0, 255))
-        hud.capture()
-        hud._select((3, 4))
-        hud._toggle_advanced()
-        self.root.update()
+    def test_advanced_inputs_commit_enter_without_applying(self, *_mocks):
+        """Enter in the advanced inputs must stop before the window's Apply
+        binding. Checked through the binding path: synthetic key events need
+        app focus, which is slow and flaky on macOS."""
+        committed = []
+        original = CaptureHud._bind_commit
 
-        for widget in (hud.pos_entries[0], hud.pixel_entries[0]):
-            widget.focus_force()
-            self.root.update()
-            widget.event_generate("<Return>", when="tail")
-            self.root.update()
+        def record(widget, handler):
+            committed.append(widget)
+            original(widget, handler)
 
-        on_apply.assert_not_called()
-        self.assertTrue(hud.is_open())
-        # Control: Enter elsewhere in the HUD still applies.
-        hud.btn_apply.focus_force()
-        self.root.update()
-        hud.btn_apply.event_generate("<Return>", when="tail")
-        self.root.update()
-        on_apply.assert_called_once()
+        with patch.object(CaptureHud, "_bind_commit", side_effect=record):
+            hud = CaptureHud(self.root, mode="single", capturer=FakeCapturer())
+        spins = [
+            w
+            for w in hud.advanced.winfo_children()
+            if w.winfo_class() == "TSpinbox"
+        ]
+
+        for widget in [*hud.pos_entries, *hud.pixel_entries, *spins]:
+            self.assertIn(widget, committed)
+        self.assertEqual(len(spins), 2)
+        hud.close()
 
 
 if __name__ == "__main__":

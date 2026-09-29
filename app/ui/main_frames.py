@@ -8,7 +8,7 @@ from pathlib import Path
 from tkinter import font as tkfont
 from tkinter import messagebox
 from tkinter import ttk
-from typing import Any, cast
+from typing import Any
 
 from loguru import logger
 
@@ -40,7 +40,6 @@ from app.storage.run_sets_storage import (
 from app.ui import theme
 from app.utils.i18n import txt
 from app.utils.system import ProcessCollector
-from app.utils.window_state import WindowUtils
 
 VoidCallback = Callable[[], None]
 RunProfilesChanged = Callable[[list[str]], None]
@@ -131,7 +130,6 @@ class ProfileFrame(tk.Frame):
         textvariable: tk.StringVar,
         profiles_dir: str | Path,
         edit_cb: VoidCallback | None = None,
-        sort_cb: VoidCallback | None = None,
         list_changed_cb: VoidCallback | None = None,
         **kwargs: Any,
     ) -> None:
@@ -143,14 +141,13 @@ class ProfileFrame(tk.Frame):
         self.name_to_index: dict[str, int] = {}
         self.favorite_names: set[str] = set()
         self._edit_cb = edit_cb
-        self._sort_cb = sort_cb
         self._list_changed_cb = list_changed_cb
 
         self._normal_font = tkfont.nametofont("TkTextFont").copy()
         self._bold_font = tkfont.nametofont("TkTextFont").copy()
         self._bold_font.configure(weight="bold")
 
-        # col0 label | col1 fixed combo | edit | copy | delete | sort
+        # col0 label | col1 fixed combo | edit | copy | delete
         _configure_target_row_grid(self)
 
         self.lbl_profiles: tk.Label = tk.Label(self, anchor="w", width=8)
@@ -174,20 +171,12 @@ class ProfileFrame(tk.Frame):
         self.copy_button.grid(row=0, column=3, sticky="we", padx=(0, 6))
         self.del_button: tk.Button = tk.Button(self, command=self.delete_profile)
         self.del_button.grid(row=0, column=4, sticky="we", padx=(0, 6))
-        self.sort_button: tk.Button = tk.Button(
-            self, command=self._on_sort_clicked
-        )
-        self.sort_button.grid(row=0, column=5, sticky="we")
         self.refresh_texts()
         self.load_profiles()
 
     def _on_edit_clicked(self) -> None:
         if self._edit_cb is not None:
             self._edit_cb()
-
-    def _on_sort_clicked(self) -> None:
-        if self._sort_cb is not None:
-            self._sort_cb()
 
     def _apply_selected_profile_font(self, profile_name: str) -> None:
         font = (
@@ -285,7 +274,6 @@ class ProfileFrame(tk.Frame):
         self.edit_button.config(text=txt("Edit", "편집"))
         self.copy_button.config(text=txt("Copy", "복사"))
         self.del_button.config(text=txt("Delete", "삭제"))
-        self.sort_button.config(text=txt("Sort", "정렬"))
 
     def copy_profile(self) -> None:
         if not (curr := self.get_selected_profile_name()):
@@ -370,9 +358,11 @@ class RunSetFrame(tk.Frame):
         profiles_dir: str | Path,
         current_profile_getter: Callable[[], str],
         on_change: RunProfilesChanged | None = None,
+        edit_cb: Callable[[str], None] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(master, **kwargs)
+        self._edit_cb = edit_cb
         self.sets_path = Path(sets_path)
         self.profiles_dir = Path(profiles_dir)
         self.selected_var = textvariable
@@ -536,10 +526,9 @@ class RunSetFrame(tk.Frame):
 
     def _update_action_states(self) -> None:
         is_virtual = is_current_run_set(self.get_selected_set_id())
-        # Virtual entry: edit disabled (save-as via copy). Delete disabled.
-        edit_state = "disabled" if is_virtual else "normal"
+        # Virtual entry: edit opens the current profile. Delete disabled.
         del_state = "disabled" if is_virtual else "normal"
-        self.edit_button.config(state=edit_state)
+        self.edit_button.config(state="normal")
         self.del_button.config(state=del_state)
         self.copy_button.config(state="normal")
 
@@ -552,62 +541,9 @@ class RunSetFrame(tk.Frame):
         self._update_action_states()
 
     def open_editor(self) -> None:
-        set_id = self.get_selected_set_id()
-        if is_current_run_set(set_id):
-            messagebox.showinfo(
-                txt("Info", "안내"),
-                txt(
-                    "Current profile tracks the Profiles row. Copy it to create a named run set.",
-                    "현재 프로필은 프로필 행을 따릅니다. 이름 있는 실행 세트를 만들려면 복사하세요.",
-                ),
-                parent=self,
-            )
-            return
-        if not self._available:
-            messagebox.showinfo(
-                txt("Info", "안내"),
-                txt("No profiles available.", "사용 가능한 프로필이 없습니다."),
-                parent=self,
-            )
-            return
-        members = get_run_set(set_id, self.sets_path)
-        self._open_member_dialog(
-            title=txt("Edit Run Set", "실행 세트 편집"),
-            initial_name=set_id,
-            initial_members=members,
-            rename_allowed=True,
-            on_save=lambda name, profiles: self._save_edited_set(
-                set_id, name, profiles
-            ),
-        )
-
-    def _save_edited_set(
-        self, original_id: str, new_name: str, profiles: list[str]
-    ) -> None:
-        cleaned_name = new_name.strip()
-        if not cleaned_name:
-            raise ValueError(txt("Name is required.", "이름이 필요합니다."))
-        if is_current_run_set(cleaned_name):
-            raise ValueError(
-                txt("That name is reserved.", "예약된 이름입니다.")
-            )
-        if cleaned_name != original_id and cleaned_name in list_run_set_names(
-            self.sets_path
-        ):
-            raise FileExistsError(
-                txt(
-                    "Run set '{name}' already exists.",
-                    "실행 세트 '{name}'이(가) 이미 존재합니다.",
-                    name=cleaned_name,
-                )
-            )
-        if cleaned_name != original_id:
-            # Rename by delete+upsert to keep a single write path simple.
-            delete_run_set(original_id, self.sets_path)
-        upsert_run_set(cleaned_name, profiles, self.sets_path)
-        self.load_sets(select_id=cleaned_name)
-        if self._on_change is not None:
-            self._on_change(self.get_run_profiles())
+        """실행 세트 구성은 작업 공간 사이드바에서 편집한다."""
+        if self._edit_cb is not None:
+            self._edit_cb(self.get_selected_set_id())
 
     def copy_set(self) -> None:
         set_id = self.get_selected_set_id()
@@ -696,185 +632,6 @@ class RunSetFrame(tk.Frame):
                 txt("Delete failed: {error}", "삭제 실패: {error}", error=e),
                 parent=self,
             )
-
-    def _open_member_dialog(
-        self,
-        *,
-        title: str,
-        initial_name: str,
-        initial_members: list[str],
-        rename_allowed: bool,
-        on_save: Callable[[str, list[str]], None],
-    ) -> None:
-        win = tk.Toplevel(self)
-        win.title(title)
-        win.configure(bg=theme.SURFACE_PAPER)
-        win.transient(self.winfo_toplevel())
-        body = tk.Frame(
-            win, bg=theme.SURFACE_PAPER, padx=theme.SPACE_3, pady=theme.SPACE_3
-        )
-        body.pack(fill="both", expand=True)
-
-        name_row = tk.Frame(body, bg=theme.SURFACE_PAPER)
-        name_row.pack(fill="x", pady=(0, theme.SPACE_2))
-        tk.Label(
-            name_row,
-            text=txt("Name:", "이름:"),
-            bg=theme.SURFACE_PAPER,
-            fg=theme.INK_SECONDARY,
-        ).pack(side=tk.LEFT)
-        name_var = tk.StringVar(value=initial_name)
-        name_entry = ttk.Entry(name_row, textvariable=name_var, width=28)
-        name_entry.pack(side=tk.LEFT, padx=(theme.SPACE_1, 0), fill="x", expand=True)
-        if not rename_allowed:
-            name_entry.configure(state="readonly")
-
-        tk.Label(
-            body,
-            text=txt(
-                "Check profiles included in this run set.",
-                "이 실행 세트에 포함할 프로필을 선택하세요.",
-            ),
-            bg=theme.SURFACE_PAPER,
-            fg=theme.INK_SECONDARY,
-            anchor="w",
-            justify="left",
-        ).pack(fill="x", pady=(0, theme.SPACE_2))
-
-        # 프로필이 많으면 고정 높이를 넘으므로 스크롤한다.
-        list_box = tk.Frame(body, bg=theme.SURFACE_CANVAS)
-        list_box.pack(fill="both", expand=True)
-        list_canvas = tk.Canvas(
-            list_box,
-            height=220,
-            bg=theme.SURFACE_CANVAS,
-            borderwidth=0,
-            highlightthickness=0,
-        )
-        list_scrollbar = ttk.Scrollbar(
-            list_box, orient="vertical", command=cast(Any, list_canvas).yview
-        )
-        list_canvas.configure(yscrollcommand=list_scrollbar.set)
-        list_scrollbar.pack(side=tk.RIGHT, fill="y")
-        list_canvas.pack(side=tk.LEFT, fill="both", expand=True)
-        list_frame = tk.Frame(list_canvas, bg=theme.SURFACE_CANVAS)
-        list_window = list_canvas.create_window(
-            (0, 0), window=list_frame, anchor="nw"
-        )
-        list_frame.bind(
-            "<Configure>",
-            lambda _e: list_canvas.configure(
-                scrollregion=list_canvas.bbox("all")
-            ),
-        )
-        list_canvas.bind(
-            "<Configure>",
-            lambda e: list_canvas.itemconfigure(list_window, width=e.width),
-        )
-
-        def scroll_list(event: tk.Event[tk.Misc]) -> str:
-            num = getattr(event, "num", None)
-            if num in (4, 5):
-                step = -1 if num == 4 else 1
-            else:
-                step = -1 if event.delta > 0 else 1
-            list_canvas.yview_scroll(step, "units")
-            return "break"
-
-        vars_by_name: dict[str, tk.BooleanVar] = {}
-        selected = set(initial_members)
-        scroll_targets: list[tk.Misc] = [list_canvas, list_frame]
-        for name in self._available:
-            var = tk.BooleanVar(value=name in selected)
-            vars_by_name[name] = var
-            check = tk.Checkbutton(
-                list_frame,
-                text=name,
-                variable=var,
-                anchor="w",
-                bg=theme.SURFACE_CANVAS,
-                activebackground=theme.SURFACE_CANVAS,
-                fg=theme.INK_PRIMARY,
-                selectcolor=theme.SURFACE_PAPER,
-            )
-            check.pack(fill="x", padx=theme.SPACE_1, pady=1)
-            scroll_targets.append(check)
-        for widget in scroll_targets:
-            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-                widget.bind(seq, scroll_list)
-
-        btn_row = tk.Frame(body, bg=theme.SURFACE_PAPER)
-        btn_row.pack(fill="x", pady=(theme.SPACE_3, 0))
-
-        def apply_and_close(_event: object | None = None) -> str | None:
-            chosen = [n for n in self._available if vars_by_name[n].get()]
-            if not chosen:
-                messagebox.showwarning(
-                    txt("Warning", "경고"),
-                    txt(
-                        "Select at least one profile.",
-                        "프로필을 하나 이상 선택하세요.",
-                    ),
-                    parent=win,
-                )
-                return "break"
-            try:
-                on_save(name_var.get(), chosen)
-            except Exception as e:
-                messagebox.showerror(
-                    txt("Error", "오류"),
-                    txt("Save failed: {error}", "저장 실패: {error}", error=e),
-                    parent=win,
-                )
-                return "break"
-            win.destroy()
-            return "break"
-
-        def cancel(_event: object | None = None) -> None:
-            win.destroy()
-
-        def _style_dialog_button(btn: tk.Button) -> None:
-            btn.configure(
-                bg=theme.SURFACE_CANVAS,
-                fg=theme.INK_PRIMARY,
-                activebackground=theme.SURFACE_SUNKEN,
-                activeforeground=theme.INK_PRIMARY,
-                disabledforeground=theme.INK_MUTED,
-                relief="flat",
-                borderwidth=1,
-                highlightthickness=1,
-                highlightbackground=theme.SURFACE_DIVIDER,
-                highlightcolor=theme.SURFACE_DIVIDER,
-                padx=theme.SPACE_3,
-                pady=theme.SPACE_1,
-                cursor="hand2",
-            )
-
-        btn_cancel = tk.Button(btn_row, text=txt("Cancel", "취소"), command=cancel)
-        btn_apply = tk.Button(
-            btn_row, text=txt("Apply", "적용"), command=apply_and_close
-        )
-        for btn in (btn_cancel, btn_apply):
-            _style_dialog_button(btn)
-        btn_cancel.pack(side=tk.RIGHT, padx=(theme.SPACE_1, 0))
-        btn_apply.pack(side=tk.RIGHT)
-
-        # Enter applies even while the name Entry has focus (bind on both).
-        win.bind("<Return>", apply_and_close)
-        win.bind("<KP_Enter>", apply_and_close)
-        name_entry.bind("<Return>", apply_and_close)
-        name_entry.bind("<KP_Enter>", apply_and_close)
-        win.bind("<Escape>", cancel)
-        win.protocol("WM_DELETE_WINDOW", cancel)
-        WindowUtils.center_window(win)
-        try:
-            win.grab_set()
-        except tk.TclError:
-            pass
-        win.focus_force()
-        if rename_allowed:
-            name_entry.focus_set()
-            name_entry.selection_range(0, tk.END)
 
 
 class ButtonFrame(tk.Frame):
