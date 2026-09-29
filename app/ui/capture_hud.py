@@ -584,8 +584,18 @@ class CaptureHud:
 
     # -- state accessors ------------------------------------------------------
 
+    def _moved_off_hold(self) -> bool:
+        """고정한 뒤 ALT나 좌표 입력으로 위치를 옮겨, 새 위치가 아직 고정되지 않았다."""
+        session = self.capture_session
+        held = session.held_position
+        return held is not None and held != session.current_position()
+
     def _shows_live(self) -> bool:
-        return self._alt_down or self.capture_session.held_image is None
+        return (
+            self._alt_down
+            or self.capture_session.held_image is None
+            or self._moved_off_hold()
+        )
 
     def is_ready(self) -> bool:
         snap = self.capture_session.snapshot()
@@ -657,7 +667,8 @@ class CaptureHud:
         self._render()
 
     def apply(self) -> None:
-        result = self.result()
+        # 옮긴 위치를 고정하지 않았으면 예전 캡처본을 조용히 저장하지 않는다.
+        result = None if self._moved_off_hold() else self.result()
         if result is None:
             self._feedback = (
                 txt(
@@ -779,7 +790,7 @@ class CaptureHud:
         except ValueError:
             return
         self.capture_session.set_position(pos)
-        self._render_info()
+        self._render()
 
     def _on_pixel_entry(self, _event: object | None = None) -> None:
         try:
@@ -827,6 +838,8 @@ class CaptureHud:
             self._render_info()
         if alt != self._alt_down:
             self._alt_down = alt
+            if alt:
+                self._feedback = None
             self._render()
 
         ctrl = KeyUtils.mod_key_pressed("ctrl")
@@ -1010,7 +1023,7 @@ class CaptureHud:
                 ),
                 theme.INK_SECONDARY,
             )
-        if snap.held_image is None:
+        if snap.held_image is None or self._moved_off_hold():
             return (
                 txt("Press CTRL to freeze this area.", "CTRL로 이 영역을 고정하세요."),
                 theme.INK_SECONDARY,

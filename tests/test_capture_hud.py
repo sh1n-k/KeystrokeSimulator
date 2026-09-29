@@ -288,6 +288,31 @@ class TestCaptureFlow(unittest.TestCase):
         hud.capture.assert_called_once()
         hud.on_apply.assert_not_called()
 
+    def test_moved_area_stays_live_until_frozen(self):
+        """After ALT moves off the held area, releasing ALT keeps the live view
+        and Apply refuses the stale capture until CTRL freezes the new area."""
+        hud = _make_hud_stub(self.session, mode="single")
+        self.capturer.emit((0, 0, 255))
+        hud.capture()
+        hud._select((3, 4))
+        self.assertFalse(hud._shows_live())
+
+        self.session.set_position((900, 700))  # ALT move, then released
+        self.capturer.emit((0, 255, 0))
+
+        self.assertTrue(hud._shows_live())
+        self.assertEqual(hud._displayed_image().getpixel((0, 0)), (0, 255, 0))
+        self.assertEqual(hud._status()[0], "Press CTRL to freeze this area.")
+        hud.apply()
+        hud.on_apply.assert_not_called()
+
+        hud.capture()
+        hud.apply()
+
+        result = hud.on_apply.call_args.args[0]
+        self.assertEqual(result.position, (900, 700))
+        self.assertEqual(result.color, (0, 255, 0))
+
     def test_single_mode_apply_hands_result_and_closes(self):
         hud = _make_hud_stub(self.session, mode="single")
         self.capturer.emit((0, 0, 255))
