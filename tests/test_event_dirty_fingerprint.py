@@ -4,11 +4,7 @@ import unittest
 from PIL import Image
 
 from app.core.models import EventModel
-from app.ui.profiles import (
-    EVENT_DIRTY_FIELD_NAMES,
-    _event_fingerprint,
-    event_dirty_field_names,
-)
+from app.core.profile_events import EVENT_DIRTY_FIELD_NAMES, event_fingerprint
 
 
 def _mutated_event(field_name: str) -> EventModel:
@@ -58,7 +54,7 @@ def _mutated_event(field_name: str) -> EventModel:
 class TestEventDirtyFingerprintCoverage(unittest.TestCase):
     def test_dirty_field_names_cover_all_event_model_fields(self) -> None:
         model_fields = {field.name for field in dataclasses.fields(EventModel)}
-        dirty_fields = event_dirty_field_names()
+        dirty_fields = EVENT_DIRTY_FIELD_NAMES
 
         self.assertEqual(
             model_fields,
@@ -67,23 +63,22 @@ class TestEventDirtyFingerprintCoverage(unittest.TestCase):
                 "EventModel fields and dirty/fingerprint coverage diverged. "
                 f"missing_from_dirty={sorted(model_fields - dirty_fields)} "
                 f"extra_in_dirty={sorted(dirty_fields - model_fields)}. "
-                "Update EVENT_DIRTY_FIELD_NAMES and _event_fingerprint together."
+                "Update EVENT_DIRTY_FIELD_NAMES and event_fingerprint together."
             ),
         )
-        self.assertIs(dirty_fields, EVENT_DIRTY_FIELD_NAMES)
 
     def test_each_event_model_field_affects_fingerprint(self) -> None:
-        """Fail if _event_fingerprint omits a field listed in dirty coverage."""
-        base_fp = _event_fingerprint(EventModel())
-        for field_name in sorted(event_dirty_field_names()):
+        """Fail if event_fingerprint omits a field listed in dirty coverage."""
+        base_fp = event_fingerprint(EventModel())
+        for field_name in sorted(EVENT_DIRTY_FIELD_NAMES):
             with self.subTest(field=field_name):
-                changed_fp = _event_fingerprint(_mutated_event(field_name))
+                changed_fp = event_fingerprint(_mutated_event(field_name))
                 self.assertNotEqual(
                     base_fp,
                     changed_fp,
                     msg=(
                         f"Field {field_name!r} is in EVENT_DIRTY_FIELD_NAMES but "
-                        f"mutating it does not change _event_fingerprint — "
+                        f"mutating it does not change event_fingerprint — "
                         f"autosave may skip real edits."
                     ),
                 )

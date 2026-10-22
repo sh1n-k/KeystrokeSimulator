@@ -2,7 +2,7 @@ import unittest
 
 from PIL import Image
 
-from app.ui.capture_session import CaptureSession
+from app.ui.capture_session import CaptureSession, capture_rect, rects_overlap
 
 
 class FakeCapturer:
@@ -112,6 +112,16 @@ class TestCaptureSession(unittest.TestCase):
         self.assertIsNone(snapshot.selected_position)
         self.assertIsNone(snapshot.reference_color)
         self.assertEqual(snapshot.latest_position, (2, 3))
+
+
+class TestCaptureGeometry(unittest.TestCase):
+    def test_capture_rect_uses_position_as_top_left(self):
+        self.assertEqual(capture_rect((10, 20), (100, 50)), (10, 20, 100, 50))
+
+    def test_rects_overlap_excludes_touching_edges(self):
+        self.assertTrue(rects_overlap((0, 0, 10, 10), (9, 9, 5, 5)))
+        self.assertFalse(rects_overlap((0, 0, 10, 10), (10, 0, 5, 5)))
+        self.assertFalse(rects_overlap((0, 0, 10, 10), (0, 10, 5, 5)))
 
 
 if __name__ == "__main__":

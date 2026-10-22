@@ -78,9 +78,7 @@ _RUNTIME_TOGGLE_HANGUL_2SET_ALIASES = {
 }
 
 
-def _canonical_key_name(
-    key_name: str | None, os_name: str | None = None
-) -> str | None:
+def _canonical_key_name(key_name: str | None, os_name: str | None = None) -> str | None:
     if not key_name:
         return None
 
@@ -212,6 +210,7 @@ def normalize_runtime_toggle_listener_key(
 
     return raw_name.upper()
 
+
 def normalize_runtime_toggle_wheel_event(
     delta: int | None = None, num: int | None = None
 ) -> str | None:
@@ -267,15 +266,15 @@ def collect_runtime_toggle_validation_errors(
     if not trigger_raw:
         errors.append(
             txt(
-                "Toggle set trigger is missing.",
-                "토글 세트 트리거가 비어 있습니다.",
+                "On/off hotkey is missing.",
+                "켜고 끄는 단축키가 비어 있습니다.",
             )
         )
     elif not trigger:
         errors.append(
             txt(
-                "Toggle set trigger is invalid: {trigger}",
-                "토글 세트 트리거가 올바르지 않습니다: {trigger}",
+                "On/off hotkey is invalid: {trigger}",
+                "켜고 끄는 단축키가 올바르지 않습니다: {trigger}",
                 trigger=trigger_raw,
             )
         )
@@ -283,8 +282,8 @@ def collect_runtime_toggle_validation_errors(
     if runtime_toggle_member_count(active_events) == 0:
         errors.append(
             txt(
-                "Toggle set has no selected events.",
-                "토글 세트에 선택된 이벤트가 없습니다.",
+                "Hotkey set has no selected events.",
+                "단축키 묶음에 선택된 이벤트가 없습니다.",
             )
         )
 
@@ -300,8 +299,8 @@ def collect_runtime_toggle_validation_errors(
     if invalid_member_events:
         errors.append(
             txt(
-                "Toggle set member is missing an input key. Events: {names}",
-                "토글 세트 멤버에 입력 키가 없습니다. 이벤트: {names}",
+                "Hotkey set event is missing an input key. Events: {names}",
+                "단축키 묶음 이벤트에 입력 키가 없습니다. 이벤트: {names}",
                 names=", ".join(invalid_member_events),
             )
         )
@@ -313,24 +312,24 @@ def collect_runtime_toggle_validation_errors(
     if start_stop_trigger == "ALT_SHIFT_MAC" and trigger in {"Option", "Shift"}:
         errors.append(
             txt(
-                "Toggle set trigger conflicts with Start/Stop: {trigger}",
-                "토글 세트 트리거가 시작/중지와 충돌합니다: {trigger}",
+                "On/off hotkey conflicts with Start/Stop: {trigger}",
+                "켜고 끄는 단축키가 시작/중지와 충돌합니다: {trigger}",
                 trigger=display_runtime_toggle_trigger(trigger, os_name=os_name),
             )
         )
     elif start_stop_trigger == "ALT_SHIFT_WIN" and trigger in {"Alt", "Shift"}:
         errors.append(
             txt(
-                "Toggle set trigger conflicts with Start/Stop: {trigger}",
-                "토글 세트 트리거가 시작/중지와 충돌합니다: {trigger}",
+                "On/off hotkey conflicts with Start/Stop: {trigger}",
+                "켜고 끄는 단축키가 시작/중지와 충돌합니다: {trigger}",
                 trigger=display_runtime_toggle_trigger(trigger, os_name=os_name),
             )
         )
     elif start_stop_trigger and start_stop_trigger == trigger:
         errors.append(
             txt(
-                "Toggle set trigger conflicts with Start/Stop: {trigger}",
-                "토글 세트 트리거가 시작/중지와 충돌합니다: {trigger}",
+                "On/off hotkey conflicts with Start/Stop: {trigger}",
+                "켜고 끄는 단축키가 시작/중지와 충돌합니다: {trigger}",
                 trigger=display_runtime_toggle_trigger(trigger, os_name=os_name),
             )
         )
@@ -352,8 +351,8 @@ def collect_runtime_toggle_validation_errors(
         if conflicting_events:
             errors.append(
                 txt(
-                    "Toggle set trigger conflicts with event input key '{trigger}'. Events: {names}",
-                    "토글 세트 트리거가 이벤트 입력 키 '{trigger}' 와 충돌합니다. 이벤트: {names}",
+                    "On/off hotkey conflicts with event input key '{trigger}'. Events: {names}",
+                    "켜고 끄는 단축키가 이벤트 입력 키 '{trigger}' 와 충돌합니다. 이벤트: {names}",
                     trigger=display_runtime_toggle_trigger(trigger, os_name=os_name),
                     names=", ".join(conflicting_events),
                 )

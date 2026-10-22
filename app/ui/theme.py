@@ -81,6 +81,11 @@ ROW_SELECTED_BG = SIGNAL_TINT
 ROW_MARKER_SELECTED = "#3A8F63"
 ROW_MARKER_WIDTH = 4
 
+# Capture box outline drawn over the game while the capture HUD is open.
+# Saturated so it reads on both dark and bright game scenes.
+CAPTURE_BORDER = "#FF2D55"
+CAPTURE_BORDER_WIDTH = 2
+
 
 # ---------------------------------------------------------------------------
 # Spacing — 4px base grid (use these instead of arbitrary padx/pady)
@@ -93,8 +98,16 @@ SPACE_3 = 12
 # ---------------------------------------------------------------------------
 # Icon vocabulary — unicode glyphs that render across macOS and Windows.
 # ---------------------------------------------------------------------------
-ICON_CONDITION = "◐"         # ◐
-ICON_INVERTED = "⇄"          # ⇄
+# Only glyphs that carry an affordance stay; feature emoji were removed in
+# favour of words and the status color dots above.
+ICON_FAVORITE = "★"
+ICON_SEARCH = "⌕"
+ICON_TOOLS = "⚙"
+ICON_START = "▶"
+ICON_STOP = "■"
+ICON_EXPANDED = "▾"
+ICON_COLLAPSED = "▸"
+ICON_REMOVE = "✕"
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +140,8 @@ def make_fonts() -> dict[str, tkfont.Font]:
         "body_bold": tkfont.Font(family=sans, size=12, weight="bold"),
         "caption": tkfont.Font(family=sans, size=11, weight="normal"),
         "mono": tkfont.Font(family=mono, size=12, weight="normal"),
+        # Standalone glyph buttons (⚙): the glyph draws small at text sizes.
+        "icon": tkfont.Font(family=sans, size=22, weight="normal"),
     }
 
 

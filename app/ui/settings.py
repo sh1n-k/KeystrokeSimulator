@@ -65,6 +65,8 @@ class KeystrokeSettings(tk.Toplevel):
         self.button_dock: tk.Frame
         self.button_group: tk.Frame
         self._press_key_label = ""
+        self._warning_section = "keys"
+        self._current_section = "keys"
         self._sound_pack_id_by_label: dict[str, str] = {}
         # Prefer the host app's single SoundPlayer. A second PlaybackDevice in the
         # same process races CoreAudio/miniaudio and can hard-crash on macOS.
@@ -86,8 +88,7 @@ class KeystrokeSettings(tk.Toplevel):
         theme.install_styles(self)
         self.geometry(SETTINGS_WINDOW_DEFAULT_GEOMETRY)
         self.minsize(*SETTINGS_WINDOW_MIN_SIZE)
-        # Top ContextBar mirrors the main window so each dialog reads as
-        # part of the same workstation surface.
+        # Top ContextBar mirrors the main window's title bar.
         self._build_context_bar().grid(
             row=0, column=0, columnspan=2, sticky="we"
         )
@@ -130,13 +131,6 @@ class KeystrokeSettings(tk.Toplevel):
             fg=theme.INK_PRIMARY,
             font=f["heading"],
         ).pack(side="left")
-        tk.Label(
-            bar,
-            text=txt("Workstation Defaults", "워크스테이션 기본값"),
-            bg=theme.SURFACE_PANEL,
-            fg=theme.INK_MUTED,
-            font=f["caption"],
-        ).pack(side="left", padx=(theme.SPACE_3, 0))
         return bar
 
     def _build_settings_nav_rail(self) -> tk.Frame:
@@ -184,17 +178,22 @@ class KeystrokeSettings(tk.Toplevel):
 
     def _show_settings_section(self, section: str) -> None:
         sections = {
-            "keys": (self.card_keys, self.warning_label),
-            "language": (self.card_lang,),
-            "timing": (self.card_timing,),
-            "sound": (self.card_sound,),
+            "keys": self.card_keys,
+            "language": self.card_lang,
+            "timing": self.card_timing,
+            "sound": self.card_sound,
         }
-        for key, widgets in sections.items():
-            for widget in widgets:
-                if key == section:
-                    widget.grid()
-                else:
-                    widget.grid_remove()
+        for key, card in sections.items():
+            if key == section:
+                card.grid()
+            else:
+                card.grid_remove()
+        self._current_section = section
+        # 경고는 그 경고가 속한 섹션에서만 보인다.
+        if section == getattr(self, "_warning_section", "keys"):
+            self.warning_label.grid()
+        else:
+            self.warning_label.grid_remove()
 
         f = theme.fonts()
         for key, label in self._settings_nav_labels.items():
@@ -399,7 +398,7 @@ class KeystrokeSettings(tk.Toplevel):
         )
         ttk.Checkbutton(
             self.card_sound,
-            text=txt("Toggle alert", "토글 알림음"),
+            text=txt("On/off alert", "켜고 끄기 알림음"),
             variable=self.ui_vars["runtime_toggle_sound_enabled"],
         ).grid(row=1, column=0, padx=10, pady=5, sticky="w")
 
@@ -581,14 +580,16 @@ class KeystrokeSettings(tk.Toplevel):
                 and self.settings.start_stop_key in invalid_keys
             ):
                 return self._warn(
-                    txt("Please select a Start/Stop key.", "시작/중지 키를 선택하세요.")
+                    txt("Please select a Start/Stop key.", "시작/중지 키를 선택하세요."),
+                    "keys",
                 )
         elif (
             self._bool_var("enable_key").get()
             and self.settings.start_stop_key in invalid_keys
         ):
             return self._warn(
-                txt("Please select a Start/Stop key.", "시작/중지 키를 선택하세요.")
+                txt("Please select a Start/Stop key.", "시작/중지 키를 선택하세요."),
+                "keys",
             )
 
         # 2. Numeric Validation & Update
@@ -597,14 +598,22 @@ class KeystrokeSettings(tk.Toplevel):
                 mn = int(self._str_var(f"{prefix}_min").get() or 0)
                 mx = int(self._str_var(f"{prefix}_max").get() or 0)
                 if mn >= mx:
-                    return self._warn(txt("Min must be less than Max.", "최소값은 최대값보다 작아야 합니다."))
+                    return self._warn(
+                        txt("Min must be less than Max.", "최소값은 최대값보다 작아야 합니다."),
+                        "timing",
+                    )
                 if not (50 <= mn and mx <= 500):
-                    return self._warn(txt("Values must be between 50 and 500.", "값은 50~500 범위여야 합니다."))
+                    return self._warn(
+                        txt("Values must be between 50 and 500.", "값은 50~500 범위여야 합니다."),
+                        "timing",
+                    )
                 setattr(self.settings, f"{prefix}_min", mn)
                 setattr(self.settings, f"{prefix}_max", mx)
 
         except ValueError:
-            return self._warn(txt("Invalid numeric input.", "숫자 입력이 올바르지 않습니다."))
+            return self._warn(
+                txt("Invalid numeric input.", "숫자 입력이 올바르지 않습니다."), "timing"
+            )
 
         self.settings.notification_sound_pack = self._selected_sound_pack_id()
         self.settings.runtime_toggle_sound_pack = self._selected_toggle_sound_pack_id()
@@ -621,14 +630,38 @@ class KeystrokeSettings(tk.Toplevel):
             txt("Reset settings?", "설정을 초기화하시겠습니까?"),
             parent=self,
         ):
-            self._save_window_position()
+            # 창을 다시 만들면 저장된 파일을 다시 읽으므로 화면 값만 기본값으로
+            # 바꾼다. 저장은 OK를 눌렀을 때만 한다.
             self.settings = UserSettings()
-            replacement = KeystrokeSettings(self.master)
-            if self.app_master is not None and hasattr(
-                self.app_master, "settings_window"
-            ):
-                cast(SettingsHost, self.app_master).settings_window = replacement
-            self.destroy()
+            self._apply_settings_to_widgets()
+
+    def _apply_settings_to_widgets(self) -> None:
+        if self.is_windows:
+            self._bool_var("use_alt_shift").set(self.settings.use_alt_shift_hotkey)
+        else:
+            self._bool_var("enable_key").set(self.settings.toggle_start_stop_mac)
+        self._toggle_combo_state()
+        self.language_combo.set(
+            LANGUAGE_LABELS.get(
+                normalize_language(self.settings.language), LANGUAGE_LABELS["en"]
+            )
+        )
+        for prefix in ("key_pressed_time", "delay_between_loop"):
+            for suffix in ("min", "max"):
+                key = f"{prefix}_{suffix}"
+                self._str_var(key).set(str(getattr(self.settings, key)))
+        label_by_pack_id = {v: k for k, v in self._sound_pack_id_by_label.items()}
+        for combo, pack_id in (
+            (self.sound_pack_combo, self.settings.notification_sound_pack),
+            (self.toggle_sound_pack_combo, self.settings.runtime_toggle_sound_pack),
+        ):
+            label = label_by_pack_id.get(normalize_notification_sound_pack(pack_id))
+            if label is not None:
+                combo.set(label)
+        self._bool_var("runtime_toggle_sound_enabled").set(
+            self.settings.runtime_toggle_sound_enabled
+        )
+        self._update_warning_text()
 
     def on_close(self, event: tk.Event[tk.Misc] | None = None) -> None:
         self._save_window_position()
@@ -649,8 +682,11 @@ class KeystrokeSettings(tk.Toplevel):
                 host.setup_event_handlers()
         self.destroy()
 
-    def _warn(self, msg: str) -> None:
+    def _warn(self, msg: str, section: str) -> None:
+        """검증 경고를 해당 섹션으로 이동해 그 안에 보여준다."""
         self.warning_label.config(text=msg)
+        self._warning_section = section
+        self._show_settings_section(section)
 
     def _update_warning_text(self) -> None:
         msg = (
@@ -659,6 +695,9 @@ class KeystrokeSettings(tk.Toplevel):
             else txt("macOS: Start/Stop is Option+Shift.", "macOS: 시작/중지는 Option+Shift입니다.")
         )
         self.warning_label.config(text=msg)
+        self._warning_section = "keys"
+        if getattr(self, "_current_section", "keys") != "keys":
+            self.warning_label.grid_remove()
 
     @staticmethod
     def _validate_numeric(P: str) -> bool:

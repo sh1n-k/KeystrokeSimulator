@@ -21,7 +21,7 @@ from app.utils.runtime_toggle import (
 UI_PAD_XS = theme.SPACE_1
 UI_PAD_SM = theme.SPACE_1
 UI_PAD_MD = theme.SPACE_2
-# Keep in step with the event-name delay in profile_event_list.
+# Renaming a profile renames its file, so typing waits for a pause.
 NAME_COMMIT_DELAY_MS = 700
 
 class ProfileFrame(ttk.Frame):
@@ -134,7 +134,7 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         on_change: Optional[Callable[[], None]] = None,
     ) -> None:
         super().__init__(
-            master, text=txt("Toggle set", "토글 세트")
+            master, text=txt("Hotkey set", "단축키 묶음")
         )
         self.on_change = on_change
         initial_trigger = normalize_runtime_toggle_trigger(
@@ -160,7 +160,7 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
             command=self._notify_changed,
         ).grid(row=0, column=0, padx=(UI_PAD_MD, UI_PAD_SM), pady=UI_PAD_SM, sticky="w")
 
-        self.lbl_trigger = ttk.Label(self, text=txt("Toggle trigger:", "토글 트리거:"))
+        self.lbl_trigger = ttk.Label(self, text=txt("On/off hotkey:", "켜고 끄는 단축키:"))
         self.lbl_trigger.grid(
             row=0, column=1, padx=(0, UI_PAD_SM), pady=UI_PAD_SM, sticky="w"
         )
@@ -212,8 +212,8 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
         self.lbl_help = ttk.Label(
             self,
             text=txt(
-                "Checked events start off. While running, press the toggle key to enable or disable them together (CDs, optional skills, etc.). Click Capture, then press a key or scroll the mouse wheel.",
-                "체크한 이벤트는 시작 시 꺼져 있습니다. 실행 중 토글 키로 한 번에 켜고 끕니다(쿨기·옵션 스킬 등). 입력 받기를 누른 뒤 키를 누르거나 마우스 휠을 움직이세요.",
+                "Checked events start off. While running, press the hotkey to enable or disable them together (CDs, optional skills, etc.). Click Capture, then press a key or scroll the mouse wheel.",
+                "체크한 이벤트는 시작 시 꺼져 있습니다. 실행 중 단축키로 한 번에 켜고 끕니다(쿨기·옵션 스킬 등). 입력 받기를 누른 뒤 키를 누르거나 마우스 휠을 움직이세요.",
             ),
             foreground=theme.INK_MUTED,
         )
@@ -228,7 +228,7 @@ class RuntimeToggleSettingsFrame(ttk.LabelFrame):
             sticky="w",
         )
         # One-line stand-in shown while the feature is off, so an unused
-        # toggle set costs a single row instead of the full panel.
+        # hotkey set costs a single row instead of the full panel.
         self.lbl_collapsed_hint = ttk.Label(
             self,
             text=txt(

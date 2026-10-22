@@ -13,6 +13,23 @@ from app.core.models import ColorTuple, Position
 MIN_CAPTURE_SIZE = 50
 MAX_CAPTURE_SIZE = 1000
 
+# (left, top, width, height) in screen coordinates.
+Rect = tuple[int, int, int, int]
+
+
+def capture_rect(position: Position, size: Position) -> Rect:
+    """캡처 박스. `ScreenshotCapturer._capture_group`처럼 좌표가 왼쪽 위다."""
+    return (position[0], position[1], size[0], size[1])
+
+
+def rects_overlap(a: Rect, b: Rect) -> bool:
+    return not (
+        a[0] + a[2] <= b[0]
+        or b[0] + b[2] <= a[0]
+        or a[1] + a[3] <= b[1]
+        or b[1] + b[3] <= a[1]
+    )
+
 
 @dataclass(frozen=True)
 class CaptureSnapshot:
