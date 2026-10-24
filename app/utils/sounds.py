@@ -4,6 +4,7 @@ import atexit
 import array
 import base64
 import importlib
+import sys
 import threading
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -24,7 +25,8 @@ _CHANNELS = 2
 _SAMPLE_RATE = 44100
 _SAMPLE_FORMAT = miniaudio.SampleFormat.SIGNED16
 _SAMPLE_WIDTH = int(miniaudio.width_from_format(_SAMPLE_FORMAT))
-_BUFFER_MSEC = 20
+# Windows needs a larger buffer: Python mix callbacks miss 20ms deadlines under GIL contention.
+_BUFFER_MSEC = 100 if sys.platform == "win32" else 20
 _SAMPLE_MIN = -32768
 _SAMPLE_MAX = 32767
 
