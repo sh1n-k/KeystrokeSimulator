@@ -6,6 +6,7 @@ import base64
 import importlib
 import sys
 import threading
+import time
 from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Any, TypeAlias, cast
@@ -27,6 +28,9 @@ _SAMPLE_FORMAT = miniaudio.SampleFormat.SIGNED16
 _SAMPLE_WIDTH = int(miniaudio.width_from_format(_SAMPLE_FORMAT))
 # Windows needs a larger buffer: Python mix callbacks miss 20ms deadlines under GIL contention.
 _BUFFER_MSEC = 100 if sys.platform == "win32" else 20
+# Windows chops the next sound when the device is reopened right after an idle
+# close, so keep it open for a while after the last play.
+_IDLE_CLOSE_DELAY_SEC = 10.0 if sys.platform == "win32" else 0.0
 _SAMPLE_MIN = -32768
 _SAMPLE_MAX = 32767
 
@@ -232,6 +236,9 @@ class SoundPlayer:
         thread.start()
 
     def _run_idle_stop(self, generation: int) -> None:
+        if _IDLE_CLOSE_DELAY_SEC > 0:
+            # New audio bumps the generation, so a play during the wait keeps the device.
+            time.sleep(_IDLE_CLOSE_DELAY_SEC)
         with self._lock:
             if generation != self._idle_generation:
                 return

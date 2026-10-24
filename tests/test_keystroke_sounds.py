@@ -6,6 +6,12 @@ from app.utils.sounds import SoundPlayer, _ActiveSound
 
 
 class TestKeystrokeSounds(unittest.TestCase):
+    def setUp(self) -> None:
+        # Idle-close tests expect an immediate close regardless of host OS.
+        delay = patch("app.utils.sounds._IDLE_CLOSE_DELAY_SEC", 0.0)
+        delay.start()
+        self.addCleanup(delay.stop)
+
     @patch("app.utils.sounds.miniaudio.PlaybackDevice")
     @patch("app.utils.sounds.miniaudio.decode")
     def test_sound_player_init_does_not_start_device(self, mock_decode, mock_device):
@@ -192,6 +198,32 @@ class TestKeystrokeSounds(unittest.TestCase):
         mock_device.assert_called_once()
         mock_device.return_value.start.assert_called_once()
         self.assertIsNotNone(player._device)
+
+    @patch("app.utils.sounds._IDLE_CLOSE_DELAY_SEC", 0.2)
+    @patch("app.utils.sounds.miniaudio.PlaybackDevice")
+    @patch("app.utils.sounds.miniaudio.decode")
+    def test_idle_close_delay_keeps_device_for_next_play(
+        self, mock_decode, mock_device
+    ):
+        samples = array.array("h", [1, 2])
+        mock_decode.return_value.samples = samples
+        player = SoundPlayer()
+        player.play_start_sound()
+        assert player._stream is not None
+        player._stream.send(1)
+        player._stream.send(1)  # idle: arms a delayed close
+
+        # A play during the delay reuses the open device.
+        player.play_stop_sound()
+        mock_device.assert_called_once()
+        self.assertEqual(list(player._stream.send(1)), [1, 2])
+        player._stream.send(1)
+
+        # The stale close is cancelled; the latest one closes after the delay.
+        self.assertIsNotNone(player._device)
+        player._await_idle_stop(timeout=1.0)
+        self.assertIsNone(player._device)
+        mock_device.return_value.close.assert_called_once()
 
     @patch("app.utils.sounds.miniaudio.PlaybackDevice")
     @patch("app.utils.sounds.miniaudio.decode")
