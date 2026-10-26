@@ -1,3 +1,5 @@
+"""Tk 메인 스레드 Dispatcher: queue + socketpair wake + after 펌프."""
+
 from __future__ import annotations
 
 import queue
@@ -9,13 +11,6 @@ from typing import Protocol
 
 from loguru import logger
 
-from app.platform.system import ResponsivenessActivity
-
-
-class InputListener(Protocol):
-    def start(self) -> object: ...
-    def stop(self) -> object: ...
-
 
 class TkScheduler(Protocol):
     def after(self, ms: int, func: Callable[[], object], /) -> str: ...
@@ -24,12 +19,12 @@ class TkScheduler(Protocol):
     # Windows Tk omits them; callers must use hasattr/getattr.
 
 
-class InputListenerSession:
-    """Own global listeners and marshal their actions onto the Tk thread.
+class TkDispatcher:
+    """Marshal posted actions onto the Tk thread (`Dispatcher` for InputRouter).
 
     Hotkey posts use a socketpair filehandler wake on macOS so the Tk loop is
     kicked even when the window is backgrounded (cause 2), with after(0) as
-    fallback. Optional ResponsivenessActivity reduces App Nap timer coalescing.
+    fallback.
     """
 
     def __init__(self, root: TkScheduler, interval_ms: int = 10) -> None:
@@ -37,7 +32,6 @@ class InputListenerSession:
         # Idle pump cadence; posts also request an immediate wake.
         self.interval_ms = interval_ms
         self._actions: queue.SimpleQueue[Callable[[], object]] = queue.SimpleQueue()
-        self._listeners: list[InputListener] = []
         self._after_id: str | None = None
         self._active = False
         self._draining = False
@@ -46,8 +40,6 @@ class InputListenerSession:
         self._wake_r: socket.socket | None = None
         self._wake_w: socket.socket | None = None
         self._filehandler_installed = False
-        self._responsiveness = ResponsivenessActivity()
-        self._responsiveness_held = False
 
     def start(self) -> None:
         if self._active:
@@ -56,25 +48,6 @@ class InputListenerSession:
         self._ensure_wake_pipe()
         if not self._draining:
             self._drain()
-
-    def begin_responsiveness(self) -> None:
-        """Keep process timers responsive while macOS hotkeys are armed."""
-        if self._responsiveness_held:
-            return
-        self._responsiveness.begin()
-        self._responsiveness_held = True
-
-    def end_responsiveness(self) -> None:
-        if not self._responsiveness_held:
-            return
-        self._responsiveness_held = False
-        self._responsiveness.end()
-
-    def add(self, listener: InputListener, *, started: bool = False) -> InputListener:
-        self._listeners.append(listener)
-        if not started:
-            listener.start()
-        return listener
 
     def post(self, action: Callable[[], object]) -> None:
         if not self._active:
@@ -103,7 +76,7 @@ class InputListenerSession:
             createfilehandler(wake_r, mask, self._on_wake_readable)
             self._filehandler_installed = True
         except Exception:
-            logger.debug("InputListenerSession wake pipe unavailable", exc_info=True)
+            logger.debug("TkDispatcher wake pipe unavailable", exc_info=True)
             self._cleanup_wake_pipe()
 
     def _cleanup_wake_pipe(self) -> None:
@@ -192,19 +165,12 @@ class InputListenerSession:
         self._active = False
         with self._kick_lock:
             self._kick_scheduled = False
-        self.end_responsiveness()
         if self._after_id is not None:
             try:
                 self.root.after_cancel(self._after_id)
             except Exception:
                 pass
             self._after_id = None
-        for listener in self._listeners:
-            try:
-                listener.stop()
-            except Exception:
-                pass
-        self._listeners.clear()
         self._cleanup_wake_pipe()
         while True:
             try:

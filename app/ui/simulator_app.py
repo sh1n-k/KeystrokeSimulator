@@ -30,7 +30,8 @@ from app.ui.main_frames import (
     ProcessFrame,
     RunTargetFrame,
 )
-from app.ui.input_listener_session import InputListener, InputListenerSession
+from app.platform.input_router import InputListener, InputRouter
+from app.ui.tk_dispatcher import TkDispatcher
 from app.platform.mac_hotkey_tap import MacHotkeyTapListener
 from app.platform.mac_key_poll import MacKeyPollListener
 from app.storage.modkey_sets_storage import (
@@ -155,7 +156,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.start_stop_mouse_listener: InputListener | None = None
         self.runtime_toggle_mouse_listener: InputListener | None = None
         self.keyboard_listener: InputListener | None = None
-        self.input_listener_session = InputListenerSession(self)
+        self.input_listener_session = InputRouter(TkDispatcher(self))
         self.alt_pressed: bool = False
         self.shift_pressed: bool = False
         self.last_alt_shift_toggle_time: float = 0
