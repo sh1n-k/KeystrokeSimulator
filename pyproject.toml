@@ -16,6 +16,7 @@ dependencies = [
     "pyobjc-framework-Quartz==12.2.1; sys_platform == 'darwin'",
     "pyobjc-framework-ScreenCaptureKit==12.2.1; sys_platform == 'darwin'",
     "miniaudio==1.71",
+    "pyside6-essentials==6.12.0",
 ]
 
 [dependency-groups]

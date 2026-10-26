@@ -191,3 +191,17 @@ macOS와 Windows에서 아래 체크리스트를 모두 통과해야 `feat/pysid
 - Windows 스타일: `windows11` vs `fusion`(S1에서 화면 비교 후 결정).
 - 작업 공간 이벤트 목록: `QTreeWidget`(빠름) vs `QTreeView` + 모델(드래그·필터에 유리, 권장).
 - 미추적 `scripts/mac_capture_bench.py`, `scripts/mac_global_toggle_probe.py` 보존 여부.
+
+## 부록 A. P1 스파이크 결과 (2026-10-26, macOS 26.7.1 arm64, uv 관리 CPython 3.14.9, PySide6-Essentials 6.12.0)
+
+| # | 결과 | 비고 |
+|---|---|---|
+| S1 | 통과 (macOS) | Windows 설치는 실기 확인 필요. Homebrew python@3.14.9에는 `_tkinter`가 없어 Tk 기준선은 `uv sync --managed-python`으로 만든 venv에서 돌렸다 |
+| S2 | 통과 | Qt 루프 안에서 `MacStreamBackend` open 0.52s, 100ms 간격 grab 197/197 성공(20s) |
+| S2b | 보류 | 이 셸 프로세스에 Accessibility가 없어 `CGEventTapCreate`가 None. 권한 부여 후 실기에서 확인 |
+| S3 | 부분 통과 | QApplication 이후 pynput mouse Listener 시작·유지는 크래시 없음. 실제 휠·버튼 이벤트 수신은 Accessibility 부여 후 실기 확인 |
+| S4 | 통과 | `threading.Thread`에서 emit한 50건 모두 메인 스레드 슬롯에서 실행 (QObject 메서드 슬롯 + QueuedConnection) |
+| S5 | 부분 통과 | `winId()`→NSWindow(`QNSPanel`)에 level 25, collectionBehavior(canJoinAllSpaces·fullScreenAuxiliary) 설정 성공. 전체화면 게임 위 표시는 실기 확인 |
+| S6 | 통과 | 영역 바깥 테두리 창은 캡처본에 0픽셀, 안쪽에 두면 480픽셀(검출 민감도 확인) |
+| S7 | 미실행 | 기존 `ResponsivenessActivity`(NSProcessInfo activity)를 Qt에서도 그대로 쓴다. 실기 확인 |
+| S8 | 로컬 통과 | macOS에서 `QT_QPA_PLATFORM=offscreen` + QTest 클릭 테스트 통과. GitHub Actions는 첫 푸시에서 확인 |
