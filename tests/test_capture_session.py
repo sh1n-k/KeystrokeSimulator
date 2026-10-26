@@ -2,7 +2,8 @@ import unittest
 
 from PIL import Image
 
-from app.ui.capture_session import CaptureSession, capture_rect, rects_overlap
+from app.domain.capture_geometry import capture_rect, rects_overlap
+from app.engine.capture_session import CaptureSession
 
 
 class FakeCapturer:

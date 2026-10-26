@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from app.ui.capture_hud import CaptureHud
-from app.ui.capture_session import CaptureSession
+from app.engine.capture_session import CaptureSession
 from app.ui.settings import KeystrokeSettings
 from app.ui.simulator_app import KeystrokeSimulatorApp
 from app.ui.workspace import Workspace

@@ -52,13 +52,16 @@ from app.storage.run_sets_storage import (
     rename_run_set,
     upsert_run_set,
 )
+from app.domain.capture_geometry import CaptureResult
+from app.domain.event_editing import apply_capture
+from app.presenters.workspace_sidebar import ItemKind
 from app.ui import theme
-from app.ui.capture_hud import CaptureHud, CaptureResult
+from app.ui.capture_hud import CaptureHud
 from app.ui.event_graph import ensure_profile_graph_image
 from app.ui.profile_settings import ProfileFrame, RuntimeToggleSettingsFrame
-from app.ui.workspace_detail import EventDetailPanel, apply_capture
+from app.ui.workspace_detail import EventDetailPanel
 from app.ui.workspace_list import EventTree
-from app.ui.workspace_sidebar import ItemKind, WorkspaceSidebar
+from app.ui.workspace_sidebar import WorkspaceSidebar
 from app.utils.i18n import txt
 from app.domain.runtime_toggle import collect_runtime_toggle_validation_errors
 from app.storage.app_state import StateUtils

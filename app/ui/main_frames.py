@@ -7,6 +7,11 @@ from tkinter import messagebox
 from tkinter import ttk
 from typing import Any, Literal
 
+from app.domain.display_text import (
+    TARGET_COMBO_CHARS,
+    ellipsize_display,
+    run_set_display,
+)
 from app.storage.modkey_sets_storage import (
     DEFAULT_MODKEY_SET_NAME,
     copy_modkey_set,
@@ -32,19 +37,7 @@ RunTarget = tuple[TargetKind, str]
 
 _TARGET_LABEL_MIN = 84
 _TARGET_ACTION_MIN = 84
-_TARGET_COMBO_CHARS = 24
 _SEPARATOR = "─" * 14
-
-
-def _ellipsize_display(text: str, max_chars: int = _TARGET_COMBO_CHARS) -> str:
-    """Keep combobox labels within a fixed character budget (stable window width)."""
-    if max_chars <= 0:
-        return ""
-    if len(text) <= max_chars:
-        return text
-    if max_chars == 1:
-        return "…"
-    return text[: max_chars - 1] + "…"
 
 
 def _configure_target_row_grid(frame: tk.Frame) -> None:
@@ -53,10 +46,6 @@ def _configure_target_row_grid(frame: tk.Frame) -> None:
     frame.grid_columnconfigure(0, weight=0, minsize=_TARGET_LABEL_MIN)
     frame.grid_columnconfigure(1, weight=1)
     frame.grid_columnconfigure(2, weight=0, minsize=_TARGET_ACTION_MIN)
-
-
-def run_set_display(name: str) -> str:
-    return _ellipsize_display(f"{txt('Set', '세트')} · {name}")
 
 
 class HoverTip:
@@ -125,7 +114,7 @@ class ProcessFrame(tk.Frame):
             self,
             textvariable=textvariable,
             state="readonly",
-            width=_TARGET_COMBO_CHARS,
+            width=TARGET_COMBO_CHARS,
         )
         self.process_combobox.grid(row=0, column=1, sticky="we", padx=(0, 6))
         self.refresh_button: tk.Button = tk.Button(
@@ -191,7 +180,7 @@ class RunTargetFrame(tk.Frame):
             self,
             textvariable=self.display_var,
             state="readonly",
-            width=_TARGET_COMBO_CHARS,
+            width=TARGET_COMBO_CHARS,
         )
         self.combobox.grid(row=0, column=1, sticky="we", padx=(0, 6))
         self.combobox.bind("<<ComboboxSelected>>", self._on_selected)
@@ -224,7 +213,7 @@ class RunTargetFrame(tk.Frame):
         profile_values = build_profile_display_values(
             self.profile_names, self._favorites
         )
-        values = [_ellipsize_display(v) for v in profile_values]
+        values = [ellipsize_display(v) for v in profile_values]
         if self.run_set_names:
             values.append(_SEPARATOR)
             values.extend(run_set_display(n) for n in self.run_set_names)
@@ -302,7 +291,7 @@ class ModKeySetFrame(tk.Frame):
             self,
             textvariable=self.selected_var,
             state="readonly",
-            width=_TARGET_COMBO_CHARS,
+            width=TARGET_COMBO_CHARS,
         )
         self.sets_combobox.grid(row=0, column=1, sticky="we", padx=(0, 6))
         self.sets_combobox.bind("<<ComboboxSelected>>", self._on_set_selected)

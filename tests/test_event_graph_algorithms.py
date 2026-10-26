@@ -1,27 +1,29 @@
 import unittest
 from unittest.mock import patch
 
-import app.ui.event_graph as graph_module
+import app.domain.event_graph_layout as graph_module
 
-from app.ui.event_graph import (
-    PALETTE,
+from app.domain.event_graph_layout import (
     GraphEdge,
     GraphNode,
     _assign_levels,
     _build_components,
-    _build_graph,
-    _bezier_point,
-    _bezier_tangent,
-    _calc_control_point,
     _calc_max_cols,
-    _compute_edge_offsets,
     _count_group_breaks,
+    _optimize_layer_order,
+    _wrap_layers,
+    bezier_point,
+    bezier_tangent,
+    build_graph,
+    calc_control_point,
+    compute_edge_offsets,
+)
+from app.ui.event_graph import (
+    PALETTE,
     _fade_color,
     _group_color,
-    _optimize_layer_order,
     _profile_hash,
     _wrap_label,
-    _wrap_layers,
 )
 from app.domain.models import EventModel, ProfileModel
 
@@ -40,12 +42,12 @@ def _make_node(node_id, name=None, group_id=None, **kwargs):
 
 
 class TestBuildGraph(unittest.TestCase):
-    """_build_graph: ProfileModel → 그래프 구조 변환"""
+    """build_graph: ProfileModel → 그래프 구조 변환"""
 
     def test_empty_profile(self):
         """빈 프로필 → 빈 그래프"""
         profile = ProfileModel(name="test", event_list=[])
-        nodes, edges = _build_graph(profile)
+        nodes, edges = build_graph(profile)
         self.assertEqual(len(nodes), 0)
         self.assertEqual(len(edges), 0)
 
@@ -55,7 +57,7 @@ class TestBuildGraph(unittest.TestCase):
             name="test",
             event_list=[EventModel(event_name="A")],
         )
-        nodes, edges = _build_graph(profile)
+        nodes, edges = build_graph(profile)
         self.assertEqual(len(nodes), 1)
         self.assertEqual(nodes[0].name, "A")
         self.assertEqual(len(edges), 0)
@@ -69,7 +71,7 @@ class TestBuildGraph(unittest.TestCase):
                 EventModel(event_name="B", conditions={"A": True}),
             ],
         )
-        nodes, edges = _build_graph(profile)
+        nodes, edges = build_graph(profile)
         self.assertEqual(len(nodes), 2)
         self.assertEqual(len(edges), 1)
         self.assertEqual(edges[0].src, "evt_0")  # A
@@ -84,7 +86,7 @@ class TestBuildGraph(unittest.TestCase):
                 EventModel(event_name="B", conditions={"NonExistent": True}),
             ],
         )
-        nodes, edges = _build_graph(profile)
+        nodes, edges = build_graph(profile)
         self.assertEqual(len(nodes), 2)  # B + missing
         missing = [n for n in nodes if n.missing]
         self.assertEqual(len(missing), 1)
@@ -101,7 +103,7 @@ class TestBuildGraph(unittest.TestCase):
                 EventModel(event_name="C", conditions={"A": True, "B": False}),
             ],
         )
-        nodes, edges = _build_graph(profile)
+        nodes, edges = build_graph(profile)
         self.assertEqual(len(edges), 2)
         states = {(e.src, e.dst): e.state for e in edges}
         self.assertTrue(states[("evt_0", "evt_2")])   # A → C: True
@@ -120,7 +122,7 @@ class TestBuildGraph(unittest.TestCase):
                 ),
             ],
         )
-        nodes, _ = _build_graph(profile)
+        nodes, _ = build_graph(profile)
         node = nodes[0]
         self.assertEqual(node.group_id, "G1")
         self.assertFalse(node.use_event)
@@ -136,7 +138,7 @@ class TestBuildGraph(unittest.TestCase):
                 EventModel(event_name="B", conditions={"A": True}),
             ],
         )
-        nodes, edges = _build_graph(profile)
+        nodes, edges = build_graph(profile)
         self.assertEqual(len(nodes), 3)
         # B는 두 개의 A 노드 모두에서 엣지를 받음
         b_edges = [e for e in edges if e.dst == "evt_2"]
@@ -403,56 +405,56 @@ class TestBezierMath(unittest.TestCase):
 
     def test_bezier_point_at_start(self):
         """t=0: 시작점 반환"""
-        p = _bezier_point(0.0, (0, 0), (50, 100), (100, 0))
+        p = bezier_point(0.0, (0, 0), (50, 100), (100, 0))
         self.assertAlmostEqual(p[0], 0.0)
         self.assertAlmostEqual(p[1], 0.0)
 
     def test_bezier_point_at_end(self):
         """t=1: 끝점 반환"""
-        p = _bezier_point(1.0, (0, 0), (50, 100), (100, 0))
+        p = bezier_point(1.0, (0, 0), (50, 100), (100, 0))
         self.assertAlmostEqual(p[0], 100.0)
         self.assertAlmostEqual(p[1], 0.0)
 
     def test_bezier_point_at_mid(self):
         """t=0.5: 중간점"""
-        p = _bezier_point(0.5, (0, 0), (50, 100), (100, 0))
+        p = bezier_point(0.5, (0, 0), (50, 100), (100, 0))
         self.assertAlmostEqual(p[0], 50.0)
         self.assertAlmostEqual(p[1], 50.0)
 
     def test_bezier_tangent_direction(self):
         """접선 벡터가 올바른 방향"""
-        dx, dy = _bezier_tangent(0.0, (0, 0), (100, 0), (200, 0))
+        dx, dy = bezier_tangent(0.0, (0, 0), (100, 0), (200, 0))
         self.assertGreater(dx, 0)  # 오른쪽 방향
         self.assertAlmostEqual(dy, 0.0)  # y 변화 없음
 
     def test_calc_control_point_no_offset(self):
         """offset=0: 중점 반환"""
-        cp = _calc_control_point((0, 0), (100, 0), 0.0)
+        cp = calc_control_point((0, 0), (100, 0), 0.0)
         self.assertAlmostEqual(cp[0], 50.0)
         self.assertAlmostEqual(cp[1], 0.0)
 
     def test_calc_control_point_with_offset(self):
         """offset > 0: 수직 방향으로 이동"""
-        cp = _calc_control_point((0, 0), (100, 0), 20.0)
+        cp = calc_control_point((0, 0), (100, 0), 20.0)
         self.assertAlmostEqual(cp[0], 50.0)
         # 수평선의 수직 = y축 방향
         self.assertNotAlmostEqual(cp[1], 0.0)
 
     def test_calc_control_point_zero_length(self):
         """시작=끝: 길이 0일 때 offset 적용"""
-        cp = _calc_control_point((50, 50), (50, 50), 10.0)
+        cp = calc_control_point((50, 50), (50, 50), 10.0)
         self.assertAlmostEqual(cp[0], 60.0)  # mx + offset
         self.assertAlmostEqual(cp[1], 50.0)
 
 
 class TestComputeEdgeOffsets(unittest.TestCase):
-    """_compute_edge_offsets: 엣지 겹침 방지 오프셋"""
+    """compute_edge_offsets: 엣지 겹침 방지 오프셋"""
 
     def test_single_edge_zero_offset(self):
         """엣지 1개 → 오프셋 0"""
         edges = [GraphEdge(src="A", dst="B", state=True)]
         positions = {"A": (0, 0), "B": (100, 100)}
-        offsets = _compute_edge_offsets(edges, positions)
+        offsets = compute_edge_offsets(edges, positions)
         self.assertAlmostEqual(offsets[("A", "B")], 0.0)
 
     def test_multiple_edges_to_same_dest(self):
@@ -462,7 +464,7 @@ class TestComputeEdgeOffsets(unittest.TestCase):
             GraphEdge(src="B", dst="C", state=True),
         ]
         positions = {"A": (0, 0), "B": (100, 0), "C": (50, 100)}
-        offsets = _compute_edge_offsets(edges, positions)
+        offsets = compute_edge_offsets(edges, positions)
         o1 = offsets[("A", "C")]
         o2 = offsets[("B", "C")]
         self.assertNotAlmostEqual(o1, o2)  # 서로 다른 오프셋
@@ -472,7 +474,7 @@ class TestComputeEdgeOffsets(unittest.TestCase):
         """position에 없는 노드의 엣지는 무시"""
         edges = [GraphEdge(src="A", dst="B", state=True)]
         positions = {"A": (0, 0)}  # B 없음
-        offsets = _compute_edge_offsets(edges, positions)
+        offsets = compute_edge_offsets(edges, positions)
         self.assertEqual(len(offsets), 0)
 
 

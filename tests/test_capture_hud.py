@@ -9,23 +9,22 @@ from PIL import Image
 
 from app.domain.models import EventModel, ProfileModel
 from app.storage.profile_storage import load_profile, save_profile
-from app.ui.capture_hud import (
+from app.domain.capture_geometry import (
     MAGNIFIER_SPAN,
     MAGNIFIER_ZOOM,
-    CaptureHud,
     CaptureResult,
-    append_quick_event,
     border_rects,
-    ctrl_capture_allowed,
     display_to_image,
     hud_position,
     magnifier_to_image,
     preview_size,
-    render_magnifier,
-    render_overlay,
+    rects_overlap,
 )
+from app.domain.capture_render import render_magnifier, render_overlay
+from app.engine.capture_session import CaptureSession
+from app.presenters.quick_capture import append_quick_event
+from app.ui.capture_hud import CaptureHud, ctrl_capture_allowed
 from app.ui import theme
-from app.ui.capture_session import CaptureSession, rects_overlap
 from app.utils.i18n import set_language
 
 _RUN_GUI_TESTS = os.environ.get("RUN_GUI_TESTS", "0") == "1"
@@ -108,7 +107,9 @@ class TestMagnifier(unittest.TestCase):
     def test_render_magnifier_pads_outside_and_marks_selected(self):
         img = Image.new("RGB", (20, 20), (255, 0, 0))
 
-        zoomed = render_magnifier(img, (0, 0), (0, 0))
+        zoomed = render_magnifier(
+            img, (0, 0), (0, 0), pad_color=theme.SURFACE_SUNKEN
+        )
 
         size = MAGNIFIER_SPAN * MAGNIFIER_ZOOM
         self.assertEqual(zoomed.size, (size, size))

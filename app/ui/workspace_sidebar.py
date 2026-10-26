@@ -5,13 +5,11 @@ from __future__ import annotations
 import tkinter as tk
 import tkinter.ttk as ttk
 from collections.abc import Callable, Sequence
-from typing import Literal
 
-from app.storage.profile_display import QUICK_PROFILE_NAME
+from app.presenters.workspace_sidebar import ItemKind, sidebar_actions
 from app.ui import theme
 from app.utils.i18n import txt
 
-ItemKind = Literal["profile", "run_set"]
 SelectCallback = Callable[[ItemKind, str], None]
 ActionCallback = Callable[[ItemKind, str, str], None]
 NewCallback = Callable[[ItemKind], None]
@@ -21,24 +19,6 @@ _ROOTS: dict[ItemKind, str] = {"profile": "root:profile", "run_set": "root:run_s
 
 def item_iid(kind: ItemKind, name: str) -> str:
     return f"{kind}:{name}"
-
-
-def sidebar_actions(kind: ItemKind, name: str) -> list[tuple[str, str]]:
-    """(action, 라벨). Quick은 이름 변경·삭제가 없다."""
-    if kind == "run_set":
-        return [
-            ("rename", txt("Rename…", "이름 바꾸기…")),
-            ("copy", txt("Duplicate", "복사")),
-            ("delete", txt("Delete", "삭제")),
-        ]
-    actions = [
-        ("copy", txt("Duplicate", "복사")),
-        ("favorite", txt("Toggle favorite", "즐겨찾기 켜기/끄기")),
-    ]
-    if name != QUICK_PROFILE_NAME:
-        actions.insert(0, ("rename", txt("Rename…", "이름 바꾸기…")))
-        actions.append(("delete", txt("Delete", "삭제")))
-    return actions
 
 
 class WorkspaceSidebar(tk.Frame):

@@ -6,16 +6,16 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from app.domain.models import EventModel
-from app.ui.capture_hud import CaptureResult
-from app.ui.workspace_detail import (
-    EventDetailPanel,
+from app.domain.capture_geometry import CaptureResult
+from app.domain.event_editing import (
     apply_capture,
     capture_from_event,
     clamp_region,
     clear_capture,
     event_issues,
 )
+from app.domain.models import EventModel
+from app.ui.workspace_detail import EventDetailPanel
 from app.utils.i18n import set_language
 
 

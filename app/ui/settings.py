@@ -5,7 +5,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk, messagebox
 from collections.abc import Callable
-from typing import Any, ClassVar, Protocol, cast
+from typing import Any, Protocol, cast
 
 from loguru import logger
 from app.utils.i18n import (
@@ -16,6 +16,7 @@ from app.utils.i18n import (
     txt,
 )
 from app.domain.models import UserSettings
+from app.domain.validation import settings_number_entry_valid, start_stop_key_valid
 from app.storage.settings_storage import load_user_settings, save_user_settings
 from app.utils.notification_sound_packs import (
     notification_sound_pack_choices,
@@ -39,8 +40,6 @@ class SettingsHost(Protocol):
 
 
 class KeystrokeSettings(tk.Toplevel):
-    VALID_CHARS: ClassVar[set[str]] = set("`[];',./-=\"")
-
     def __init__(self, master: tk.Misc | None = None) -> None:
         super().__init__(master)
         self.app_master: object | None = master
@@ -276,7 +275,7 @@ class KeystrokeSettings(tk.Toplevel):
         self._create_sound_section()
 
         # 2. Numeric Entries
-        v_cmd = (self.register(self._validate_numeric), "%P")
+        v_cmd = (self.register(settings_number_entry_valid), "%P")
         self._add_range_row(
             0, txt("Key pressed time", "키 누름 시간"), "key_pressed_time", v_cmd
         )
@@ -556,10 +555,7 @@ class KeystrokeSettings(tk.Toplevel):
             return
 
         key = (event.char or event.keysym).upper()
-        is_valid = (len(key) == 1 and (key.isalnum() or key in self.VALID_CHARS)) or (
-            key.startswith("F") and key[1:].isdigit()
-        )
-        if is_valid:
+        if start_stop_key_valid(key):
             self.start_stop_combo.set(key)
             self.settings.start_stop_key = key
 
@@ -699,9 +695,3 @@ class KeystrokeSettings(tk.Toplevel):
         self._warning_section = "keys"
         if getattr(self, "_current_section", "keys") != "keys":
             self.warning_label.grid_remove()
-
-    @staticmethod
-    def _validate_numeric(P: str) -> bool:
-        return P == "" or (
-            P.isdigit() and not (P.startswith("0") and len(P) > 1) and int(P) < 1000
-        )

@@ -14,13 +14,13 @@ from app.storage.run_sets_storage import get_run_set, upsert_run_set
 from app.ui import theme
 from app.storage.profile_storage import ordered_profile_names
 from app.ui.workspace import Workspace
-from app.ui.workspace_list import (
+from app.domain.display_text import (
     condition_summary,
     row_badges,
     section_note,
     section_title,
 )
-from app.ui.workspace_sidebar import sidebar_actions
+from app.presenters.workspace_sidebar import sidebar_actions
 from app.domain.profile_events import build_event_sections
 from app.utils.i18n import set_language
 
@@ -128,7 +128,7 @@ class TestListActions(WorkspaceStubCase):
     def test_recapturing_is_undoable(self):
         from PIL import Image
 
-        from app.ui.capture_hud import CaptureResult
+        from app.domain.capture_geometry import CaptureResult
 
         event = self._captured()
         image = event.held_screenshot

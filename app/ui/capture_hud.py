@@ -9,25 +9,31 @@ from __future__ import annotations
 import tkinter as tk
 import tkinter.ttk as ttk
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageTk
 
-from app.domain.models import ColorTuple, EventModel, Position
-from app.domain.profile_events import next_numbered_event_name
-from app.storage.profile_storage import ensure_quick_profile, load_profile, save_profile
-from app.ui import theme
-from app.ui.capture_session import (
+from app.domain.capture_geometry import (
+    MAGNIFIER_SPAN,
+    MAGNIFIER_ZOOM,
     MAX_CAPTURE_SIZE,
     MIN_CAPTURE_SIZE,
-    CaptureBackend,
-    CaptureSession,
+    CaptureResult,
     Rect,
+    border_rects,
     capture_rect,
-    rects_overlap,
+    display_to_image,
+    hud_position,
+    magnifier_to_image,
+    preview_size,
 )
+from app.domain.capture_render import color_hex, render_magnifier, render_overlay
+from app.domain.models import Position
+from app.engine.capture_session import CaptureBackend, CaptureSession
+from app.presenters.quick_capture import append_quick_event
+from app.storage.profile_storage import ensure_quick_profile
+from app.ui import theme
 from app.utils.i18n import txt
 from app.platform.keys import KeyUtils
 from app.platform.system import PermissionUtils
@@ -36,161 +42,12 @@ from app.ui.tk_window import WindowUtils
 
 HudMode = Literal["single", "continuous"]
 
-PREVIEW_MAX = 200
-MAGNIFIER_ZOOM = 8
-MAGNIFIER_SPAN = 11  # 원본 픽셀 수(홀수라 가운데 픽셀이 있다)
-HUD_MARGIN = 16
 HUD_WRAP = 250
 _TEXT_INPUT_CLASSES = frozenset(
     {"Entry", "TEntry", "Spinbox", "TSpinbox", "TCombobox", "Text"}
 )
 # 100ms 폴링 기준 3초. 권한 조회는 호출당 10ms 이상이다.
 _PERMISSION_POLL_TICKS = 30
-
-
-@dataclass(frozen=True)
-class CaptureResult:
-    """적용한 캡처. position은 캡처 박스의 왼쪽 위(화면 좌표)다."""
-
-    position: Position
-    capture_size: Position
-    image: Image.Image
-    pixel: Position
-    color: ColorTuple
-
-
-# ---------------------------------------------------------------------------
-# Pure helpers
-# ---------------------------------------------------------------------------
-
-
-def preview_size(image_size: Position) -> Position:
-    """1:1로 보여주되 긴 변을 PREVIEW_MAX로 제한한다."""
-    w, h = image_size
-    scale = min(1.0, PREVIEW_MAX / max(1, w), PREVIEW_MAX / max(1, h))
-    return (max(1, int(w * scale)), max(1, int(h * scale)))
-
-
-def display_to_image(
-    point: Position, display_size: Position, image_size: Position
-) -> Position | None:
-    dw, dh = display_size
-    if dw <= 0 or dh <= 0:
-        return None
-    x = int(point[0] * image_size[0] / dw)
-    y = int(point[1] * image_size[1] / dh)
-    if not (0 <= x < image_size[0] and 0 <= y < image_size[1]):
-        return None
-    return (x, y)
-
-
-def magnifier_to_image(
-    point: Position, center: Position, image_size: Position
-) -> Position | None:
-    """돋보기 좌표를 원본 픽셀 좌표로 바꾼다. 원본 밖이면 None."""
-    half = MAGNIFIER_SPAN // 2
-    x = center[0] - half + point[0] // MAGNIFIER_ZOOM
-    y = center[1] - half + point[1] // MAGNIFIER_ZOOM
-    if not (0 <= x < image_size[0] and 0 <= y < image_size[1]):
-        return None
-    return (x, y)
-
-
-def render_magnifier(
-    image: Image.Image, center: Position, selected: Position | None
-) -> Image.Image:
-    """center 주변 MAGNIFIER_SPAN 픽셀을 확대한다. 원본 밖은 회색으로 채운다."""
-    half = MAGNIFIER_SPAN // 2
-    left, top = center[0] - half, center[1] - half
-    src = Image.new("RGB", (MAGNIFIER_SPAN, MAGNIFIER_SPAN), theme.SURFACE_SUNKEN)
-    clip = (
-        max(0, left),
-        max(0, top),
-        min(image.width, left + MAGNIFIER_SPAN),
-        min(image.height, top + MAGNIFIER_SPAN),
-    )
-    if clip[0] < clip[2] and clip[1] < clip[3]:
-        src.paste(image.convert("RGB").crop(clip), (clip[0] - left, clip[1] - top))
-    size = MAGNIFIER_SPAN * MAGNIFIER_ZOOM
-    zoomed = cast(
-        Image.Image, cast(Any, src).resize((size, size), Image.Resampling.NEAREST)
-    )
-    draw = ImageDraw.Draw(zoomed)
-    if selected is not None:
-        sx, sy = selected[0] - left, selected[1] - top
-        if 0 <= sx < MAGNIFIER_SPAN and 0 <= sy < MAGNIFIER_SPAN:
-            x0, y0 = sx * MAGNIFIER_ZOOM, sy * MAGNIFIER_ZOOM
-            x1, y1 = x0 + MAGNIFIER_ZOOM - 1, y0 + MAGNIFIER_ZOOM - 1
-            draw.rectangle([x0 - 1, y0 - 1, x1 + 1, y1 + 1], outline="white")
-            draw.rectangle([x0, y0, x1, y1], outline="black")
-    return zoomed
-
-
-def render_overlay(
-    image: Image.Image, pixel: Position | None, region_size: Position | None = None
-) -> Image.Image:
-    """대상 픽셀 표시. 픽셀 모드는 반전 십자선, 영역 모드는 영역 사각형."""
-    res = image.convert("RGB")  # always a copy
-    if pixel is None:
-        return res
-    cx, cy = pixel
-    w, h = res.size
-    if not (0 <= cx < w and 0 <= cy < h):
-        return res
-    if region_size is not None:
-        rw, rh = region_size[0] // 2, region_size[1] // 2
-        draw = ImageDraw.Draw(res)
-        draw.rectangle(
-            [max(0, cx - rw), max(0, cy - rh), min(w, cx + rw), min(h, cy + rh)],
-            outline="yellow",
-            width=2,
-        )
-        return res
-    pixels = cast(Any, res.load())
-    for x in range(w):
-        r, g, b = pixels[x, cy]
-        pixels[x, cy] = (255 - r, 255 - g, 255 - b)
-    for y in range(h):
-        if y == cy:
-            continue
-        r, g, b = pixels[cx, y]
-        pixels[cx, y] = (255 - r, 255 - g, 255 - b)
-    return res
-
-
-def hud_position(
-    hud: Rect, box: Rect, screen: Position, margin: int = HUD_MARGIN
-) -> Position | None:
-    """HUD가 캡처 박스와 겹치면 박스 반대편 화면 모서리 위치. 안 겹치면 None."""
-    if not rects_overlap(hud, box):
-        return None
-    _, _, w, h = hud
-    sw, sh = screen
-    near_x, far_x = margin, sw - w - margin
-    near_y, far_y = margin, sh - h - margin
-    box_cx, box_cy = box[0] + box[2] / 2, box[1] + box[3] / 2
-    xs = (near_x, far_x) if box_cx > sw / 2 else (far_x, near_x)
-    ys = (near_y, far_y) if box_cy > sh / 2 else (far_y, near_y)
-    candidates = [(xs[0], ys[0]), (xs[0], ys[1]), (xs[1], ys[0]), (xs[1], ys[1])]
-    clamped = [
-        (max(0, min(x, sw - w)), max(0, min(y, sh - h))) for x, y in candidates
-    ]
-    for x, y in clamped:
-        if not rects_overlap((x, y, w, h), box):
-            return (x, y)
-    return clamped[0]
-
-
-def border_rects(box: Rect, thickness: int) -> list[Rect]:
-    """캡처 박스 바깥쪽 테두리 4개(위, 아래, 왼쪽, 오른쪽). 박스 안은 덮지 않는다."""
-    x, y, w, h = box
-    t = thickness
-    return [
-        (x - t, y - t, w + 2 * t, t),
-        (x - t, y + h, w + 2 * t, t),
-        (x - t, y, t, h),
-        (x + w, y, t, h),
-    ]
 
 
 class CaptureBorder:
@@ -246,31 +103,6 @@ def ctrl_capture_allowed(focus: tk.Misc | None) -> bool:
         return focus.winfo_class() not in _TEXT_INPUT_CLASSES
     except tk.TclError:
         return True
-
-
-def append_quick_event(profiles_dir: Path, result: CaptureResult) -> str:
-    """Quick 프로필을 다시 읽어 뒤에 추가한다. 붙인 이름을 돌려준다."""
-    profile = load_profile(profiles_dir, "Quick", migrate=True)
-    name = next_numbered_event_name(e.event_name or "" for e in profile.event_list)
-    profile.event_list.append(
-        EventModel(
-            event_name=name,
-            capture_size=result.capture_size,
-            latest_position=result.position,
-            clicked_position=result.pixel,
-            held_screenshot=result.image,
-            ref_pixel_value=result.color,
-            match_mode="pixel",
-            region_size=None,
-        )
-    )
-    save_profile(profiles_dir, profile, name="Quick")
-    return name
-
-
-def _color_hex(color: ColorTuple) -> str:
-    r, g, b = (int(c) for c in color[:3])
-    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 # ---------------------------------------------------------------------------
@@ -973,7 +805,10 @@ class CaptureHud:
             return
         center = self._mag_center or (img.width // 2, img.height // 2)
         selected = None if self._shows_live() else self.capture_session.selected_position
-        self._set_image(self.lbl_magnifier, render_magnifier(img, center, selected))
+        self._set_image(
+            self.lbl_magnifier,
+            render_magnifier(img, center, selected, pad_color=theme.SURFACE_SUNKEN),
+        )
 
     def _render_info(self) -> None:
         snap = self.capture_session.snapshot()
@@ -987,7 +822,7 @@ class CaptureHud:
             point = self.capture_session.current_position()
         rgb = ",".join(str(int(c)) for c in color[:3]) if color else "—"
         try:
-            self.lbl_swatch.config(bg=_color_hex(color) if color else theme.SURFACE_SUNKEN)
+            self.lbl_swatch.config(bg=color_hex(color) if color else theme.SURFACE_SUNKEN)
             self.lbl_info.config(text=f"{rgb}  ({point[0]}, {point[1]})")
         except tk.TclError:
             return

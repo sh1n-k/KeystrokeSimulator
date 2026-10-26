@@ -106,3 +106,27 @@ def timing_is_valid(duration_ms: int | None, randomization_ms: int | None) -> bo
     return not (
         duration_ms and randomization_ms and randomization_ms < MIN_RANDOMIZATION_MS
     )
+
+
+def is_digits(value: str) -> bool:
+    """숫자 입력 칸의 키 입력 검증. 빈 값은 입력 중으로 본다."""
+    return value == "" or value.isdigit()
+
+
+def settings_number_entry_valid(value: str) -> bool:
+    """설정 창 숫자 칸: 빈 값 또는 앞자리 0 없는 0~999."""
+    return value == "" or (
+        value.isdigit()
+        and not (value.startswith("0") and len(value) > 1)
+        and int(value) < 1000
+    )
+
+
+START_STOP_SYMBOL_KEYS = frozenset("`[];',./-=\"")
+
+
+def start_stop_key_valid(key: str) -> bool:
+    """시작/중지 키로 받을 수 있는 키 이름(대문자). 영숫자·기호 한 글자 또는 F키."""
+    return (len(key) == 1 and (key.isalnum() or key in START_STOP_SYMBOL_KEYS)) or (
+        key.startswith("F") and key[1:].isdigit()
+    )
