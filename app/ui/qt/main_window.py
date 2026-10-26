@@ -365,7 +365,8 @@ class RunWindow(QMainWindow):
 
     def before_start(self) -> None:
         hud = self.quick_hud
-        if hud is not None and hud.isVisible():
+        is_open = getattr(hud, "is_open", None)
+        if hud is not None and callable(is_open) and is_open():
             hud.close()
 
     def defer(self, action: Callable[[], None]) -> None:
@@ -383,6 +384,11 @@ class RunWindow(QMainWindow):
     def load_settings(self) -> None:
         self.run.load_settings()
         self.refresh_texts()
+        # Language may have changed: open child windows re-translate too.
+        for child in (self.workspace, self.quick_hud):
+            retranslate = getattr(child, "retranslate", None)
+            if callable(retranslate):
+                retranslate()
 
     def setup_event_handlers(self) -> None:
         self.run.setup_event_handlers()
