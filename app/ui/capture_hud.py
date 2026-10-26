@@ -272,6 +272,9 @@ class CaptureHud(QWidget):
         self.on_close = on_close
         self._closing = False
         self._capture_generation = -1
+        # 캡처 박스를 피해 비켜 있는 동안: 사용자가 둔 원래 자리와 비킨 자리(논리 좌표).
+        self._home: QPoint | None = None
+        self._aside_at: QPoint | None = None
         self._scale = capture_scale()
         self.controller = CaptureController(
             mode=mode,
@@ -484,11 +487,17 @@ class CaptureHud(QWidget):
         pos = QCursor.pos()
         return (_to_capture(pos.x(), self._scale), _to_capture(pos.y(), self._scale))
 
-    def _screen_size(self) -> Position:
-        size = QGuiApplication.primaryScreen().geometry().size()
+    def _screen_rect(self, box: Rect) -> Rect:
+        """박스 가운데가 있는 모니터의 사용 가능 영역(캡처 좌표)."""
+        s = self._scale
+        center = QPoint(int((box[0] + box[2] / 2) / s), int((box[1] + box[3] / 2) / s))
+        screen = QGuiApplication.screenAt(center) or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry()
         return (
-            _to_capture(size.width(), self._scale),
-            _to_capture(size.height(), self._scale),
+            _to_capture(area.x(), s),
+            _to_capture(area.y(), s),
+            _to_capture(area.width(), s),
+            _to_capture(area.height(), s),
         )
 
     def _hud_rect(self) -> Rect | None:
@@ -655,12 +664,40 @@ class CaptureHud(QWidget):
                 self._render()
 
     def _avoid_capture_box(self) -> None:
+        """박스와 겹치면 박스 옆으로 비키고, 박스가 떠나면 원래 자리로 돌아온다."""
+        aside = self._aside_at
+        if aside is not None and (self.pos() - aside).manhattanLength() > 2:
+            # 비켜 있던 HUD를 사용자가 직접 옮겼다. 그 자리가 새 원래 자리다.
+            self._home = self._aside_at = None
+        home = self._home
+        if home is not None and self._may_return(home):
+            self._home = self._aside_at = None
+            self.move(home)
+            return
         hud = self._hud_rect()
         if hud is None:
             return
-        target = self.controller.hud_target(hud, self._screen_size())
-        if target is not None:
-            self.move(int(target[0] / self._scale), int(target[1] / self._scale))
+        target = self.controller.hud_target(hud, self._screen_rect(self.controller.box()))
+        if target is None:
+            return
+        if self._home is None:
+            self._home = self.pos()
+        self._aside_at = QPoint(int(target[0] / self._scale), int(target[1] / self._scale))
+        self.move(self._aside_at)
+
+    def _may_return(self, home: QPoint) -> bool:
+        screen = QGuiApplication.screenAt(home)
+        if screen is None or not screen.availableGeometry().contains(home):
+            return False  # 모니터 구성이 바뀌어 원래 자리가 화면 밖이다.
+        s = self._scale
+        frame = self.frameGeometry()
+        rect = (
+            _to_capture(home.x(), s),
+            _to_capture(home.y(), s),
+            _to_capture(frame.width(), s),
+            _to_capture(frame.height(), s),
+        )
+        return self.controller.hud_may_return(rect)
 
     def _sync_border(self) -> None:
         if self.border is None or self._closing:
@@ -737,7 +774,8 @@ class CaptureHud(QWidget):
             self._closing = True
             self._capture_timer.stop()
             self._key_timer.stop()
-            pos = self.pos()
+            # 비켜 있는 중이면 원래 자리를 저장한다.
+            pos = self._home or self.pos()
             self.controller.save_state(
                 (_to_capture(pos.x(), self._scale), _to_capture(pos.y(), self._scale))
             )

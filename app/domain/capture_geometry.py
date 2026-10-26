@@ -15,6 +15,7 @@ PREVIEW_MAX = 200
 MAGNIFIER_ZOOM = 8
 MAGNIFIER_SPAN = 11  # 원본 픽셀 수(홀수라 가운데 픽셀이 있다)
 HUD_MARGIN = 16
+HUD_RETURN_GAP = 24
 
 # (left, top, width, height) in screen coordinates.
 Rect = tuple[int, int, int, int]
@@ -78,26 +79,60 @@ def magnifier_to_image(
 
 
 def hud_position(
-    hud: Rect, box: Rect, screen: Position, margin: int = HUD_MARGIN
+    hud: Rect, box: Rect, screen: Rect, margin: int = HUD_MARGIN
 ) -> Position | None:
-    """HUD가 캡처 박스와 겹치면 박스 반대편 화면 모서리 위치. 안 겹치면 None."""
+    """HUD가 캡처 박스와 겹치면 옮겨 갈 위치. 안 겹치면 None.
+
+    박스 바로 옆(오른쪽·왼쪽·아래·위) 가운데 화면 안에 들어가고 지금 위치에서
+    가장 가까운 자리로 간다. 옆에 자리가 없으면 박스 반대편 화면 모서리로 간다.
+    screen은 박스가 있는 모니터의 사용 가능 영역이다.
+    """
     if not rects_overlap(hud, box):
         return None
-    _, _, w, h = hud
-    sw, sh = screen
-    near_x, far_x = margin, sw - w - margin
-    near_y, far_y = margin, sh - h - margin
-    box_cx, box_cy = box[0] + box[2] / 2, box[1] + box[3] / 2
-    xs = (near_x, far_x) if box_cx > sw / 2 else (far_x, near_x)
-    ys = (near_y, far_y) if box_cy > sh / 2 else (far_y, near_y)
-    candidates = [(xs[0], ys[0]), (xs[0], ys[1]), (xs[1], ys[0]), (xs[1], ys[1])]
-    clamped = [
-        (max(0, min(x, sw - w)), max(0, min(y, sh - h))) for x, y in candidates
+    hx, hy, w, h = hud
+    bx, by, bw, bh = box
+    sx, sy, sw, sh = screen
+
+    def clamp_x(x: int) -> int:
+        return max(sx, min(x, sx + sw - w))
+
+    def clamp_y(y: int) -> int:
+        return max(sy, min(y, sy + sh - h))
+
+    beside = [
+        (bx + bw + margin, clamp_y(hy)),
+        (bx - w - margin, clamp_y(hy)),
+        (clamp_x(hx), by + bh + margin),
+        (clamp_x(hx), by - h - margin),
     ]
+    fits = [
+        (x, y)
+        for x, y in beside
+        if sx <= x <= sx + sw - w
+        and sy <= y <= sy + sh - h
+        and not rects_overlap((x, y, w, h), box)
+    ]
+    if fits:
+        return min(fits, key=lambda p: (p[0] - hx) ** 2 + (p[1] - hy) ** 2)
+
+    near_x, far_x = sx + margin, sx + sw - w - margin
+    near_y, far_y = sy + margin, sy + sh - h - margin
+    box_cx, box_cy = bx + bw / 2, by + bh / 2
+    xs = (near_x, far_x) if box_cx > sx + sw / 2 else (far_x, near_x)
+    ys = (near_y, far_y) if box_cy > sy + sh / 2 else (far_y, near_y)
+    corners = [(xs[0], ys[0]), (xs[0], ys[1]), (xs[1], ys[0]), (xs[1], ys[1])]
+    clamped = [(clamp_x(x), clamp_y(y)) for x, y in corners]
     for x, y in clamped:
         if not rects_overlap((x, y, w, h), box):
             return (x, y)
     return clamped[0]
+
+
+def hud_can_return(home: Rect, box: Rect, gap: int = HUD_RETURN_GAP) -> bool:
+    """비켜 있던 HUD가 원래 자리로 돌아가도 되는가. 박스가 원래 자리에서 gap
+    이상 떨어져야 한다. 경계에서 비킴·복귀가 반복되지 않게 하는 여유다."""
+    x, y, w, h = home
+    return not rects_overlap((x - gap, y - gap, w + 2 * gap, h + 2 * gap), box)
 
 
 def border_rects(box: Rect, thickness: int) -> list[Rect]:

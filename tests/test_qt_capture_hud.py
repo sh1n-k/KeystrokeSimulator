@@ -298,6 +298,57 @@ class TestCaptureHudFlow(HudTestCase):
         self.assertFalse(rects_overlap(frame, hud.controller.box()))
 
 
+    def _alt_to(self, hud: CaptureHud, x: int, y: int) -> None:
+        self.keys["alt"] = True
+        with patch("app.ui.capture_hud.QCursor.pos", return_value=QPoint(x, y)):
+            hud._check_keys()
+
+    def test_hud_returns_home_when_alt_moves_the_box_away(self):
+        hud, _ = self.make()
+        hud.move(400, 300)
+        self._alt_to(hud, 420, 320)
+        self.assertNotEqual(hud.pos(), QPoint(400, 300))
+
+        self._alt_to(hud, 0, 0)  # box leaves the home area
+
+        self.assertEqual(hud.pos(), QPoint(400, 300))
+
+    def test_hud_stays_aside_after_alt_is_released(self):
+        hud, _ = self.make()
+        hud.move(400, 300)
+        self._alt_to(hud, 420, 320)
+        aside = hud.pos()
+        self.keys["alt"] = False
+        hud.controller.session.set_position((0, 0))
+
+        hud._check_keys()
+
+        self.assertEqual(hud.pos(), aside)
+
+    def test_user_drag_while_aside_becomes_new_home(self):
+        hud, _ = self.make()
+        hud.move(400, 300)
+        self._alt_to(hud, 420, 320)
+        hud.move(50, 500)  # the user drags the HUD somewhere else
+
+        self._alt_to(hud, 0, 0)
+
+        self.assertEqual(hud.pos(), QPoint(50, 500))
+
+    def test_close_while_aside_saves_home_position(self):
+        hud, _ = self.make()
+        hud.move(400, 300)
+        self._alt_to(hud, 420, 320)
+
+        hud.close()
+
+        scale = hud._scale
+        self.assertEqual(
+            self.saved[-1]["capture_hud_pos"],
+            f"{round(400 * scale)}/{round(300 * scale)}",
+        )
+
+
 class TestOpenQuickCapture(HudTestCase):
     def make_parent(self) -> QWidget:
         parent = QWidget()

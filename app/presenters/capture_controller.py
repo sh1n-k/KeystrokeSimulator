@@ -21,6 +21,7 @@ from app.domain.capture_geometry import (
     Rect,
     capture_rect,
     display_to_image,
+    hud_can_return,
     hud_position,
     magnifier_to_image,
     preview_size,
@@ -387,9 +388,15 @@ class CaptureController:
                 status = True
         return TickUpdate(render=render, info=info, status=status)
 
-    def hud_target(self, hud: Rect, screen: Position) -> Position | None:
-        """HUD가 캡처 박스와 겹치면 옮겨 갈 위치."""
+    def hud_target(self, hud: Rect, screen: Rect) -> Position | None:
+        """HUD가 캡처 박스와 겹치면 옮겨 갈 위치(박스 옆)."""
         return hud_position(hud, self.box(), screen)
+
+    def hud_may_return(self, home: Rect) -> bool:
+        """비켜 있던 HUD를 원래 자리로 돌려도 되는가. ALT로 박스를 옮기는
+        동안에만 돌아간다. ALT를 놓은 뒤 HUD로 가는 포인터 앞에서 HUD가
+        움직이지 않게 한다."""
+        return self.alt_down and hud_can_return(home, self.box())
 
     # -- view data ------------------------------------------------------------
 

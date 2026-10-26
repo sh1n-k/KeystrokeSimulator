@@ -12,6 +12,7 @@ from app.domain.capture_geometry import (
     CaptureResult,
     border_rects,
     display_to_image,
+    hud_can_return,
     hud_position,
     magnifier_to_image,
     preview_size,
@@ -86,33 +87,51 @@ class TestOverlay(unittest.TestCase):
 
 
 class TestHudPosition(unittest.TestCase):
-    SCREEN = (1920, 1080)
+    SCREEN = (0, 0, 1920, 1080)
 
     def test_no_move_without_overlap(self):
         self.assertIsNone(
             hud_position((0, 0, 260, 330), (800, 400, 100, 100), self.SCREEN)
         )
 
-    def test_moves_to_opposite_corner_of_box(self):
+    def test_steps_just_beside_the_box(self):
         hud = (100, 100, 260, 330)
-        box_top_left = (150, 150, 100, 100)
-        box_bottom_right = (1700, 900, 100, 100)
+        box = (150, 150, 100, 100)
 
-        self.assertEqual(
-            hud_position(hud, box_top_left, self.SCREEN),
-            (1920 - 260 - 16, 1080 - 330 - 16),
-        )
-        self.assertEqual(
-            hud_position((1600, 700, 260, 330), box_bottom_right, self.SCREEN), (16, 16)
-        )
+        self.assertEqual(hud_position(hud, box, self.SCREEN), (150 + 100 + 16, 100))
 
-    def test_stays_on_screen_when_box_covers_every_corner(self):
+    def test_picks_the_nearest_side_that_fits_on_screen(self):
+        hud = (1600, 500, 260, 330)
+        box = (1700, 550, 100, 100)  # no room on the right; below is nearest
+
+        self.assertEqual(hud_position(hud, box, self.SCREEN), (1600, 666))
+
+    def test_uses_the_monitor_that_holds_the_box(self):
+        right_monitor = (1920, 0, 1920, 1080)
+        hud = (1950, 80, 260, 330)
+        box = (2000, 100, 100, 100)
+
+        x, y = hud_position(hud, box, right_monitor)
+
+        self.assertEqual((x, y), (1950, 216))  # below the box, on the right monitor
+        self.assertGreaterEqual(x, 1920)
+
+    def test_falls_back_to_a_corner_when_no_side_fits(self):
         hud = (1400, 550, 260, 330)
-        box = (100, 50, 1700, 1000)  # no corner is free: fall back on-screen
+        box = (100, 50, 1700, 1000)  # no side and no corner is free
 
         x, y = hud_position(hud, box, self.SCREEN)
 
         self.assertEqual((x, y), (1920 - 260 - 16, 16))
+
+
+class TestHudReturn(unittest.TestCase):
+    def test_returns_only_when_box_is_clear_of_home_with_a_gap(self):
+        home = (100, 100, 260, 330)
+
+        self.assertFalse(hud_can_return(home, (150, 150, 100, 100)))
+        self.assertFalse(hud_can_return(home, (370, 150, 100, 100)))  # within gap
+        self.assertTrue(hud_can_return(home, (400, 150, 100, 100)))
 
 
 class TestBorderRects(unittest.TestCase):

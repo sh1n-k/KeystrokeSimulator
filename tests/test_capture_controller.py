@@ -452,11 +452,18 @@ class TestHudPlacementAndState(unittest.TestCase):
     def test_hud_target_moves_away_from_box(self):
         c, *_ = make_controller()  # box (500, 400, 100, 100)
 
-        self.assertIsNone(c.hud_target((0, 0, 260, 330), (1920, 1080)))
-        self.assertEqual(
-            c.hud_target((450, 350, 260, 330), (1920, 1080)),
-            (1920 - 260 - 16, 1080 - 330 - 16),
-        )
+        screen = (0, 0, 1920, 1080)
+        self.assertIsNone(c.hud_target((0, 0, 260, 330), screen))
+        self.assertEqual(c.hud_target((450, 350, 260, 330), screen), (616, 350))
+
+    def test_hud_returns_only_while_alt_moves_the_box(self):
+        c, *_ = make_controller()  # box (500, 400, 100, 100)
+        home = (0, 0, 260, 330)
+
+        self.assertFalse(c.hud_may_return(home))
+        c.alt_down = True
+        self.assertTrue(c.hud_may_return(home))
+        self.assertFalse(c.hud_may_return((450, 350, 260, 330)))
 
     @patch("app.presenters.capture_controller.StateUtils.save_main_app_state")
     def test_save_state_uses_existing_keys(self, save):
