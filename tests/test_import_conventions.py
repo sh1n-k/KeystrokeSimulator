@@ -187,7 +187,7 @@ class TestPackageBoundaries(unittest.TestCase):
     def test_non_ui_packages_do_not_import_ui(self):
         files = [
             path
-            for package in ("engine", "platform", "storage", "utils")
+            for package in ("engine", "platform", "presenters", "storage", "utils")
             for path in _app_python_files(package)
         ]
         violations = _boundary_violations(
@@ -196,7 +196,7 @@ class TestPackageBoundaries(unittest.TestCase):
         self.assertEqual(
             violations,
             [],
-            "engine/platform/storage/utils must not import app.ui:\n"
+            "engine/platform/presenters/storage/utils must not import app.ui:\n"
             + "\n".join(violations),
         )
 
