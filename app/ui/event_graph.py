@@ -28,7 +28,7 @@ from app.domain.event_graph_layout import (
     layout_graph,
 )
 from app.domain.models import ProfileModel
-from app.ui import theme
+from app.ui import tokens as theme
 
 RGB: TypeAlias = tuple[int, int, int]
 Box: TypeAlias = tuple[int, int, int, int]
@@ -44,7 +44,7 @@ def _rgb(hex_color: str) -> RGB:
     )
 
 
-# App palette in RGB form, derived from app/ui/theme.py tokens.
+# App palette in RGB form, derived from app/ui/tokens.py.
 BACKGROUND = _rgb(theme.SURFACE_PAPER)
 PANEL_BG = _rgb(theme.SURFACE_PANEL)
 TEXT_COLOR = _rgb(theme.INK_PRIMARY)
