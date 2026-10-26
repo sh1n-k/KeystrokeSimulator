@@ -17,7 +17,8 @@ def render_magnifier(
     *,
     pad_color: str,
 ) -> Image.Image:
-    """center 주변 MAGNIFIER_SPAN 픽셀을 확대한다. 원본 밖은 pad_color로 채운다."""
+    """center 주변 MAGNIFIER_SPAN 픽셀을 확대한다. 원본 밖은 pad_color로 채운다.
+    선택 픽셀은 사각형으로 두르고 그 칸 가운데를 지나는 반전 십자선을 긋는다."""
     half = MAGNIFIER_SPAN // 2
     left, top = center[0] - half, center[1] - half
     src = Image.new("RGB", (MAGNIFIER_SPAN, MAGNIFIER_SPAN), pad_color)
@@ -39,9 +40,31 @@ def render_magnifier(
         if 0 <= sx < MAGNIFIER_SPAN and 0 <= sy < MAGNIFIER_SPAN:
             x0, y0 = sx * MAGNIFIER_ZOOM, sy * MAGNIFIER_ZOOM
             x1, y1 = x0 + MAGNIFIER_ZOOM - 1, y0 + MAGNIFIER_ZOOM - 1
+            _invert_cross(
+                zoomed,
+                (x0 + MAGNIFIER_ZOOM // 2, y0 + MAGNIFIER_ZOOM // 2),
+                skip=(x0 - 1, y0 - 1, x1 + 1, y1 + 1),
+            )
             draw.rectangle([x0 - 1, y0 - 1, x1 + 1, y1 + 1], outline="white")
             draw.rectangle([x0, y0, x1, y1], outline="black")
     return zoomed
+
+
+def _invert_cross(
+    image: Image.Image, center: Position, skip: tuple[int, int, int, int]
+) -> None:
+    """center를 지나는 가로·세로 1px 반전선. skip 사각형 안은 건드리지 않는다."""
+    pixels = cast(Any, image.load())
+    cx, cy = center
+    sx0, sy0, sx1, sy1 = skip
+    for x in range(image.width):
+        if not sx0 <= x <= sx1:
+            r, g, b = pixels[x, cy]
+            pixels[x, cy] = (255 - r, 255 - g, 255 - b)
+    for y in range(image.height):
+        if not sy0 <= y <= sy1:
+            r, g, b = pixels[cx, y]
+            pixels[cx, y] = (255 - r, 255 - g, 255 - b)
 
 
 def render_overlay(

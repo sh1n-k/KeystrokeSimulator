@@ -402,7 +402,8 @@ class CaptureController:
         img = self.displayed_image()
         if img is None:
             return None, preview_size(self._capture_size)
-        if not self.shows_live():
+        # 픽셀 모드의 십자선은 돋보기에 그린다. 미리보기에는 영역 사각형만 둔다.
+        if not self.shows_live() and self.region_size is not None:
             img = render_overlay(img, self.session.selected_position, self.region_size)
         size = preview_size(img.size)
         if size != img.size:

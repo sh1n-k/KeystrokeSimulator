@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from app.domain.capture_geometry import CaptureResult
+from app.domain.capture_geometry import MAGNIFIER_SPAN, MAGNIFIER_ZOOM, CaptureResult
 from app.domain.models import EventModel, ProfileModel
 from app.presenters.capture_controller import (
     PERMISSION_POLL_TICKS,
@@ -214,6 +214,33 @@ class TestPreviewInput(unittest.TestCase):
         self.assertTrue(c.click_preview((3, 4), (100, 100)))
         self.assertEqual(c.session.selected_position, (3, 4))
         self.assertEqual(c.mag_center, (3, 4))
+
+    def test_pixel_crosshair_is_in_magnifier_not_preview(self):
+        c, cap, *_ = make_controller()
+        cap.emit((0, 0, 255))
+        c.capture()
+        c.click_preview((50, 50), (100, 100))
+
+        preview, _size = c.preview()
+        zoomed = c.magnifier("#000000")
+
+        assert preview is not None and zoomed is not None
+        self.assertEqual(preview.getpixel((0, 50))[:3], (0, 0, 255))
+        cross = (MAGNIFIER_SPAN // 2) * MAGNIFIER_ZOOM + MAGNIFIER_ZOOM // 2
+        self.assertEqual(zoomed.getpixel((0, cross)), (255, 255, 0))
+        self.assertEqual(zoomed.getpixel((cross, zoomed.height - 1)), (255, 255, 0))
+        self.assertEqual(zoomed.getpixel((0, 0)), (0, 0, 255))
+
+    def test_region_mode_keeps_rectangle_in_preview(self):
+        c, cap, *_ = make_controller(region_size=(20, 20))
+        cap.emit((0, 0, 0))
+        c.capture()
+        c.click_preview((50, 50), (100, 100))
+
+        preview, _size = c.preview()
+
+        assert preview is not None
+        self.assertEqual(preview.getpixel((40, 50))[:3], (255, 255, 0))
 
     def test_magnifier_click_keeps_center(self):
         c, cap, *_ = make_controller()
