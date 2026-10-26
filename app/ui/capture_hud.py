@@ -31,7 +31,8 @@ from app.ui.capture_session import (
 from app.utils.i18n import txt
 from app.platform.keys import KeyUtils
 from app.platform.system import PermissionUtils
-from app.utils.window_state import StateUtils, WindowUtils
+from app.storage.app_state import StateUtils
+from app.ui.tk_window import WindowUtils
 
 HudMode = Literal["single", "continuous"]
 

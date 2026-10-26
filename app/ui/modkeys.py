@@ -14,7 +14,7 @@ from app.storage.modkey_sets_storage import (
 )
 from app.ui import theme
 from app.utils.i18n import dual_text_width, txt
-from app.utils.window_state import WindowUtils
+from app.ui.tk_window import WindowUtils
 
 ModKeyRow: TypeAlias = tuple[
     tk.BooleanVar,  # enabled

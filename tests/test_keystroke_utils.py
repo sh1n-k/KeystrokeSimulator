@@ -8,7 +8,7 @@ from app.domain.models import EventModel, ProfileModel
 from app.platform import system
 from app.platform.keys import KeyUtils
 from app.platform.system import PermissionUtils
-from app.utils.window_state import StateUtils
+from app.storage.app_state import StateUtils
 from app.domain.runtime_toggle import (
     active_runtime_toggle_events,
     MOUSE_BUTTON_3_TRIGGER,

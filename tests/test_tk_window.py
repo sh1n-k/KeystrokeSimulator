@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock
 
-from app.utils.window_state import WindowUtils
+from app.ui.tk_window import WindowUtils
 
 
 class TestModalGrabHelpers(unittest.TestCase):

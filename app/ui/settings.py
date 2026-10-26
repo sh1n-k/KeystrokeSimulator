@@ -22,7 +22,8 @@ from app.utils.notification_sound_packs import (
     normalize_notification_sound_pack,
 )
 from app.utils.sounds import SoundPlayer
-from app.utils.window_state import StateUtils, WindowUtils
+from app.storage.app_state import StateUtils
+from app.ui.tk_window import WindowUtils
 from app.ui import theme
 
 SETTINGS_WINDOW_DEFAULT_GEOMETRY = "800x400"

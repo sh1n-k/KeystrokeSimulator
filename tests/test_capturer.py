@@ -149,6 +149,27 @@ class TestCapturerAttributes(unittest.TestCase):
         _pos, image = capturer.screenshot_callback.call_args[0]
         self.assertEqual(image.size, (10, 10))
 
+    def test_callback_failure_stops_capture_thread(self):
+        """받는 쪽(UI) 콜백이 실패하면 캡처 루프를 끝내고 백엔드를 닫는다."""
+        capturer = self._make_capturer()
+        capturer.current_position = (10, 10)
+        capturer.screenshot_callback = MagicMock(side_effect=RuntimeError("gone"))
+        capturer.capturing.set()
+
+        backend = MagicMock()
+        backend.is_dead.return_value = False
+        backend.grab.return_value = [make_image_frame(4, 4, channels=4)]
+
+        with (
+            patch("app.engine.capturer.open_screen_backend", return_value=backend),
+            patch("app.engine.capturer.time.sleep", return_value=None),
+        ):
+            capturer.capture_screenshot()
+
+        capturer.screenshot_callback.assert_called_once()
+        self.assertFalse(capturer.capturing.is_set())
+        backend.close.assert_called_once()
+
     def test_preview_uses_the_same_backend_as_the_run_loop(self):
         """편집기 기준색과 실행 매칭이 어긋나지 않으려면 캡처 경로가 같아야 한다."""
         capturer = self._make_capturer()

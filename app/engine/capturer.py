@@ -1,5 +1,4 @@
 import time
-import tkinter as tk
 from threading import Event, Thread
 from collections.abc import Callable
 
@@ -115,11 +114,15 @@ class ScreenshotCapturer:
                             backend, last_retry = self._reopen(backend, last_retry)
                         frame = backend.grab([group])[0]
                         if frame is not None:
-                            callback(position, frame.to_rgb_image())
-                except tk.TclError as e:
-                    logger.error(f"Event windows has been destroyed: {e}")
-                    self.capturing.clear()
-                    break
+                            image = frame.to_rgb_image()
+                            try:
+                                callback(position, image)
+                            except Exception as e:
+                                # 콜백은 UI 쪽 코드다. 받는 쪽 창이 사라졌다고 보고
+                                # 캡처 스레드를 끝낸다.
+                                logger.error(f"Event windows has been destroyed: {e}")
+                                self.capturing.clear()
+                                break
                 except Exception as e:
                     logger.error(f"Preview capture failed: {e}")
                 time.sleep(_POLL_ACTIVE_S if self._idle_cycles == 0 else _POLL_IDLE_S)

@@ -61,7 +61,8 @@ from app.ui.workspace_list import EventTree
 from app.ui.workspace_sidebar import ItemKind, WorkspaceSidebar
 from app.utils.i18n import txt
 from app.domain.runtime_toggle import collect_runtime_toggle_validation_errors
-from app.utils.window_state import StateUtils, WindowUtils
+from app.storage.app_state import StateUtils
+from app.ui.tk_window import WindowUtils
 
 WORKSPACE_DEFAULT_GEOMETRY = "1180x720"
 WORKSPACE_MIN_SIZE = (980, 600)

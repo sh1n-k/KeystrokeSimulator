@@ -76,7 +76,8 @@ from app.platform.system import (
     PermissionUtils,
 )
 from app.utils.exception_hooks import install_exception_hooks
-from app.utils.window_state import StateUtils, WindowUtils
+from app.storage.app_state import StateUtils
+from app.ui.tk_window import WindowUtils
 from app.ui import theme
 
 STATUS_BG_INFO = theme.STATUS_INFO_BG
