@@ -68,6 +68,7 @@ from app.presenters.capture_controller import (
     HudMode,
     Tone,
 )
+from app.presenters.workspace_model import WorkspaceModel
 from app.ui import tokens
 from app.ui import style
 from app.ui.capture_border import CaptureBorder
@@ -258,6 +259,7 @@ class CaptureHud(QWidget):
         border: bool = True,
         on_close: Callable[[], object] | None = None,
         capturer: CaptureBackend | None = None,
+        append_quick: Callable[[CaptureResult], str | None] | None = None,
     ) -> None:
         super().__init__(
             parent, Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint
@@ -279,6 +281,7 @@ class CaptureHud(QWidget):
             region_size=region_size,
             capture_size=capture_size,
             on_apply=on_apply,
+            append_quick=append_quick,
             close=self.close,
         )
         # 실행 중에는 테두리를 만들지 않는다(호출부가 border=False로 연다).
@@ -780,10 +783,17 @@ def open_quick_capture(parent: QWidget) -> None:
             host.quick_hud = None
         host.update_ui()
 
+    def append_to_workspace(result: CaptureResult) -> str | None:
+        model = getattr(getattr(host, "workspace", None), "model", None)
+        if isinstance(model, WorkspaceModel):
+            return model.append_quick_event(result)
+        return None
+
     hud = CaptureHud(
         parent,
         mode="continuous",
         profiles_dir=host.profiles_dir,
         on_close=closed,
+        append_quick=append_to_workspace,
     )
     host.quick_hud = hud

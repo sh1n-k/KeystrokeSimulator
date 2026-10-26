@@ -355,6 +355,27 @@ class TestContinuous(unittest.TestCase):
         self.assertEqual(c.feedback[1], "ready")
         self.assertIn("1 saved", c.title())
 
+    def test_open_workspace_takes_the_event_instead_of_disk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prof_dir = Path(tmp)
+            append = MagicMock(return_value="7")
+            c, cap, keys, _pt = make_controller(
+                "continuous", profiles_dir=prof_dir, append_quick=append
+            )
+            cap.emit((0, 0, 255))
+            keys.ctrl = True
+            c.tick(text_focus=False)
+            keys.ctrl = False
+            c.tick(text_focus=False)
+            c.select((3, 4))
+            keys.ctrl = True
+            c.tick(text_focus=False)
+
+            saved = load_profile(prof_dir, "Quick", migrate=False).event_list
+        append.assert_called_once()
+        self.assertEqual(saved, [])
+        self.assertIn("'7'", c.feedback[0])
+
     def test_ctrl_after_moving_recaptures(self):
         c, cap, *_ = make_controller("continuous", profiles_dir=None)
         cap.emit((0, 0, 255))

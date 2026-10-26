@@ -402,6 +402,23 @@ class TestEventEdits(ModelCase):
         self.assertIsNone(model.undo_label)
         self.assertIsNotNone(stale.held_screenshot)
 
+    def test_append_quick_event_only_into_open_quick(self):
+        model = self.make([rule("1")], name="Quick")
+        result = CaptureResult(
+            position=(5, 6),
+            capture_size=(5, 5),
+            image=Image.new("RGB", (5, 5)),
+            pixel=(1, 1),
+            color=(0, 0, 0),
+        )
+
+        self.assertEqual(model.append_quick_event(result), "2")
+        self.assertEqual(self.names(model), ["1", "2"])
+        self.assertEqual(model.undo_label, "quick event")
+
+        other = self.make([rule("x")], name="P")
+        self.assertIsNone(other.append_quick_event(result))
+
     def test_condition_candidates_list_signals_first_and_mark_cycles(self):
         model = self.make(
             [rule("R", conditions={"S": True}), signal("S"), rule("Q", conditions={"R": True})]

@@ -12,11 +12,13 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
 
 from tests.qt_support import qt_app
+from tests.test_capture_controller import FakeCapturer
 
 from app.domain.capture_geometry import CaptureResult
 from app.domain.models import EventModel, ProfileModel, UserSettings
 from app.storage.profile_storage import load_profile, save_profile
 from app.storage.run_sets_storage import get_run_set, upsert_run_set
+from app.ui.capture_hud import open_quick_capture
 from app.ui.workspace import WorkspaceWindow, open_workspace
 from app.utils.i18n import set_language
 
@@ -424,6 +426,31 @@ class TestRunSetsAndOptions(WorkspaceWindowCase):
 
         saved = get_run_set("Raid", Path("run_sets.json"))
         self.assertEqual(sorted(saved), ["C", "P", "Quick"])
+
+    def test_quick_capture_goes_into_open_quick_and_survives_autosave(self) -> None:
+        save_profile(Path("profiles"), ProfileModel(name="Quick", event_list=[rule("1")]))
+        self.assertTrue(self.ws.model.open_profile("Quick"))
+        self.host.quick_hud = None  # type: ignore[attr-defined]
+        with patch("app.engine.capture_session.ScreenshotCapturer", FakeCapturer):
+            open_quick_capture(self.host)
+        hud = self.host.quick_hud  # type: ignore[attr-defined]
+        self.addCleanup(hud.close)
+        result = CaptureResult(
+            position=(5, 6),
+            capture_size=(5, 5),
+            image=Image.new("RGB", (5, 5), (0, 0, 255)),
+            pixel=(1, 1),
+            color=(0, 0, 255),
+        )
+
+        name = hud.controller.append_quick(result)
+        self.ws.model.add_rule()  # 그 뒤 작업 공간에서 편집한다.
+        self.assertTrue(self.ws.model.flush())
+
+        saved = load_profile(Path("profiles"), "Quick", migrate=False).event_list
+        self.assertEqual(name, "2")
+        self.assertIn("2", [e.event_name for e in saved])
+        self.assertEqual(self.ws.model.undo_label, "add rule")
 
     def test_run_set_rename_follows_in_main_window(self) -> None:
         upsert_run_set("Raid", ["P"], Path("run_sets.json"))

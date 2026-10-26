@@ -28,6 +28,7 @@ from app.domain.profile_events import (
     event_needs_attention,
     move_in_section,
     next_available_event_name,
+    next_numbered_event_name,
     profile_fingerprint,
     remove_condition_references,
     rename_colliding_events,
@@ -48,6 +49,7 @@ from app.domain.validation import (
     normalized_event_name,
     timing_is_valid,
 )
+from app.presenters.quick_capture import quick_event
 from app.presenters.workspace_sidebar import ItemKind
 from app.storage.profile_display import QUICK_PROFILE_NAME
 from app.storage.profile_storage import (
@@ -494,6 +496,15 @@ class WorkspaceModel:
         event = EventModel(event_name=name, execute_action=True)
         self._append([event], txt("add rule", "규칙 추가"))
         return event
+
+    def append_quick_event(self, result: CaptureResult) -> str | None:
+        """Quick을 열어 둔 동안의 빠른 캡처는 여기에 붙인다. 디스크에 따로 쓰면
+        이 모델의 자동 저장이 덮어쓴다. Quick이 열려 있지 않으면 None."""
+        if not self._is_current_profile(QUICK_PROFILE_NAME):
+            return None
+        name = next_numbered_event_name(self.names())
+        self._append([quick_event(name, result)], txt("quick event", "빠른 이벤트"))
+        return name
 
     def next_signal_name(self) -> str:
         return next_available_event_name(txt("Signal", "신호"), self.names())

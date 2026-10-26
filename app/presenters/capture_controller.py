@@ -97,6 +97,7 @@ class CaptureController:
         region_size: Position | None = None,
         capture_size: Position = (100, 100),
         on_apply: Callable[[CaptureResult], None] | None = None,
+        append_quick: Callable[[CaptureResult], str | None] | None = None,
         close: Callable[[], object] | None = None,
         alt_pressed: Callable[[], bool] = _alt_pressed,
         ctrl_pressed: Callable[[], bool] = _ctrl_pressed,
@@ -106,6 +107,8 @@ class CaptureController:
         self.profiles_dir = profiles_dir
         self.region_size = region_size
         self.on_apply = on_apply
+        # 연속 모드: 열린 작업 공간이 Quick을 들고 있으면 그쪽에 붙인다.
+        self.append_quick = append_quick
         self._close = close
         self._pointer = pointer
         self._alt_pressed = alt_pressed
@@ -267,7 +270,9 @@ class CaptureController:
             return
         if self.profiles_dir is None:
             return
-        name = append_quick_event(self.profiles_dir, result)
+        name = self.append_quick(result) if self.append_quick is not None else None
+        if name is None:
+            name = append_quick_event(self.profiles_dir, result)
         self.saved_count += 1
         self.session.clear_hold()
         self._held_size = None
