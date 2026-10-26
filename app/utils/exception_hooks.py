@@ -1,16 +1,8 @@
 import sys
 import threading
-from collections.abc import Callable
 from types import TracebackType
-from typing import Protocol, cast
 
 from loguru import logger
-
-
-class TkExceptionReporter(Protocol):
-    report_callback_exception: Callable[
-        [type[BaseException], BaseException, TracebackType | None], None
-    ]
 
 
 def _log_unhandled_exception(
@@ -49,19 +41,7 @@ def _handle_thread_exception(args: threading.ExceptHookArgs) -> None:
     )
 
 
-def _handle_tk_exception(
-    exc_type: type[BaseException],
-    exc_value: BaseException,
-    traceback: TracebackType | None,
-) -> None:
-    _log_unhandled_exception(
-        "Unhandled Tk callback exception", exc_type, exc_value, traceback
-    )
-
-
-def install_exception_hooks(root: object | None = None) -> None:
+def install_exception_hooks() -> None:
+    """Qt slot exceptions also reach `sys.excepthook` under PySide6."""
     sys.excepthook = _handle_sys_exception
     threading.excepthook = _handle_thread_exception
-    if root is not None:
-        tk_root = cast(TkExceptionReporter, root)
-        tk_root.report_callback_exception = _handle_tk_exception

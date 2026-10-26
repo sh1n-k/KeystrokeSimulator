@@ -23,8 +23,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.presenters.modkeys_form import PLACEHOLDER_VALUE, ModKeysForm
-from app.ui.qt import style
-from app.ui.qt.dialogs import KeyCaptureEdit
+from app.ui import style
+from app.ui.dialogs import KeyCaptureEdit
 from app.utils.i18n import txt
 
 _KEYCAPS = {"Alt": "⎇", "Ctrl": "⌃", "Shift": "⇧"}

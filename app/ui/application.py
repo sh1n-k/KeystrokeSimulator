@@ -11,7 +11,7 @@ from loguru import logger
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from app.ui.qt import style
+from app.ui import style
 from app.utils.exception_hooks import install_exception_hooks
 
 
@@ -30,7 +30,7 @@ def main() -> int:
     qt_app.setApplicationName("Keystroke Simulator")
     style.apply_app_style(qt_app)
 
-    from app.ui.qt.main_window import RunWindow
+    from app.ui.main_window import RunWindow
 
     window: RunWindow | None = None
 

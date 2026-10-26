@@ -12,14 +12,11 @@ class TestExceptionHooks(unittest.TestCase):
         sys.excepthook = sys.__excepthook__
         threading.excepthook = threading.__excepthook__
 
-    def test_install_sets_sys_thread_and_tk_hooks(self):
-        root = SimpleNamespace()
-
-        install_exception_hooks(root)
+    def test_install_sets_sys_and_thread_hooks(self):
+        install_exception_hooks()
 
         self.assertIsNot(sys.excepthook, sys.__excepthook__)
         self.assertIsNot(threading.excepthook, threading.__excepthook__)
-        self.assertTrue(callable(root.report_callback_exception))
 
     def test_sys_hook_logs_regular_exception(self):
         install_exception_hooks()

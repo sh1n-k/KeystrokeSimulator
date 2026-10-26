@@ -1,6 +1,6 @@
 """수정키 세트 편집 상태와 저장. UI 툴킷과 무관하다.
 
-Tk `ModificationKeysWindow`의 의미를 옮긴다. 세트는 프로필·실행 세트와 독립이다.
+세트는 프로필·실행 세트와 독립이다.
 """
 
 from __future__ import annotations

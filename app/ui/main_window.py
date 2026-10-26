@@ -58,8 +58,8 @@ from app.storage.run_sets_storage import (
     list_run_set_names,
 )
 from app.ui import tokens
-from app.ui.qt import style
-from app.ui.qt.dispatcher import QtDispatcher
+from app.ui import style
+from app.ui.dispatcher import QtDispatcher
 from app.utils.i18n import txt
 from app.utils.sounds import SoundPlayer
 
@@ -525,7 +525,7 @@ class RunWindow(QMainWindow):
 
     def open_workspace_for(self, target: RunTarget) -> None:
         """"편집…": 실행 콤보에서 고른 프로필이나 실행 세트로 연다(M-06)."""
-        from app.ui.qt.workspace import open_workspace
+        from app.ui.workspace import open_workspace
 
         kind, name = target
         open_workspace(self, kind=kind, name=name)
@@ -533,12 +533,12 @@ class RunWindow(QMainWindow):
     def open_quick_events(self) -> None:
         if self.run.is_running:
             return
-        from app.ui.qt.capture_hud import open_quick_capture
+        from app.ui.capture_hud import open_quick_capture
 
         open_quick_capture(self)
 
     def open_settings(self) -> None:
-        from app.ui.qt.settings_dialog import open_settings
+        from app.ui.settings_dialog import open_settings
 
         open_settings(self)
 
@@ -548,7 +548,7 @@ class RunWindow(QMainWindow):
         set_name = self.modkey_combo.currentText()
         if not set_name:
             return
-        from app.ui.qt.modkeys_dialog import edit_modkey_set
+        from app.ui.modkeys_dialog import edit_modkey_set
 
         edit_modkey_set(self, set_name, self.modkey_sets_path)
         self._update_status()

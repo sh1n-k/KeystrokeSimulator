@@ -155,6 +155,15 @@ class TestImportConventions(unittest.TestCase):
 
 
 class TestPackageBoundaries(unittest.TestCase):
+    def test_tkinter_is_not_imported(self):
+        violations = _boundary_violations(
+            _project_python_files(),
+            lambda module: module.split(".", 1)[0] in {"tkinter", "_tkinter"},
+        )
+        self.assertEqual(
+            violations, [], "The UI is Qt-only:\n" + "\n".join(violations)
+        )
+
     def test_gui_toolkits_are_imported_only_in_ui(self):
         ui_root = APP_ROOT / "ui"
         files = [path for path in _app_python_files() if ui_root not in path.parents]

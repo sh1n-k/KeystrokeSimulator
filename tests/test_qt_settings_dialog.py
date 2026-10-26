@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QWidget
 from app.domain.models import UserSettings
 from app.presenters.settings_form import SettingsForm
 from app.storage.settings_storage import save_user_settings
-from app.ui.qt.settings_dialog import SettingsDialog, open_settings
+from app.ui.settings_dialog import SettingsDialog, open_settings
 from app.utils.i18n import set_language, txt
 
 
@@ -279,11 +279,11 @@ class TestFields(QtSettingsTestCase):
 class TestWithRunWindow(QtSettingsTestCase):
     def test_run_window_tools_entry_round_trip(self) -> None:
         from app.presenters.run_controller import RunController
-        from app.ui.qt.main_window import RunWindow
+        from app.ui.main_window import RunWindow
 
         patches = [
-            patch("app.ui.qt.main_window.ProcessCollector.get", return_value=[]),
-            patch("app.ui.qt.main_window.SoundPlayer", MagicMock),
+            patch("app.ui.main_window.ProcessCollector.get", return_value=[]),
+            patch("app.ui.main_window.SoundPlayer", MagicMock),
             patch.object(RunController, "setup_event_handlers"),
             patch.object(RunController, "unbind_events"),
         ]

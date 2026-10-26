@@ -1,7 +1,7 @@
 [project]
 name = "keystroke-simulator"
 version = "3.0.0"
-description = "Tkinter desktop automation app that watches screen regions and replays keystrokes."
+description = "PySide6 (Qt) desktop automation app that watches screen regions and replays keystrokes."
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [

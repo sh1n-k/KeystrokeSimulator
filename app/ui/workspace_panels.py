@@ -34,7 +34,7 @@ from app.domain.runtime_toggle import (
 from app.presenters.workspace_sidebar import ItemKind, sidebar_actions
 from app.ui import tokens
 from app.ui.event_graph import ensure_profile_graph_image
-from app.ui.qt import style
+from app.ui import style
 from app.utils.i18n import txt
 
 # Renaming a profile renames its file, so typing waits for a pause.

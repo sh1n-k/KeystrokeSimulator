@@ -35,7 +35,7 @@ from app.domain.profile_events import (
     event_needs_attention,
     referenced_event_names,
 )
-from app.ui.qt import style
+from app.ui import style
 from app.utils.i18n import txt
 
 DRAG_HANDLE = "⋮⋮"

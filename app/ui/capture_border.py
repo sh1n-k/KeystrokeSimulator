@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QWidget
 
 from app.domain.capture_geometry import Rect, border_rects
 from app.ui import tokens
-from app.ui.qt.mac_window import keep_above_all_spaces
+from app.ui.mac_window import keep_above_all_spaces
 
 
 class _BorderPiece(QWidget):

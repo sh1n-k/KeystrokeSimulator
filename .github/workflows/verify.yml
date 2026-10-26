@@ -20,11 +20,5 @@ jobs:
       - run: uv python install 3.14
       - run: uv lock --check
       - run: uv sync --locked
+      # Qt widget tests run offscreen (tests/qt_support.py) on both OSes.
       - run: uv run -m scripts.verify
-      - if: runner.os == 'macOS'
-        env:
-          RUN_GUI_TESTS: "1"
-        run: >-
-          uv run -m unittest
-          tests.test_capture_hud.TestCaptureHudLayout
-          tests.test_keystroke_settings.TestKeystrokeSettings

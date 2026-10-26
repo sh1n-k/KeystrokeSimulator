@@ -2,502 +2,446 @@
 
 from __future__ import annotations
 
-import tkinter as tk
-import tkinter.ttk as ttk
 from collections.abc import Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 
-from PIL import Image, ImageTk
+from PIL import Image
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QImage, QIntValidator, QPixmap
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QPushButton,
+    QRadioButton,
+    QScrollArea,
+    QSizePolicy,
+    QSpinBox,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.domain.capture_geometry import CaptureResult
 from app.domain.capture_render import render_overlay
-from app.domain.event_editing import (
-    apply_capture,
-    capture_from_event,
-    clamp_region,
-    clear_capture,
-    event_issues,
-)
+from app.domain.event_editing import capture_from_event, event_issues
+from app.domain.key_codes import KeyCodes
 from app.domain.models import EventModel, Position
-from app.domain.profile_events import event_has_screen, rename_condition_references
-from app.domain.validation import (
-    MIN_REGION_SIZE,
-    condition_cycle_if_added,
-    event_name_taken,
-    is_digits,
-    normalized_event_name,
-    timing_is_valid,
-)
-from app.ui import theme
-from app.ui.capture_hud import CaptureHud
+from app.domain.profile_events import event_has_screen
+from app.domain.validation import MAX_REGION_SIZE, MIN_REGION_SIZE
+from app.presenters.workspace_model import BulkAction, WorkspaceModel
+from app.ui import tokens
+from app.ui import style
 from app.utils.i18n import txt
-from app.platform.keys import KeyUtils
 
-ChangeCallback = Callable[[EventModel, str], None]
-BulkCallback = Callable[[str, object], None]
+if TYPE_CHECKING:
+    from app.ui.capture_hud import CaptureHud
 
 THUMB_MAX = 160
-PANEL_WRAP = 280
+PANEL_WIDTH = 340
 
 
-class ScrollFrame(ttk.Frame):
-    """세로 스크롤 되는 내용 프레임."""
-
-    def __init__(self, master: tk.Misc) -> None:
-        super().__init__(master)
-        self.canvas = tk.Canvas(
-            self, borderwidth=0, highlightthickness=0, bg=theme.SURFACE_PANEL
-        )
-        bar = ttk.Scrollbar(self, orient="vertical", command=cast(Any, self.canvas).yview)
-        self.canvas.configure(yscrollcommand=bar.set)
-        bar.pack(side="right", fill="y")
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.body = tk.Frame(self.canvas, bg=theme.SURFACE_PANEL)
-        window = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
-        self.body.bind(
-            "<Configure>",
-            lambda _e: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
-        )
-        self.canvas.bind(
-            "<Configure>", lambda e: self.canvas.itemconfigure(window, width=e.width)
-        )
-        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            self.canvas.bind_all(seq, self._on_wheel, add="+")
-
-    def _on_wheel(self, event: tk.Event[tk.Misc]) -> None:
-        widget = cast(Any, event).widget
-        try:
-            inside = str(widget).startswith(str(self.canvas))
-        except (tk.TclError, AttributeError):
-            return
-        if not inside or self.body.winfo_height() <= self.canvas.winfo_height():
-            return
-        num = getattr(event, "num", None)
-        step = (-1 if num == 4 else 1) if num in (4, 5) else (-1 if event.delta > 0 else 1)
-        self.canvas.yview_scroll(step, "units")
+def pil_to_pixmap(image: Image.Image) -> QPixmap:
+    rgba = image.convert("RGBA")
+    data = rgba.tobytes("raw", "RGBA")
+    qimage = QImage(
+        data, rgba.width, rgba.height, rgba.width * 4, QImage.Format.Format_RGBA8888
+    )
+    return QPixmap.fromImage(qimage.copy())
 
 
-class EventDetailPanel(ttk.Frame):
+def _section_label(text: str) -> QLabel:
+    label = QLabel(text)
+    font = label.font()
+    font.setBold(True)
+    label.setFont(font)
+    label.setContentsMargins(0, tokens.SPACE_3, 0, 0)
+    return label
+
+
+def _error_label() -> QLabel:
+    label = QLabel()
+    label.setWordWrap(True)
+    label.setStyleSheet(f"color: {style.status_colors('error')[1]};")
+    label.hide()
+    return label
+
+
+def _set_message(label: QLabel, text: str) -> None:
+    label.setText(text)
+    label.setVisible(bool(text))
+
+
+class EventDetailPanel(QScrollArea):
     def __init__(
         self,
-        master: tk.Misc,
+        model: WorkspaceModel,
         *,
-        events_getter: Callable[[], list[EventModel]],
-        toggle_enabled_getter: Callable[[], bool],
         running_getter: Callable[[], bool],
-        on_change: ChangeCallback,
-        on_bulk: BulkCallback,
-        before_screen_change: Callable[[], object] = lambda: None,
+        selection_getter: Callable[[], list[EventModel]],
+        parent: QWidget | None = None,
     ) -> None:
-        super().__init__(master)
-        self.events_getter = events_getter
-        self.toggle_enabled_getter = toggle_enabled_getter
+        super().__init__(parent)
+        self.model = model
         self.running_getter = running_getter
-        self.on_change = on_change
-        self.on_bulk = on_bulk
-        # 캡처본은 다시 입력할 수 없으므로 바꾸기 전에 되돌리기 지점을 남긴다.
-        self.before_screen_change = before_screen_change
-        self.event: EventModel | None = None
+        self.selection_getter = selection_getter
+        # `event`는 QWidget.event와 겹치므로 쓰지 않는다.
+        self.current: EventModel | None = None
         self.selection: list[EventModel] = []
         self.capture_hud: CaptureHud | None = None
         self._syncing = False
-        self._thumb: ImageTk.PhotoImage | None = None
-        self._advanced_open = False
 
-        self.scroll = ScrollFrame(self)
-        self.scroll.pack(fill="both", expand=True)
-        body = self.scroll.body
-        f = theme.fonts()
-
-        self.lbl_title = tk.Label(
-            body,
-            text="",
-            bg=theme.SURFACE_PANEL,
-            fg=theme.INK_PRIMARY,
-            font=f["heading"],
-            anchor="w",
-            justify="left",
-            wraplength=PANEL_WRAP,
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setMinimumWidth(280)
+        body = QWidget()
+        self.setWidget(body)
+        root = QVBoxLayout(body)
+        root.setContentsMargins(
+            tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3, tokens.SPACE_3
         )
-        self.lbl_title.pack(fill="x", pady=(theme.SPACE_3, theme.SPACE_2), padx=theme.SPACE_3)
+        root.setSpacing(tokens.SPACE_2)
 
-        # --- single-event editor ---------------------------------------------
-        self.editor = tk.Frame(body, bg=theme.SURFACE_PANEL)
+        self.lbl_title = QLabel()
+        self.lbl_title.setWordWrap(True)
+        title_font = self.lbl_title.font()
+        title_font.setBold(True)
+        title_font.setPointSizeF(title_font.pointSizeF() + 2)
+        self.lbl_title.setFont(title_font)
+        root.addWidget(self.lbl_title)
+
+        self.editor = QWidget()
         self._build_editor(self.editor)
+        root.addWidget(self.editor)
 
-        # --- multi-selection actions -----------------------------------------
-        self.bulk = tk.Frame(body, bg=theme.SURFACE_PANEL)
+        self.bulk = QWidget()
         self._build_bulk(self.bulk)
+        root.addWidget(self.bulk)
 
-        self.lbl_placeholder = tk.Label(
-            body,
-            text=txt(
+        self.lbl_placeholder = QLabel(
+            txt(
                 "Select an event to edit it here. ↑/↓ moves between events.",
                 "이벤트를 선택하면 여기에서 바로 편집합니다. ↑/↓로 이동합니다.",
-            ),
-            bg=theme.SURFACE_PANEL,
-            fg=theme.INK_MUTED,
-            anchor="w",
-            justify="left",
-            wraplength=PANEL_WRAP,
+            )
         )
-        self.show([])
+        self.lbl_placeholder.setWordWrap(True)
+        style.caption(self.lbl_placeholder)
+        root.addWidget(self.lbl_placeholder)
+        root.addStretch(1)
+        self.show_events([])
 
-    # -- layout ---------------------------------------------------------------
+    # ── layout ─────────────────────────────────────────────────────────
 
-    def _label(self, parent: tk.Misc, text: str, *, muted: bool = True) -> tk.Label:
-        return tk.Label(
-            parent,
-            text=text,
-            bg=theme.SURFACE_PANEL,
-            fg=theme.INK_MUTED if muted else theme.INK_PRIMARY,
-            font=theme.fonts()["caption"],
-            anchor="w",
+    def _build_editor(self, parent: QWidget) -> None:
+        box = QVBoxLayout(parent)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(tokens.SPACE_1)
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setLabelAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
 
-    def _build_editor(self, parent: tk.Frame) -> None:
-        grid = tk.Frame(parent, bg=theme.SURFACE_PANEL)
-        grid.pack(fill="x", padx=theme.SPACE_3)
-        grid.grid_columnconfigure(1, weight=1)
+        self.entry_name = QLineEdit()
+        self.entry_name.editingFinished.connect(self.commit_name)
+        self.lbl_name_error = _error_label()
+        name_box = QVBoxLayout()
+        name_box.setSpacing(2)
+        name_box.addWidget(self.entry_name)
+        name_box.addWidget(self.lbl_name_error)
+        form.addRow(txt("Name", "이름"), name_box)
 
-        self._label(grid, txt("Name", "이름")).grid(row=0, column=0, sticky="w")
-        self.name_var = tk.StringVar(master=self)
-        self.entry_name = ttk.Entry(grid, textvariable=self.name_var)
-        self.entry_name.grid(row=0, column=1, sticky="we", pady=2)
-        self.entry_name.bind("<FocusOut>", self._commit_name)
-        self.entry_name.bind("<Return>", self._commit_name)
-        self.lbl_name_error = tk.Label(
-            grid,
-            text="",
-            bg=theme.SURFACE_PANEL,
-            fg=theme.STATUS_ERROR_FG,
-            font=theme.fonts()["caption"],
-            anchor="w",
-            wraplength=PANEL_WRAP,
-            justify="left",
-        )
-        self.lbl_name_error.grid(row=1, column=1, sticky="w")
+        kind_row = QHBoxLayout()
+        self.kind_group = QButtonGroup(self)
+        self.radio_signal = QRadioButton(txt("Signal", "신호"))
+        self.radio_rule = QRadioButton(txt("Rule", "규칙"))
+        for button in (self.radio_signal, self.radio_rule):
+            self.kind_group.addButton(button)
+            kind_row.addWidget(button)
+        kind_row.addStretch(1)
+        self.kind_group.buttonClicked.connect(self._on_kind_changed)
+        form.addRow(txt("Type", "종류"), kind_row)
 
-        self._label(grid, txt("Type", "종류")).grid(row=2, column=0, sticky="w")
-        self.kind_var = tk.StringVar(master=self, value="rule")
-        f_kind = tk.Frame(grid, bg=theme.SURFACE_PANEL)
-        f_kind.grid(row=2, column=1, sticky="w", pady=2)
-        for value, label in (
-            ("signal", txt("Signal", "신호")),
-            ("rule", txt("Rule", "규칙")),
-        ):
-            ttk.Radiobutton(
-                f_kind,
-                text=label,
-                value=value,
-                variable=self.kind_var,
-                command=self._on_kind_changed,
-            ).pack(side="left", padx=(0, theme.SPACE_2))
+        self.combo_key = QComboBox()
+        self.combo_key.addItem("")
+        self.combo_key.addItems(KeyCodes.get_key_name_list())
+        self.combo_key.setMaxVisibleItems(20)
+        self.combo_key.activated.connect(self._on_key_changed)
+        self.lbl_key = QLabel(txt("Key", "키"))
+        form.addRow(self.lbl_key, self.combo_key)
 
-        self.lbl_key = self._label(grid, txt("Key", "키"))
-        self.lbl_key.grid(row=3, column=0, sticky="w")
-        self.key_var = tk.StringVar(master=self)
-        self.combo_key = ttk.Combobox(
-            grid,
-            textvariable=self.key_var,
-            state="readonly",
-            values=KeyUtils.get_key_name_list(),
-            width=12,
-        )
-        self.combo_key.grid(row=3, column=1, sticky="w", pady=2)
-        self.combo_key.bind("<<ComboboxSelected>>", self._on_key_changed)
-        self.combo_key.bind("<KeyPress>", self._on_key_typed)
+        self.combo_group = QComboBox()
+        self.combo_group.setEditable(True)
+        self.combo_group.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.combo_group.activated.connect(self._on_group_changed)
+        line = self.combo_group.lineEdit()
+        if line is not None:
+            line.editingFinished.connect(self._on_group_changed)
+        self.lbl_group_hint = QLabel()
+        self.lbl_group_hint.setWordWrap(True)
+        style.caption(self.lbl_group_hint)
+        group_box = QVBoxLayout()
+        group_box.setSpacing(2)
+        group_box.addWidget(self.combo_group)
+        group_box.addWidget(self.lbl_group_hint)
+        self.lbl_group = QLabel(txt("Group", "그룹"))
+        form.addRow(self.lbl_group, group_box)
+        box.addLayout(form)
 
-        self.lbl_group = self._label(grid, txt("Group", "그룹"))
-        self.lbl_group.grid(row=4, column=0, sticky="w")
-        self.group_var = tk.StringVar(master=self)
-        self.combo_group = ttk.Combobox(grid, textvariable=self.group_var, width=16)
-        self.combo_group.grid(row=4, column=1, sticky="w", pady=2)
-        for seq in ("<<ComboboxSelected>>", "<FocusOut>", "<Return>"):
-            self.combo_group.bind(seq, self._on_group_changed)
-        self.lbl_group_hint = tk.Label(
-            grid,
-            text="",
-            bg=theme.SURFACE_PANEL,
-            fg=theme.INK_MUTED,
-            font=theme.fonts()["caption"],
-            anchor="w",
-            justify="left",
-            wraplength=PANEL_WRAP,
-        )
-        self.lbl_group_hint.grid(row=5, column=1, sticky="w")
-
-        f_flags = tk.Frame(parent, bg=theme.SURFACE_PANEL)
-        f_flags.pack(fill="x", pady=(theme.SPACE_1, 0), padx=theme.SPACE_3)
-        self.use_var = tk.BooleanVar(master=self, value=True)
-        ttk.Checkbutton(
-            f_flags,
-            text=txt("In use", "사용"),
-            variable=self.use_var,
-            command=self._on_use_changed,
-        ).pack(side="left", padx=(0, theme.SPACE_3))
-        self.toggle_var = tk.BooleanVar(master=self, value=False)
-        self.chk_toggle = ttk.Checkbutton(
-            f_flags,
-            text=txt("Hotkey on/off set", "단축키로 켜고 끄기"),
-            variable=self.toggle_var,
-            command=self._on_toggle_changed,
-        )
+        flags = QHBoxLayout()
+        self.chk_use = QCheckBox(txt("In use", "사용"))
+        self.chk_use.toggled.connect(self._on_use_changed)
+        self.chk_toggle = QCheckBox(txt("Hotkey on/off set", "단축키로 켜고 끄기"))
+        self.chk_toggle.toggled.connect(self._on_toggle_changed)
+        flags.addWidget(self.chk_use)
+        flags.addWidget(self.chk_toggle)
+        flags.addStretch(1)
+        box.addLayout(flags)
 
         # --- conditions ---
-        self._section_header(parent, txt("Conditions", "조건"))
-        self.cond_list = tk.Frame(parent, bg=theme.SURFACE_PANEL)
-        self.cond_list.pack(fill="x", padx=theme.SPACE_3)
-        self.btn_add_cond = ttk.Menubutton(parent, text=txt("＋ Add condition", "＋ 조건 추가"))
-        self.btn_add_cond.pack(anchor="w", pady=(theme.SPACE_1, 0), padx=theme.SPACE_3)
-        self.cond_menu = tk.Menu(self.btn_add_cond, tearoff=0, postcommand=self._fill_condition_menu)
-        self.btn_add_cond.configure(menu=self.cond_menu)
+        box.addWidget(_section_label(txt("Conditions", "조건")))
+        self.cond_host = QWidget()
+        self.cond_list = QVBoxLayout(self.cond_host)
+        self.cond_list.setContentsMargins(0, 0, 0, 0)
+        self.cond_list.setSpacing(2)
+        box.addWidget(self.cond_host)
+        self.btn_add_cond = QToolButton()
+        self.btn_add_cond.setText(txt("＋ Add condition", "＋ 조건 추가"))
+        self.btn_add_cond.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        # macOS draws the menu arrow over the label; the ＋ already says "menu".
+        self.btn_add_cond.setStyleSheet(
+            "QToolButton::menu-indicator { image: none; width: 0; }"
+        )
+        self.cond_menu = QMenu(self.btn_add_cond)
+        self.cond_menu.aboutToShow.connect(self._fill_condition_menu)
+        self.btn_add_cond.setMenu(self.cond_menu)
+        box.addWidget(self.btn_add_cond, 0, Qt.AlignmentFlag.AlignLeft)
 
         # --- screen ---
-        self._section_header(parent, txt("Screen", "화면"))
-        f_screen = tk.Frame(parent, bg=theme.SURFACE_PANEL)
-        f_screen.pack(fill="x", padx=theme.SPACE_3)
-        thumb_border = tk.Frame(f_screen, bg=theme.SURFACE_DIVIDER, padx=1, pady=1)
-        thumb_border.pack(anchor="w")
-        self.lbl_thumb = tk.Label(
-            thumb_border, bg=theme.SURFACE_SUNKEN, highlightthickness=0, bd=0
-        )
-        self.lbl_thumb.pack()
-        f_info = tk.Frame(f_screen, bg=theme.SURFACE_PANEL)
-        f_info.pack(fill="x", pady=(theme.SPACE_1, 0))
-        self.lbl_swatch = tk.Label(
-            f_info,
-            width=2,
-            bg=theme.SURFACE_SUNKEN,
-            highlightthickness=1,
-            highlightbackground=theme.SURFACE_DIVIDER,
-        )
-        self.lbl_swatch.pack(side="left")
-        self.lbl_screen = tk.Label(
-            f_info,
-            text="",
-            bg=theme.SURFACE_PANEL,
-            fg=theme.INK_SECONDARY,
-            font=theme.fonts()["caption"],
-            anchor="w",
-            justify="left",
-        )
-        self.lbl_screen.pack(side="left", padx=(theme.SPACE_1, 0))
-        f_screen_btns = tk.Frame(f_screen, bg=theme.SURFACE_PANEL)
-        f_screen_btns.pack(anchor="w", pady=(theme.SPACE_1, 0))
-        ttk.Button(
-            f_screen_btns,
-            text=txt("Capture…", "캡처…"),
-            command=self.open_capture,
-            style="Accent.TButton",
-        ).pack(side="left", padx=(0, theme.SPACE_1))
-        self.btn_clear_screen = ttk.Button(
-            f_screen_btns,
-            text=txt("Clear", "지우기"),
-            command=self._on_clear_screen,
-            style="Outline.TButton",
-        )
-        self.btn_clear_screen.pack(side="left")
+        box.addWidget(_section_label(txt("Screen", "화면")))
+        self.lbl_thumb = QLabel()
+        self.lbl_thumb.setFrameShape(QFrame.Shape.StyledPanel)
+        self.lbl_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_thumb.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        box.addWidget(self.lbl_thumb, 0, Qt.AlignmentFlag.AlignLeft)
+        info = QHBoxLayout()
+        self.lbl_swatch = QLabel()
+        self.lbl_swatch.setFixedSize(16, 16)
+        self.lbl_screen = QLabel()
+        style.caption(self.lbl_screen)
+        info.addWidget(self.lbl_swatch)
+        info.addWidget(self.lbl_screen, 1)
+        box.addLayout(info)
+        buttons = QHBoxLayout()
+        self.btn_capture = QPushButton(txt("Capture…", "캡처…"))
+        self.btn_capture.setAutoDefault(False)
+        self.btn_capture.clicked.connect(self.open_capture)
+        self.btn_clear_screen = QPushButton(txt("Clear", "지우기"))
+        self.btn_clear_screen.setAutoDefault(False)
+        self.btn_clear_screen.clicked.connect(self._on_clear_screen)
+        buttons.addWidget(self.btn_capture)
+        buttons.addWidget(self.btn_clear_screen)
+        buttons.addStretch(1)
+        box.addLayout(buttons)
 
         # --- advanced ---
-        self.lbl_advanced = tk.Label(
-            parent,
-            text="",
-            bg=theme.SURFACE_PANEL,
-            fg=theme.SIGNAL_BASE,
-            font=theme.fonts()["caption"],
-            anchor="w",
-            cursor="hand2",
+        self.btn_advanced = QToolButton()
+        self.btn_advanced.setCheckable(True)
+        self.btn_advanced.setAutoRaise(True)
+        self.btn_advanced.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
         )
-        self.lbl_advanced.pack(fill="x", pady=(theme.SPACE_3, 0), padx=theme.SPACE_3)
-        self.lbl_advanced.bind("<Button-1>", lambda _e: self._toggle_advanced())
-        self.advanced = tk.Frame(parent, bg=theme.SURFACE_PANEL)
+        self.btn_advanced.toggled.connect(self._toggle_advanced)
+        box.addWidget(self.btn_advanced, 0, Qt.AlignmentFlag.AlignLeft)
+        self.advanced = QWidget()
         self._build_advanced(self.advanced)
+        self.advanced.hide()
+        box.addWidget(self.advanced)
 
-        self.lbl_issues = tk.Label(
-            parent,
-            text="",
-            bg=theme.SURFACE_PANEL,
-            fg=theme.STATUS_WARN_FG,
-            font=theme.fonts()["caption"],
-            anchor="w",
-            justify="left",
-            wraplength=PANEL_WRAP,
-        )
-        self.lbl_issues.pack(fill="x", pady=(theme.SPACE_3, theme.SPACE_3), padx=theme.SPACE_3)
+        self.lbl_issues = QLabel()
+        self.lbl_issues.setWordWrap(True)
+        self.lbl_issues.setStyleSheet(f"color: {style.status_colors('warn')[1]};")
+        box.addWidget(self.lbl_issues)
 
-    def _build_advanced(self, parent: tk.Frame) -> None:
-        grid = tk.Frame(parent, bg=theme.SURFACE_PANEL)
-        grid.pack(fill="x", padx=theme.SPACE_3)
-        vcmd = (self.register(is_digits), "%P")
-        self.dur_var = tk.StringVar(master=self)
-        self.rand_var = tk.StringVar(master=self)
-        for row, (label, var) in enumerate(
+    def _build_advanced(self, parent: QWidget) -> None:
+        box = QVBoxLayout(parent)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(tokens.SPACE_1)
+        form = QFormLayout()
+        validator = QIntValidator(0, 999_999, parent)
+        self.entry_duration = QLineEdit()
+        self.entry_random = QLineEdit()
+        for entry, label in (
             (
-                (txt("Press time (ms, min 50)", "누름 시간 (ms, 최소 50)"), self.dur_var),
-                (txt("Random (ms, min 30)", "랜덤 (ms, 최소 30)"), self.rand_var),
-            )
+                self.entry_duration,
+                txt("Press time (ms, min 50)", "누름 시간 (ms, 최소 50)"),
+            ),
+            (self.entry_random, txt("Random (ms, min 30)", "랜덤 (ms, 최소 30)")),
         ):
-            self._label(grid, label).grid(row=row, column=0, sticky="w")
-            entry = ttk.Entry(
-                grid, textvariable=var, width=6, validate="key", validatecommand=vcmd
-            )
-            entry.grid(row=row, column=1, sticky="w", pady=1, padx=(theme.SPACE_1, 0))
-            entry.bind("<FocusOut>", self._commit_timing)
-            entry.bind("<Return>", self._commit_timing)
-        self._label(
-            grid,
-            txt("Blank uses the global timing.", "비워 두면 전역 타이밍을 씁니다."),
-        ).grid(row=2, column=0, columnspan=2, sticky="w")
-        self.lbl_timing_error = tk.Label(
-            grid,
-            text="",
-            bg=theme.SURFACE_PANEL,
-            fg=theme.STATUS_ERROR_FG,
-            font=theme.fonts()["caption"],
-            anchor="w",
+            entry.setValidator(validator)
+            entry.setMaximumWidth(80)
+            entry.editingFinished.connect(self._commit_timing)
+            form.addRow(label, entry)
+        box.addLayout(form)
+        hint = QLabel(
+            txt("Blank uses the global timing.", "비워 두면 전역 타이밍을 씁니다.")
         )
-        self.lbl_timing_error.grid(row=3, column=0, columnspan=2, sticky="w")
+        style.caption(hint)
+        box.addWidget(hint)
+        self.lbl_timing_error = _error_label()
+        box.addWidget(self.lbl_timing_error)
 
-        self.invert_var = tk.BooleanVar(master=self)
-        self.chk_invert = ttk.Checkbutton(
-            parent,
-            text=txt("Trigger when the color differs", "색이 다를 때"),
-            variable=self.invert_var,
-            command=self._on_invert_changed,
+        self.chk_invert = QCheckBox(
+            txt("Trigger when the color differs", "색이 다를 때")
         )
-        self.chk_invert.pack(anchor="w", padx=theme.SPACE_3, pady=(theme.SPACE_1, 0))
+        self.chk_invert.toggled.connect(self._on_invert_changed)
+        box.addWidget(self.chk_invert)
 
-        f_mode = tk.Frame(parent, bg=theme.SURFACE_PANEL)
-        f_mode.pack(fill="x", padx=theme.SPACE_3, pady=(theme.SPACE_1, 0))
-        self._label(f_mode, txt("Match", "매칭")).pack(side="left", padx=(0, theme.SPACE_1))
-        self.mode_var = tk.StringVar(master=self, value="pixel")
-        self.mode_buttons: list[ttk.Radiobutton] = []
-        for value, label in (
-            ("pixel", txt("Pixel", "픽셀")),
-            ("region", txt("Region", "영역")),
-        ):
-            button = ttk.Radiobutton(
-                f_mode,
-                text=label,
-                value=value,
-                variable=self.mode_var,
-                command=self._on_mode_changed,
-            )
-            button.pack(side="left", padx=(0, theme.SPACE_2))
-            self.mode_buttons.append(button)
-        f_region = tk.Frame(parent, bg=theme.SURFACE_PANEL)
-        f_region.pack(fill="x", padx=theme.SPACE_3, pady=(theme.SPACE_1, 0))
-        self._label(f_region, txt("Region W×H", "영역 가로×세로")).pack(side="left")
-        self.region_w_var = tk.StringVar(master=self)
-        self.region_h_var = tk.StringVar(master=self)
-        self.region_spins: list[ttk.Spinbox] = []
-        for var in (self.region_w_var, self.region_h_var):
-            spin = ttk.Spinbox(
-                f_region, textvariable=var, from_=MIN_REGION_SIZE, to=1000, width=5
-            )
-            spin.pack(side="left", padx=(theme.SPACE_1, 0))
-            for seq in ("<FocusOut>", "<Return>", "<<Increment>>", "<<Decrement>>"):
-                spin.bind(seq, self._on_region_size_changed)
-            self.region_spins.append(spin)
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel(txt("Match", "매칭")))
+        self.mode_group = QButtonGroup(self)
+        self.radio_pixel = QRadioButton(txt("Pixel", "픽셀"))
+        self.radio_region = QRadioButton(txt("Region", "영역"))
+        for button in (self.radio_pixel, self.radio_region):
+            self.mode_group.addButton(button)
+            mode_row.addWidget(button)
+        mode_row.addStretch(1)
+        self.mode_group.buttonClicked.connect(self._on_mode_changed)
+        box.addLayout(mode_row)
 
-    def _build_bulk(self, parent: tk.Frame) -> None:
-        for text, action, value in (
+        region_row = QHBoxLayout()
+        region_row.addWidget(QLabel(txt("Region W×H", "영역 가로×세로")))
+        self.spin_region_w = QSpinBox()
+        self.spin_region_h = QSpinBox()
+        for spin in (self.spin_region_w, self.spin_region_h):
+            spin.setRange(MIN_REGION_SIZE, MAX_REGION_SIZE)
+            spin.setKeyboardTracking(False)
+            spin.valueChanged.connect(self._on_region_size_changed)
+            region_row.addWidget(spin)
+        region_row.addStretch(1)
+        box.addLayout(region_row)
+
+    def _build_bulk(self, parent: QWidget) -> None:
+        box = QVBoxLayout(parent)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(tokens.SPACE_1)
+        entries: tuple[tuple[str, BulkAction | None, bool], ...] = (
             (txt("Turn on", "사용 켜기"), "use", True),
             (txt("Turn off", "사용 끄기"), "use", False),
             (txt("Add to hotkey set", "단축키 묶음에 넣기"), "toggle", True),
             (txt("Remove from hotkey set", "단축키 묶음에서 빼기"), "toggle", False),
-            (txt("Delete", "삭제"), "delete", None),
-        ):
-            ttk.Button(
-                parent,
-                text=text,
-                command=lambda a=action, v=value: self.on_bulk(a, v),
-                style="Outline.TButton",
-            ).pack(anchor="w", padx=theme.SPACE_3)
-        f_group = tk.Frame(parent, bg=theme.SURFACE_PANEL)
-        f_group.pack(anchor="w", padx=theme.SPACE_3, pady=(theme.SPACE_2, 0))
-        self._label(f_group, txt("Group", "그룹")).pack(side="left")
-        self.bulk_group_var = tk.StringVar(master=self)
-        self.combo_bulk_group = ttk.Combobox(
-            f_group, textvariable=self.bulk_group_var, width=14
+            (txt("Delete", "삭제"), None, False),
         )
-        self.combo_bulk_group.pack(side="left", padx=(theme.SPACE_1, 0))
-        ttk.Button(
-            f_group,
-            text=txt("Set", "지정"),
-            command=lambda: self.on_bulk("group", self.bulk_group_var.get().strip() or None),
-        ).pack(side="left", padx=(theme.SPACE_1, 0))
-
-    def _section_header(self, parent: tk.Misc, text: str) -> None:
-        tk.Label(
-            parent,
-            text=text,
-            bg=theme.SURFACE_PANEL,
-            fg=theme.INK_SECONDARY,
-            font=theme.fonts()["body_bold"],
-            anchor="w",
-        ).pack(fill="x", padx=theme.SPACE_3, pady=(theme.SPACE_3, theme.SPACE_1))
-
-    # -- showing --------------------------------------------------------------
-
-    def show(self, selection: list[EventModel]) -> None:
-        """선택이 바뀔 때. 편집 중인 이름은 먼저 확정한다."""
-        if self.event is not None and not self._syncing:
-            self._commit_name()
-        self.selection = list(selection)
-        self.event = selection[0] if len(selection) == 1 else None
-        for frame in (self.editor, self.bulk, self.lbl_placeholder):
-            frame.pack_forget()
-        if self.event is not None:
-            self.editor.pack(fill="x")
-            self.refresh()
-        elif selection:
-            self.lbl_title.config(
-                text=txt("{count} selected", "{count}개 선택됨", count=len(selection))
+        self.bulk_buttons: list[QPushButton] = []
+        for text, action, value in entries:
+            button = QPushButton(text)
+            button.setAutoDefault(False)
+            if action is None:
+                button.clicked.connect(self._bulk_delete)
+            else:
+                button.clicked.connect(self._bulk_slot(action, value))
+            box.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
+            self.bulk_buttons.append(button)
+        group_row = QHBoxLayout()
+        group_row.addWidget(QLabel(txt("Group", "그룹")))
+        self.combo_bulk_group = QComboBox()
+        self.combo_bulk_group.setEditable(True)
+        self.combo_bulk_group.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.combo_bulk_group.setMinimumWidth(120)
+        group_row.addWidget(self.combo_bulk_group)
+        self.btn_bulk_group = QPushButton(txt("Set", "지정"))
+        self.btn_bulk_group.setAutoDefault(False)
+        self.btn_bulk_group.clicked.connect(
+            lambda: self._bulk(
+                "group", self.combo_bulk_group.currentText().strip() or None
             )
-            groups = sorted({(e.group_id or "").strip() for e in self._events()} - {""})
-            self.combo_bulk_group.config(values=groups)
-            self.bulk.pack(fill="x")
+        )
+        group_row.addWidget(self.btn_bulk_group)
+        group_row.addStretch(1)
+        box.addLayout(group_row)
+
+    # ── showing ────────────────────────────────────────────────────────
+
+    def show_events(self, selection: list[EventModel]) -> None:
+        """선택이 바뀔 때. 편집 중인 이름은 먼저 확정한다."""
+        same = len(selection) == len(self.selection) and all(
+            a is b for a, b in zip(selection, self.selection, strict=True)
+        )
+        if same and self.current is not None:
+            self.refresh()
+            return
+        if self.current is not None and not self._syncing:
+            self.commit_name()
+        self.selection = list(selection)
+        self.current = selection[0] if len(selection) == 1 else None
+        self.editor.setVisible(self.current is not None)
+        self.bulk.setVisible(len(selection) > 1)
+        self.lbl_placeholder.setVisible(not selection)
+        if self.current is not None:
+            _set_message(self.lbl_name_error, "")
+            _set_message(self.lbl_timing_error, "")
+            self.refresh(force_name=True)
+        elif selection:
+            self.lbl_title.setText(
+                txt("{count} selected", "{count}개 선택됨", count=len(selection))
+            )
+            current = self.combo_bulk_group.currentText()
+            self.combo_bulk_group.clear()
+            self.combo_bulk_group.addItems(self.model.group_names())
+            self.combo_bulk_group.setEditText(current)
         else:
-            self.lbl_title.config(text=txt("Details", "상세"))
-            self.lbl_placeholder.pack(fill="x", padx=theme.SPACE_3)
+            self.lbl_title.setText(txt("Details", "상세"))
 
-    def _events(self) -> list[EventModel]:
-        return self.events_getter()
-
-    def refresh(self) -> None:
-        event = self.event
+    def refresh(self, *, force_name: bool = False) -> None:
+        event = self.current
         if event is None:
+            if len(self.selection) > 1:
+                self.lbl_title.setText(
+                    txt(
+                        "{count} selected",
+                        "{count}개 선택됨",
+                        count=len(self.selection),
+                    )
+                )
             return
         self._syncing = True
         try:
             is_rule = bool(event.execute_action)
-            self.lbl_title.config(text=event.event_name or txt("(unnamed)", "(이름 없음)"))
-            if self.focus_get() is not self.entry_name:
-                self.name_var.set(event.event_name or "")
-                self.lbl_name_error.config(text="")
-            self.kind_var.set("rule" if is_rule else "signal")
-            self.key_var.set(event.key_to_enter or "")
-            self.combo_key.config(state="readonly" if is_rule else "disabled")
-            groups = sorted({(e.group_id or "").strip() for e in self._events()} - {""})
-            self.combo_group.config(values=groups, state="normal" if is_rule else "disabled")
-            if self.focus_get() is not self.combo_group:
-                self.group_var.set((event.group_id or "").strip())
-            self.lbl_group_hint.config(text=self._group_hint(event))
-            self.use_var.set(bool(event.use_event))
-            self.toggle_var.set(bool(event.runtime_toggle_member))
-            if self.toggle_enabled_getter():
-                self.chk_toggle.pack(side="left")
-            else:
-                self.chk_toggle.pack_forget()
+            self.lbl_title.setText(event.event_name or txt("(unnamed)", "(이름 없음)"))
+            if force_name or not self.entry_name.hasFocus():
+                self.entry_name.setText(event.event_name or "")
+            self.radio_rule.setChecked(is_rule)
+            self.radio_signal.setChecked(not is_rule)
+            index = self.combo_key.findText(event.key_to_enter or "")
+            self.combo_key.setCurrentIndex(max(index, 0))
+            self.combo_key.setEnabled(is_rule)
+            self.lbl_key.setEnabled(is_rule)
+            group_line = self.combo_group.lineEdit()
+            editing_group = group_line is not None and group_line.hasFocus()
+            if force_name or not editing_group:
+                self.combo_group.clear()
+                self.combo_group.addItems(self.model.group_names())
+                self.combo_group.setEditText((event.group_id or "").strip())
+            self.combo_group.setEnabled(is_rule)
+            self.lbl_group_hint.setText(self._group_hint(event))
+            self.chk_use.setChecked(bool(event.use_event))
+            self.chk_toggle.setChecked(bool(event.runtime_toggle_member))
+            self.chk_toggle.setVisible(bool(self.model.profile.runtime_toggle_enabled))
             self._refresh_conditions()
             self._refresh_screen()
             self._refresh_advanced()
             issues = event_issues(event)
-            self.lbl_issues.config(
-            text="\n".join(f"{theme.STATUS_WARN_ICON} {i}" for i in issues)
-        )
+            self.lbl_issues.setText(
+                "\n".join(f"{tokens.STATUS_WARN_ICON} {i}" for i in issues)
+            )
+            self.lbl_issues.setVisible(bool(issues))
         finally:
             self._syncing = False
 
@@ -518,360 +462,302 @@ class EventDetailPanel(ttk.Frame):
             "그룹 없음: 조건이 맞는 규칙이 모두 실행되어 순서가 상관없습니다.",
         )
 
-    def _refresh_conditions(self) -> None:
-        event = self.event
-        for child in self.cond_list.winfo_children():
-            child.destroy()
-        if event is None:
-            return
-        if not event.conditions:
-            self._label(self.cond_list, txt("None", "없음")).pack(anchor="w")
-            return
-        for name, state in list(event.conditions.items()):
-            row = tk.Frame(self.cond_list, bg=theme.SURFACE_PANEL)
-            row.pack(fill="x", pady=1)
-            tk.Label(
-                row,
-                text=name,
-                bg=theme.SURFACE_PANEL,
-                fg=theme.INK_PRIMARY,
-                anchor="w",
-            ).pack(side="left", fill="x", expand=True)
-            state_var = tk.StringVar(
-                master=row, value=self._state_label(state)
-            )
-            combo = ttk.Combobox(
-                row,
-                textvariable=state_var,
-                state="readonly",
-                width=6,
-                values=[self._state_label(True), self._state_label(False)],
-            )
-            combo.pack(side="left", padx=(theme.SPACE_1, 0))
-            combo.bind(
-                "<<ComboboxSelected>>",
-                lambda _e, n=name, v=state_var: self._set_condition(
-                    n, v.get() == self._state_label(True)
-                ),
-            )
-            ttk.Button(
-                row,
-                text=theme.ICON_REMOVE,
-                width=2,
-                command=lambda n=name: self._remove_condition(n),
-            ).pack(side="left", padx=(theme.SPACE_1, 0))
-
     @staticmethod
     def _state_label(state: bool) -> str:
         return txt("on", "켜짐") if state else txt("off", "꺼짐")
 
+    def _refresh_conditions(self) -> None:
+        while self.cond_list.count():
+            item = self.cond_list.takeAt(0)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                # 지우기 전에 바로 숨긴다(deleteLater는 다음 루프에서 지운다).
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+        event = self.current
+        if event is None:
+            return
+        if not event.conditions:
+            none = QLabel(txt("None", "없음"))
+            style.caption(none)
+            self.cond_list.addWidget(none)
+            return
+        for name, state in list(event.conditions.items()):
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            label = QLabel(name)
+            label.setObjectName("condition_name")
+            line.addWidget(label, 1)
+            combo = QComboBox()
+            combo.addItems([self._state_label(True), self._state_label(False)])
+            combo.setCurrentIndex(0 if state else 1)
+            combo.activated.connect(self._condition_slot(name))
+            line.addWidget(combo)
+            remove = QToolButton()
+            remove.setText(tokens.ICON_REMOVE)
+            remove.setAutoRaise(True)
+            remove.setToolTip(txt("Delete", "삭제"))
+            remove.clicked.connect(
+                lambda _checked=False, n=name: self._remove_condition(n)
+            )
+            line.addWidget(remove)
+            self.cond_list.addWidget(row)
+
     def _refresh_screen(self) -> None:
-        event = self.event
+        event = self.current
         if event is None:
             return
         image = event.held_screenshot
         if image is None:
             size = THUMB_MAX * 3 // 4
-            shown = Image.new("RGB", (size, size // 2), theme.SURFACE_SUNKEN)
+            self.lbl_thumb.setPixmap(QPixmap())
+            self.lbl_thumb.setFixedSize(size, size // 2)
+            self.lbl_thumb.setText(txt("No screen yet", "화면 없음"))
+            style.caption(self.lbl_thumb)
         else:
             region = event.region_size if event.match_mode == "region" else None
             shown = render_overlay(image, event.clicked_position, region)
             shown.thumbnail((THUMB_MAX, THUMB_MAX))
-        self._thumb = ImageTk.PhotoImage(shown, master=self.lbl_thumb)
-        self.lbl_thumb.configure(image=cast(Any, self._thumb), width=shown.width, height=shown.height)
+            self.lbl_thumb.setText("")
+            self.lbl_thumb.setPixmap(pil_to_pixmap(shown))
+            self.lbl_thumb.setFixedSize(shown.width + 2, shown.height + 2)
         color = event.ref_pixel_value
-        self.lbl_swatch.config(
-            bg="#{:02x}{:02x}{:02x}".format(*(int(c) for c in color[:3]))
-            if color
-            else theme.SURFACE_SUNKEN
-        )
+        if color:
+            hex_color = "#{:02x}{:02x}{:02x}".format(*(int(c) for c in color[:3]))
+            self.lbl_swatch.setStyleSheet(
+                f"background: {hex_color}; border: 1px solid palette(mid);"
+            )
+        else:
+            self.lbl_swatch.setStyleSheet("border: 1px solid palette(mid);")
         if event_has_screen(event):
             pos = cast(Position, event.latest_position)
             pixel = cast(Position, event.clicked_position)
             rgb = ",".join(str(int(c)) for c in color[:3]) if color else "—"
-            self.lbl_screen.config(text=f"{rgb}  ({pos[0] + pixel[0]}, {pos[1] + pixel[1]})")
-            self.btn_clear_screen.state(["!disabled"])
+            self.lbl_screen.setText(
+                f"{rgb}  ({pos[0] + pixel[0]}, {pos[1] + pixel[1]})"
+            )
+            self.btn_clear_screen.setEnabled(True)
         else:
-            self.lbl_screen.config(
-                text=txt("No screen trigger", "화면 트리거 없음")
+            self.lbl_screen.setText(
+                txt("No screen trigger", "화면 트리거 없음")
                 if event.execute_action
                 else txt("No screen yet", "화면 없음")
             )
-            self.btn_clear_screen.state(["disabled"])
+            self.btn_clear_screen.setEnabled(False)
 
     def _refresh_advanced(self) -> None:
-        event = self.event
+        event = self.current
         if event is None:
             return
-        self.dur_var.set("" if event.press_duration_ms is None else str(int(event.press_duration_ms)))
-        self.rand_var.set("" if event.randomization_ms is None else str(int(event.randomization_ms)))
-        self.lbl_timing_error.config(text="")
-        self.invert_var.set(bool(event.invert_match))
-        self.mode_var.set(event.match_mode or "pixel")
-        has_image = event.held_screenshot is not None and event.clicked_position is not None
-        for button in self.mode_buttons:
-            button.state(["!disabled"] if has_image else ["disabled"])
-        self.chk_invert.state(["!disabled"] if event_has_screen(event) else ["disabled"])
+        if not self.entry_duration.hasFocus():
+            self.entry_duration.setText(
+                ""
+                if event.press_duration_ms is None
+                else str(int(event.press_duration_ms))
+            )
+        if not self.entry_random.hasFocus():
+            self.entry_random.setText(
+                ""
+                if event.randomization_ms is None
+                else str(int(event.randomization_ms))
+            )
+        self.chk_invert.setChecked(bool(event.invert_match))
+        self.chk_invert.setEnabled(event_has_screen(event))
+        is_region = event.match_mode == "region"
+        self.radio_region.setChecked(is_region)
+        self.radio_pixel.setChecked(not is_region)
+        has_image = (
+            event.held_screenshot is not None and event.clicked_position is not None
+        )
+        for button in (self.radio_pixel, self.radio_region):
+            button.setEnabled(has_image)
         region = event.region_size or (100, 100)
-        self.region_w_var.set(str(region[0]))
-        self.region_h_var.set(str(region[1]))
-        region_state = ["!disabled"] if event.match_mode == "region" and has_image else ["disabled"]
-        for spin in self.region_spins:
-            spin.state(region_state)
+        for spin, value in (
+            (self.spin_region_w, region[0]),
+            (self.spin_region_h, region[1]),
+        ):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+            spin.setEnabled(is_region and has_image)
         customized = bool(
             event.press_duration_ms
             or event.randomization_ms
             or event.invert_match
             or event.match_mode == "region"
         )
-        mark = theme.ICON_EXPANDED if self._advanced_open else theme.ICON_COLLAPSED
+        open_ = self.btn_advanced.isChecked()
+        mark = tokens.ICON_EXPANDED if open_ else tokens.ICON_COLLAPSED
         dot = " ·" if customized else ""
-        self.lbl_advanced.config(text=f"{mark} {txt('Advanced', '고급')}{dot}")
+        self.btn_advanced.setText(f"{mark} {txt('Advanced', '고급')}{dot}")
 
-    def _toggle_advanced(self) -> None:
-        self._advanced_open = not self._advanced_open
-        if self._advanced_open:
-            self.advanced.pack(fill="x", after=self.lbl_advanced)
-        else:
-            self.advanced.pack_forget()
+    def _toggle_advanced(self, checked: bool) -> None:
+        self.advanced.setVisible(checked)
         self._refresh_advanced()
 
-    # -- commits --------------------------------------------------------------
+    # ── commits ────────────────────────────────────────────────────────
 
-    def _changed(self, field: str) -> None:
-        if self.event is None:
-            return
-        self.on_change(self.event, field)
-        self.refresh()
-
-    def _commit_name(self, _event: object | None = None) -> str | None:
-        event = self.event
+    def commit_name(self) -> bool:
+        """입력한 이름을 확정한다. 거부되면 이유를 보이고 False."""
+        event = self.current
         if event is None or self._syncing:
-            return None
-        new_name = normalized_event_name(self.name_var.get())
-        old_name = event.event_name or ""
-        if new_name == old_name:
-            self.lbl_name_error.config(text="")
-            return None
-        if not new_name:
-            self.lbl_name_error.config(text=txt("Enter a name.", "이름을 입력하세요."))
-            return "break"
-        if event_name_taken(self._events(), new_name, ignore=event):
-            self.lbl_name_error.config(
-                text=txt(
-                    "'{name}' already exists.", "'{name}' 이름이 이미 있습니다.", name=new_name
-                )
-            )
-            return "break"
-        self.lbl_name_error.config(text="")
-        event.event_name = new_name
-        if old_name:
-            rename_condition_references(self._events(), old_name, new_name)
-        self._changed("name")
-        return None
+            return True
+        error = self.model.rename_event(event, self.entry_name.text())
+        _set_message(self.lbl_name_error, error)
+        return not error
 
-    def _on_kind_changed(self) -> None:
-        if self.event is None or self._syncing:
+    def _on_kind_changed(self, *_args: object) -> None:
+        if self.current is None or self._syncing:
             return
-        self.event.execute_action = self.kind_var.get() == "rule"
-        self._changed("kind")
+        self.model.set_event_kind(self.current, self.radio_rule.isChecked())
 
-    def _on_key_changed(self, _event: object | None = None) -> None:
-        if self.event is None or self._syncing:
+    def _on_key_changed(self, *_args: object) -> None:
+        if self.current is None or self._syncing:
             return
-        self.event.key_to_enter = self.key_var.get() or None
-        self._changed("key")
+        self.model.set_event_key(self.current, self.combo_key.currentText() or None)
 
-    def _on_key_typed(self, event: tk.Event[tk.Misc]) -> None:
-        """키 이름을 타이핑해 고른다(F1~F12 포함)."""
-        key = (event.keysym or event.char).upper()
-        values = [str(v) for v in cast(Any, self.combo_key).cget("values")]
-        if key.startswith("F") and key[1:].isdigit() and key in values:
-            self.key_var.set(key)
-        elif char := event.char.upper():
-            match = next((v for v in values if v.startswith(char)), None)
-            if match is None:
-                return
-            self.key_var.set(match)
-        else:
+    def _on_group_changed(self, *_args: object) -> None:
+        if self.current is None or self._syncing:
             return
-        self._on_key_changed()
+        self.model.set_event_group(self.current, self.combo_group.currentText())
 
-    def _on_group_changed(self, _event: object | None = None) -> None:
-        event = self.event
-        if event is None or self._syncing:
+    def _on_use_changed(self, checked: bool) -> None:
+        if self.current is None or self._syncing:
             return
-        group = self.group_var.get().strip() or None
-        if group == ((event.group_id or "").strip() or None):
-            return
-        event.group_id = group
-        self._changed("group")
+        self.model.set_event_use(self.current, checked)
 
-    def _on_use_changed(self) -> None:
-        if self.event is None or self._syncing:
+    def _on_toggle_changed(self, checked: bool) -> None:
+        if self.current is None or self._syncing:
             return
-        self.event.use_event = bool(self.use_var.get())
-        self._changed("use")
-
-    def _on_toggle_changed(self) -> None:
-        if self.event is None or self._syncing:
-            return
-        self.event.runtime_toggle_member = bool(self.toggle_var.get())
-        self._changed("toggle")
+        self.model.set_event_toggle_member(self.current, checked)
 
     def _set_condition(self, name: str, state: bool) -> None:
-        if self.event is None:
-            return
-        self.event.conditions[name] = state
-        self._changed("conditions")
+        if self.current is not None:
+            self.model.set_condition(self.current, name, state)
 
     def _remove_condition(self, name: str) -> None:
-        if self.event is None:
-            return
-        self.event.conditions.pop(name, None)
-        self._changed("conditions")
-
-    def condition_candidates(self) -> list[tuple[EventModel, list[str] | None]]:
-        """추가할 수 있는 조건 후보와, 순환이 생기면 그 경로. 신호가 먼저다."""
-        target = self.event
-        if target is None:
-            return []
-        events = self._events()
-        candidates = [
-            e
-            for e in events
-            if e is not target
-            and e.event_name
-            and e.event_name not in target.conditions
-        ]
-        candidates.sort(key=lambda e: (bool(e.execute_action), (e.event_name or "").casefold()))
-        return [
-            (e, condition_cycle_if_added(events, target, e.event_name or ""))
-            for e in candidates
-        ]
+        if self.current is not None:
+            self.model.remove_condition(self.current, name)
 
     def _fill_condition_menu(self) -> None:
         menu = self.cond_menu
-        menu.delete(0, "end")
-        candidates = self.condition_candidates()
+        menu.clear()
+        event = self.current
+        candidates = self.model.condition_candidates(event) if event is not None else []
         if not candidates:
-            menu.add_command(
-                label=txt("No other events", "다른 이벤트가 없습니다"), state="disabled"
-            )
+            action = menu.addAction(txt("No other events", "다른 이벤트가 없습니다"))
+            action.setEnabled(False)
             return
         last_kind: bool | None = None
-        for event, cycle in candidates:
-            kind = bool(event.execute_action)
+        for candidate, cycle in candidates:
+            kind = bool(candidate.execute_action)
             if last_kind is not None and kind != last_kind:
-                menu.add_separator()
+                menu.addSeparator()
             last_kind = kind
-            name = event.event_name or ""
+            name = candidate.event_name or ""
             if cycle:
-                menu.add_command(
-                    label=txt(
+                action = menu.addAction(
+                    txt(
                         "{name} — circular: {path}",
                         "{name} — 순환: {path}",
                         name=name,
                         path=" → ".join(cycle),
-                    ),
-                    state="disabled",
+                    )
                 )
+                action.setEnabled(False)
             else:
-                menu.add_command(
-                    label=name, command=lambda n=name: self._set_condition(n, True)
+                action = menu.addAction(name)
+                action.triggered.connect(
+                    lambda _checked=False, n=name: self._set_condition(n, True)
                 )
 
-    def _commit_timing(self, _event: object | None = None) -> None:
-        event = self.event
+    def _commit_timing(self) -> None:
+        event = self.current
         if event is None or self._syncing:
             return
-        dur = int(self.dur_var.get()) if self.dur_var.get() else None
-        rand = int(self.rand_var.get()) if self.rand_var.get() else None
-        if not timing_is_valid(dur, rand):
-            self.lbl_timing_error.config(
-                text=txt(
+        dur_text = self.entry_duration.text().strip()
+        rand_text = self.entry_random.text().strip()
+        dur = int(dur_text) if dur_text else None
+        rand = int(rand_text) if rand_text else None
+        if not self.model.set_event_timing(event, dur, rand):
+            _set_message(
+                self.lbl_timing_error,
+                txt(
                     "Press time must be at least 50 ms and random at least 30 ms.",
                     "누름 시간은 50ms, 랜덤은 30ms 이상이어야 합니다.",
-                )
+                ),
             )
             return
-        self.lbl_timing_error.config(text="")
-        if (dur, rand) == (event.press_duration_ms, event.randomization_ms):
-            return
-        event.press_duration_ms = dur
-        event.randomization_ms = rand
-        self._changed("timing")
+        _set_message(self.lbl_timing_error, "")
 
-    def _on_invert_changed(self) -> None:
-        if self.event is None or self._syncing:
+    def _on_invert_changed(self, checked: bool) -> None:
+        if self.current is None or self._syncing:
             return
-        self.event.invert_match = bool(self.invert_var.get())
-        self._changed("invert")
+        self.model.set_event_invert(self.current, checked)
 
-    def _on_mode_changed(self) -> None:
-        event = self.event
+    def _on_mode_changed(self, *_args: object) -> None:
+        if self.current is None or self._syncing:
+            return
+        mode = "region" if self.radio_region.isChecked() else "pixel"
+        self.model.set_match_mode(self.current, mode)
+
+    def _on_region_size_changed(self, *_args: object) -> None:
+        event = self.current
         if event is None or self._syncing:
             return
-        event.match_mode = self.mode_var.get()
-        if event.match_mode == "region":
-            clamp_region(event)
-        self._changed("mode")
-
-    def _on_region_size_changed(self, _event: object | None = None) -> None:
-        event = self.event
-        if event is None or self._syncing or event.match_mode != "region":
-            return
-        try:
-            size = (int(self.region_w_var.get()), int(self.region_h_var.get()))
-        except ValueError:
-            self._refresh_advanced()
-            return
-        before = event.region_size
-        event.region_size = size
-        clamp_region(event)
-        if event.region_size != before:
-            self._changed("region")
-        else:
-            self._refresh_advanced()
+        self.model.set_region_size(
+            event, self.spin_region_w.value(), self.spin_region_h.value()
+        )
+        self._refresh_advanced()
 
     def _on_clear_screen(self) -> None:
-        if self.event is None:
-            return
-        self.before_screen_change()
-        clear_capture(self.event)
-        self._changed("screen")
+        if self.current is not None:
+            self.model.clear_screen(self.current)
 
-    # -- capture HUD ----------------------------------------------------------
+    def _bulk_slot(self, action: BulkAction, value: object) -> Callable[[], None]:
+        return lambda: self._bulk(action, value)
+
+    def _condition_slot(self, name: str) -> Callable[[int], None]:
+        def on_activated(index: int) -> None:
+            self._set_condition(name, index == 0)
+
+        return on_activated
+
+    def _bulk(self, action: BulkAction, value: object) -> None:
+        self.model.bulk(action, value, self.selection_getter())
+
+    def _bulk_delete(self) -> None:
+        self.model.delete_events(self.selection_getter())
+
+    # ── capture HUD ────────────────────────────────────────────────────
 
     def open_capture(self) -> None:
-        event = self.event
+        event = self.current
         if event is None:
             return
         hud = self.capture_hud
         if hud is not None and hud.is_open():
-            cast(Any, hud.win).lift()
-            return
+            return  # 이미 열린 HUD를 쓴다(HUD 참조에는 is_open/close만 부른다)
+        from app.ui.capture_hud import CaptureHud
+
         region = event.region_size if event.match_mode == "region" else None
 
         def on_apply(result: CaptureResult) -> None:
-            self.before_screen_change()
-            apply_capture(event, result)
-            if self.event is event:
-                self._changed("screen")
-            else:
-                self.on_change(event, "screen")
+            self.model.apply_capture_to(event, result)
 
         def on_name_change(name: str) -> None:
-            if self.event is event:
-                self.name_var.set(name)
+            if self.current is event:
+                self.entry_name.setText(name)
 
         def on_close() -> None:
             self.capture_hud = None
-            if self.event is event:
-                self._commit_name()
+            if self.current is event:
+                self.commit_name()
 
         self.capture_hud = CaptureHud(
-            self.winfo_toplevel(),
+            self.window(),
             mode="single",
             name=event.event_name or "",
             on_name_change=on_name_change,

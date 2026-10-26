@@ -3,6 +3,7 @@
 - 권장 추론 레벨: xhigh (장기·다단계 작업)
 - 작업 위치: `git worktree add ../KeystrokeSimulator-qt -b feat/pyside6` (대규모 변경이라 main 직접 작업 금지)
 - 성공 기준: 각 단계 `uv run -m scripts.verify` 통과 + diff 리뷰, 최종 단계는 macOS·Windows 실기에서 아래 "기능 동등성 체크리스트" 전 항목 통과
+- 진행 상태(2026-10-26): P0–P5 완료. Tk 코드는 제거됐고 `uv run -m app`이 Qt 앱을 띄운다. Qt 모듈은 계획의 `app/ui/qt/` 대신 `app/ui/`에 평평하게 두었다. P6(실기 동등성 검증)이 남았다.
 
 ## 0. 전제와 원칙
 

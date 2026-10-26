@@ -1,18 +1,54 @@
 """캡처 HUD — 편집기와 빠른 이벤트가 함께 쓰는 작은 항상 위 캡처 창.
 
-게임 화면과 캡처 영역을 비교하려고 topmost를 유지하고, 대신 창을 작게
-두고 캡처 박스와 겹치면 스스로 비켜난다.
+게임 화면과 캡처 영역을 비교하려고 항상 위를 유지하고(UI 정책 1), 대신 창을
+작게 두고 캡처 박스와 겹치면 스스로 비켜난다. 상태와 동작은
+`CaptureController`가 맡고 이 모듈은 표시와 입력 전달만 한다.
+
+게임이 포커스를 가진 동안에도 ALT/CTRL을 읽어야 하므로 Qt 키 이벤트가 아니라
+`QTimer`로 전역 키 상태를 폴링한다(100ms). 캡처 프레임은 50ms마다
+`CaptureSession` 세대를 확인한다.
 """
 
 from __future__ import annotations
 
-import tkinter as tk
-import tkinter.ttk as ttk
+import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
-from PIL import Image, ImageTk
+from PIL import Image
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
+from PySide6.QtGui import (
+    QCloseEvent,
+    QCursor,
+    QFontDatabase,
+    QGuiApplication,
+    QImage,
+    QIntValidator,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+)
+from PySide6.QtWidgets import (
+    QAbstractSpinBox,
+    QApplication,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QSizePolicy,
+    QSpinBox,
+    QTextEdit,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.domain.capture_geometry import (
     MAGNIFIER_SPAN,
@@ -21,88 +57,181 @@ from app.domain.capture_geometry import (
     MIN_CAPTURE_SIZE,
     CaptureResult,
     Rect,
-    border_rects,
-    capture_rect,
-    display_to_image,
-    hud_position,
-    magnifier_to_image,
-    preview_size,
 )
-from app.domain.capture_render import color_hex, render_magnifier, render_overlay
+from app.domain.capture_render import color_hex
 from app.domain.models import Position
-from app.engine.capture_session import CaptureBackend, CaptureSession
-from app.presenters.quick_capture import append_quick_event
-from app.storage.profile_storage import ensure_quick_profile
-from app.ui import theme
+from app.engine.capture_session import CaptureBackend
+from app.presenters.capture_controller import (
+    CAPTURE_POLL_MS,
+    KEY_POLL_MS,
+    CaptureController,
+    HudMode,
+    Tone,
+)
+from app.ui import tokens
+from app.ui import style
+from app.ui.capture_border import CaptureBorder
+from app.ui.mac_window import keep_above_all_spaces
 from app.utils.i18n import txt
-from app.platform.keys import KeyUtils
-from app.platform.system import PermissionUtils
-from app.storage.app_state import StateUtils
-from app.ui.tk_window import WindowUtils
-
-HudMode = Literal["single", "continuous"]
 
 HUD_WRAP = 250
-_TEXT_INPUT_CLASSES = frozenset(
-    {"Entry", "TEntry", "Spinbox", "TSpinbox", "TCombobox", "Text"}
-)
-# 100ms 폴링 기준 3초. 권한 조회는 호출당 10ms 이상이다.
-_PERMISSION_POLL_TICKS = 30
+_MAGNIFIER_SIZE = MAGNIFIER_SPAN * MAGNIFIER_ZOOM
+_RETURN_KEYS = (Qt.Key.Key_Return, Qt.Key.Key_Enter)
 
 
-class CaptureBorder:
-    """캡처 박스를 게임 화면 위에 표시하는 얇은 창 4개."""
-
-    def __init__(self, master: tk.Misc) -> None:
-        self._box: Rect | None = None
-        self.windows: list[tk.Toplevel] = []
-        for _ in range(4):
-            win = tk.Toplevel(master, bg=theme.CAPTURE_BORDER)
-            win.overrideredirect(True)
-            win.withdraw()
-            self.windows.append(win)
-
-    def show(self, box: Rect) -> None:
-        if box == self._box:
-            return
-        self._box = box
-        rects = border_rects(box, theme.CAPTURE_BORDER_WIDTH)
-        for win, (x, y, w, h) in zip(self.windows, rects, strict=True):
-            try:
-                win.geometry(f"{max(1, w)}x{max(1, h)}+{x}+{y}")
-                if win.state() == "withdrawn":
-                    win.deiconify()
-                    win.update_idletasks()
-                    cast(Any, win).attributes("-topmost", True)
-            except tk.TclError:
-                continue
-        # macOS는 메뉴바 영역 등에 놓인 창을 스스로 옮긴다. 옮겨진 조각은
-        # 캡처 박스 안으로 들어올 수 있으므로 숨긴다.
-        for win, (x, y, _w, _h) in zip(self.windows, rects, strict=True):
-            try:
-                win.update_idletasks()
-                if (win.winfo_x(), win.winfo_y()) != (x, y):
-                    win.withdraw()
-            except tk.TclError:
-                continue
-
-    def destroy(self) -> None:
-        for win in self.windows:
-            try:
-                win.destroy()
-            except tk.TclError:
-                pass
-        self.windows = []
+# ---------------------------------------------------------------------------
+# Coordinates
+# ---------------------------------------------------------------------------
 
 
-def ctrl_capture_allowed(focus: tk.Misc | None) -> bool:
-    """텍스트 입력 중에는 CTRL을 캡처로 받지 않는다."""
-    if focus is None:
-        return True
-    try:
-        return focus.winfo_class() not in _TEXT_INPUT_CLASSES
-    except tk.TclError:
-        return True
+def capture_scale() -> float:
+    """캡처 좌표(화면 픽셀) / Qt 논리 좌표.
+
+    macOS는 캡처도 포인트 좌표라 1이다. Windows는 프로세스가 DPI 인식(물리
+    픽셀)으로 캡처하고 Qt는 논리 좌표를 쓰므로 주 모니터 배율을 곱한다. 캡처는
+    주 모니터만 대상이다.
+    """
+    if sys.platform != "win32":
+        return 1.0
+    return float(QGuiApplication.primaryScreen().devicePixelRatio())
+
+
+def _to_capture(value: int, scale: float) -> int:
+    return round(value * scale)
+
+
+def _to_logical_rect(rect: Rect, scale: float) -> Rect:
+    """바깥 테두리가 박스를 덮지 않도록 왼쪽 위는 내리고 오른쪽 아래는 올린다."""
+    if scale == 1.0:
+        return rect
+    x, y, w, h = rect
+    left, top = int(x / scale), int(y / scale)
+    right, bottom = -int(-(x + w) // scale), -int(-(y + h) // scale)
+    return (left, top, right - left, bottom - top)
+
+
+def pil_to_qimage(img: Image.Image) -> QImage:
+    rgb = img.convert("RGB")
+    data = rgb.tobytes("raw", "RGB")
+    return QImage(
+        data, rgb.width, rgb.height, rgb.width * 3, QImage.Format.Format_RGB888
+    ).copy()
+
+
+def _is_text_input(widget: QWidget | None) -> bool:
+    if isinstance(widget, QComboBox):
+        return widget.isEditable()
+    return isinstance(widget, QLineEdit | QAbstractSpinBox | QTextEdit | QPlainTextEdit)
+
+
+def text_input_has_focus() -> bool:
+    """앱이 활성이고 텍스트 입력칸에 포커스가 있다. 게임이 포커스면 False."""
+    if QGuiApplication.applicationState() != Qt.ApplicationState.ApplicationActive:
+        return False
+    return _is_text_input(QApplication.focusWidget())
+
+
+# ---------------------------------------------------------------------------
+# Widgets
+# ---------------------------------------------------------------------------
+
+
+class _ImageView(QWidget):
+    """1px 테두리 안에 PIL 이미지를 1:1로 그린다. 좌표는 이미지 기준으로 넘긴다."""
+
+    def __init__(
+        self,
+        *,
+        on_press: Callable[[Position], None],
+        on_hover: Callable[[Position], None] | None = None,
+        on_leave: Callable[[], None] | None = None,
+    ) -> None:
+        super().__init__()
+        self._image: QImage | None = None
+        self._size: Position = (1, 1)
+        self._on_press = on_press
+        self._on_hover = on_hover
+        self._on_leave = on_leave
+        self.setMouseTracking(on_hover is not None)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+    def set_image(self, img: Image.Image | None, size: Position) -> None:
+        self._image = None if img is None else pil_to_qimage(img)
+        if size != self._size:
+            self._size = size
+            self.setFixedSize(size[0] + 2, size[1] + 2)
+        self.update()
+
+    @property
+    def display_size(self) -> Position:
+        return self._size
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        palette = self.palette()
+        painter.fillRect(self.rect(), palette.mid())
+        inner = QRect(1, 1, self._size[0], self._size[1])
+        if self._image is None:
+            painter.fillRect(inner, palette.alternateBase())
+        else:
+            painter.drawImage(inner, self._image)
+
+    @staticmethod
+    def _point(event: QMouseEvent) -> Position:
+        pos = event.position()
+        return (int(pos.x()) - 1, int(pos.y()) - 1)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._on_press(self._point(event))
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self._on_press(self._point(event))
+        elif self._on_hover is not None:
+            self._on_hover(self._point(event))
+
+    def leaveEvent(self, event: QEvent) -> None:
+        if self._on_leave is not None:
+            self._on_leave()
+        super().leaveEvent(event)
+
+
+class _CommitKeys(QObject):
+    """입력칸의 Enter는 값만 확정한다. 창의 Enter(적용)로 번지지 않게 끊는다.
+
+    Up/Down이 등록된 칸은 값을 1씩 바꾸고 확정한다.
+    """
+
+    def __init__(self, parent: QObject) -> None:
+        super().__init__(parent)
+        self._commit: dict[QObject, Callable[[], None]] = {}
+        self._nudge: dict[QObject, Callable[[int], None]] = {}
+
+    def bind(
+        self,
+        widget: QWidget,
+        commit: Callable[[], None],
+        nudge: Callable[[int], None] | None = None,
+    ) -> None:
+        self._commit[widget] = commit
+        if nudge is not None:
+            self._nudge[widget] = nudge
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() != QEvent.Type.KeyPress or not isinstance(event, QKeyEvent):
+            return False
+        key = event.key()
+        if key in _RETURN_KEYS and watched in self._commit:
+            self._commit[watched]()
+            return True
+        nudge = self._nudge.get(watched)
+        if nudge is not None and key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            nudge(1 if key == Qt.Key.Key_Up else -1)
+            return True
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -110,727 +239,457 @@ def ctrl_capture_allowed(focus: tk.Misc | None) -> bool:
 # ---------------------------------------------------------------------------
 
 
-class CaptureHud:
+class CaptureHud(QWidget):
     """단일 모드는 이벤트 하나의 화면을 고르고, 연속 모드는 Quick에 계속 추가한다."""
 
     def __init__(
         self,
-        master: tk.Misc,
+        parent: QWidget | None,
         *,
-        mode: HudMode,
+        mode: Literal["single", "continuous"],
         name: str = "",
         on_name_change: Callable[[str], None] | None = None,
         on_apply: Callable[[CaptureResult], None] | None = None,
         profiles_dir: Path | None = None,
         initial: CaptureResult | None = None,
-        capture_size: Position = (100, 100),
-        region_size: Position | None = None,
+        capture_size: tuple[int, int] = (100, 100),
+        region_size: tuple[int, int] | None = None,
         grab: bool = False,
         border: bool = True,
         on_close: Callable[[], object] | None = None,
         capturer: CaptureBackend | None = None,
     ) -> None:
+        super().__init__(
+            parent, Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.mode: HudMode = mode
-        self.master = master
         self.on_name_change = on_name_change
-        self.on_apply = on_apply
-        self.profiles_dir = profiles_dir
-        self.region_size = region_size
         self.on_close = on_close
-        self._grab = grab
-        self.saved_count = 0
-        self._is_closing = False
-        self._alt_down = False
-        self._ctrl_was_pressed = False
+        self._closing = False
         self._capture_generation = -1
-        self._held_size: Position | None = None
-        self._mag_center: Position | None = None
-        self._preview_display: Position = (1, 1)
-        self._feedback: tuple[str, str] | None = None
-        self._permission_message = self._compute_permission_message()
-        self._permission_ticks = _PERMISSION_POLL_TICKS
-        self._capture_after_id: str | None = None
-        self._modifier_after_id: str | None = None
-        self._pointer_state_key = "event_pointer" if mode == "single" else "quick_ptr"
-
-        if mode == "continuous" and profiles_dir is not None:
-            ensure_quick_profile(profiles_dir)
-
-        self.capture_session = CaptureSession(capturer)
-        self.win = tk.Toplevel(master)
+        self._scale = capture_scale()
+        self.controller = CaptureController(
+            mode=mode,
+            pointer=self._pointer,
+            capturer=capturer,
+            profiles_dir=profiles_dir,
+            region_size=region_size,
+            capture_size=capture_size,
+            on_apply=on_apply,
+            close=self.close,
+        )
         # 실행 중에는 테두리를 만들지 않는다(호출부가 border=False로 연다).
-        self.border: CaptureBorder | None = CaptureBorder(self.win) if border else None
-        self.win.title(
+        self.border: CaptureBorder | None = CaptureBorder() if border else None
+        self.setWindowTitle(
             txt("Capture", "캡처")
             if mode == "single"
             else txt("Quick Capture", "빠른 캡처")
         )
-        if isinstance(master, tk.Tk | tk.Toplevel):
-            self.win.transient(master)
-        self.win.resizable(False, False)
-        self.win.protocol("WM_DELETE_WINDOW", self.close)
-        self.win.bind("<Escape>", self.close)
-        self.win.bind("<Return>", self._on_return)
+        self._keys = _CommitKeys(self)
+        self._build(name)
 
-        self.name_var = tk.StringVar(master=self.win, value=name)
-        self.capture_w_var = tk.IntVar(master=self.win, value=capture_size[0])
-        self.capture_h_var = tk.IntVar(master=self.win, value=capture_size[1])
-        self._create_ui()
-
-        self.capture_session.set_capture_size(*capture_size)
         if initial is not None:
-            self.capture_w_var.set(initial.capture_size[0])
-            self.capture_h_var.set(initial.capture_size[1])
-            self.capture_session.set_capture_size(*initial.capture_size)
-            self.capture_session.set_position(initial.position, force=True)
-            self.capture_session.restore(
-                latest_position=initial.position,
-                held_image=initial.image.copy(),
-                selected_position=initial.pixel,
-                reference_color=initial.color,
-            )
-            self._held_size = initial.capture_size
-            self._mag_center = initial.pixel
-        self._restore_state(restore_pointer=initial is None)
+            self.controller.restore(initial)
+        self._sync_size_spins()
+        hud_pos = self.controller.load_state(restore_pointer=initial is None)
         self._render()
-        # macOS Tk drops -topmost set on a transient window before it is
-        # mapped, so apply it after the pending geometry work.
-        self.win.update_idletasks()
-        cast(Any, self.win).attributes("-topmost", True)
+        self.adjustSize()
+        self._place(hud_pos)
 
         if grab:
-            try:
-                self.win.grab_set()
-            except tk.TclError:
-                pass
-        self.win.focus_force()
-        self.capture_session.start()
-        self._poll_capture()
-        self._check_keys()
+            self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.show()
+        keep_above_all_spaces(self)
+        # 이 앱이 활성일 때(버튼으로 연 직후)만 앞으로 가져온다. 게임에서
+        # 포커스를 빼앗지 않는다.
+        if QGuiApplication.applicationState() == Qt.ApplicationState.ApplicationActive:
+            self.raise_()
+            self.activateWindow()
+
+        # 부모가 닫히며 close 없이 파괴돼도 캡처 스레드와 테두리를 정리한다.
+        controller, border_ref = self.controller, self.border
+
+        def on_destroyed(*_args: object) -> None:
+            _release(controller, border_ref)
+
+        self.destroyed.connect(on_destroyed)
+
+        self.controller.start()
+        self._capture_timer = QTimer(self)
+        self._capture_timer.timeout.connect(self._poll_capture)
+        self._capture_timer.start(CAPTURE_POLL_MS)
+        self._key_timer = QTimer(self)
+        self._key_timer.timeout.connect(self._check_keys)
+        self._key_timer.start(KEY_POLL_MS)
 
     # -- layout ---------------------------------------------------------------
 
-    def _create_ui(self) -> None:
-        try:
-            self.win.configure(bg=theme.SURFACE_PAPER)
-        except tk.TclError:
-            pass
-        theme.install_styles(self.win)
-        f = theme.fonts()
-
-        header = tk.Frame(
-            self.win, bg=theme.SURFACE_PANEL, padx=theme.SPACE_2, pady=theme.SPACE_1
+    def _build(self, name: str) -> None:
+        root = QVBoxLayout(self)
+        root.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+        root.setContentsMargins(
+            tokens.SPACE_3, tokens.SPACE_2, tokens.SPACE_3, tokens.SPACE_3
         )
-        header.pack(fill="x")
-        self.entry_name: ttk.Entry | None = None
-        self.lbl_title: tk.Label | None = None
+        root.setSpacing(tokens.SPACE_2)
+
+        self.entry_name: QLineEdit | None = None
+        self.lbl_title: QLabel | None = None
         if self.mode == "single":
-            entry = ttk.Entry(header, textvariable=self.name_var, width=24)
-            entry.pack(side="left", fill="x", expand=True)
-            entry.bind("<KeyRelease>", self._on_name_edit)
-            entry.bind("<Return>", self._commit_name)
-            entry.bind("<KP_Enter>", self._commit_name)
+            entry = QLineEdit(name)
+            entry.setPlaceholderText(txt("Event name", "이벤트 이름"))
+            entry.textEdited.connect(self._on_name_edit)
+            self._keys.bind(entry, self._commit_name)
+            root.addWidget(entry)
             self.entry_name = entry
         else:
-            self.lbl_title = tk.Label(
-                header,
-                text="",
-                bg=theme.SURFACE_PANEL,
-                fg=theme.INK_PRIMARY,
-                font=f["body_bold"],
-                anchor="w",
-            )
-            self.lbl_title.pack(side="left", fill="x", expand=True)
-        tk.Frame(self.win, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x")
+            title = QLabel()
+            font = title.font()
+            font.setBold(True)
+            title.setFont(font)
+            root.addWidget(title)
+            self.lbl_title = title
 
-        body = tk.Frame(
-            self.win, bg=theme.SURFACE_PAPER, padx=theme.SPACE_2, pady=theme.SPACE_2
+        images = QHBoxLayout()
+        images.setSpacing(tokens.SPACE_2)
+        self.preview = _ImageView(
+            on_press=self._on_preview_press,
+            on_hover=self._on_preview_hover,
+            on_leave=self._on_preview_leave,
         )
-        body.pack(fill="both")
+        self.magnifier = _ImageView(on_press=self._on_magnifier_press)
+        images.addWidget(self.preview, 0, Qt.AlignmentFlag.AlignTop)
+        images.addWidget(self.magnifier, 0, Qt.AlignmentFlag.AlignTop)
+        images.addStretch(1)
+        root.addLayout(images)
 
-        images = tk.Frame(body, bg=theme.SURFACE_PAPER)
-        images.pack(anchor="w")
-        self.lbl_preview = self._make_image_label(images)
-        cast(tk.Frame, self.lbl_preview.master).pack(side="left", anchor="n")
-        self.lbl_magnifier = self._make_image_label(images)
-        cast(tk.Frame, self.lbl_magnifier.master).pack(
-            side="left", anchor="n", padx=(theme.SPACE_2, 0)
+        info = QHBoxLayout()
+        info.setSpacing(tokens.SPACE_2)
+        self.swatch = QFrame()
+        self.swatch.setFixedSize(16, 16)
+        self.lbl_info = QLabel()
+        self.lbl_info.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.lbl_info.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        for seq in ("<Button-1>", "<B1-Motion>"):
-            self.lbl_preview.bind(seq, self._on_preview_click)
-            self.lbl_magnifier.bind(seq, self._on_magnifier_click)
-        self.lbl_preview.bind("<Motion>", self._on_preview_motion)
-        self.lbl_preview.bind("<Leave>", self._on_preview_leave)
+        info.addWidget(self.swatch)
+        info.addWidget(self.lbl_info, 1)
+        root.addLayout(info)
 
-        info = tk.Frame(body, bg=theme.SURFACE_PAPER)
-        info.pack(fill="x", pady=(theme.SPACE_2, 0))
-        self.lbl_swatch = tk.Label(
-            info,
-            width=2,
-            bg=theme.SURFACE_SUNKEN,
-            highlightthickness=1,
-            highlightbackground=theme.SURFACE_DIVIDER,
-        )
-        self.lbl_swatch.pack(side="left")
-        self.lbl_info = tk.Label(
-            info,
-            text="",
-            bg=theme.SURFACE_PAPER,
-            fg=theme.INK_PRIMARY,
-            font=f["mono"],
-            anchor="w",
-        )
-        self.lbl_info.pack(side="left", padx=(theme.SPACE_1, 0))
-
-        tk.Label(
-            body,
-            text=txt(
+        hint = QLabel(
+            txt(
                 "ALT move · CTRL freeze · click to pick",
                 "ALT 이동 · CTRL 고정 · 클릭 지정",
-            ),
-            bg=theme.SURFACE_PAPER,
-            fg=theme.INK_MUTED,
-            font=f["caption"],
-            anchor="w",
-        ).pack(fill="x", pady=(theme.SPACE_1, 0))
-        self.lbl_status = tk.Label(
-            body,
-            text="",
-            bg=theme.SURFACE_PAPER,
-            fg=theme.INK_SECONDARY,
-            font=f["caption"],
-            anchor="w",
-            justify="left",
-            wraplength=HUD_WRAP,
+            )
         )
-        self.lbl_status.pack(fill="x")
+        style.caption(hint)
+        hint.setFixedWidth(HUD_WRAP)
+        self.lbl_status = QLabel()
+        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setFixedWidth(HUD_WRAP)
+        status_box = QVBoxLayout()
+        status_box.setSpacing(2)
+        status_box.addWidget(hint)
+        status_box.addWidget(self.lbl_status)
+        root.addLayout(status_box)
 
-        self.lbl_advanced = tk.Label(
-            body,
-            text="",
-            bg=theme.SURFACE_PAPER,
-            fg=theme.SIGNAL_BASE,
-            font=f["caption"],
-            anchor="w",
-            cursor="hand2",
+        self.btn_advanced = QToolButton()
+        self.btn_advanced.setAutoRaise(True)
+        # 접기 표시는 링크처럼 보인다(macOS 기본 툴 버튼 테두리 없이).
+        self.btn_advanced.setStyleSheet(
+            "QToolButton { border: none; padding: 0; color: palette(link); }"
         )
-        self.lbl_advanced.pack(fill="x", pady=(theme.SPACE_1, 0))
-        self.lbl_advanced.bind("<Button-1>", lambda _e: self._toggle_advanced())
-        self.advanced = tk.Frame(body, bg=theme.SURFACE_PAPER)
+        self.btn_advanced.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_advanced.clicked.connect(self._toggle_advanced)
+        root.addWidget(self.btn_advanced, 0, Qt.AlignmentFlag.AlignLeft)
+        self.advanced = QWidget()
         self._build_advanced(self.advanced)
-        self._advanced_open = False
+        self.advanced.hide()
+        root.addWidget(self.advanced)
         self._sync_advanced_label()
 
-        tk.Frame(self.win, bg=theme.SURFACE_DIVIDER, height=1).pack(fill="x")
-        dock = tk.Frame(
-            self.win, bg=theme.SURFACE_PANEL, padx=theme.SPACE_2, pady=theme.SPACE_2
-        )
-        dock.pack(fill="x")
-        ttk.Button(
-            dock,
-            text=txt("Recapture", "다시 캡처"),
-            command=self.recapture,
-            style="Outline.TButton",
-        ).pack(side="left")
-        self.btn_apply = ttk.Button(
-            dock,
-            text=txt("Apply ↵", "적용 ↵"),
-            command=self.apply,
-            style="Accent.TButton",
-        )
-        self.btn_apply.pack(side="right")
+        dock = QHBoxLayout()
+        self.btn_recapture = QPushButton(txt("Recapture", "다시 캡처"))
+        self.btn_recapture.setAutoDefault(False)
+        self.btn_recapture.clicked.connect(self.recapture)
+        self.btn_apply = QPushButton(txt("Apply ↵", "적용 ↵"))
+        self.btn_apply.setAutoDefault(False)
+        self.btn_apply.clicked.connect(self.apply)
+        dock.addWidget(self.btn_recapture)
+        dock.addStretch(1)
+        dock.addWidget(self.btn_apply)
+        root.addLayout(dock)
 
-    def _build_advanced(self, parent: tk.Frame) -> None:
-        rows = (
-            (txt("Box", "위치"), "pos"),
-            (txt("Pixel", "픽셀"), "pixel"),
-        )
-        self.pos_entries: list[ttk.Entry] = []
-        self.pixel_entries: list[ttk.Entry] = []
+    def _build_advanced(self, parent: QWidget) -> None:
+        grid = QGridLayout(parent)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(tokens.SPACE_1)
+        grid.setVerticalSpacing(2)
+        self.pos_entries: list[QLineEdit] = []
+        self.pixel_entries: list[QLineEdit] = []
+        rows = ((txt("Box", "위치"), "pos"), (txt("Pixel", "픽셀"), "pixel"))
         for row, (label, kind) in enumerate(rows):
-            tk.Label(
-                parent, text=label, bg=theme.SURFACE_PAPER, fg=theme.INK_SECONDARY
-            ).grid(row=row, column=0, sticky="w", pady=1)
+            grid.addWidget(QLabel(label), row, 0)
             for col, axis in enumerate(("X", "Y")):
-                tk.Label(
-                    parent, text=axis, bg=theme.SURFACE_PAPER, fg=theme.INK_MUTED
-                ).grid(row=row, column=1 + col * 2, sticky="e", padx=(theme.SPACE_2, 2))
-                entry = ttk.Entry(parent, width=5)
-                entry.grid(row=row, column=2 + col * 2, sticky="w", pady=1)
-                entry.bind(
-                    "<Up>", lambda _e, en=entry, k=kind: self._nudge_entry(en, k, 1)
+                axis_label = QLabel(axis)
+                style.caption(axis_label)
+                grid.addWidget(
+                    axis_label, row, 1 + col * 2, Qt.AlignmentFlag.AlignRight
                 )
-                entry.bind(
-                    "<Down>", lambda _e, en=entry, k=kind: self._nudge_entry(en, k, -1)
-                )
+                entry = QLineEdit()
+                entry.setValidator(QIntValidator(-99999, 99999, entry))
+                entry.setFixedWidth(56)
+                grid.addWidget(entry, row, 2 + col * 2)
                 if kind == "pos":
-                    entry.bind("<FocusOut>", self._on_pos_entry)
-                    self._bind_commit(entry, self._on_pos_entry)
+                    entry.editingFinished.connect(self._on_pos_entry)
+                    commit = self._on_pos_entry
                     self.pos_entries.append(entry)
                 else:
-                    entry.bind("<KeyRelease>", self._on_pixel_entry)
-                    self._bind_commit(entry, self._on_pixel_entry)
+                    entry.textEdited.connect(self._on_pixel_entry)
+                    commit = self._on_pixel_entry
                     self.pixel_entries.append(entry)
-        tk.Label(
-            parent,
-            text=txt("Size", "크기"),
-            bg=theme.SURFACE_PAPER,
-            fg=theme.INK_SECONDARY,
-        ).grid(row=2, column=0, sticky="w", pady=1)
-        for col, (axis, var) in enumerate(
-            (("W", self.capture_w_var), ("H", self.capture_h_var))
-        ):
-            tk.Label(
-                parent, text=axis, bg=theme.SURFACE_PAPER, fg=theme.INK_MUTED
-            ).grid(row=2, column=1 + col * 2, sticky="e", padx=(theme.SPACE_2, 2))
-            spin = ttk.Spinbox(
-                parent,
-                textvariable=var,
-                from_=MIN_CAPTURE_SIZE,
-                to=MAX_CAPTURE_SIZE,
-                width=5,
-            )
-            spin.grid(row=2, column=2 + col * 2, sticky="w", pady=1)
-            for seq in ("<FocusOut>", "<<Increment>>", "<<Decrement>>"):
-                spin.bind(seq, self._on_capture_size_change)
-            self._bind_commit(spin, self._on_capture_size_change)
+                self._keys.bind(
+                    entry,
+                    commit,
+                    lambda delta, en=entry, c=commit: self._nudge_entry(en, c, delta),
+                )
+        grid.addWidget(QLabel(txt("Size", "크기")), 2, 0)
+        self.size_spins: list[QSpinBox] = []
+        for col, axis in enumerate(("W", "H")):
+            axis_label = QLabel(axis)
+            style.caption(axis_label)
+            grid.addWidget(axis_label, 2, 1 + col * 2, Qt.AlignmentFlag.AlignRight)
+            spin = QSpinBox()
+            spin.setRange(MIN_CAPTURE_SIZE, MAX_CAPTURE_SIZE)
+            spin.setKeyboardTracking(False)
+            spin.setFixedWidth(64)
+            spin.valueChanged.connect(self._on_capture_size_change)
+            self._keys.bind(spin, spin.interpretText)
+            grid.addWidget(spin, 2, 2 + col * 2)
+            self.size_spins.append(spin)
+        grid.setColumnStretch(5, 1)
 
-    @staticmethod
-    def _bind_commit(widget: tk.Misc, handler: Callable[[], None]) -> None:
-        """입력칸의 Enter는 값만 확정한다. 창의 Enter(적용)로 번지지 않게 끊는다."""
+    # -- coordinates ----------------------------------------------------------
 
-        def on_return(_event: object) -> str:
-            handler()
-            return "break"
+    def _pointer(self) -> Position:
+        pos = QCursor.pos()
+        return (_to_capture(pos.x(), self._scale), _to_capture(pos.y(), self._scale))
 
-        widget.bind("<Return>", on_return)
-        widget.bind("<KP_Enter>", on_return)
-
-    @staticmethod
-    def _make_image_label(parent: tk.Misc) -> tk.Label:
-        # macOS Tk: highlightthickness>0 + width/height draws an L-box inside
-        # PhotoImage previews, so the 1px border comes from an outer Frame.
-        border = tk.Frame(parent, bg=theme.SURFACE_DIVIDER, padx=1, pady=1)
-        label = tk.Label(border, bg=theme.SURFACE_SUNKEN, highlightthickness=0, bd=0)
-        label.pack()
-        return label
-
-    # -- state accessors ------------------------------------------------------
-
-    def _moved_off_hold(self) -> bool:
-        """고정한 뒤 ALT나 좌표 입력으로 위치를 옮겨, 새 위치가 아직 고정되지 않았다."""
-        session = self.capture_session
-        held = session.held_position
-        return held is not None and held != session.current_position()
-
-    def _shows_live(self) -> bool:
+    def _screen_size(self) -> Position:
+        size = QGuiApplication.primaryScreen().geometry().size()
         return (
-            self._alt_down
-            or self.capture_session.held_image is None
-            or self._moved_off_hold()
+            _to_capture(size.width(), self._scale),
+            _to_capture(size.height(), self._scale),
         )
 
-    def is_ready(self) -> bool:
-        snap = self.capture_session.snapshot()
-        return bool(
-            snap.held_image is not None
-            and snap.held_position is not None
-            and snap.selected_position is not None
-            and snap.reference_color is not None
-        )
-
-    def result(self) -> CaptureResult | None:
-        snap = self.capture_session.snapshot()
-        if (
-            snap.held_image is None
-            or snap.held_position is None
-            or snap.selected_position is None
-            or snap.reference_color is None
-        ):
+    def _hud_rect(self) -> Rect | None:
+        frame = self.frameGeometry()
+        if frame.width() <= 1 or frame.height() <= 1:
             return None
-        return CaptureResult(
-            position=snap.held_position,
-            capture_size=self._held_size or self._current_capture_size(),
-            image=snap.held_image.copy(),
-            pixel=snap.selected_position,
-            color=snap.reference_color,
+        s = self._scale
+        return (
+            _to_capture(frame.x(), s),
+            _to_capture(frame.y(), s),
+            _to_capture(frame.width(), s),
+            _to_capture(frame.height(), s),
         )
 
-    def _current_capture_size(self) -> Position:
-        try:
-            w, h = self.capture_w_var.get(), self.capture_h_var.get()
-        except (tk.TclError, ValueError):
-            w, h = 100, 100
-        return (
-            max(MIN_CAPTURE_SIZE, min(MAX_CAPTURE_SIZE, w)),
-            max(MIN_CAPTURE_SIZE, min(MAX_CAPTURE_SIZE, h)),
+    def _place(self, saved: Position | None) -> None:
+        """저장한 위치(캡처 좌표)로 옮긴다. 화면 밖이면 주 모니터 가운데."""
+        if saved is not None:
+            point = QPoint(int(saved[0] / self._scale), int(saved[1] / self._scale))
+            screen = QGuiApplication.screenAt(point)
+            if screen is not None and screen.availableGeometry().contains(point):
+                self.move(point)
+                return
+        area = QGuiApplication.primaryScreen().availableGeometry()
+        size = self.sizeHint()
+        self.move(
+            area.x() + (area.width() - size.width()) // 2,
+            area.y() + (area.height() - size.height()) // 2,
         )
 
     # -- actions --------------------------------------------------------------
 
+    def is_ready(self) -> bool:
+        return self.controller.is_ready()
+
+    def result(self) -> CaptureResult | None:
+        return self.controller.result()
+
     def capture(self) -> None:
-        """현재 실시간 프레임을 고정한다. 고른 픽셀은 새 캡처본 안이면 유지한다."""
-        session = self.capture_session
-        if session.latest_image is None or not session.hold():
-            self._feedback = (
-                txt(
-                    "Move the mouse with ALT until the preview follows it.",
-                    "ALT를 누른 채 마우스를 움직여 미리보기가 따라오게 하세요.",
-                ),
-                theme.STATUS_WARN_FG,
-            )
-            self._render()
-            return
-        self._held_size = self._current_capture_size()
-        self._feedback = None
-        held = session.held_image
-        selected = session.selected_position
-        if held is not None and selected is not None:
-            if not session.select(selected, held.size):
-                session.selected_position = None
-                session.reference_color = None
-        self._mag_center = session.selected_position
+        self.controller.capture()
         self._render()
 
     def recapture(self) -> None:
-        self.capture_session.clear_hold()
-        self._held_size = None
-        self._feedback = None
-        self._mag_center = None
+        self.controller.recapture()
         self._render()
 
     def apply(self) -> None:
-        # 옮긴 위치를 고정하지 않았으면 예전 캡처본을 조용히 저장하지 않는다.
-        result = None if self._moved_off_hold() else self.result()
-        if result is None:
-            self._feedback = (
-                txt(
-                    "Freeze the preview with CTRL and click the target pixel first.",
-                    "먼저 CTRL로 고정하고 대상 픽셀을 클릭하세요.",
-                ),
-                theme.STATUS_WARN_FG,
-            )
-            self._render()
-            return
-        if self.mode == "single":
-            if self.on_apply is not None:
-                self.on_apply(result)
-            self.close()
-            return
-        if self.profiles_dir is None:
-            return
-        name = append_quick_event(self.profiles_dir, result)
-        self.saved_count += 1
-        self.capture_session.clear_hold()
-        self._held_size = None
-        self._mag_center = None
-        self._feedback = (
-            txt(
-                "Saved Quick event '{name}'. Move to the next target.",
-                "Quick 이벤트 '{name}'을 저장했습니다. 다음 대상으로 옮기세요.",
-                name=name,
-            ),
-            theme.STATUS_READY_FG,
-        )
+        self.controller.apply()
         self._render()
 
-    def _on_ctrl(self) -> None:
-        session = self.capture_session
-        # 연속 모드에서 대상을 고른 뒤 다시 누른 CTRL은 적용이다. 새 프레임을
-        # 찍지 않고 대상을 고른 캡처본을 그대로 저장한다.
-        if (
-            self.mode == "continuous"
-            and self.is_ready()
-            and session.held_position == session.current_position()
-        ):
+    def select(self, pixel: Position) -> None:
+        if self.controller.select(pixel):
+            self._render()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.close()
+            return
+        if event.key() in _RETURN_KEYS:
             self.apply()
             return
-        self.capture()
-
-    def _on_return(self, _event: object | None = None) -> str:
-        self.apply()
-        return "break"
+        super().keyPressEvent(event)
 
     # -- input handlers -------------------------------------------------------
 
-    def _on_name_edit(self, _event: object | None = None) -> None:
+    def _on_name_edit(self, text: str) -> None:
         if self.on_name_change is not None:
-            self.on_name_change(self.name_var.get())
+            self.on_name_change(text)
 
-    def _commit_name(self, _event: object | None = None) -> str:
-        self._on_name_edit()
+    def _commit_name(self) -> None:
+        if self.entry_name is not None:
+            self._on_name_edit(self.entry_name.text())
         # 포커스를 입력칸에서 빼야 CTRL 캡처가 다시 동작한다.
-        self.win.focus_set()
-        return "break"
+        self.setFocus()
 
-    def _select(self, pixel: Position) -> None:
-        held = self.capture_session.held_image
-        if held is None or not self.capture_session.select(pixel, held.size):
-            return
-        self._feedback = None
-        self._render()
+    def _on_preview_press(self, point: Position) -> None:
+        if self.controller.click_preview(point, self.preview.display_size):
+            self._render()
 
-    def _on_preview_click(self, event: tk.Event[tk.Misc]) -> None:
-        held = self.capture_session.held_image
-        if held is None or self._shows_live():
-            return
-        pixel = display_to_image((event.x, event.y), self._preview_display, held.size)
-        if pixel is not None:
-            self._mag_center = pixel
-            self._select(pixel)
+    def _on_magnifier_press(self, point: Position) -> None:
+        if self.controller.click_magnifier(point):
+            self._render()
 
-    def _on_magnifier_click(self, event: tk.Event[tk.Misc]) -> None:
-        held = self.capture_session.held_image
-        if held is None or self._shows_live() or self._mag_center is None:
-            return
-        # 드래그 중에는 돋보기 중심을 움직이지 않는다. 움직이면 커서 아래
-        # 픽셀이 계속 바뀐다.
-        pixel = magnifier_to_image((event.x, event.y), self._mag_center, held.size)
-        if pixel is not None:
-            self._select(pixel)
-
-    def _on_preview_motion(self, event: tk.Event[tk.Misc]) -> None:
-        img = self._displayed_image()
-        if img is None:
-            return
-        pixel = display_to_image((event.x, event.y), self._preview_display, img.size)
-        if pixel is not None and pixel != self._mag_center:
-            self._mag_center = pixel
+    def _on_preview_hover(self, point: Position) -> None:
+        if self.controller.hover_preview(point, self.preview.display_size):
             self._render_magnifier()
 
-    def _on_preview_leave(self, _event: object | None = None) -> None:
-        selected = self.capture_session.selected_position
-        if selected is not None and selected != self._mag_center:
-            self._mag_center = selected
+    def _on_preview_leave(self) -> None:
+        if self.controller.leave_preview():
             self._render_magnifier()
 
-    def _nudge_entry(self, entry: ttk.Entry, kind: str, delta: int) -> str:
+    @staticmethod
+    def _nudge_entry(entry: QLineEdit, commit: Callable[[], None], delta: int) -> None:
         try:
-            value = int(entry.get()) + delta
-        except ValueError:
-            return "break"
-        entry.delete(0, tk.END)
-        entry.insert(0, str(value))
-        if kind == "pos":
-            self._on_pos_entry()
-        else:
-            self._on_pixel_entry()
-        return "break"
-
-    def _on_pos_entry(self, _event: object | None = None) -> None:
-        try:
-            pos = (int(self.pos_entries[0].get()), int(self.pos_entries[1].get()))
+            value = int(entry.text()) + delta
         except ValueError:
             return
-        self.capture_session.set_position(pos)
+        entry.setText(str(value))
+        commit()
+
+    @staticmethod
+    def _entry_pair(entries: list[QLineEdit]) -> Position | None:
+        try:
+            return (int(entries[0].text()), int(entries[1].text()))
+        except ValueError:
+            return None
+
+    def _on_pos_entry(self) -> None:
+        pos = self._entry_pair(self.pos_entries)
+        if pos is None:
+            return
+        self.controller.set_box_position(pos)
         self._render()
 
-    def _on_pixel_entry(self, _event: object | None = None) -> None:
-        try:
-            pixel = (
-                int(self.pixel_entries[0].get()),
-                int(self.pixel_entries[1].get()),
-            )
-        except ValueError:
-            return
-        if pixel != self.capture_session.selected_position:
-            self._mag_center = pixel
-            self._select(pixel)
+    def _on_pixel_entry(self, *_args: object) -> None:
+        pixel = self._entry_pair(self.pixel_entries)
+        if pixel is not None and self.controller.set_pixel(pixel):
+            self._render()
 
-    def _on_capture_size_change(self, _event: object | None = None) -> None:
-        size = self._current_capture_size()
-        try:
-            if (self.capture_w_var.get(), self.capture_h_var.get()) != size:
-                self.capture_w_var.set(size[0])
-                self.capture_h_var.set(size[1])
-        except (tk.TclError, ValueError):
-            self.capture_w_var.set(size[0])
-            self.capture_h_var.set(size[1])
-        self.capture_session.set_capture_size(*size)
+    def _on_capture_size_change(self, *_args: object) -> None:
+        self.controller.set_capture_size(
+            self.size_spins[0].value(), self.size_spins[1].value()
+        )
+        self._sync_border()
+
+    def _sync_size_spins(self) -> None:
+        for spin, value in zip(self.size_spins, self.controller.capture_size, strict=True):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
 
     def _toggle_advanced(self) -> None:
-        self._advanced_open = not self._advanced_open
-        if self._advanced_open:
-            self.advanced.pack(fill="x", after=self.lbl_advanced)
-        else:
-            self.advanced.pack_forget()
+        self.advanced.setVisible(self.advanced.isHidden())
         self._sync_advanced_label()
 
     def _sync_advanced_label(self) -> None:
-        mark = theme.ICON_EXPANDED if self._advanced_open else theme.ICON_COLLAPSED
-        self.lbl_advanced.config(text=f"{mark} {txt('Advanced', '고급')}")
+        mark = tokens.ICON_COLLAPSED if self.advanced.isHidden() else tokens.ICON_EXPANDED
+        self.btn_advanced.setText(f"{mark} {txt('Advanced', '고급')}")
 
     # -- polling --------------------------------------------------------------
 
     def _check_keys(self) -> None:
-        if self._is_closing:
+        if self._closing:
             return
-        alt = KeyUtils.mod_key_pressed("alt")
-        if alt:
-            self.capture_session.set_position(self.win.winfo_pointerxy())
-            self._render_info()
-        if alt != self._alt_down:
-            self._alt_down = alt
-            if alt:
-                self._feedback = None
+        update = self.controller.tick(text_focus=text_input_has_focus())
+        if self._closing:
+            return
+        if update.render:
             self._render()
-
-        ctrl = KeyUtils.mod_key_pressed("ctrl")
-        if ctrl and not self._ctrl_was_pressed and ctrl_capture_allowed(
-            self._focus_widget()
-        ):
-            self._on_ctrl()
-        self._ctrl_was_pressed = ctrl
-
+        else:
+            if update.info:
+                self._render_info()
+            if update.status:
+                self._render_status()
         self._avoid_capture_box()
         self._sync_border()
 
-        self._permission_ticks -= 1
-        if self._permission_ticks <= 0:
-            self._permission_ticks = _PERMISSION_POLL_TICKS
-            permission = self._compute_permission_message()
-            if permission != self._permission_message:
-                self._permission_message = permission
-                self._render_status()
-
-        self._modifier_after_id = self.win.after(100, self._check_keys)
-
     def _poll_capture(self) -> None:
-        if self._is_closing:
+        if self._closing:
             return
-        snapshot = self.capture_session.snapshot()
-        if snapshot.generation != self._capture_generation:
-            self._capture_generation = snapshot.generation
-            if self._shows_live():
+        generation = self.controller.session.snapshot().generation
+        if generation != self._capture_generation:
+            self._capture_generation = generation
+            if self.controller.shows_live():
                 self._render()
-        self._capture_after_id = self.win.after(50, self._poll_capture)
-
-    def _focus_widget(self) -> tk.Misc | None:
-        try:
-            return self.win.focus_get()
-        except (tk.TclError, KeyError):
-            return None
-
-    def _hud_rect(self) -> Rect | None:
-        try:
-            self.win.update_idletasks()
-            x, y = self.win.winfo_x(), self.win.winfo_y()
-            w, h = self.win.winfo_width(), self.win.winfo_height()
-            title_bar = max(0, self.win.winfo_rooty() - y)
-        except tk.TclError:
-            return None
-        if w <= 1 or h <= 1:
-            return None
-        return (x, y, w, h + title_bar)
 
     def _avoid_capture_box(self) -> None:
         hud = self._hud_rect()
         if hud is None:
             return
-        box = capture_rect(
-            self.capture_session.current_position(), self._current_capture_size()
-        )
-        screen = (self.win.winfo_screenwidth(), self.win.winfo_screenheight())
-        target = hud_position(hud, box, screen)
+        target = self.controller.hud_target(hud, self._screen_size())
         if target is not None:
-            self.win.geometry(f"+{target[0]}+{target[1]}")
+            self.move(int(target[0] / self._scale), int(target[1] / self._scale))
 
     def _sync_border(self) -> None:
-        if self.border is None:
+        if self.border is None or self._closing:
             return
-        self.border.show(
-            capture_rect(
-                self.capture_session.current_position(), self._current_capture_size()
-            )
-        )
-
-    @staticmethod
-    def _compute_permission_message() -> str | None:
-        missing = PermissionUtils.missing_macos_permissions()
-        if not missing:
-            return None
-        labels: list[str] = []
-        if "screen" in missing:
-            labels.append(txt("Screen Recording", "화면 기록"))
-        if "accessibility" in missing:
-            labels.append(txt("Accessibility", "손쉬운 사용"))
-        return txt(
-            "macOS permission required: {missing}.",
-            "macOS 권한 필요: {missing}.",
-            missing=", ".join(labels),
-        )
+        self.border.show(_to_logical_rect(self.controller.box(), self._scale))
 
     # -- rendering ------------------------------------------------------------
 
-    def _displayed_image(self) -> Image.Image | None:
-        session = self.capture_session
-        return session.latest_image if self._shows_live() else session.held_image
-
     def _render(self) -> None:
-        if self._is_closing:
+        if self._closing:
             return
-        self._render_preview()
+        img, size = self.controller.preview()
+        self.preview.set_image(img, size)
         self._render_magnifier()
         self._render_info()
         self._render_status()
 
-    def _render_preview(self) -> None:
-        img = self._displayed_image()
-        if img is None:
-            size = preview_size(self._current_capture_size())
-            self._set_image(
-                self.lbl_preview, Image.new("RGB", size, theme.SURFACE_SUNKEN)
-            )
-            self._preview_display = size
-            return
-        if not self._shows_live():
-            img = render_overlay(
-                img, self.capture_session.selected_position, self.region_size
-            )
-        size = preview_size(img.size)
-        if size != img.size:
-            img = cast(
-                Image.Image, cast(Any, img).resize(size, Image.Resampling.LANCZOS)
-            )
-        self._preview_display = size
-        self._set_image(self.lbl_preview, img)
-
     def _render_magnifier(self) -> None:
-        img = self._displayed_image()
-        size = MAGNIFIER_SPAN * MAGNIFIER_ZOOM
-        if img is None:
-            self._set_image(
-                self.lbl_magnifier, Image.new("RGB", (size, size), theme.SURFACE_SUNKEN)
-            )
-            return
-        center = self._mag_center or (img.width // 2, img.height // 2)
-        selected = None if self._shows_live() else self.capture_session.selected_position
-        self._set_image(
-            self.lbl_magnifier,
-            render_magnifier(img, center, selected, pad_color=theme.SURFACE_SUNKEN),
-        )
+        pad = self.palette().alternateBase().color().name()
+        img = self.controller.magnifier(pad)
+        self.magnifier.set_image(img, (_MAGNIFIER_SIZE, _MAGNIFIER_SIZE))
 
     def _render_info(self) -> None:
-        snap = self.capture_session.snapshot()
-        color = snap.reference_color
-        if snap.held_position is not None and snap.selected_position is not None:
-            point = (
-                snap.held_position[0] + snap.selected_position[0],
-                snap.held_position[1] + snap.selected_position[1],
-            )
-        else:
-            point = self.capture_session.current_position()
+        color, point = self.controller.info()
         rgb = ",".join(str(int(c)) for c in color[:3]) if color else "—"
-        try:
-            self.lbl_swatch.config(bg=color_hex(color) if color else theme.SURFACE_SUNKEN)
-            self.lbl_info.config(text=f"{rgb}  ({point[0]}, {point[1]})")
-        except tk.TclError:
-            return
-        self._sync_entries(snap.selected_position)
+        fill = color_hex(color) if color else "palette(alternate-base)"
+        self.swatch.setStyleSheet(
+            f"QFrame {{ background: {fill}; border: 1px solid palette(mid); }}"
+        )
+        self.lbl_info.setText(f"{rgb}  ({point[0]}, {point[1]})")
+        self._sync_entries()
 
-    def _sync_entries(self, selected: Position | None) -> None:
-        focus = self._focus_widget()
-        pos = self.capture_session.current_position()
+    def _sync_entries(self) -> None:
+        focus = QApplication.focusWidget()
+        pos = self.controller.session.current_position()
+        selected = self.controller.session.selected_position
         for entry, value in zip(self.pos_entries, pos, strict=True):
             if entry is not focus:
                 self._set_entry(entry, value)
@@ -839,129 +698,88 @@ class CaptureHud:
                 self._set_entry(entry, None if selected is None else selected[i])
 
     @staticmethod
-    def _set_entry(entry: ttk.Entry, value: int | None) -> None:
+    def _set_entry(entry: QLineEdit, value: int | None) -> None:
         text = "" if value is None else str(value)
-        if entry.get() != text:
-            entry.delete(0, tk.END)
-            entry.insert(0, text)
-
-    def _status(self) -> tuple[str, str]:
-        if self._permission_message:
-            return self._permission_message, theme.STATUS_WARN_FG
-        if self._feedback is not None:
-            return self._feedback
-        snap = self.capture_session.snapshot()
-        if snap.latest_image is None:
-            return (
-                txt(
-                    "Hold ALT and move the mouse over the target.",
-                    "ALT를 누른 채 대상 위로 마우스를 옮기세요.",
-                ),
-                theme.INK_SECONDARY,
-            )
-        if snap.held_image is None or self._moved_off_hold():
-            return (
-                txt("Press CTRL to freeze this area.", "CTRL로 이 영역을 고정하세요."),
-                theme.INK_SECONDARY,
-            )
-        if snap.selected_position is None:
-            return (
-                txt(
-                    "Click the capture or magnifier to pick the target pixel.",
-                    "캡처본이나 돋보기를 클릭해 대상 픽셀을 고르세요.",
-                ),
-                theme.INK_SECONDARY,
-            )
-        if self.mode == "continuous":
-            return (
-                txt(
-                    "Press CTRL again (or Apply) to save to Quick.",
-                    "CTRL을 한 번 더 누르거나 적용하면 Quick에 저장합니다.",
-                ),
-                theme.SIGNAL_BASE,
-            )
-        return (
-            txt("Press Apply (Enter) to use this capture.", "적용(Enter)을 누르세요."),
-            theme.SIGNAL_BASE,
-        )
+        if entry.text() != text:
+            entry.setText(text)
 
     def _render_status(self) -> None:
-        text, color = self._status()
-        try:
-            self.lbl_status.config(text=text, fg=color)
-            self.btn_apply.config(state="normal" if self.is_ready() else "disabled")
-            if self.lbl_title is not None:
-                self.lbl_title.config(
-                    text=txt(
-                        "Quick Add · {count} saved",
-                        "빠른 추가 · {count}개 저장",
-                        count=self.saved_count,
-                    )
-                )
-        except tk.TclError:
-            return
-
-    @staticmethod
-    def _set_image(label: tk.Label, img: Image.Image) -> None:
-        try:
-            photo = ImageTk.PhotoImage(img.convert("RGB"), master=label)
-            label.configure(image=photo, width=img.width, height=img.height)
-            cast(Any, label).image = photo
-        except tk.TclError:
-            return
+        text, tone = self.controller.status()
+        self.lbl_status.setText(text)
+        self.lbl_status.setStyleSheet(f"QLabel {{ color: {_tone_color(tone)}; }}")
+        self.btn_apply.setEnabled(self.controller.is_ready())
+        if self.lbl_title is not None:
+            self.lbl_title.setText(self.controller.title())
 
     # -- lifecycle ------------------------------------------------------------
 
+    @property
+    def saved_count(self) -> int:
+        return self.controller.saved_count
+
     def is_open(self) -> bool:
-        if self._is_closing:
-            return False
-        try:
-            return bool(self.win.winfo_exists())
-        except tk.TclError:
-            return False
+        return not self._closing
 
-    def _restore_state(self, *, restore_pointer: bool) -> None:
-        state = StateUtils.load_main_app_state() or {}
-        pos = StateUtils.parse_slash_int_pair(state.get("capture_hud_pos"))
-        if pos is not None:
-            self.win.geometry(f"+{pos[0]}+{pos[1]}")
-        else:
-            WindowUtils.center_window(self.win)
-        if restore_pointer and (ptr := state.get(self._pointer_state_key)):
-            point = StateUtils.parse_position_tuple(ptr)
-            if point is not None:
-                self.capture_session.set_position(point)
+    def close(self) -> bool:
+        if self._closing:
+            return False
+        return super().close()
 
-    def close(self, _event: object | None = None) -> None:
-        if self._is_closing:
-            return
-        self._is_closing = True
-        for after_id in (self._capture_after_id, self._modifier_after_id):
-            if after_id is not None:
-                try:
-                    self.win.after_cancel(after_id)
-                except tk.TclError:
-                    pass
-        self.capture_session.stop()
-        if self.border is not None:
-            self.border.destroy()
-        try:
-            StateUtils.save_main_app_state(
-                capture_hud_pos=f"{self.win.winfo_x()}/{self.win.winfo_y()}",
-                **{
-                    self._pointer_state_key: str(
-                        self.capture_session.current_position()
-                    )
-                },
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if not self._closing:
+            self._closing = True
+            self._capture_timer.stop()
+            self._key_timer.stop()
+            pos = self.pos()
+            self.controller.save_state(
+                (_to_capture(pos.x(), self._scale), _to_capture(pos.y(), self._scale))
             )
-        except tk.TclError:
-            pass
-        try:
-            self.win.grab_release()
-            self.win.destroy()
-        except tk.TclError:
-            pass
-        if self._grab:
-            WindowUtils.restore_modal_grab(self.master)
-        if self.on_close is not None:
-            self.on_close()
+            _release(self.controller, self.border)
+            self.border = None
+            if self.on_close is not None:
+                self.on_close()
+        event.accept()
+
+
+def _release(controller: CaptureController, border: CaptureBorder | None) -> None:
+    controller.stop()
+    if border is not None:
+        border.destroy()
+
+
+def _tone_color(tone: Tone) -> str:
+    if tone == "warn":
+        return style.status_colors("warn")[1]
+    if tone == "ready":
+        return style.status_colors("ready")[1]
+    if tone == "accent":
+        return style.status_colors("ready")[1] if style.is_dark() else style.ACCENT
+    return "palette(text)"
+
+
+# ---------------------------------------------------------------------------
+# Main window entry
+# ---------------------------------------------------------------------------
+
+
+def open_quick_capture(parent: QWidget) -> None:
+    """실행 창의 "빠른 이벤트…": 연속 모드 HUD를 하나만 연다."""
+    host: Any = parent
+    existing = getattr(host, "quick_hud", None)
+    if isinstance(existing, CaptureHud) and existing.is_open():
+        existing.raise_()
+        existing.activateWindow()
+        return
+
+    def closed() -> None:
+        if getattr(host, "quick_hud", None) is hud:
+            host.quick_hud = None
+        host.update_ui()
+
+    hud = CaptureHud(
+        parent,
+        mode="continuous",
+        profiles_dir=host.profiles_dir,
+        on_close=closed,
+    )
+    host.quick_hud = hud

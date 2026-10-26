@@ -12,9 +12,13 @@ from app.domain.runtime_toggle import (
     normalize_runtime_toggle_listener_key,
 )
 from app.platform.keys import KeyUtils
-from app.presenters.run_controller import RunController, RunSelection
+from app.presenters.run_controller import (
+    RunController,
+    RunSelection,
+    migrate_legacy_run_profiles,
+)
 from app.storage.profile_storage import save_profile
-from app.storage.run_sets_storage import upsert_run_set
+from app.storage.run_sets_storage import load_run_sets, upsert_run_set
 
 
 class FakeVar:
@@ -885,6 +889,28 @@ class TestRunProfileNames(unittest.TestCase):
         app.selected_profile.set("Quick")
 
         self.assertEqual(app.run_profile_names(), ["Quick"])
+
+
+
+class TestMigrateLegacyRunProfiles(unittest.TestCase):
+    def test_two_or_more_profiles_become_named_set(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "run_sets.json"
+            name = migrate_legacy_run_profiles(
+                {"run_profiles": ["A", "B"]}, ["Migrated"], path
+            )
+
+            self.assertEqual(name, "Migrated 2")
+            self.assertEqual(load_run_sets(path)["Migrated 2"], ["A", "B"])
+
+    def test_single_profile_is_not_migrated(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "run_sets.json"
+
+            self.assertIsNone(
+                migrate_legacy_run_profiles({"run_profiles": "A"}, [], path)
+            )
+            self.assertFalse(path.exists())
 
 
 if __name__ == "__main__":

@@ -35,8 +35,8 @@ from app.presenters.settings_form import (
     SettingsSection,
 )
 from app.storage.app_state import StateUtils
-from app.ui.qt import style
-from app.ui.qt.dialogs import KeyCaptureEdit
+from app.ui import style
+from app.ui.dialogs import KeyCaptureEdit
 from app.utils.i18n import LANGUAGE_LABELS, SUPPORTED_LANGUAGES, txt
 from app.utils.notification_sound_packs import (
     normalize_notification_sound_pack,

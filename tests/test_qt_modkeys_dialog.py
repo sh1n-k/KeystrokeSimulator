@@ -15,7 +15,7 @@ from app.storage.modkey_sets_storage import (
     list_modkey_set_names,
     upsert_modkey_set,
 )
-from app.ui.qt.modkeys_dialog import ModKeysDialog, edit_modkey_set
+from app.ui.modkeys_dialog import ModKeysDialog, edit_modkey_set
 from app.utils.i18n import set_language
 
 
@@ -104,7 +104,7 @@ class TestModKeysDialog(unittest.TestCase):
                 "app.presenters.modkeys_form.upsert_modkey_set",
                 side_effect=OSError("disk"),
             ),
-            patch("app.ui.qt.modkeys_dialog.QMessageBox.critical") as critical,
+            patch("app.ui.modkeys_dialog.QMessageBox.critical") as critical,
         ):
             dialog.save_button.click()
 

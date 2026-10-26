@@ -1,7 +1,7 @@
 """OS 입력 리스너 수명과 UI 메인 스레드 전달. UI 툴킷과 무관하다.
 
 리스너 스레드는 `post(action)`만 부른다. 메인 스레드에서 실행하는 일은
-주입받은 `Dispatcher`가 맡는다(Tk: `app/ui/tk_dispatcher.py`).
+주입받은 `Dispatcher`가 맡는다(Qt: `app/ui/dispatcher.py`).
 """
 
 from __future__ import annotations

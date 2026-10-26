@@ -3,32 +3,10 @@ import unittest
 from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
+from tests.qt_support import qt_app
+
 from app.platform.input_router import Dispatcher, InputRouter
-from app.ui.tk_dispatcher import TkDispatcher
-
-
-class FakeRoot:
-    def __init__(self) -> None:
-        self.callback = None
-        self.cancelled = None
-        self.after_calls = 0
-        self.filehandlers: list = []
-        self.deleted_handlers: list = []
-        self.READABLE = 1
-
-    def after(self, _delay: int, callback):
-        self.after_calls += 1
-        self.callback = callback
-        return f"after-{self.after_calls}"
-
-    def after_cancel(self, after_id: str) -> None:
-        self.cancelled = after_id
-
-    def createfilehandler(self, file, mask, func):
-        self.filehandlers.append((file, mask, func))
-
-    def deletefilehandler(self, file):
-        self.deleted_handlers.append(file)
+from app.ui.dispatcher import QtDispatcher
 
 
 class FakeListener:
@@ -77,169 +55,92 @@ class FakeDispatcher:
             action()
 
 
-class TestTkDispatcher(unittest.TestCase):
-    def _dispatcher(self) -> tuple[FakeRoot, TkDispatcher]:
-        root = FakeRoot()
-        dispatcher = TkDispatcher(root)
-        self.addCleanup(dispatcher.stop)
-        return root, dispatcher
+class TestQtDispatcher(unittest.TestCase):
+    def setUp(self) -> None:
+        self.app = qt_app()
+        self.dispatcher = QtDispatcher()
+        self.addCleanup(self.dispatcher.stop)
+
+    def drain(self) -> None:
+        self.app.processEvents()
 
     def test_satisfies_dispatcher_protocol(self) -> None:
-        dispatcher: Dispatcher = TkDispatcher(FakeRoot())
+        dispatcher: Dispatcher = self.dispatcher
         self.assertTrue(callable(dispatcher.post))
 
-    def test_posted_action_runs_only_when_tk_pump_drains(self) -> None:
-        root, dispatcher = self._dispatcher()
-        calls = []
-        dispatcher.start()
-        # Consume idle pump schedule from start().
-        assert root.callback is not None
-        root.callback()
-
-        dispatcher.post(lambda: calls.append("handled"))
+    def test_posted_action_runs_only_when_event_loop_drains(self) -> None:
+        calls: list[str] = []
+        self.dispatcher.start()
+        self.dispatcher.post(lambda: calls.append("handled"))
         self.assertEqual(calls, [])
-        # post() schedules after(0) kick.
-        assert root.callback is not None
-        root.callback()
+
+        self.drain()
 
         self.assertEqual(calls, ["handled"])
 
-    def test_post_schedules_immediate_kick(self) -> None:
-        root, dispatcher = self._dispatcher()
-        dispatcher.start()
-        start_calls = root.after_calls
-        dispatcher.post(lambda: None)
-        # One extra after(0) kick beyond the idle pump.
-        self.assertGreaterEqual(root.after_calls, start_calls + 1)
-        self.assertEqual(root.callback, dispatcher._kicked_drain)
-
     def test_post_before_start_is_dropped(self) -> None:
-        root, dispatcher = self._dispatcher()
-        calls = []
-        dispatcher.post(lambda: calls.append("early"))
-        dispatcher.start()
-        assert root.callback is not None
-        root.callback()
+        calls: list[str] = []
+        self.dispatcher.post(lambda: calls.append("early"))
+        self.dispatcher.start()
+        self.drain()
         self.assertEqual(calls, [])
 
     def test_actions_run_in_post_order_and_errors_do_not_stop_drain(self) -> None:
-        root, dispatcher = self._dispatcher()
-        dispatcher.start()
-        assert root.callback is not None
-        root.callback()
+        self.dispatcher.start()
         calls: list[int] = []
 
         def boom() -> None:
             raise RuntimeError("boom")
 
-        dispatcher.post(lambda: calls.append(1))
-        dispatcher.post(boom)
-        dispatcher.post(lambda: calls.append(2))
-        assert root.callback is not None
-        with patch("app.ui.tk_dispatcher.logger") as logger:
-            root.callback()
+        self.dispatcher.post(lambda: calls.append(1))
+        self.dispatcher.post(boom)
+        self.dispatcher.post(lambda: calls.append(2))
+        with patch("app.ui.dispatcher.logger") as logger:
+            self.drain()
         self.assertEqual(calls, [1, 2])
         logger.exception.assert_called_once()
 
-    def test_stop_cancels_pump_and_discards_pending_actions(self) -> None:
-        root, dispatcher = self._dispatcher()
-        calls = []
-        dispatcher.start()
-        dispatcher.post(lambda: calls.append("pending"))
+    def test_stop_discards_pending_actions_even_after_restart(self) -> None:
+        calls: list[str] = []
+        self.dispatcher.start()
+        self.dispatcher.post(lambda: calls.append("pending"))
 
-        dispatcher.stop()
-        dispatcher.start()
-        assert root.callback is not None
-        root.callback()
+        self.dispatcher.stop()
+        self.dispatcher.start()
+        self.drain()
 
-        self.assertIsNotNone(root.cancelled)
         self.assertEqual(calls, [])
 
-    def test_action_that_stops_dispatcher_does_not_restart_pump(self) -> None:
-        root, dispatcher = self._dispatcher()
-        dispatcher.start()
-        # Drain idle start schedule, then post stop via kick.
-        assert root.callback is not None
-        root.callback()
-        dispatcher.post(dispatcher.stop)
-        assert root.callback is not None
-        calls_before = root.after_calls
-        root.callback()
-        # stop() must not schedule another idle pump.
-        self.assertEqual(root.after_calls, calls_before)
+    def test_post_from_worker_thread_runs_on_main_thread(self) -> None:
+        self.dispatcher.start()
+        ran_on: list[int] = []
+        worker = threading.Thread(
+            target=lambda: self.dispatcher.post(
+                lambda: ran_on.append(threading.get_ident())
+            )
+        )
+        worker.start()
+        worker.join()
+        self.assertEqual(ran_on, [])
 
-    def test_action_can_restart_dispatcher_without_duplicate_pump(self) -> None:
-        root, dispatcher = self._dispatcher()
-        dispatcher.start()
-        assert root.callback is not None
-        root.callback()
+        self.drain()
 
-        def restart() -> None:
-            dispatcher.stop()
-            dispatcher.start()
+        self.assertEqual(ran_on, [threading.get_ident()])
 
-        dispatcher.post(restart)
-        assert root.callback is not None
-        root.callback()
-
-        # restart() -> start() schedules one idle drain.
-        self.assertIsNotNone(root.callback)
-
-    def test_start_installs_wake_filehandler(self) -> None:
-        root, dispatcher = self._dispatcher()
-        dispatcher.start()
-        self.assertEqual(len(root.filehandlers), 1)
-        self.assertTrue(dispatcher._filehandler_installed)
-
-    def test_wake_readable_drains_posted_actions(self) -> None:
-        root, dispatcher = self._dispatcher()
-        dispatcher.start()
-        # Consume idle pump from start.
-        assert root.callback is not None
-        root.callback()
-
-        calls: list[str] = []
-        dispatcher.post(lambda: calls.append("via-wake"))
-        # Simulate Tk filehandler callback instead of after kick.
-        _file, _mask, handler = root.filehandlers[0]
-        handler()
-        self.assertEqual(calls, ["via-wake"])
-
-    def test_stop_removes_filehandler(self) -> None:
-        root, dispatcher = self._dispatcher()
-        dispatcher.start()
-        dispatcher.stop()
-        self.assertEqual(len(root.deleted_handlers), 1)
-        self.assertFalse(dispatcher._filehandler_installed)
-
-
-class TestInputRouterWithTkDispatcher(unittest.TestCase):
-    def test_stop_stops_owned_listeners_and_cancels_pump(self) -> None:
-        root = FakeRoot()
-        router = InputRouter(TkDispatcher(root))
+    def test_action_that_stops_router_drops_later_actions(self) -> None:
+        router = InputRouter(self.dispatcher)
         self.addCleanup(router.stop)
         listener = FakeListener()
+        calls: list[str] = []
         router.start()
         router.add(listener)
-
-        router.stop()
-
-        self.assertTrue(listener.started)
-        self.assertTrue(listener.stopped)
-        self.assertIsNotNone(root.cancelled)
-
-    def test_action_that_stops_router_does_not_restart_pump(self) -> None:
-        root = FakeRoot()
-        router = InputRouter(TkDispatcher(root))
-        self.addCleanup(router.stop)
-        router.start()
-        assert root.callback is not None
-        root.callback()
         router.post(router.stop)
-        assert root.callback is not None
-        calls_before = root.after_calls
-        root.callback()
-        self.assertEqual(root.after_calls, calls_before)
+        router.post(lambda: calls.append("late"))
+
+        self.drain()
+
+        self.assertTrue(listener.stopped)
+        self.assertEqual(calls, [])
 
 
 class TestInputRouter(unittest.TestCase):

@@ -9,7 +9,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
 
 from app.domain.capture_geometry import CaptureResult, rects_overlap
-from app.ui.qt.capture_hud import CaptureHud, _to_logical_rect, open_quick_capture
+from app.ui.capture_hud import CaptureHud, _to_logical_rect, open_quick_capture
 from app.utils.i18n import set_language
 from tests.qt_support import qt_app
 from tests.test_capture_controller import FakeCapturer
@@ -265,7 +265,7 @@ class TestCaptureHudFlow(HudTestCase):
         hud, cap = self.make()
         cap.emit((0, 0, 255))
         self.keys["ctrl"] = True
-        with patch("app.ui.qt.capture_hud.text_input_has_focus", return_value=True):
+        with patch("app.ui.capture_hud.text_input_has_focus", return_value=True):
             hud._check_keys()
 
         self.assertIsNone(hud.controller.session.held_image)
@@ -274,7 +274,7 @@ class TestCaptureHudFlow(HudTestCase):
         hud, _ = self.make()
         hud.move(400, 300)
         self.keys["alt"] = True
-        with patch("app.ui.qt.capture_hud.QCursor.pos", return_value=QPoint(420, 320)):
+        with patch("app.ui.capture_hud.QCursor.pos", return_value=QPoint(420, 320)):
             hud._check_keys()
 
         self.assertEqual(hud.controller.box()[:2], (420, 320))

@@ -1,6 +1,6 @@
 # Keystroke Simulator
 
-화면의 픽셀 또는 영역을 감시하고 조건이 충족되면 지정한 키 입력을 실행하는 Python/Tkinter 데스크톱 앱입니다. macOS를 주 대상으로 하며 Windows도 지원합니다.
+화면의 픽셀 또는 영역을 감시하고 조건이 충족되면 지정한 키 입력을 실행하는 Python/PySide6(Qt) 데스크톱 앱입니다. macOS를 주 대상으로 하며 Windows도 지원합니다.
 
 ## 주요 기능
 
@@ -15,7 +15,7 @@
 
 ## 실행
 
-요구사항은 `uv`와 Tk/Tcl을 포함한 Python 3.14입니다. 플랫폼별 패키지는 `pyproject.toml`과 `uv.lock`을 기준으로 설치됩니다.
+요구사항은 `uv`와 Python 3.14입니다(`uv python install 3.14`로 설치한 managed Python 권장). 플랫폼별 패키지는 `pyproject.toml`과 `uv.lock`을 기준으로 설치됩니다.
 
 ```bash
 uv python install 3.14

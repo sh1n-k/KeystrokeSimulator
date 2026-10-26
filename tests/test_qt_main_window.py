@@ -4,13 +4,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from PySide6.QtWidgets import QMessageBox
 from tests.qt_support import qt_app
 
 from app.domain.models import ProfileModel
 from app.presenters.run_controller import RunController
 from app.storage.profile_storage import save_profile
 from app.storage.run_sets_storage import CURRENT_RUN_SET_ID, upsert_run_set
-from app.ui.qt.main_window import RunWindow
+from app.ui.main_window import RunWindow
 from app.utils.i18n import set_language
 
 PROCS = [("Game", 4321, None), ("Editor", 77, None)]
@@ -26,8 +27,8 @@ class TestRunWindow(unittest.TestCase):
         save_profile(Path("profiles"), ProfileModel(name="Rot"))
         upsert_run_set("Raid", ["Rot"], Path("run_sets.json"))
         patches = [
-            patch("app.ui.qt.main_window.ProcessCollector.get", return_value=PROCS),
-            patch("app.ui.qt.main_window.SoundPlayer", MagicMock),
+            patch("app.ui.main_window.ProcessCollector.get", return_value=PROCS),
+            patch("app.ui.main_window.SoundPlayer", MagicMock),
             patch.object(RunController, "setup_event_handlers"),
             patch.object(RunController, "unbind_events"),
         ]
@@ -122,6 +123,39 @@ class TestRunWindow(unittest.TestCase):
         self.assertTrue(states["workspace"])
         self.assertFalse(states["settings"])
         self.assertFalse(states["quick"])
+
+
+    def _write_logs(self) -> tuple[Path, Path]:
+        log_dir = Path("logs")
+        log_dir.mkdir()
+        old = log_dir / "old.log"
+        old.write_text("data", encoding="utf-8")
+        keep = log_dir / "keysym.log"
+        keep.write_text("keep", encoding="utf-8")
+        return old, keep
+
+    def test_clear_local_logs_cancel_keeps_files(self) -> None:
+        old, keep = self._write_logs()
+        with patch(
+            "app.ui.main_window.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Cancel,
+        ):
+            self.window.clear_local_logs()
+
+        self.assertTrue(old.exists())
+        self.assertTrue(keep.exists())
+
+    def test_clear_local_logs_ok_keeps_keysym_log(self) -> None:
+        old, keep = self._write_logs()
+        with patch(
+            "app.ui.main_window.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Ok,
+        ):
+            self.window.clear_local_logs()
+
+        self.assertFalse(old.exists())
+        self.assertTrue(keep.exists())
+        self.assertIn("1", self.window.lbl_run_status.text())
 
 
 if __name__ == "__main__":

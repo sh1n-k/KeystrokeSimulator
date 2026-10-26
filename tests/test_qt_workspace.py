@@ -17,7 +17,7 @@ from app.domain.capture_geometry import CaptureResult
 from app.domain.models import EventModel, ProfileModel, UserSettings
 from app.storage.profile_storage import load_profile, save_profile
 from app.storage.run_sets_storage import get_run_set, upsert_run_set
-from app.ui.qt.workspace import WorkspaceWindow, open_workspace
+from app.ui.workspace import WorkspaceWindow, open_workspace
 from app.utils.i18n import set_language
 
 
@@ -224,7 +224,7 @@ class TestEditing(WorkspaceWindowCase):
     def test_capture_button_opens_hud_and_apply_is_undoable(self) -> None:
         event = self.event("S")
         self.ws.tree.select([event])
-        with patch("app.ui.qt.capture_hud.CaptureHud") as hud:
+        with patch("app.ui.capture_hud.CaptureHud") as hud:
             self.ws.detail.btn_capture.click()
         kwargs = hud.call_args.kwargs
         self.assertEqual(kwargs["mode"], "single")
@@ -247,7 +247,7 @@ class TestEditing(WorkspaceWindowCase):
 
     def test_new_signal_comes_from_the_hud(self) -> None:
         self.host.run.is_running = True
-        with patch("app.ui.qt.capture_hud.CaptureHud") as hud:
+        with patch("app.ui.capture_hud.CaptureHud") as hud:
             self.ws.btn_add_signal.click()
         kwargs = hud.call_args.kwargs
         self.assertFalse(kwargs["border"])  # no border while running
@@ -313,7 +313,7 @@ class TestRunningAndClosing(WorkspaceWindowCase):
 
     def test_sidebar_delete_is_refused_while_running(self) -> None:
         self.host.run.is_running = True
-        with patch("app.ui.qt.workspace.QMessageBox") as box:
+        with patch("app.ui.workspace.QMessageBox") as box:
             self.ws._on_sidebar_action("profile", "delete", "P")
 
         box.warning.assert_called_once()
@@ -343,7 +343,7 @@ class TestRunningAndClosing(WorkspaceWindowCase):
 
     def test_close_is_refused_when_save_fails(self) -> None:
         self.ws.model.profile.event_list.append(rule("loose"))
-        with patch("app.ui.qt.workspace.QMessageBox") as box:
+        with patch("app.ui.workspace.QMessageBox") as box:
             self.ws.close()
 
         box.warning.assert_called_once()
