@@ -668,9 +668,8 @@ class WorkspaceModel:
 
     def rename_event(self, event: EventModel, text: str) -> str:
         """이름을 바꾼다. 거부하면 그 이유, 받아들이면 빈 문자열."""
-        if not any(e is event for e in self.profile.event_list):
-            # 다른 프로필이나 되돌리기 전 스냅숏의 이벤트. 조건 참조를 바꾸면
-            # 지금 프로필이 오염되므로 무시한다.
+        if not self._owns(event):
+            # 조건 참조를 바꾸면 지금 프로필이 오염되므로 무시한다.
             return ""
         new_name = normalized_event_name(text)
         old_name = event.event_name or ""
@@ -795,13 +794,21 @@ class WorkspaceModel:
         if event.region_size != before:
             self._event_changed()
 
+    def _owns(self, event: EventModel) -> bool:
+        """다른 프로필이나 되돌리기 전 스냅숏의 이벤트가 아니다."""
+        return any(e is event for e in self.profile.event_list)
+
     def clear_screen(self, event: EventModel) -> None:
         """캡처본은 다시 입력할 수 없으므로 바꾸기 전에 되돌리기 지점을 남긴다."""
+        if not self._owns(event):
+            return
         self.push_undo(txt("screen", "화면"))
         clear_capture(event)
         self._event_changed()
 
     def apply_capture_to(self, event: EventModel, result: CaptureResult) -> None:
+        if not self._owns(event):
+            return
         self.push_undo(txt("screen", "화면"))
         apply_capture(event, result)
         self._event_changed()

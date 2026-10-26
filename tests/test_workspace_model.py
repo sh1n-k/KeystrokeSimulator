@@ -393,6 +393,15 @@ class TestEventEdits(ModelCase):
         self.assertEqual(stale.event_name, "A")
         self.assertEqual(model.profile.event_list[1].conditions, {"A": True})
 
+    def test_capture_of_event_outside_profile_is_ignored(self):
+        model = self.make([captured("A")])
+        stale = captured("A")
+
+        model.clear_screen(stale)
+
+        self.assertIsNone(model.undo_label)
+        self.assertIsNotNone(stale.held_screenshot)
+
     def test_condition_candidates_list_signals_first_and_mark_cycles(self):
         model = self.make(
             [rule("R", conditions={"S": True}), signal("S"), rule("Q", conditions={"R": True})]
