@@ -273,18 +273,23 @@ class CaptureController:
         name = self.append_quick(result) if self.append_quick is not None else None
         if name is None:
             name = append_quick_event(self.profiles_dir, result)
+            message = txt(
+                "Saved Quick event '{name}'. Move to the next target.",
+                "Quick 이벤트 '{name}'을 저장했습니다. 다음 대상으로 옮기세요.",
+                name=name,
+            )
+        else:
+            # 열린 작업 공간이 저장한다. 저장 실패는 작업 공간 창에 보인다.
+            message = txt(
+                "Added Quick event '{name}' to the open workspace. Move to the next target.",
+                "Quick 이벤트 '{name}'을 열린 작업 공간에 추가했습니다. 다음 대상으로 옮기세요.",
+                name=name,
+            )
         self.saved_count += 1
         self.session.clear_hold()
         self._held_size = None
         self.mag_center = None
-        self.feedback = (
-            txt(
-                "Saved Quick event '{name}'. Move to the next target.",
-                "Quick 이벤트 '{name}'을 저장했습니다. 다음 대상으로 옮기세요.",
-                name=name,
-            ),
-            "ready",
-        )
+        self.feedback = (message, "ready")
 
     def on_ctrl(self) -> None:
         session = self.session

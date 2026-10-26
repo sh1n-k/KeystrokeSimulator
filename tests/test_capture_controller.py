@@ -375,6 +375,7 @@ class TestContinuous(unittest.TestCase):
         append.assert_called_once()
         self.assertEqual(saved, [])
         self.assertIn("'7'", c.feedback[0])
+        self.assertIn("open workspace", c.feedback[0])
 
     def test_ctrl_after_moving_recaptures(self):
         c, cap, *_ = make_controller("continuous", profiles_dir=None)
