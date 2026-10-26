@@ -17,7 +17,7 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from app.utils.keys import KeyUtils
+from app.platform.keys import KeyUtils
 
 EnabledProvider = Callable[[], bool]
 RuntimeKeyProvider = Callable[[], str | None]

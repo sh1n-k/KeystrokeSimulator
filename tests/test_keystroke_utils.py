@@ -4,12 +4,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.core.models import EventModel, ProfileModel
-from app.utils import system
-from app.utils.keys import KeyUtils
-from app.utils.system import PermissionUtils
+from app.domain.models import EventModel, ProfileModel
+from app.platform import system
+from app.platform.keys import KeyUtils
+from app.platform.system import PermissionUtils
 from app.utils.window_state import StateUtils
-from app.utils.runtime_toggle import (
+from app.domain.runtime_toggle import (
     active_runtime_toggle_events,
     MOUSE_BUTTON_3_TRIGGER,
     WHEEL_DOWN_TRIGGER,
@@ -140,27 +140,27 @@ class TestPermissionUtils(unittest.TestCase):
     def test_quartz_symbol_uses_module_attribute_lookup(self):
         module = SimpleNamespace(CGPreflightScreenCaptureAccess=lambda: True)
 
-        with patch("app.utils.system._platform_module", return_value=module):
+        with patch("app.platform.system._platform_module", return_value=module):
             self.assertTrue(system.quartz_symbol("CGPreflightScreenCaptureAccess")())
 
-    @patch("app.utils.system.IS_MAC", True)
+    @patch("app.platform.system.IS_MAC", True)
     @patch(
-        "app.utils.system.PermissionUtils.has_screen_capture_access", return_value=False
+        "app.platform.system.PermissionUtils.has_screen_capture_access", return_value=False
     )
     @patch(
-        "app.utils.system.PermissionUtils.has_accessibility_access", return_value=True
+        "app.platform.system.PermissionUtils.has_accessibility_access", return_value=True
     )
     def test_missing_macos_permissions_returns_screen_only(
         self, _mock_accessibility, _mock_screen
     ):
         self.assertEqual(PermissionUtils.missing_macos_permissions(), ["screen"])
 
-    @patch("app.utils.system.IS_MAC", True)
+    @patch("app.platform.system.IS_MAC", True)
     @patch(
-        "app.utils.system.PermissionUtils.has_screen_capture_access", return_value=False
+        "app.platform.system.PermissionUtils.has_screen_capture_access", return_value=False
     )
     @patch(
-        "app.utils.system.PermissionUtils.has_accessibility_access", return_value=False
+        "app.platform.system.PermissionUtils.has_accessibility_access", return_value=False
     )
     def test_missing_macos_permissions_returns_both(
         self, _mock_accessibility, _mock_screen

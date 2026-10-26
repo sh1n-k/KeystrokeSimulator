@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from loguru import logger
 
 if TYPE_CHECKING:
-    from app.core.processor import ImageFrame
+    from app.engine.processor import ImageFrame
 
 Rect = dict[str, int]
 
@@ -158,7 +158,7 @@ class MssScreenBackend:
         if sct is None:
             return
         try:
-            from app.utils.system import MonitorUtils
+            from app.platform.system import MonitorUtils
 
             screen_w, screen_h = MonitorUtils.get_primary_size()
             call_samples: list[float] = []
@@ -189,7 +189,7 @@ class MssScreenBackend:
             self._full_cost_ms = None
 
     def grab(self, groups: Sequence[Any]) -> list[ImageFrame | None]:
-        from app.core.processor import ImageFrame
+        from app.engine.processor import ImageFrame
 
         with self._lock:
             sct = self._sct
@@ -292,7 +292,7 @@ def frame_from_region(
     view: memoryview, stride: int, x: int, y: int, width: int, height: int
 ) -> ImageFrame:
     """픽셀 버퍼에서 요청한 영역만 잘라 담는다."""
-    from app.core.processor import ImageFrame
+    from app.engine.processor import ImageFrame
 
     packed = width * 4
     dest = bytearray(height * packed)

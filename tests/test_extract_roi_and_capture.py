@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from app.core.processor import ImageFrame
+from app.engine.processor import ImageFrame
 from tests.helpers import fill_frame_rect, make_image_frame, make_processor_stub
 
 
@@ -248,7 +248,7 @@ class TestExtractROIWarning(unittest.TestCase):
     def test_warning_logged_on_first_failure(self):
         """경계 초과 최초 발생 시 logger.warning이 호출됨"""
         img = make_image_frame(10, 10)
-        with patch("app.core.processor.logger") as mock_log:
+        with patch("app.engine.processor.logger") as mock_log:
             self.proc._extract_roi(img, self._out_of_bounds_evt())
             mock_log.warning.assert_called_once()
 
@@ -256,7 +256,7 @@ class TestExtractROIWarning(unittest.TestCase):
         """동일 이벤트명은 두 번째 호출부터 경고를 출력하지 않음"""
         img = make_image_frame(10, 10)
         evt = self._out_of_bounds_evt("OnceOnly")
-        with patch("app.core.processor.logger") as mock_log:
+        with patch("app.engine.processor.logger") as mock_log:
             self.proc._extract_roi(img, evt)
             self.proc._extract_roi(img, evt)
             self.proc._extract_roi(img, evt)
@@ -265,7 +265,7 @@ class TestExtractROIWarning(unittest.TestCase):
     def test_different_events_each_warn_once(self):
         """이벤트명이 다르면 각각 1회씩 경고"""
         img = make_image_frame(10, 10)
-        with patch("app.core.processor.logger") as mock_log:
+        with patch("app.engine.processor.logger") as mock_log:
             self.proc._extract_roi(
                 img, self._out_of_bounds_evt("EvtA")
             )
@@ -277,7 +277,7 @@ class TestExtractROIWarning(unittest.TestCase):
     def test_warning_message_contains_event_name_and_sizes(self):
         """경고 메시지에 이벤트명과 크기 정보가 포함됨"""
         img = make_image_frame(10, 10)
-        with patch("app.core.processor.logger") as mock_log:
+        with patch("app.engine.processor.logger") as mock_log:
             self.proc._extract_roi(
                 img, self._out_of_bounds_evt("MyEvent")
             )
@@ -295,7 +295,7 @@ class TestExtractROIWarning(unittest.TestCase):
             "rel_x": 50,
             "rel_y": 50,
         }
-        with patch("app.core.processor.logger") as mock_log:
+        with patch("app.engine.processor.logger") as mock_log:
             self.proc._extract_roi(img, evt)
             mock_log.warning.assert_not_called()
 

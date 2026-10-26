@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.core.models import UserSettings
+from app.domain.models import UserSettings
 from app.storage.settings_storage import load_user_settings, save_user_settings
 
 

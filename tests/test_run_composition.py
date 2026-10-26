@@ -1,7 +1,7 @@
 import unittest
 
-from app.core.models import EventModel, ProfileModel
-from app.core.run_composition import (
+from app.domain.models import EventModel, ProfileModel
+from app.domain.run_composition import (
     compose_run_session,
     format_run_profile_summary,
     namespace_event,

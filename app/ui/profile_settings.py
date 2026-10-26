@@ -8,10 +8,10 @@ from typing import Any, Literal, Optional, cast
 
 from loguru import logger
 
-from app.core.models import ProfileModel
+from app.domain.models import ProfileModel
 from app.ui import theme
 from app.utils.i18n import txt
-from app.utils.runtime_toggle import (
+from app.domain.runtime_toggle import (
     display_runtime_toggle_trigger,
     normalize_runtime_toggle_capture_key,
     normalize_runtime_toggle_trigger,

@@ -1,7 +1,7 @@
 import platform
 import threading
 
-from app.core.processor import ImageFrame, KeystrokeProcessor, Pixel
+from app.engine.processor import ImageFrame, KeystrokeProcessor, Pixel
 
 
 def make_processor_stub(event_data_list=None) -> KeystrokeProcessor:

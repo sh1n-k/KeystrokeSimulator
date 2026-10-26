@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.core.models import EventModel, ProfileModel
+from app.domain.models import EventModel, ProfileModel
 from app.ui.simulator_app import KeystrokeSimulatorApp
 from app.utils.i18n import set_language
 

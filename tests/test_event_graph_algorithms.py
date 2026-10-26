@@ -23,7 +23,7 @@ from app.ui.event_graph import (
     _wrap_label,
     _wrap_layers,
 )
-from app.core.models import EventModel, ProfileModel
+from app.domain.models import EventModel, ProfileModel
 
 
 def _make_node(node_id, name=None, group_id=None, **kwargs):

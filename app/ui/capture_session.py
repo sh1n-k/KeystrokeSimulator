@@ -7,8 +7,8 @@ from typing import Protocol, cast
 
 from PIL import Image
 
-from app.core.capturer import ScreenshotCapturer
-from app.core.models import ColorTuple, Position
+from app.engine.capturer import ScreenshotCapturer
+from app.domain.models import ColorTuple, Position
 
 MIN_CAPTURE_SIZE = 50
 MAX_CAPTURE_SIZE = 1000

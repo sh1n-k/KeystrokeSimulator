@@ -17,8 +17,8 @@ from typing import Any, cast
 from loguru import logger
 from PIL import Image, ImageTk
 
-from app.core.models import EventModel, ProfileModel
-from app.core.profile_events import (
+from app.domain.models import EventModel, ProfileModel
+from app.domain.profile_events import (
     EventSection,
     apply_target_to_same_area,
     clone_event,
@@ -32,7 +32,7 @@ from app.core.profile_events import (
     sort_sections_by_name,
     write_section_order,
 )
-from app.core.validation import event_name_taken, find_duplicate_event_names
+from app.domain.validation import event_name_taken, find_duplicate_event_names
 from app.storage.profile_display import QUICK_PROFILE_NAME
 from app.storage.profile_storage import (
     copy_profile,
@@ -60,7 +60,7 @@ from app.ui.workspace_detail import EventDetailPanel, apply_capture
 from app.ui.workspace_list import EventTree
 from app.ui.workspace_sidebar import ItemKind, WorkspaceSidebar
 from app.utils.i18n import txt
-from app.utils.runtime_toggle import collect_runtime_toggle_validation_errors
+from app.domain.runtime_toggle import collect_runtime_toggle_validation_errors
 from app.utils.window_state import StateUtils, WindowUtils
 
 WORKSPACE_DEFAULT_GEOMETRY = "1180x720"

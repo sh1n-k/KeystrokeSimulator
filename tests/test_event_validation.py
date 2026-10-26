@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from app.core.models import EventModel
+from app.domain.models import EventModel
 from app.ui.capture_hud import CaptureResult
 from app.ui.workspace_detail import (
     EventDetailPanel,

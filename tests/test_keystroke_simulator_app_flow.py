@@ -4,10 +4,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from app.core.models import EventModel, ProfileModel
+from app.domain.models import EventModel, ProfileModel
 from app.ui.simulator_app import KeystrokeSimulatorApp
-from app.utils.keys import KeyUtils
-from app.utils.runtime_toggle import (
+from app.platform.keys import KeyUtils
+from app.domain.runtime_toggle import (
     MOUSE_BUTTON_3_TRIGGER,
     WHEEL_DOWN_TRIGGER,
     WHEEL_UP_TRIGGER,
@@ -1101,7 +1101,7 @@ class TestRuntimeToggleKeyHandling(unittest.TestCase):
 
 class TestMacKeyPollListener(unittest.TestCase):
     def _make_listener(self, **kwargs):
-        from app.ui.mac_key_poll import MacKeyPollListener
+        from app.platform.mac_key_poll import MacKeyPollListener
 
         session = MagicMock()
         posted: list = []
@@ -1126,17 +1126,17 @@ class TestMacKeyPollListener(unittest.TestCase):
         listener, _session, posted, start_stop, _runtime = self._make_listener()
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
-        ), patch("app.ui.mac_key_poll.KeyUtils.key_pressed", return_value=False):
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ), patch("app.platform.mac_key_poll.KeyUtils.key_pressed", return_value=False):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.0):
                 listener._tick()
             self.assertEqual(posted, [])
 
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.01):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.01):
                 listener._tick()
             self.assertEqual(posted, [])
 
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.02):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.02):
                 listener._tick()
 
         self.assertEqual(len(posted), 1)
@@ -1149,12 +1149,12 @@ class TestMacKeyPollListener(unittest.TestCase):
             start_stop_enabled=lambda: False
         )
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
-        ), patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ), patch("app.platform.mac_key_poll.time.time", return_value=100.0):
             listener._tick()
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
-        ), patch("app.ui.mac_key_poll.time.time", return_value=100.05):
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+        ), patch("app.platform.mac_key_poll.time.time", return_value=100.05):
             listener._tick()
         self.assertEqual(posted, [])
         start_stop.assert_not_called()
@@ -1164,11 +1164,11 @@ class TestMacKeyPollListener(unittest.TestCase):
         listener, _session, posted, start_stop, _runtime = self._make_listener()
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
         ):
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.0):
                 listener._tick()
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.04):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.04):
                 listener._tick()
         self.assertEqual(len(posted), 1)
 
@@ -1176,17 +1176,17 @@ class TestMacKeyPollListener(unittest.TestCase):
             return key == "alt"
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", side_effect=only_option
-        ), patch("app.ui.mac_key_poll.time.time", return_value=100.5):
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", side_effect=only_option
+        ), patch("app.platform.mac_key_poll.time.time", return_value=100.5):
             listener._tick()
         self.assertFalse(listener._latched)
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
         ):
-            with patch("app.ui.mac_key_poll.time.time", return_value=101.0):
+            with patch("app.platform.mac_key_poll.time.time", return_value=101.0):
                 listener._tick()
-            with patch("app.ui.mac_key_poll.time.time", return_value=101.04):
+            with patch("app.platform.mac_key_poll.time.time", return_value=101.04):
                 listener._tick()
         self.assertEqual(len(posted), 2)
         posted[0]()
@@ -1202,8 +1202,8 @@ class TestMacKeyPollListener(unittest.TestCase):
             return True
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", side_effect=track
-        ), patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", side_effect=track
+        ), patch("app.platform.mac_key_poll.time.time", return_value=100.0):
             listener._tick()
         self.assertEqual(calls[0], ("alt", True))
         self.assertEqual(calls[1], ("shift", True))
@@ -1212,25 +1212,25 @@ class TestMacKeyPollListener(unittest.TestCase):
         listener, _session, posted, start_stop, _runtime = self._make_listener()
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
         ):
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.0):
                 listener._tick()
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.04):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.04):
                 listener._tick()
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=False
-        ), patch("app.ui.mac_key_poll.time.time", return_value=100.5):
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=False
+        ), patch("app.platform.mac_key_poll.time.time", return_value=100.5):
             listener._tick()
         self.assertFalse(listener._latched)
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
         ):
-            with patch("app.ui.mac_key_poll.time.time", return_value=101.0):
+            with patch("app.platform.mac_key_poll.time.time", return_value=101.0):
                 listener._tick()
-            with patch("app.ui.mac_key_poll.time.time", return_value=101.04):
+            with patch("app.platform.mac_key_poll.time.time", return_value=101.04):
                 listener._tick()
 
         self.assertEqual(len(posted), 2)
@@ -1242,34 +1242,34 @@ class TestMacKeyPollListener(unittest.TestCase):
         listener, _session, posted, start_stop, _runtime = self._make_listener()
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
         ):
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.0):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.0):
                 listener._tick()
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.04):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.04):
                 listener._tick()
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=False
-        ), patch("app.ui.mac_key_poll.time.time", return_value=100.05):
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=False
+        ), patch("app.platform.mac_key_poll.time.time", return_value=100.05):
             listener._tick()
 
         # Re-arm attempt still inside 0.2s debounce from first fire at 100.04.
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
         ):
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.10):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.10):
                 listener._tick()
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.20):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.20):
                 listener._tick()
         self.assertEqual(len(posted), 1)
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
         ):
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.30):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.30):
                 listener._tick()
-            with patch("app.ui.mac_key_poll.time.time", return_value=100.34):
+            with patch("app.platform.mac_key_poll.time.time", return_value=100.34):
                 listener._tick()
         self.assertEqual(len(posted), 2)
         posted[0]()
@@ -1281,11 +1281,11 @@ class TestMacKeyPollListener(unittest.TestCase):
         listener, _session, posted, start_stop, _runtime = self._make_listener()
 
         with patch(
-            "app.ui.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
+            "app.platform.mac_key_poll.KeyUtils.mod_key_pressed", return_value=True
         ):
             t = 100.0
             for _ in range(40):
-                with patch("app.ui.mac_key_poll.time.time", return_value=t):
+                with patch("app.platform.mac_key_poll.time.time", return_value=t):
                     listener._tick()
                 t += 0.015
 
@@ -1295,7 +1295,7 @@ class TestMacKeyPollListener(unittest.TestCase):
         start_stop.assert_called_once()
 
     def test_listener_stop_joins_thread(self) -> None:
-        from app.ui.mac_key_poll import MacKeyPollListener
+        from app.platform.mac_key_poll import MacKeyPollListener
 
         session = MagicMock()
         session.post = MagicMock()
@@ -1313,8 +1313,8 @@ class TestMacKeyPollListener(unittest.TestCase):
 
 
 class TestMacModKeyPressed(unittest.TestCase):
-    @patch("app.utils.keys.IS_MAC", True)
-    @patch("app.utils.keys.IS_WIN", False)
+    @patch("app.platform.keys.IS_MAC", True)
+    @patch("app.platform.keys.IS_WIN", False)
     def test_mod_key_pressed_uses_left_or_right_physical_codes(self):
         calls: list[int] = []
 
@@ -1330,13 +1330,13 @@ class TestMacModKeyPressed(unittest.TestCase):
             # Flag fallback symbols should not be needed when key-state hits.
             return 0
 
-        with patch("app.utils.keys.quartz_symbol", side_effect=fake_symbol):
+        with patch("app.platform.keys.quartz_symbol", side_effect=fake_symbol):
             self.assertTrue(KeyUtils.mod_key_pressed("alt"))
         self.assertIn(58, calls)
         self.assertIn(61, calls)
 
-    @patch("app.utils.keys.IS_MAC", True)
-    @patch("app.utils.keys.IS_WIN", False)
+    @patch("app.platform.keys.IS_MAC", True)
+    @patch("app.platform.keys.IS_WIN", False)
     def test_physical_only_skips_sticky_flag_fallback(self):
         def fake_symbol(name: str):
             if name == "CGEventSourceKeyState":
@@ -1347,7 +1347,7 @@ class TestMacModKeyPressed(unittest.TestCase):
                 return lambda _hid: 0xFFFFFFFF  # all flags set
             return 1
 
-        with patch("app.utils.keys.quartz_symbol", side_effect=fake_symbol):
+        with patch("app.platform.keys.quartz_symbol", side_effect=fake_symbol):
             self.assertFalse(KeyUtils.mod_key_pressed("shift", physical_only=True))
             self.assertTrue(KeyUtils.mod_key_pressed("shift", physical_only=False))
 

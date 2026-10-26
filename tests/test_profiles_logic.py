@@ -1,10 +1,10 @@
-"""프로필 이벤트 공용 로직(app.core.profile_events). 작업 공간 UI 테스트는
+"""프로필 이벤트 공용 로직(app.domain.profile_events). 작업 공간 UI 테스트는
 test_workspace.py에 있다."""
 
 import unittest
 
-from app.core.models import EventModel
-from app.core.profile_events import (
+from app.domain.models import EventModel
+from app.domain.profile_events import (
     event_matches_query,
     event_needs_attention,
     remove_condition_references,

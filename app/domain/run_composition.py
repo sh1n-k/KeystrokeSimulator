@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.core.models import EventModel, ProfileModel
-from app.core.profile_events import clone_event
-from app.core.validation import find_duplicate_event_names, normalized_event_name
+from app.domain.models import EventModel, ProfileModel
+from app.domain.profile_events import clone_event
+from app.domain.validation import find_duplicate_event_names, normalized_event_name
 from app.utils.i18n import txt
-from app.utils.runtime_toggle import (
+from app.domain.runtime_toggle import (
     collect_runtime_toggle_validation_errors,
     normalize_runtime_toggle_trigger,
 )

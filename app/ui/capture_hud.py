@@ -15,8 +15,8 @@ from typing import Any, Literal, cast
 
 from PIL import Image, ImageDraw, ImageTk
 
-from app.core.models import ColorTuple, EventModel, Position
-from app.core.profile_events import next_numbered_event_name
+from app.domain.models import ColorTuple, EventModel, Position
+from app.domain.profile_events import next_numbered_event_name
 from app.storage.profile_storage import ensure_quick_profile, load_profile, save_profile
 from app.ui import theme
 from app.ui.capture_session import (
@@ -29,8 +29,8 @@ from app.ui.capture_session import (
     rects_overlap,
 )
 from app.utils.i18n import txt
-from app.utils.keys import KeyUtils
-from app.utils.system import PermissionUtils
+from app.platform.keys import KeyUtils
+from app.platform.system import PermissionUtils
 from app.utils.window_state import StateUtils, WindowUtils
 
 HudMode = Literal["single", "continuous"]

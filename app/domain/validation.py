@@ -1,6 +1,6 @@
 from collections.abc import Iterable, Mapping
 
-from app.core.models import EventModel
+from app.domain.models import EventModel
 
 MIN_PRESS_DURATION_MS = 50
 MIN_RANDOMIZATION_MS = 30

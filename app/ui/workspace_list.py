@@ -7,8 +7,8 @@ import tkinter.ttk as ttk
 from collections.abc import Callable, Sequence
 from typing import Any, cast
 
-from app.core.models import EventModel
-from app.core.profile_events import (
+from app.domain.models import EventModel
+from app.domain.profile_events import (
     EventSection,
     build_event_sections,
     event_has_screen,

@@ -9,7 +9,7 @@ from typing import cast
 
 from loguru import logger
 
-from app.core.models import ModificationKeys
+from app.domain.models import ModificationKeys
 
 MODKEY_SETS_SCHEMA_VERSION = 1
 DEFAULT_MODKEY_SET_NAME = "Default"

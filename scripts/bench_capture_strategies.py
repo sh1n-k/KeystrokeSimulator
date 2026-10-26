@@ -29,9 +29,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app.core.processor import CaptureGroup, EventData, ImageFrame, KeystrokeProcessor
-from app.core.screen_backend import MssScreenBackend, union_group_rects
-from app.utils.system import MonitorUtils
+from app.engine.processor import CaptureGroup, EventData, ImageFrame, KeystrokeProcessor
+from app.engine.screen_backend import MssScreenBackend, union_group_rects
+from app.platform.system import MonitorUtils
 from tests.helpers import make_processor_stub
 
 

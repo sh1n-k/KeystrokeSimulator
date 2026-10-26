@@ -17,8 +17,8 @@ import pynput.keyboard
 import pynput.mouse
 from app.utils.i18n import normalize_language, set_language, txt
 
-from app.core.models import EventModel, ProfileModel, UserSettings
-from app.core.run_composition import (
+from app.domain.models import EventModel, ProfileModel, UserSettings
+from app.domain.run_composition import (
     ComposedRunSession,
     compose_run_session,
 )
@@ -31,8 +31,8 @@ from app.ui.main_frames import (
     RunTargetFrame,
 )
 from app.ui.input_listener_session import InputListener, InputListenerSession
-from app.ui.mac_hotkey_tap import MacHotkeyTapListener
-from app.ui.mac_key_poll import MacKeyPollListener
+from app.platform.mac_hotkey_tap import MacHotkeyTapListener
+from app.platform.mac_key_poll import MacKeyPollListener
 from app.storage.modkey_sets_storage import (
     DEFAULT_MODKEY_SET_NAME,
     DEFAULT_MODKEY_SETS_PATH,
@@ -51,12 +51,12 @@ from app.storage.profile_storage import (
     load_profile,
 )
 from app.storage.settings_storage import load_user_settings, save_user_settings
-from app.core.processor import KeystrokeProcessor
+from app.engine.processor import KeystrokeProcessor
 from app.ui.capture_hud import CaptureHud
 from app.ui.workspace import Workspace
 from app.ui.settings import KeystrokeSettings
 from app.utils.sounds import SoundPlayer
-from app.utils.runtime_toggle import (
+from app.domain.runtime_toggle import (
     MOUSE_BUTTON_3_TRIGGER,
     MOUSE_BUTTON_4_TRIGGER,
     RUNTIME_TOGGLE_DEBOUNCE_SECONDS,
@@ -71,7 +71,7 @@ from app.utils.runtime_toggle import (
     normalize_runtime_toggle_trigger,
     runtime_toggle_member_count,
 )
-from app.utils.system import (
+from app.platform.system import (
     ProcessUtils,
     PermissionUtils,
 )

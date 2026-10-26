@@ -3,8 +3,8 @@ import unittest
 
 from PIL import Image
 
-from app.core.models import EventModel
-from app.core.profile_events import EVENT_DIRTY_FIELD_NAMES, event_fingerprint
+from app.domain.models import EventModel
+from app.domain.profile_events import EVENT_DIRTY_FIELD_NAMES, event_fingerprint
 
 
 def _mutated_event(field_name: str) -> EventModel:

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from app.core.models import EventModel, ProfileModel
+from app.domain.models import EventModel, ProfileModel
 from app.storage.modkey_sets_storage import (
     coerce_modification_keys,
 )

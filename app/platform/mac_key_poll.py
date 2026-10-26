@@ -14,7 +14,7 @@ from typing import Protocol
 
 from loguru import logger
 
-from app.utils.keys import KeyUtils
+from app.platform.keys import KeyUtils
 
 
 class PostsActions(Protocol):

@@ -4,8 +4,8 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-import app.core.screen_backend as sb
-from app.core.screen_backend import (
+import app.engine.screen_backend as sb
+from app.engine.screen_backend import (
     MacStreamBackend,
     MssScreenBackend,
     NullScreenBackend,
@@ -83,7 +83,7 @@ class TestCreateScreenBackend(unittest.TestCase):
         """mss로 대체하지 않고, 실행 루프가 다시 열 수 있도록 사망 상태로 준다."""
         _patch_quartz(self)
         with patch(
-            "app.core.screen_backend.MacStreamBackend.open",
+            "app.engine.screen_backend.MacStreamBackend.open",
             side_effect=RuntimeError("no permission"),
         ):
             backend = open_screen_backend([_group(1, 1, 2, 2)], os_name="Darwin")
@@ -114,7 +114,7 @@ class TestMacStreamGrab(unittest.TestCase):
         groups = [_group(12, 21, 1, 1)]
 
         with patch(
-            "app.core.screen_backend.copy_rects", return_value=[wanted]
+            "app.engine.screen_backend.copy_rects", return_value=[wanted]
         ) as copier:
             cropped = backend.grab(groups)
 
@@ -126,7 +126,7 @@ class TestMacStreamGrab(unittest.TestCase):
         backend = MacStreamBackend({"left": 0, "top": 0, "width": 2, "height": 2})
         backend.buffer = object()
 
-        with patch("app.core.screen_backend.copy_rects", return_value=None):
+        with patch("app.engine.screen_backend.copy_rects", return_value=None):
             self.assertEqual(backend.grab([_group(0, 0, 1, 1)]), [None])
 
         self.assertIsNone(backend.buffer)
@@ -139,7 +139,7 @@ class TestMacStreamGrab(unittest.TestCase):
         wanted = make_image_frame(1, 1)
         fill_frame_rect(wanted, 0, 0, 1, 1, (7, 7, 7))
 
-        with patch("app.core.screen_backend.copy_rects", return_value=[wanted]):
+        with patch("app.engine.screen_backend.copy_rects", return_value=[wanted]):
             grabbed = backend.grab([_group(0, 0, 1, 1)])
 
         assert grabbed[0] is not None
@@ -230,7 +230,7 @@ def _patch_quartz(case):
     def fake(name):
         return _FakeQuartz if name == "Quartz" else real(name)
 
-    patcher = patch("app.core.screen_backend._framework", side_effect=fake)
+    patcher = patch("app.engine.screen_backend._framework", side_effect=fake)
     patcher.start()
     case.addCleanup(patcher.stop)
 
@@ -350,7 +350,7 @@ class TestSampleBufferStatus(unittest.TestCase):
         output.backend = backend
 
         with patch(
-            "app.core.screen_backend._handle_sample_buffer",
+            "app.engine.screen_backend._handle_sample_buffer",
             side_effect=RuntimeError("boom"),
         ):
             output.stream_didOutputSampleBuffer_ofType_(None, object(), 0)
@@ -392,7 +392,7 @@ class TestStallEscalation(unittest.TestCase):
         backend = _live_backend(object())
         wanted = [make_image_frame(1, 1)]
 
-        with patch("app.core.screen_backend.copy_rects", return_value=wanted):
+        with patch("app.engine.screen_backend.copy_rects", return_value=wanted):
             for _ in range(5):
                 self.assertIsNotNone(backend.grab([_group(0, 0, 1, 1)])[0])
 
@@ -476,7 +476,7 @@ class TestStallEscalation(unittest.TestCase):
         self.assertEqual(backend.frame_gap, "blank")
 
         with patch(
-            "app.core.screen_backend.copy_rects",
+            "app.engine.screen_backend.copy_rects",
             return_value=[make_image_frame(2, 2)],
         ):
             _handle_sample_buffer(
@@ -519,7 +519,7 @@ class TestOffscreenCaptureRects(unittest.TestCase):
         }
 
         with patch(
-            "app.core.processor.MonitorUtils.get_primary_size",
+            "app.engine.processor.MonitorUtils.get_primary_size",
             return_value=(1000, 800),
         ) as size:
             groups = proc._build_capture_groups([far])
@@ -541,7 +541,7 @@ class TestOffscreenCaptureRects(unittest.TestCase):
         offscreen = dict(good, name="OFFSCREEN", center_x=-50, center_y=-50)
 
         with patch(
-            "app.core.processor.MonitorUtils.get_primary_size",
+            "app.engine.processor.MonitorUtils.get_primary_size",
             return_value=(1000, 800),
         ):
             groups = proc._build_capture_groups([good, offscreen])
@@ -565,7 +565,7 @@ class TestOffscreenCaptureRects(unittest.TestCase):
         }
 
         with patch(
-            "app.core.processor.MonitorUtils.get_primary_size",
+            "app.engine.processor.MonitorUtils.get_primary_size",
             return_value=(1000, 800),
         ):
             groups = proc._build_capture_groups([edge])
@@ -596,7 +596,7 @@ class TestDeadBackendRecovery(unittest.TestCase):
         fresh = MagicMock()
 
         with patch(
-            "app.core.processor.create_screen_backend", return_value=fresh
+            "app.engine.processor.create_screen_backend", return_value=fresh
         ) as reopen:
             replacement = proc._replace_dead_backend(dead)
 
@@ -613,7 +613,7 @@ class TestDeadBackendRecovery(unittest.TestCase):
         proc = self._stub()
 
         with patch(
-            "app.core.processor.create_screen_backend", return_value=MagicMock()
+            "app.engine.processor.create_screen_backend", return_value=MagicMock()
         ) as reopen:
             proc._replace_dead_backend(MagicMock())
             for _ in range(5):
@@ -631,7 +631,7 @@ class TestDeadBackendRecovery(unittest.TestCase):
             raise OSError("slow failure")
 
         with patch(
-            "app.core.processor.create_screen_backend", side_effect=slow_fail
+            "app.engine.processor.create_screen_backend", side_effect=slow_fail
         ) as reopen:
             proc._replace_dead_backend(MagicMock())
             proc._replace_dead_backend(MagicMock())
@@ -642,7 +642,7 @@ class TestDeadBackendRecovery(unittest.TestCase):
         proc = self._stub()
 
         with patch(
-            "app.core.processor.create_screen_backend", return_value=MagicMock()
+            "app.engine.processor.create_screen_backend", return_value=MagicMock()
         ) as reopen:
             proc._replace_dead_backend(MagicMock())
             proc._last_backend_retry -= proc.BACKEND_RETRY_INTERVAL_S + 1.0
@@ -656,7 +656,7 @@ class TestDeadBackendRecovery(unittest.TestCase):
         dead = MagicMock()
 
         with patch(
-            "app.core.processor.create_screen_backend", side_effect=OSError("nope")
+            "app.engine.processor.create_screen_backend", side_effect=OSError("nope")
         ):
             self.assertIs(proc._replace_dead_backend(dead), dead)
             self.assertTrue(proc._backend_retry_failed)
@@ -680,7 +680,7 @@ class TestDeadBackendRecovery(unittest.TestCase):
     def _assert_no_reopen(self, proc):
         dead = MagicMock()
 
-        with patch("app.core.processor.create_screen_backend") as reopen:
+        with patch("app.engine.processor.create_screen_backend") as reopen:
             self.assertIs(proc._replace_dead_backend(dead), dead)
 
         reopen.assert_not_called()
@@ -696,7 +696,7 @@ class TestDeadBackendRecovery(unittest.TestCase):
             proc.term_event.set()
             return fresh
 
-        with patch("app.core.processor.create_screen_backend", side_effect=opening):
+        with patch("app.engine.processor.create_screen_backend", side_effect=opening):
             replacement = proc._replace_dead_backend(dead)
 
         self.assertIs(replacement, dead)
@@ -708,7 +708,7 @@ class TestDeadBackendRecovery(unittest.TestCase):
         first_dead = MagicMock()
         second_dead = MagicMock()
 
-        with patch("app.core.processor.create_screen_backend", return_value=MagicMock()):
+        with patch("app.engine.processor.create_screen_backend", return_value=MagicMock()):
             proc._replace_dead_backend(first_dead)
             proc._last_backend_retry -= proc.BACKEND_RETRY_INTERVAL_S + 1.0
             proc._replace_dead_backend(second_dead)
@@ -725,7 +725,7 @@ class TestDeadBackendRecovery(unittest.TestCase):
         slow = MagicMock()
         slow.close.side_effect = lambda: release.wait(5.0)
 
-        with patch("app.core.processor.create_screen_backend", return_value=MagicMock()):
+        with patch("app.engine.processor.create_screen_backend", return_value=MagicMock()):
             proc._replace_dead_backend(slow)
             proc._last_backend_retry -= proc.BACKEND_RETRY_INTERVAL_S + 1.0
             started = time.perf_counter()
@@ -739,7 +739,7 @@ class TestDeadBackendRecovery(unittest.TestCase):
 
 class TestCopyPixelbufferScale(unittest.TestCase):
     def test_buffer_view_is_zero_copy_slice(self):
-        from app.core.screen_backend import _buffer_view
+        from app.engine.screen_backend import _buffer_view
 
         data = bytearray(range(16))
         view = _buffer_view(data, 8)

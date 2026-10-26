@@ -9,9 +9,9 @@ from typing import Any, cast
 
 from PIL import Image, ImageTk
 
-from app.core.models import EventModel, Position
-from app.core.profile_events import event_has_screen, rename_condition_references
-from app.core.validation import (
+from app.domain.models import EventModel, Position
+from app.domain.profile_events import event_has_screen, rename_condition_references
+from app.domain.validation import (
     MIN_REGION_SIZE,
     condition_cycle_if_added,
     event_name_taken,
@@ -22,7 +22,7 @@ from app.core.validation import (
 from app.ui import theme
 from app.ui.capture_hud import CaptureHud, CaptureResult, render_overlay
 from app.utils.i18n import txt
-from app.utils.keys import KeyUtils
+from app.platform.keys import KeyUtils
 
 ChangeCallback = Callable[[EventModel, str], None]
 BulkCallback = Callable[[str, object], None]

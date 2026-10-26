@@ -3,8 +3,8 @@ from collections.abc import Iterable
 from typing import Protocol
 
 from app.utils.i18n import txt
-from app.core.models import EventModel, ProfileModel
-from app.utils.keys import KeyUtils
+from app.domain.models import EventModel, ProfileModel
+from app.domain.key_codes import KeyCodes
 
 
 WHEEL_UP_TRIGGER = "W_UP"
@@ -86,7 +86,7 @@ def _canonical_key_name(key_name: str | None, os_name: str | None = None) -> str
     if not raw:
         return None
 
-    key_names = KeyUtils.get_key_name_list(os_name=os_name)
+    key_names = KeyCodes.get_key_name_list(os_name=os_name)
     if raw in key_names:
         return raw
 
@@ -170,7 +170,7 @@ def normalize_runtime_toggle_capture_key(
     keycode: int | None = None,
     os_name: str | None = None,
 ) -> str | None:
-    keycode_name = KeyUtils.get_key_name_for_keycode(keycode, os_name=os_name)
+    keycode_name = KeyCodes.get_key_name_for_keycode(keycode, os_name=os_name)
     if keycode_name:
         return keycode_name
 
@@ -192,7 +192,7 @@ def normalize_runtime_toggle_listener_key(
     key: object, os_name: str | None = None
 ) -> str:
     vk = getattr(key, "vk", None)
-    keycode_name = KeyUtils.get_key_name_for_keycode(vk, os_name=os_name)
+    keycode_name = KeyCodes.get_key_name_for_keycode(vk, os_name=os_name)
     if keycode_name:
         return keycode_name.upper()
 

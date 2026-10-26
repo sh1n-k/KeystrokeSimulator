@@ -6,13 +6,13 @@ from collections.abc import Callable
 from PIL import Image
 from loguru import logger
 
-from app.core.screen_backend import (
+from app.engine.screen_backend import (
     BACKEND_RETRY_INTERVAL_S,
     PREVIEW_STREAM_FPS,
     ScreenBackend,
     open_screen_backend,
 )
-from app.utils.system import MonitorUtils
+from app.platform.system import MonitorUtils
 
 # grab이 25us라 폴링을 자주 해도 부담이 없다(mss 시절엔 1회 21ms였다).
 _POLL_ACTIVE_S = 0.1

@@ -14,17 +14,17 @@ from typing import Any, NotRequired, Protocol, TypedDict, cast
 from loguru import logger
 from PIL import Image
 
-from app.core.models import EventModel, ModificationKeys, UserSettings
-from app.core.screen_backend import (
+from app.domain.models import EventModel, ModificationKeys, UserSettings
+from app.engine.screen_backend import (
     BACKEND_RETRY_INTERVAL_S as _BACKEND_RETRY_INTERVAL_S,
 )
-from app.core.screen_backend import (
+from app.engine.screen_backend import (
     ScreenBackend,
     create_screen_backend,
     open_screen_backend,
 )
-from app.utils.keys import KeyUtils
-from app.utils.system import MonitorUtils, ProcessUtils
+from app.platform.keys import KeyUtils
+from app.platform.system import MonitorUtils, ProcessUtils
 
 Pixel = tuple[int, int, int]
 Rect = dict[str, int]

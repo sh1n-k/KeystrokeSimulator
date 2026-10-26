@@ -11,7 +11,7 @@ from typing import TypeAlias
 from PIL import Image, ImageDraw, ImageFont
 from loguru import logger
 
-from app.core.models import ProfileModel
+from app.domain.models import ProfileModel
 from app.ui import theme
 
 RGB: TypeAlias = tuple[int, int, int]

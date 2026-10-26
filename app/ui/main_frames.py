@@ -24,7 +24,7 @@ from app.storage.run_sets_storage import (
 )
 from app.ui import theme
 from app.utils.i18n import txt
-from app.utils.system import ProcessCollector
+from app.platform.system import ProcessCollector
 
 VoidCallback = Callable[[], None]
 TargetKind = Literal["profile", "run_set"]

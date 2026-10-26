@@ -4,7 +4,7 @@ import tkinter as tk
 import unittest
 from unittest.mock import patch, MagicMock
 
-from app.core.models import UserSettings
+from app.domain.models import UserSettings
 from app.ui.settings import (
     KeystrokeSettings,
     SETTINGS_WINDOW_DEFAULT_GEOMETRY,

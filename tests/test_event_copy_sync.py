@@ -3,8 +3,8 @@ import unittest
 
 from PIL import Image
 
-from app.core.models import EventModel
-from app.core.profile_events import clone_event
+from app.domain.models import EventModel
+from app.domain.profile_events import clone_event
 
 
 class TestEventCopySync(unittest.TestCase):

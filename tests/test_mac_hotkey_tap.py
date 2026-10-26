@@ -5,8 +5,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app.ui.mac_hotkey_tap import MacHotkeyTapListener
-from app.utils.keys import KeyUtils
+from app.platform.mac_hotkey_tap import MacHotkeyTapListener
+from app.platform.keys import KeyUtils
 
 
 class _QuartzStub:
@@ -60,7 +60,7 @@ class TestMacHotkeyTapProcessEvent(unittest.TestCase):
         event = object()
 
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
         ):
             # First event with both down: rising edge.
             out = listener._process_event(quartz, quartz.kCGEventFlagsChanged, event)
@@ -72,7 +72,7 @@ class TestMacHotkeyTapProcessEvent(unittest.TestCase):
 
         # Still held: swallow, no second post.
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
         ):
             out2 = listener._process_event(quartz, quartz.kCGEventFlagsChanged, event)
         self.assertIsNone(out2)
@@ -83,13 +83,13 @@ class TestMacHotkeyTapProcessEvent(unittest.TestCase):
             return key == "shift"
 
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", side_effect=only_shift
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", side_effect=only_shift
         ):
             out3 = listener._process_event(quartz, quartz.kCGEventFlagsChanged, event)
         self.assertIsNone(out3)
 
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=False
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=False
         ):
             out4 = listener._process_event(quartz, quartz.kCGEventFlagsChanged, event)
         # Both up clears swallow; this flagsChanged is passed through.
@@ -105,7 +105,7 @@ class TestMacHotkeyTapProcessEvent(unittest.TestCase):
             return key == "alt"
 
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", side_effect=only_option
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", side_effect=only_option
         ):
             out = listener._process_event(quartz, quartz.kCGEventFlagsChanged, event)
 
@@ -120,30 +120,30 @@ class TestMacHotkeyTapProcessEvent(unittest.TestCase):
         event = object()
 
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
-        ), patch("app.ui.mac_hotkey_tap.time.time", return_value=100.0):
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
+        ), patch("app.platform.mac_hotkey_tap.time.time", return_value=100.0):
             listener._process_event(quartz, quartz.kCGEventFlagsChanged, event)
 
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=False
-        ), patch("app.ui.mac_hotkey_tap.time.time", return_value=100.05):
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=False
+        ), patch("app.platform.mac_hotkey_tap.time.time", return_value=100.05):
             listener._process_event(quartz, quartz.kCGEventFlagsChanged, event)
 
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
-        ), patch("app.ui.mac_hotkey_tap.time.time", return_value=100.10):
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
+        ), patch("app.platform.mac_hotkey_tap.time.time", return_value=100.10):
             listener._process_event(quartz, quartz.kCGEventFlagsChanged, event)
 
         self.assertEqual(len(posted), 1)
 
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=False
-        ), patch("app.ui.mac_hotkey_tap.time.time", return_value=100.30):
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=False
+        ), patch("app.platform.mac_hotkey_tap.time.time", return_value=100.30):
             listener._process_event(quartz, quartz.kCGEventFlagsChanged, event)
 
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
-        ), patch("app.ui.mac_hotkey_tap.time.time", return_value=100.35):
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
+        ), patch("app.platform.mac_hotkey_tap.time.time", return_value=100.35):
             listener._process_event(quartz, quartz.kCGEventFlagsChanged, event)
 
         self.assertEqual(len(posted), 2)
@@ -160,7 +160,7 @@ class TestMacHotkeyTapProcessEvent(unittest.TestCase):
         event = object()
 
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=True
         ):
             out = listener._process_event(quartz, quartz.kCGEventFlagsChanged, event)
 
@@ -180,8 +180,8 @@ class TestMacHotkeyTapProcessEvent(unittest.TestCase):
         event = object()
 
         with patch(
-            "app.ui.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=False
-        ), patch("app.ui.mac_hotkey_tap.time.time", return_value=50.0):
+            "app.platform.mac_hotkey_tap.KeyUtils.mod_key_pressed", return_value=False
+        ), patch("app.platform.mac_hotkey_tap.time.time", return_value=50.0):
             out = listener._process_event(quartz, quartz.kCGEventKeyDown, event)
 
         self.assertIsNone(out)

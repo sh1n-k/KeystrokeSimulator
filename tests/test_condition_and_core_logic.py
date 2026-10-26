@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.helpers import evaluate_processor_events, make_processor_stub
-from app.core.processor import _normalize_key_name
+from app.engine.processor import _normalize_key_name
 
 
 class TestConditionFiltering(unittest.TestCase):
@@ -374,7 +374,7 @@ class TestSafetyAndNormalization(unittest.TestCase):
         proc = make_processor_stub()
         evt = {"dur": None, "rand": 100}
 
-        with patch("app.core.processor.random.uniform", side_effect=[0.1, -80]):
+        with patch("app.engine.processor.random.uniform", side_effect=[0.1, -80]):
             duration = proc._calculate_press_duration(evt)
 
         self.assertEqual(duration, 0.05)

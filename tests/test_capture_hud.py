@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from app.core.models import EventModel, ProfileModel
+from app.domain.models import EventModel, ProfileModel
 from app.storage.profile_storage import load_profile, save_profile
 from app.ui.capture_hud import (
     MAGNIFIER_SPAN,

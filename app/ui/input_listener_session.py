@@ -9,7 +9,7 @@ from typing import Protocol
 
 from loguru import logger
 
-from app.utils.system import ResponsivenessActivity
+from app.platform.system import ResponsivenessActivity
 
 
 class InputListener(Protocol):

@@ -11,10 +11,10 @@ from typing import cast
 from loguru import logger
 from PIL import Image
 
-from app.core.models import EventModel, ProfileModel
-from app.core.profile_events import next_available_event_name
-from app.core.validation import normalized_event_name
-from app.utils.runtime_toggle import normalize_runtime_toggle_trigger
+from app.domain.models import EventModel, ProfileModel
+from app.domain.profile_events import next_available_event_name
+from app.domain.validation import normalized_event_name
+from app.domain.runtime_toggle import normalize_runtime_toggle_trigger
 
 
 PROFILE_SCHEMA_VERSION = 1

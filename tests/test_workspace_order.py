@@ -3,8 +3,8 @@ import unittest
 
 from PIL import Image
 
-from app.core.models import EventModel
-from app.core.profile_events import (
+from app.domain.models import EventModel
+from app.domain.profile_events import (
     apply_target_to_same_area,
     build_event_sections,
     copy_event_name,
@@ -14,7 +14,7 @@ from app.core.profile_events import (
     sort_sections_by_name,
     write_section_order,
 )
-from app.core.validation import (
+from app.domain.validation import (
     condition_cycle_if_added,
     event_name_taken,
     find_condition_cycle,

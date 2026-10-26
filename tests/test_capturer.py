@@ -2,7 +2,7 @@ import time
 import unittest
 from unittest.mock import patch, MagicMock
 
-from app.core.capturer import ScreenshotCapturer
+from app.engine.capturer import ScreenshotCapturer
 from tests.helpers import make_image_frame
 
 
@@ -11,7 +11,7 @@ class TestSetCaptureSize(unittest.TestCase):
 
     def _make_capturer(self, screen_w=1920, screen_h=1080):
         with patch(
-            "app.core.capturer.MonitorUtils.get_primary_size",
+            "app.engine.capturer.MonitorUtils.get_primary_size",
             return_value=(screen_w, screen_h),
         ):
             return ScreenshotCapturer()
@@ -91,7 +91,7 @@ class TestCapturerAttributes(unittest.TestCase):
 
     def _make_capturer(self, screen_w=1920, screen_h=1080):
         with patch(
-            "app.core.capturer.MonitorUtils.get_primary_size",
+            "app.engine.capturer.MonitorUtils.get_primary_size",
             return_value=(screen_w, screen_h),
         ):
             return ScreenshotCapturer()
@@ -132,8 +132,8 @@ class TestCapturerAttributes(unittest.TestCase):
         backend.grab.return_value = [frame]
 
         with (
-            patch("app.core.capturer.open_screen_backend", return_value=backend),
-            patch("app.core.capturer.time.sleep", return_value=None),
+            patch("app.engine.capturer.open_screen_backend", return_value=backend),
+            patch("app.engine.capturer.time.sleep", return_value=None),
         ):
             capturer._last_capture_signature = (
                 (10, 10),
@@ -162,9 +162,9 @@ class TestCapturerAttributes(unittest.TestCase):
 
         with (
             patch(
-                "app.core.capturer.open_screen_backend", return_value=backend
+                "app.engine.capturer.open_screen_backend", return_value=backend
             ) as opener,
-            patch("app.core.capturer.time.sleep", return_value=None),
+            patch("app.engine.capturer.time.sleep", return_value=None),
         ):
             capturer.capture_screenshot()
 
@@ -182,7 +182,7 @@ class TestCapturerAttributes(unittest.TestCase):
 
     def test_preview_uses_the_lower_preview_fps(self):
         """전체 화면을 스트리밍하므로 실행 루프와 같은 fps는 낭비다."""
-        from app.core.screen_backend import PREVIEW_STREAM_FPS
+        from app.engine.screen_backend import PREVIEW_STREAM_FPS
 
         capturer = self._make_capturer()
         capturer.capturing.set()
@@ -195,9 +195,9 @@ class TestCapturerAttributes(unittest.TestCase):
 
         with (
             patch(
-                "app.core.capturer.open_screen_backend", return_value=backend
+                "app.engine.capturer.open_screen_backend", return_value=backend
             ) as opener,
-            patch("app.core.capturer.time.sleep", return_value=None),
+            patch("app.engine.capturer.time.sleep", return_value=None),
         ):
             capturer.capture_screenshot()
 
@@ -239,7 +239,7 @@ class TestCapturerAttributes(unittest.TestCase):
             return dead
 
         with patch(
-            "app.core.capturer.open_screen_backend", side_effect=slow_open
+            "app.engine.capturer.open_screen_backend", side_effect=slow_open
         ) as opener:
             backend, first = capturer._reopen(dead, 0.0)
             capturer._reopen(backend, first)
@@ -265,9 +265,9 @@ class TestCapturerAttributes(unittest.TestCase):
 
         with (
             patch(
-                "app.core.capturer.open_screen_backend", side_effect=[dead, fresh]
+                "app.engine.capturer.open_screen_backend", side_effect=[dead, fresh]
             ) as opener,
-            patch("app.core.capturer.time.sleep", return_value=None),
+            patch("app.engine.capturer.time.sleep", return_value=None),
         ):
             capturer.capture_screenshot()
 

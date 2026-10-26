@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from app.core.models import ProfileModel
+from app.domain.models import ProfileModel
 from app.storage.profile_storage import save_profile
 from app.storage.run_sets_storage import CURRENT_RUN_SET_ID, get_run_set, upsert_run_set
 from app.ui.main_frames import RunTargetFrame

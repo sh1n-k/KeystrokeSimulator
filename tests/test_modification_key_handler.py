@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from app.core.processor import ModificationKeyHandler
+from app.engine.processor import ModificationKeyHandler
 
 
 class TestModificationKeyHandler(unittest.IsolatedAsyncioTestCase):
@@ -14,7 +14,7 @@ class TestModificationKeyHandler(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(handler.mod_keys, {})
 
-        with patch("app.core.processor.KeyUtils.mod_key_pressed") as mock_pressed:
+        with patch("app.engine.processor.KeyUtils.mod_key_pressed") as mock_pressed:
             active = await handler.check_and_process()
 
         self.assertFalse(active)
@@ -32,7 +32,7 @@ class TestModificationKeyHandler(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(handler.mod_keys, {})
 
-        with patch("app.core.processor.KeyUtils.mod_key_pressed") as mock_pressed:
+        with patch("app.engine.processor.KeyUtils.mod_key_pressed") as mock_pressed:
             active = await handler.check_and_process()
 
         self.assertFalse(active)
@@ -50,7 +50,7 @@ class TestModificationKeyHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("alt", handler.mod_keys)
 
         with patch(
-            "app.core.processor.KeyUtils.mod_key_pressed", return_value=False
+            "app.engine.processor.KeyUtils.mod_key_pressed", return_value=False
         ) as mock_pressed:
             active = await handler.check_and_process()
 

@@ -2,8 +2,8 @@ import unittest
 
 from PIL import Image as PilImage
 
-from app.core.models import EventModel
-from app.core.processor import KeystrokeProcessor
+from app.domain.models import EventModel
+from app.engine.processor import KeystrokeProcessor
 
 
 def _make_processor_with_key_codes() -> KeystrokeProcessor:
@@ -119,7 +119,7 @@ class TestInitEventDataFieldMapping(unittest.TestCase):
 
         proc = _make_processor_with_key_codes()
         proc.os_type = "Darwin"
-        with patch("app.core.processor.logger.warning") as mock_warning:
+        with patch("app.engine.processor.logger.warning") as mock_warning:
             events = proc._init_event_data(
                 [_make_basic_event(key_to_enter="NotARealKey")]
             )

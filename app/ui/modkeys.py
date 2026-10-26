@@ -6,7 +6,7 @@ from tkinter import messagebox, ttk
 from typing import ClassVar, TypeAlias
 
 from loguru import logger
-from app.core.models import ModificationKeys
+from app.domain.models import ModificationKeys
 from app.storage.modkey_sets_storage import (
     default_modification_keys,
     get_modkey_set,

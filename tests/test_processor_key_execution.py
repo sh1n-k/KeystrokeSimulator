@@ -4,8 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
-from app.core import processor as processor_module
-from app.core.processor import KeystrokeProcessor, ModificationKeyHandler
+from app.engine import processor as processor_module
+from app.engine.processor import KeystrokeProcessor, ModificationKeyHandler
 
 
 def _make_processor_stub() -> KeystrokeProcessor:
@@ -95,7 +95,7 @@ class TestPressKeyAsync(unittest.IsolatedAsyncioTestCase):
             "무관한 조건": True,
         }
 
-        with patch("app.core.processor.logger.debug") as mock_debug:
+        with patch("app.engine.processor.logger.debug") as mock_debug:
             await proc._press_key_async(evt, state_snapshot)
 
         mock_debug.assert_called_once()
@@ -208,7 +208,7 @@ class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
         )
         handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
 
-        with patch("app.core.processor.asyncio.sleep", return_value=None):
+        with patch("app.engine.processor.asyncio.sleep", return_value=None):
             await handler._sim_key("shift", "A")
 
         handler.sim.press.assert_called_once_with(65)
@@ -224,7 +224,7 @@ class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
         handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
 
         with patch(
-            "app.core.processor.asyncio.sleep",
+            "app.engine.processor.asyncio.sleep",
             side_effect=RuntimeError("sleep boom"),
         ):
             with self.assertRaises(RuntimeError):
@@ -250,7 +250,7 @@ class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
             sleep_calls += 1
             term.set()
 
-        with patch("app.core.processor.asyncio.sleep", side_effect=fake_sleep):
+        with patch("app.engine.processor.asyncio.sleep", side_effect=fake_sleep):
             await handler._sim_key("shift", "A")
 
         self.assertGreaterEqual(sleep_calls, 1)
@@ -272,7 +272,7 @@ class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
         )
         handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
 
-        with patch("app.core.processor.asyncio.sleep", return_value=None):
+        with patch("app.engine.processor.asyncio.sleep", return_value=None):
             await handler._sim_key("shift", "A")
 
         self.assertEqual(pressed_keys, set())
@@ -296,7 +296,7 @@ class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
             release=MagicMock(side_effect=RuntimeError("release boom")),
         )
 
-        with patch("app.core.processor.asyncio.sleep", return_value=None):
+        with patch("app.engine.processor.asyncio.sleep", return_value=None):
             await handler._sim_key("shift", "A")
 
         self.assertEqual(pressed_keys, {"A"})
@@ -311,7 +311,7 @@ class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
         )
         handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
 
-        with patch("app.core.processor.asyncio.sleep", return_value=None):
+        with patch("app.engine.processor.asyncio.sleep", return_value=None):
             await handler._sim_key("shift", "A")
 
         handler.sim.press.assert_called_once_with(0)
@@ -346,7 +346,7 @@ class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
         )
         handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
 
-        with patch("app.core.processor.asyncio.sleep", return_value=None):
+        with patch("app.engine.processor.asyncio.sleep", return_value=None):
             await handler._sim_key("shift", "V", include_modifier=True)
 
         handler.sim.press.assert_called_once_with(86)
@@ -364,8 +364,8 @@ class TestModificationKeySimRelease(unittest.IsolatedAsyncioTestCase):
         handler.sim = SimpleNamespace(press=MagicMock(), release=MagicMock())
 
         with (
-            patch("app.core.processor.asyncio.sleep", return_value=None),
-            patch("app.core.processor.KeyUtils.mod_key_pressed", return_value=True),
+            patch("app.engine.processor.asyncio.sleep", return_value=None),
+            patch("app.engine.processor.KeyUtils.mod_key_pressed", return_value=True),
         ):
             await handler._sim_key("shift", "V", include_modifier=False)
 
@@ -390,7 +390,7 @@ class TestWindowsSendInputHelpers(unittest.TestCase):
         with (
             patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": ""}, clear=False),
             patch(
-                "app.core.processor._windows_map_vk_to_scan", return_value=0x1E
+                "app.engine.processor._windows_map_vk_to_scan", return_value=0x1E
             ),
         ):
             ki = processor_module._windows_build_keybdinput(0x41, key_up=False)
@@ -403,7 +403,7 @@ class TestWindowsSendInputHelpers(unittest.TestCase):
         with (
             patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": "1"}, clear=False),
             patch(
-                "app.core.processor._windows_map_vk_to_scan", return_value=0x1E
+                "app.engine.processor._windows_map_vk_to_scan", return_value=0x1E
             ),
         ):
             ki = processor_module._windows_build_keybdinput(0x41, key_up=True)
@@ -423,7 +423,7 @@ class TestWindowsSendInputHelpers(unittest.TestCase):
         with (
             patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": ""}, clear=False),
             patch(
-                "app.core.processor._windows_map_vk_to_scan", return_value=0x4B
+                "app.engine.processor._windows_map_vk_to_scan", return_value=0x4B
             ),
         ):
             ki = processor_module._windows_build_keybdinput(0x25, key_up=False)
@@ -437,9 +437,9 @@ class TestWindowsSendInputHelpers(unittest.TestCase):
         with (
             patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": "1"}, clear=False),
             patch(
-                "app.core.processor._windows_map_vk_to_scan", return_value=0
+                "app.engine.processor._windows_map_vk_to_scan", return_value=0
             ),
-            patch("app.core.processor.logger.warning") as mock_warning,
+            patch("app.engine.processor.logger.warning") as mock_warning,
         ):
             ki = processor_module._windows_build_keybdinput(0x41, key_up=False)
 
@@ -452,7 +452,7 @@ class TestWindowsSendInputHelpers(unittest.TestCase):
         with (
             patch.dict(os.environ, {"KEYSIM_WIN_SCANCODE": "1"}, clear=False),
             patch(
-                "app.core.processor._windows_map_vk_to_scan", return_value=0x4B
+                "app.engine.processor._windows_map_vk_to_scan", return_value=0x4B
             ),
         ):
             ki = processor_module._windows_build_keybdinput(0x25, key_up=False)
@@ -564,7 +564,7 @@ class TestDarwinKeyEventSource(unittest.TestCase):
             kCGEventSourceStateHIDSystemState="HID_STATE",
         )
 
-        with patch("app.core.processor.importlib.import_module", return_value=fake_quartz):
+        with patch("app.engine.processor.importlib.import_module", return_value=fake_quartz):
             processor_module._darwin_key_event(0, True)
 
         self.assertEqual(created_sources, ["HID_STATE"])

@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from app.core.models import EventModel, ProfileModel
+from app.domain.models import EventModel, ProfileModel
 from app.storage.profile_storage import load_profile, save_profile
 from app.storage.run_sets_storage import get_run_set, upsert_run_set
 from app.ui import theme
@@ -21,7 +21,7 @@ from app.ui.workspace_list import (
     section_title,
 )
 from app.ui.workspace_sidebar import sidebar_actions
-from app.core.profile_events import build_event_sections
+from app.domain.profile_events import build_event_sections
 from app.utils.i18n import set_language
 
 _RUN_GUI_TESTS = os.environ.get("RUN_GUI_TESTS", "0") == "1"

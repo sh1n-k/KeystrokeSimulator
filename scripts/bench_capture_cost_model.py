@@ -21,9 +21,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from app.core.processor import ImageFrame
-from app.core.screen_backend import MssScreenBackend, union_group_rects
-from app.utils.system import MonitorUtils
+from app.engine.processor import ImageFrame
+from app.engine.screen_backend import MssScreenBackend, union_group_rects
+from app.platform.system import MonitorUtils
 from scripts.bench_capture_strategies import (
     _build_groups,
     _timed_samples,

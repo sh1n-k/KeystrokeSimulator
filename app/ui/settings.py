@@ -15,7 +15,7 @@ from app.utils.i18n import (
     set_language,
     txt,
 )
-from app.core.models import UserSettings
+from app.domain.models import UserSettings
 from app.storage.settings_storage import load_user_settings, save_user_settings
 from app.utils.notification_sound_packs import (
     notification_sound_pack_choices,

@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from loguru import logger
 
-from app.core.models import UserSettings
+from app.domain.models import UserSettings
 from app.utils.i18n import normalize_language
 from app.utils.notification_sound_packs import normalize_notification_sound_pack
 

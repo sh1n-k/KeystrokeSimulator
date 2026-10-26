@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Any, Literal, cast
 
-from app.core.models import EventModel, ProfileModel
+from app.domain.models import EventModel, ProfileModel
 
 
 def clone_event(event: EventModel, *, event_name: str | None = None) -> EventModel:
