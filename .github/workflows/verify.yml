@@ -26,5 +26,5 @@ jobs:
           RUN_GUI_TESTS: "1"
         run: >-
           uv run -m unittest
-          tests.test_quick_event_editor.TestQuickEventEditorLayout
+          tests.test_capture_hud.TestCaptureHudLayout
           tests.test_keystroke_settings.TestKeystrokeSettings
