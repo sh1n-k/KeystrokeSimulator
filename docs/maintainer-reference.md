@@ -4,24 +4,37 @@
 
 ## 모듈 경계
 
+패키지 의존 방향은 `ui` → `engine`·`platform`·`storage` → `domain`이다. `tests/test_import_conventions.py`가 다음을 강제한다.
+
+- `tkinter`·`PySide6`는 `app/ui/**`에서만 import한다.
+- `app/domain`은 `app.engine`·`app.platform`·`app.storage`·`app.ui`와 OS 모듈(Quartz, AppKit, ApplicationServices, ScreenCaptureKit, objc, win32*, mss, pynput, ctypes)을 import하지 않는다.
+- `app/engine`·`app/platform`·`app/storage`·`app/utils`는 `app.ui`를 import하지 않는다.
+
 | 경로 | 책임 |
 | --- | --- |
 | `app/__main__.py` | GUI 진입점과 예외 로깅 |
 | `app/ui/simulator_app.py` | 실행 창(대상·실행·수정키 콤보, 상태 한 줄, ⚙ 메뉴), 실행 상태와 입력 동작 조정 |
 | `app/ui/main_frames.py` | 실행 창의 대상·실행(프로필+실행 세트 통합 콤보)·수정키 프레임 |
 | `app/ui/input_listener_session.py` | OS listener 수명과 Tk 메인 스레드 action queue |
-| `app/core/processor.py` | capture → match → condition → group priority → keystroke 처리 |
-| `app/core/models.py` | `EventModel`, `ProfileModel`, `UserSettings` 계약 |
-| `app/core/capturer.py` | 화면 캡처 스레드 |
-| `app/core/screen_backend.py` | 실행 루프 화면 백엔드. Windows는 mss, macOS는 SCStream |
+| `app/engine/processor.py` | capture → match → condition → group priority → keystroke 처리 |
+| `app/domain/models.py` | `EventModel`, `ProfileModel`, `UserSettings` 계약 |
+| `app/engine/capturer.py` | 화면 캡처 스레드 |
+| `app/engine/screen_backend.py` | 실행 루프 화면 백엔드. Windows는 mss, macOS는 SCStream |
 | `app/ui/capture_session.py` | 캡처 스레드와 편집 UI 사이의 상태 경계, 캡처 박스 기하 |
 | `app/ui/capture_hud.py` | 캡처 HUD(항상 위). 단일 모드(작업 공간의 화면 지정), 연속 모드(빠른 이벤트 → Quick 추가), 캡처 영역 테두리 |
 | `app/storage/profile_storage.py` | `profiles/*.json` 직렬화와 호환 로딩, 프로필 표시 순서 |
 | `app/storage/modkey_sets_storage.py` | `modkey_sets.json` 수정키 세트 저장 |
 | `app/storage/run_sets_storage.py` | `run_sets.json` 이름 있는 실행 세트 저장 |
-| `app/core/profile_events.py` | 이벤트 복사·조건 참조, 신호/규칙 묶음과 표시 순서(=우선순위), 되돌리기 스냅숏, 자동 저장 dirty fingerprint |
-| `app/core/validation.py` | 이름 중복·순환 조건·영역 경계·타이밍 검증 |
-| `app/core/run_composition.py` | 다중 프로필 실행 시 이벤트/group 네임스페이스 합성 |
+| `app/domain/profile_events.py` | 이벤트 복사·조건 참조, 신호/규칙 묶음과 표시 순서(=우선순위), 되돌리기 스냅숏, 자동 저장 dirty fingerprint |
+| `app/domain/validation.py` | 이름 중복·순환 조건·영역 경계·타이밍 검증 |
+| `app/domain/run_composition.py` | 다중 프로필 실행 시 이벤트/group 네임스페이스 합성 |
+| `app/domain/runtime_toggle.py` | 단축키 묶음 trigger 정규화·표시·검증 |
+| `app/domain/key_codes.py` | OS별 키 이름↔키 코드 표(`KeyCodes`). OS 호출 없음 |
+| `app/platform/keys.py` | `KeyUtils`(`KeyCodes` 상속): 실제 키 눌림 상태 조회(Quartz/`GetAsyncKeyState`) |
+| `app/platform/system.py` | 모니터·프로세스·macOS 권한·App Nap 등 OS 서비스 |
+| `app/platform/mac_hotkey_tap.py`, `app/platform/mac_key_poll.py` | macOS 전역 단축키 CGEventTap과 폴링 폴백 |
+| `app/storage/app_state.py` | `app_state.json`(최근 선택·창 위치) 읽기·쓰기 |
+| `app/ui/tk_window.py` | Tk 창 가운데 정렬·모달 grab 복원 |
 | `app/ui/workspace.py` | 작업 공간 창: 프로필·실행 세트 전환, 자동 저장, 되돌리기, 그래프 탭, 실행 중 편집 정책 |
 | `app/ui/workspace_list.py` | 가운데 목록: 신호/규칙 묶음 Treeview, 드래그 순서 |
 | `app/ui/workspace_detail.py` | 오른쪽 상세 패널: 이벤트 편집, 조건 추가, HUD 캡처 연결, 다중 선택 일괄 동작 |
@@ -72,12 +85,12 @@
 
 | 변경 종류 | 필수 구현 확인 | 최소 자동 테스트 | 필요 E2E |
 | --- | --- | --- | --- |
-| 이벤트 스키마·복사 | `app/core/models.py`, `app/core/profile_events.py` (`EVENT_DIRTY_FIELD_NAMES` / `event_fingerprint`), `app/storage/profile_storage.py`, `app/ui/workspace_detail.py`, `app/ui/capture_hud.py`, `app/core/processor.py` | `test_event_data_conversion.py`, `test_event_copy_sync.py`, `test_profile_json_storage.py`, `test_event_dirty_fingerprint.py` | 캡처·편집 또는 실행 의미가 바뀌면 앱과 프로필, 실제 실행 |
-| 작업 공간 목록·순서 | `app/core/profile_events.py`, `app/ui/workspace_list.py`, `app/ui/workspace.py` | `test_workspace_order.py`, `test_workspace.py` | 앱과 프로필, 조건·그룹과 그래프 |
+| 이벤트 스키마·복사 | `app/domain/models.py`, `app/domain/profile_events.py` (`EVENT_DIRTY_FIELD_NAMES` / `event_fingerprint`), `app/storage/profile_storage.py`, `app/ui/workspace_detail.py`, `app/ui/capture_hud.py`, `app/engine/processor.py` | `test_event_data_conversion.py`, `test_event_copy_sync.py`, `test_profile_json_storage.py`, `test_event_dirty_fingerprint.py` | 캡처·편집 또는 실행 의미가 바뀌면 앱과 프로필, 실제 실행 |
+| 작업 공간 목록·순서 | `app/domain/profile_events.py`, `app/ui/workspace_list.py`, `app/ui/workspace.py` | `test_workspace_order.py`, `test_workspace.py` | 앱과 프로필, 조건·그룹과 그래프 |
 | 설정 | `UserSettings` (incl. `notification_sound_pack`, `runtime_toggle_sound_pack`, `runtime_toggle_sound_enabled`), `app/storage/settings_storage.py`, `app/ui/settings.py`, `app/utils/sounds.py` / `notification_sound_packs.py`, 설정 소비 경로 | `test_settings_storage.py`, `test_keystroke_settings.py`, `test_notification_sound_packs.py`, `test_keystroke_sounds.py` | 표시·재시작 복원·실행 동작이 바뀌면 설정과 복원 |
-| runtime toggle(단축키 묶음) | 모델·저장 필드, `app/utils/runtime_toggle.py`, `app/ui/profile_settings.py`, `app/ui/workspace_detail.py`, `app/ui/simulator_app.py`, `app/core/processor.py` | `test_profile_json_storage.py`, `test_resolve_effective_states.py`, `test_condition_and_core_logic.py`, `test_keystroke_simulator_app_flow.py` | 실제 실행; Windows system/hotkey 변경은 Windows 필수 |
+| runtime toggle(단축키 묶음) | 모델·저장 필드, `app/domain/runtime_toggle.py`, `app/ui/profile_settings.py`, `app/ui/workspace_detail.py`, `app/ui/simulator_app.py`, `app/engine/processor.py` | `test_profile_json_storage.py`, `test_resolve_effective_states.py`, `test_condition_and_core_logic.py`, `test_keystroke_simulator_app_flow.py` | 실제 실행; Windows system/hotkey 변경은 Windows 필수 |
 | 프로필 경로·저장 | `app/storage/profile_storage.py`, `app/storage/profile_display.py`, `app/ui/main_frames.py`, `app/ui/workspace.py` | `test_profile_json_storage.py`, `test_profile_display.py`, `test_run_window.py`, `test_workspace.py` | 앱과 프로필 |
-| 캡처 UI | `app/core/capturer.py`, `app/ui/capture_session.py`, `app/ui/capture_hud.py`, `app/ui/workspace_detail.py`, processor 입력 형식 | `test_capturer.py`, `test_capture_session.py`, `test_capture_hud.py`, `test_event_validation.py`, `test_extract_roi_and_capture.py` | 앱과 프로필, 실제 화면 캡처 |
-| OS listener·권한 | `app/ui/input_listener_session.py`, `app/ui/simulator_app.py`, `app/utils/system.py`, 관련 설정과 main-thread UI 갱신 | `test_input_listener_session.py`, `test_keystroke_simulator_app_flow.py`, `test_keystroke_utils.py` | 실제 실행; 변경 대상 OS에서 수행하고 Windows system/hotkey 변경은 Windows 필수 |
+| 캡처 UI | `app/engine/capturer.py`, `app/ui/capture_session.py`, `app/ui/capture_hud.py`, `app/ui/workspace_detail.py`, processor 입력 형식 | `test_capturer.py`, `test_capture_session.py`, `test_capture_hud.py`, `test_event_validation.py`, `test_extract_roi_and_capture.py` | 앱과 프로필, 실제 화면 캡처 |
+| OS listener·권한 | `app/ui/input_listener_session.py`, `app/ui/simulator_app.py`, `app/platform/system.py`, 관련 설정과 main-thread UI 갱신 | `test_input_listener_session.py`, `test_keystroke_simulator_app_flow.py`, `test_keystroke_utils.py` | 실제 실행; 변경 대상 OS에서 수행하고 Windows system/hotkey 변경은 Windows 필수 |
 
 표의 자동 테스트는 시작점이다. `RUN_GUI_TESTS=1` GUI 테스트는 모듈 단위로 실행한다(`test_mac_hotkey_tap`·`test_screen_backend` 뒤에 Tk 창을 만들면 macOS에서 세그폴트가 날 수 있다). 공용 계약을 추가로 건드렸다면 해당 구현을 직접 검증하는 기존 테스트까지 확장한다.
