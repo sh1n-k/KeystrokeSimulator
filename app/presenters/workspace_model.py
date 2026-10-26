@@ -167,6 +167,10 @@ class WorkspaceModel:
         return ordered_profile_names(self.profiles_dir)[0]
 
     def _notify_catalog(self, selected: str | None = None) -> None:
+        if self.mode == "run_set" and self.run_set_name:
+            # 프로필 이름 변경 등으로 세트 파일이 바뀌었을 수 있다. 화면의 옛
+            # 구성으로 다시 저장하지 않도록 디스크에서 다시 읽는다.
+            self.run_set_members = get_run_set(self.run_set_name, self.run_sets_path)
         self.view.on_catalog_changed()
         if self.host_catalog_changed is not None:
             self.host_catalog_changed(selected)

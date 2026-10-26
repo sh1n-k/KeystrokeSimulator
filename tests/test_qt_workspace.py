@@ -414,6 +414,17 @@ class TestRunSetsAndOptions(WorkspaceWindowCase):
         self.assertEqual(get_run_set("Raid", Path("run_sets.json")), ["P"])
         self.assertIn("at least one", view.lbl_error.text())
 
+    def test_profile_rename_while_editing_set_keeps_new_name(self) -> None:
+        save_profile(Path("profiles"), ProfileModel(name="B"), name="B")
+        upsert_run_set("Raid", ["P", "B"], Path("run_sets.json"))
+        self.ws.model.open_run_set("Raid")
+
+        self.ws.model.rename_profile("B", "C")
+        self.ws.run_set_view.checks["Quick"].setChecked(True)
+
+        saved = get_run_set("Raid", Path("run_sets.json"))
+        self.assertEqual(sorted(saved), ["C", "P", "Quick"])
+
     def test_run_set_rename_follows_in_main_window(self) -> None:
         upsert_run_set("Raid", ["P"], Path("run_sets.json"))
         self.ws.on_catalog_changed()

@@ -368,6 +368,12 @@ class WorkspaceWindow(QMainWindow):
             else None
         )
         self.sidebar.set_items(profiles, favorites, run_sets, current)
+        if self.model.mode == "run_set":
+            self.run_set_view.load(
+                self.model.run_set_name,
+                self.model.run_set_members,
+                self.model.all_profiles(),
+            )
 
     def on_save_state_changed(self) -> None:
         state = self.model.save_state
