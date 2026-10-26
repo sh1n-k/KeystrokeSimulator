@@ -251,10 +251,9 @@ class RunController:
         sel = self.host.selection()
         set_id = (sel.run_set or "").strip()
         if set_id and not is_current_run_set(set_id):
+            # 멤버가 모두 사라진 세트를 마지막 프로필로 대신 돌리지 않는다.
             available = set(list_profile_names(self.profiles_dir))
-            names = [n for n in get_run_set(set_id, self.run_sets_path) if n in available]
-            if names:
-                return names
+            return [n for n in get_run_set(set_id, self.run_sets_path) if n in available]
         return [sel.profile] if sel.profile else []
 
     def _target_process_is_active(self) -> bool:
@@ -430,6 +429,22 @@ class RunController:
             }
 
         run_names = self.run_profile_names()
+        set_id = (self.host.selection().run_set or "").strip()
+        if not run_names and set_id and not is_current_run_set(set_id):
+            return {
+                "can_start": False,
+                "badge_text": txt("Empty Run Set", "빈 실행 세트"),
+                "title": txt(
+                    "This run set has no existing profiles.",
+                    "이 실행 세트에 남아 있는 프로필이 없습니다.",
+                ),
+                "detail": txt(
+                    "Check profiles for this set in the workspace.",
+                    "작업 공간에서 이 세트에 넣을 프로필을 체크하세요.",
+                ),
+                "tone": "warn",
+                "action": "workspace",
+            }
         if not run_names:
             return {
                 "can_start": False,

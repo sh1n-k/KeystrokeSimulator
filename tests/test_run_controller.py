@@ -876,14 +876,18 @@ class TestRunProfileNames(unittest.TestCase):
 
             self.assertEqual(app.run_profile_names(), ["Util", "Rot"])
 
-    def test_empty_run_set_falls_back_to_the_profile(self):
+    def test_empty_run_set_does_not_fall_back_to_the_profile(self):
         with tempfile.TemporaryDirectory() as td:
             app = self._controller(Path(td))
             upsert_run_set("Empty", ["Gone"], app.run_sets_path)
             app.selected_run_set.set("Empty")
             app.selected_profile.set("Rot")
+            app.selected_process.set("Game (1)")
 
-            self.assertEqual(app.run_profile_names(), ["Rot"])
+            self.assertEqual(app.run_profile_names(), [])
+            readiness = app.readiness()
+            self.assertFalse(readiness["can_start"])
+            self.assertEqual(readiness["badge_text"], "Empty Run Set")
 
     def test_current_set_uses_the_profile(self):
         app = _make_app_stub()
