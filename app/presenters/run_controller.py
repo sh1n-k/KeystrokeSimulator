@@ -206,6 +206,8 @@ class RunController:
         self.settings: UserSettings = UserSettings()
         self.is_running = False
         self.keystroke_processor: KeystrokeProcessor | None = None
+        # 실행 중 대상 pid. macOS tap/poll 스레드가 UI를 읽지 않도록 시작 때 잡는다.
+        self._run_pid: int | None = None
         self.terminate_event = threading.Event()
 
         self.start_stop_mouse_listener: InputListener | None = None
@@ -869,9 +871,10 @@ class RunController:
         return bool(getattr(self.settings, "toggle_start_stop_mac", False))
 
     def _mac_runtime_toggle_enabled_for_poll(self) -> bool:
+        """tap/poll 스레드에서 불린다. host(UI)를 읽지 않는다."""
         if not self.runtime_toggle_enabled or not self.is_running:
             return False
-        if not self._target_process_is_active():
+        if not ProcessUtils.is_process_active(self._run_pid):
             return False
         return is_keyboard_runtime_toggle_trigger(self.runtime_toggle_key)
 
@@ -1036,6 +1039,7 @@ class RunController:
         if platform.system() != "Darwin" or not self.ctrl_check_active:
             self.setup_event_handlers()
 
+        self._run_pid = selected_process_pid(process)
         self.keystroke_processor.start()
         self.save_state()
         self.sound_player.play_start_sound()

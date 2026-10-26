@@ -245,6 +245,14 @@ class TestEditing(WorkspaceWindowCase):
         self.ws.undo()
         self.assertEqual(self.event("S").latest_position, (10, 20))
 
+    def test_capture_while_running_draws_no_border(self) -> None:
+        self.host.run.is_running = True
+        self.ws.tree.select([self.event("S")])
+        with patch("app.ui.capture_hud.CaptureHud") as hud:
+            self.ws.detail.btn_capture.click()
+
+        self.assertFalse(hud.call_args.kwargs["border"])
+
     def test_new_signal_comes_from_the_hud(self) -> None:
         self.host.run.is_running = True
         with patch("app.ui.capture_hud.CaptureHud") as hud:
@@ -349,6 +357,15 @@ class TestRunningAndClosing(WorkspaceWindowCase):
         box.warning.assert_called_once()
         self.assertTrue(self.ws.is_open())
         self.ws.model.profile.event_list.pop()
+
+    def test_close_for_quit_closes_without_dialog_when_save_fails(self) -> None:
+        self.ws.model.profile.event_list.append(rule("loose"))
+        with patch("app.ui.workspace.QMessageBox") as box:
+            self.ws.close_for_quit()
+
+        box.warning.assert_not_called()
+        self.assertFalse(self.ws.is_open())
+        self.assertIsNone(self.host.workspace)
 
 
 class TestRunSetsAndOptions(WorkspaceWindowCase):

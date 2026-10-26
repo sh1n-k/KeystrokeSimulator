@@ -6,10 +6,15 @@ from unittest.mock import MagicMock, patch
 from PIL import Image
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from app.domain.capture_geometry import CaptureResult, rects_overlap
-from app.ui.capture_hud import CaptureHud, _to_logical_rect, open_quick_capture
+from app.ui.capture_hud import (
+    CaptureHud,
+    _to_logical_rect,
+    open_quick_capture,
+    text_input_has_focus,
+)
 from app.utils.i18n import set_language
 from tests.qt_support import qt_app
 from tests.test_capture_controller import FakeCapturer
@@ -269,6 +274,17 @@ class TestCaptureHudFlow(HudTestCase):
             hud._check_keys()
 
         self.assertIsNone(hud.controller.session.held_image)
+
+    def test_single_mode_opens_without_name_focus_so_ctrl_works(self):
+        hud, cap = self.make(grab=True)
+        QApplication.processEvents()
+
+        self.assertIsNot(QApplication.focusWidget(), hud.entry_name)
+        self.assertFalse(text_input_has_focus())
+        cap.emit((0, 0, 255))
+        self.keys["ctrl"] = True
+        hud._check_keys()
+        self.assertIsNotNone(hud.controller.session.held_image)
 
     def test_alt_moves_box_to_pointer_and_hud_steps_aside(self):
         hud, _ = self.make()

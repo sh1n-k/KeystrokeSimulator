@@ -301,7 +301,11 @@ class CaptureHud(QWidget):
 
         if grab:
             self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        # 창 자체가 포커스를 받아야 CTRL 고정이 바로 동작한다. 그렇지 않으면
+        # 첫 위젯인 이름칸이 포커스를 가져가 CTRL이 입력으로 취급된다.
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.show()
+        self.setFocus()
         keep_above_all_spaces(self)
         # 이 앱이 활성일 때(버튼으로 연 직후)만 앞으로 가져온다. 게임에서
         # 포커스를 빼앗지 않는다.

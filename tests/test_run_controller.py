@@ -137,6 +137,7 @@ class TestStartSimulation(unittest.TestCase):
         app.sound_player.play_start_sound.assert_called_once()
         mock_processor.start.assert_called_once()
         mock_get_modkey_set.assert_called_once_with("Combat", app.modkey_sets_path)
+        self.assertEqual(app._run_pid, 1234)
         self.assertEqual(
             mock_processor_cls.call_args.args[3], mock_get_modkey_set.return_value
         )
@@ -911,6 +912,35 @@ class TestMigrateLegacyRunProfiles(unittest.TestCase):
                 migrate_legacy_run_profiles({"run_profiles": "A"}, [], path)
             )
             self.assertFalse(path.exists())
+
+
+
+class TestMacRuntimeTogglePollProvider(unittest.TestCase):
+    """tap/poll 스레드에서 불리므로 host(UI 위젯)를 읽으면 안 된다."""
+
+    def _app(self) -> RunController:
+        app = _make_app_stub()
+        app.host.selection.side_effect = AssertionError("UI read off main thread")
+        app.runtime_toggle_enabled = True
+        app.runtime_toggle_key = "F1"
+        app.is_running = True
+        app._run_pid = 1234
+        return app
+
+    @patch("app.presenters.run_controller.ProcessUtils.is_process_active")
+    def test_uses_pid_captured_at_start(self, mock_active):
+        mock_active.return_value = True
+        app = self._app()
+
+        self.assertTrue(app._mac_runtime_toggle_enabled_for_poll())
+        mock_active.assert_called_once_with(1234)
+
+    @patch(
+        "app.presenters.run_controller.ProcessUtils.is_process_active",
+        return_value=False,
+    )
+    def test_inactive_target_disables_toggle(self, _mock_active):
+        self.assertFalse(self._app()._mac_runtime_toggle_enabled_for_poll())
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ def main() -> int:
 
     def graceful_shutdown(_signum: int, _frame: FrameType | None) -> None:
         if window is not None:
-            QTimer.singleShot(0, window.close)
+            QTimer.singleShot(0, window.quit_from_signal)
 
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)

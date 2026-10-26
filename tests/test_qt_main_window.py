@@ -4,15 +4,39 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtGui import QCloseEvent, QGuiApplication
+from PySide6.QtWidgets import QMessageBox, QWidget
 from tests.qt_support import qt_app
 
 from app.domain.models import ProfileModel
 from app.presenters.run_controller import RunController
 from app.storage.profile_storage import save_profile
-from app.storage.run_sets_storage import CURRENT_RUN_SET_ID, upsert_run_set
+from app.storage.run_sets_storage import (
+    CURRENT_RUN_SET_ID,
+    delete_run_set,
+    rename_run_set,
+    upsert_run_set,
+)
 from app.ui.main_window import RunWindow
 from app.utils.i18n import set_language
+
+class _RefusingWorkspace(QWidget):
+    """저장에 실패한 작업 공간처럼 닫기를 거부한다(시그널 종료 때만 닫힌다)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.quitting = False
+
+    def close_for_quit(self) -> None:
+        self.quitting = True
+        self.close()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self.quitting:
+            event.accept()
+        else:
+            event.ignore()
+
 
 PROCS = [("Game", 4321, None), ("Editor", 77, None)]
 
@@ -156,6 +180,75 @@ class TestRunWindow(unittest.TestCase):
         self.assertFalse(old.exists())
         self.assertTrue(keep.exists())
         self.assertIn("1", self.window.lbl_run_status.text())
+
+
+    def test_run_set_selection_keeps_last_profile(self) -> None:
+        self.window.set_target("profile", "Rot")
+        self.window.set_target("run_set", "Raid")
+
+        sel = self.window.selection()
+
+        self.assertEqual((sel.profile, sel.run_set), ("Rot", "Raid"))
+
+    def test_offscreen_main_pos_is_centered(self) -> None:
+        with patch(
+            "app.ui.main_window.StateUtils.load_main_app_state",
+            return_value={"main_pos": "-9000/-9000"},
+        ):
+            window = RunWindow()
+        self.addCleanup(window.deleteLater)
+        window._closing = True
+
+        area = QGuiApplication.primaryScreen().availableGeometry()
+        self.assertTrue(area.contains(window.frameGeometry().center()))
+
+    def test_close_is_cancelled_when_workspace_refuses(self) -> None:
+        workspace = _RefusingWorkspace()
+        self.addCleanup(workspace.deleteLater)
+        self.window.workspace = workspace
+        with patch.object(RunController, "shutdown") as shutdown:
+            closed = self.window.close()
+
+        self.assertFalse(closed)
+        self.assertFalse(self.window._closing)
+        shutdown.assert_not_called()
+
+    def test_signal_quit_closes_even_when_workspace_refuses(self) -> None:
+        workspace = _RefusingWorkspace()
+        self.addCleanup(workspace.deleteLater)
+        self.window.workspace = workspace
+        with patch.object(RunController, "shutdown") as shutdown:
+            self.window.quit_from_signal()
+
+        self.assertTrue(workspace.quitting)
+        self.assertTrue(self.window._closing)
+        shutdown.assert_called_once()
+
+
+    def test_renamed_run_set_stays_selected(self) -> None:
+        self.window.set_target("run_set", "Raid")
+        rename_run_set("Raid", "Boss", Path("run_sets.json"))
+
+        self.window.follow_renamed_run_set("Raid", "Boss")
+
+        self.assertEqual(self.window.target(), ("run_set", "Boss"))
+
+    def test_deleted_run_set_falls_back_to_last_profile(self) -> None:
+        self.window.set_target("profile", "Rot")
+        self.window.set_target("run_set", "Raid")
+        delete_run_set("Raid", Path("run_sets.json"))
+
+        self.window.reload_targets()
+
+        self.assertEqual(self.window.target(), ("profile", "Rot"))
+
+    def test_renamed_profile_follows_new_name(self) -> None:
+        self.window.set_target("profile", "Rot")
+        Path("profiles/Rot.json").rename(Path("profiles/Rot2.json"))
+
+        self.window.reload_targets("Rot2")
+
+        self.assertEqual(self.window.target(), ("profile", "Rot2"))
 
 
 if __name__ == "__main__":

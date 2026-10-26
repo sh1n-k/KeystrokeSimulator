@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
+from loguru import logger
 from PySide6.QtCore import QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -91,6 +92,7 @@ class WorkspaceWindow(QMainWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setMinimumSize(*WORKSPACE_MIN_SIZE)
         self._closed = False
+        self._quitting = False
         self._running = False
         self._options_open = False
         self.new_signal_hud: CaptureHud | None = None
@@ -392,7 +394,15 @@ class WorkspaceWindow(QMainWindow):
         self.lbl_status.setText("")
 
     def show_error(self, message: str) -> None:
+        if self._quitting:
+            logger.warning(f"Workspace not saved on quit: {message}")
+            return
         QMessageBox.warning(self, txt("Error", "오류"), message)
+
+    def close_for_quit(self) -> None:
+        """시그널 종료: 저장을 시도하되 실패해도 묻지 않고 닫는다."""
+        self._quitting = True
+        self.close()
 
     def commit_pending_edits(self) -> None:
         self.header.commit()
@@ -720,7 +730,7 @@ class WorkspaceWindow(QMainWindow):
         if self._closed:
             event.accept()
             return
-        if not self.model.close():
+        if not self.model.close() and not self._quitting:
             event.ignore()
             return
         self._closed = True

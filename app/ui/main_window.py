@@ -11,8 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
-from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
+from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -207,6 +207,8 @@ class RunWindow(QMainWindow):
         self.modkey_combo.currentIndexChanged.connect(self._on_selection_changed)
 
         self._last_target: RunTarget = ("profile", QUICK_PROFILE_NAME)
+        # 실행 세트를 골라도 마지막 프로필은 기억한다(app_state.json의 profile).
+        self._last_profile = QUICK_PROFILE_NAME
         self.refresh_processes()
         self.load_targets()
         self.load_modkey_sets()
@@ -302,7 +304,7 @@ class RunWindow(QMainWindow):
                 self.target_combo.addItem(run_set_display(name), ("run_set", name))
         self.target_combo.blockSignals(False)
         if not self.set_target(*wanted) and not self.set_target(
-            "profile", self._last_target[1] if self._last_target[0] == "profile" else ""
+            "profile", self._last_profile
         ):
             self.set_target("profile", QUICK_PROFILE_NAME)
 
@@ -317,13 +319,18 @@ class RunWindow(QMainWindow):
         for index in range(self.target_combo.count()):
             if self.target_combo.itemData(index) == (kind, name):
                 self.target_combo.setCurrentIndex(index)
-                self._last_target = (kind, name)
+                self._remember_target((kind, name))
                 return True
         return False
 
     def _on_target_changed(self, _index: int) -> None:
-        self._last_target = self.target()
+        self._remember_target(self.target())
         self._on_selection_changed()
+
+    def _remember_target(self, target: RunTarget) -> None:
+        self._last_target = target
+        if target[0] == "profile":
+            self._last_profile = target[1]
 
     def load_modkey_sets(self, select_name: str | None = None) -> None:
         ensure_default_modkey_set(self.modkey_sets_path)
@@ -347,7 +354,7 @@ class RunWindow(QMainWindow):
     def selection(self) -> RunSelection:
         kind, name = self.target()
         if kind == "run_set":
-            profile, run_set = "", name
+            profile, run_set = self._last_profile, name
         else:
             profile, run_set = name, CURRENT_RUN_SET_ID
         return RunSelection(
@@ -425,8 +432,17 @@ class RunWindow(QMainWindow):
         if isinstance(modkey_set, str) and modkey_set:
             self.load_modkey_sets(modkey_set)
         pos = StateUtils.parse_slash_int_pair(state.get("main_pos"))
-        if pos is not None:
+        # 저장된 위치가 없거나 지금 화면 밖이면(모니터 분리 등) 가운데에 둔다.
+        if pos is not None and any(
+            screen.availableGeometry().contains(QPoint(pos[0] + 40, pos[1] + 10))
+            for screen in QGuiApplication.screens()
+        ):
             self.move(pos[0], pos[1])
+        else:
+            self.adjustSize()
+            frame = self.frameGeometry()
+            frame.moveCenter(QGuiApplication.primaryScreen().availableGeometry().center())
+            self.move(frame.topLeft())
 
     # ── status / run button ────────────────────────────────────────────
 
@@ -560,7 +576,7 @@ class RunWindow(QMainWindow):
         if kind == "profile" and new_name and name not in list_profile_names(self.profiles_dir):
             name = new_name
         if kind == "run_set" and name not in list_run_set_names(self.run_sets_path):
-            kind, name = "profile", self._last_target[1] if self._last_target[0] == "profile" else QUICK_PROFILE_NAME
+            kind, name = "profile", self._last_profile
         self.load_targets((kind, name))
         self.update_ui()
 
@@ -688,8 +704,20 @@ class RunWindow(QMainWindow):
 
     # ── shutdown ───────────────────────────────────────────────────────
 
+    def quit_from_signal(self) -> None:
+        """SIGINT/SIGTERM: 작업 공간 저장이 실패해도 앱을 닫는다."""
+        close_for_quit = getattr(self.workspace, "close_for_quit", None)
+        if callable(close_for_quit):
+            close_for_quit()
+        self.close()
+
     def closeEvent(self, event: QCloseEvent) -> None:
         if not self._closing:
+            # 작업 공간이 저장에 실패하면(오류를 보인다) 앱도 닫지 않는다.
+            workspace = self.workspace
+            if workspace is not None and not workspace.close():
+                event.ignore()
+                return
             self._closing = True
             logger.info("Shutting down...")
             for child in (self.quick_hud, self.workspace, self.settings_dialog):
