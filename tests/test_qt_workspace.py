@@ -169,6 +169,37 @@ class TestEditing(WorkspaceWindowCase):
         self.assertIn("already exists", self.ws.detail.lbl_name_error.text())
         self.assertEqual(self.event("S").event_name, "S")
 
+    def _refused_rename_then_open_other(self, via_run_set: bool) -> list[EventModel]:
+        save_profile(
+            Path("profiles"),
+            ProfileModel(
+                name="Q",
+                event_list=[signal("S"), rule("Attack", conditions={"S": True})],
+            ),
+            name="Q",
+        )
+        self.ws.tree.select([self.event("S")])
+        self.ws.detail.entry_name.setText("loose")
+        self.assertFalse(self.ws.detail.commit_name())
+
+        if via_run_set:
+            upsert_run_set("Set", ["P"], Path("run_sets.json"))
+            self.ws.model.open_run_set("Set")
+        self.ws.model.open_profile("Q")
+        self.ws.model.flush()
+        return load_profile(Path("profiles"), "Q", migrate=False).event_list
+
+    def test_refused_name_is_not_applied_to_the_next_profile(self) -> None:
+        saved = self._refused_rename_then_open_other(via_run_set=False)
+
+        self.assertEqual(saved[1].conditions, {"S": True})
+        self.assertEqual([e.event_name for e in saved], ["S", "Attack"])
+
+    def test_refused_name_is_not_applied_after_run_set_view(self) -> None:
+        saved = self._refused_rename_then_open_other(via_run_set=True)
+
+        self.assertEqual(saved[1].conditions, {"S": True})
+
     def test_delete_key_then_undo_shortcut(self) -> None:
         self.ws.show()
         self.ws.activateWindow()

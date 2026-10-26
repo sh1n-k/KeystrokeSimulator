@@ -383,6 +383,16 @@ class TestEventEdits(ModelCase):
         self.assertIn("already exists", model.rename_event(a, "B"))
         self.assertEqual(a.event_name, "A")
 
+    def test_rename_of_event_outside_profile_is_ignored(self):
+        """다른 프로필·되돌리기 전 객체의 이름 확정이 지금 프로필을 바꾸지 않는다."""
+        model = self.make([signal("A"), rule("B", conditions={"A": True})])
+        stale = signal("A")
+
+        self.assertEqual(model.rename_event(stale, "C"), "")
+
+        self.assertEqual(stale.event_name, "A")
+        self.assertEqual(model.profile.event_list[1].conditions, {"A": True})
+
     def test_condition_candidates_list_signals_first_and_mark_cycles(self):
         model = self.make(
             [rule("R", conditions={"S": True}), signal("S"), rule("Q", conditions={"R": True})]

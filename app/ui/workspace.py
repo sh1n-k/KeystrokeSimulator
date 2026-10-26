@@ -296,6 +296,10 @@ class WorkspaceWindow(QMainWindow):
 
     def on_opened(self) -> None:
         model = self.model
+        # 이전 프로필의 편집 상태를 확정하지 않고 버린다. 거부된 이름이 새
+        # 프로필에 적용되거나 단축키 입력 대기가 남지 않게 한다.
+        self.detail.forget()
+        self.toggle_box.stop_capture()
         if model.mode == "profile":
             self.lbl_run_set_title.hide()
             self.header.show()

@@ -369,6 +369,11 @@ class EventDetailPanel(QScrollArea):
 
     # ── showing ────────────────────────────────────────────────────────
 
+    def forget(self) -> None:
+        """다른 프로필·실행 세트를 열 때: 확정하지 않고 선택을 비운다."""
+        self.current = None
+        self.selection = []
+
     def show_events(self, selection: list[EventModel]) -> None:
         """선택이 바뀔 때. 편집 중인 이름은 먼저 확정한다."""
         same = len(selection) == len(self.selection) and all(

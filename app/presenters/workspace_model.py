@@ -668,6 +668,10 @@ class WorkspaceModel:
 
     def rename_event(self, event: EventModel, text: str) -> str:
         """이름을 바꾼다. 거부하면 그 이유, 받아들이면 빈 문자열."""
+        if not any(e is event for e in self.profile.event_list):
+            # 다른 프로필이나 되돌리기 전 스냅숏의 이벤트. 조건 참조를 바꾸면
+            # 지금 프로필이 오염되므로 무시한다.
+            return ""
         new_name = normalized_event_name(text)
         old_name = event.event_name or ""
         if new_name == old_name:
