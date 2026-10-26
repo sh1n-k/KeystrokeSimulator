@@ -1,26 +1,23 @@
 from __future__ import annotations
 
-import json
 import platform
-import re
-import sys
-import threading
-import time
 import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
 from tkinter import ttk, messagebox
-from typing import Any, NotRequired, ParamSpec, TypedDict, TypeVar, cast
+from typing import Any, cast
 
 from loguru import logger
-import pynput.keyboard
-import pynput.mouse
-from app.utils.i18n import normalize_language, set_language, txt
+from app.utils.i18n import txt
 
-from app.domain.models import EventModel, ProfileModel, UserSettings
-from app.domain.run_composition import (
-    ComposedRunSession,
-    compose_run_session,
+from app.domain.models import UserSettings
+from app.presenters.run_controller import (
+    Readiness,
+    RunController,
+    RunSelection,
+    StatusTone,
+    migrate_legacy_run_profiles,
+    safe_call,
 )
 from app.ui.dialogs import ask_confirm
 from app.ui.modkeys import ModificationKeysWindow
@@ -30,99 +27,39 @@ from app.ui.main_frames import (
     ProcessFrame,
     RunTargetFrame,
 )
-from app.platform.input_router import InputListener, InputRouter
+from app.platform.input_router import InputRouter
 from app.ui.tk_dispatcher import TkDispatcher
-from app.platform.mac_hotkey_tap import MacHotkeyTapListener
-from app.platform.mac_key_poll import MacKeyPollListener
 from app.storage.modkey_sets_storage import (
     DEFAULT_MODKEY_SET_NAME,
     DEFAULT_MODKEY_SETS_PATH,
-    default_modification_keys,
-    get_modkey_set,
 )
 from app.storage.run_sets_storage import (
     CURRENT_RUN_SET_ID,
     DEFAULT_RUN_SETS_PATH,
     is_current_run_set,
     list_run_set_names,
-    upsert_run_set,
 )
-from app.storage.profile_storage import (
-    list_profile_names,
-    load_profile,
-)
-from app.storage.settings_storage import load_user_settings, save_user_settings
-from app.engine.processor import KeystrokeProcessor
+from app.storage.profile_storage import list_profile_names
 from app.ui.capture_hud import CaptureHud
 from app.ui.workspace import Workspace
 from app.ui.settings import KeystrokeSettings
 from app.utils.sounds import SoundPlayer
-from app.domain.runtime_toggle import (
-    MOUSE_BUTTON_3_TRIGGER,
-    MOUSE_BUTTON_4_TRIGGER,
-    RUNTIME_TOGGLE_DEBOUNCE_SECONDS,
-    RUNTIME_TOGGLE_SCROLL_GESTURE_SECONDS,
-    WHEEL_DOWN_TRIGGER,
-    WHEEL_UP_TRIGGER,
-    display_runtime_toggle_trigger,
-    is_keyboard_runtime_toggle_trigger,
-    is_mouse_button_runtime_toggle_trigger,
-    is_wheel_runtime_toggle_trigger,
-    normalize_runtime_toggle_listener_key,
-    normalize_runtime_toggle_trigger,
-    runtime_toggle_member_count,
-)
-from app.platform.system import (
-    ProcessUtils,
-    PermissionUtils,
-)
+from app.platform.system import PermissionUtils
 from app.utils.exception_hooks import install_exception_hooks
 from app.storage.app_state import StateUtils
 from app.ui.tk_window import WindowUtils
 from app.ui import theme
 
-STATUS_BG_INFO = theme.STATUS_INFO_BG
-STATUS_FG_INFO = theme.STATUS_INFO_FG
-STATUS_BG_OK = theme.STATUS_READY_BG
-STATUS_FG_OK = theme.STATUS_READY_FG
-STATUS_BG_WARN = theme.STATUS_WARN_BG
-STATUS_FG_WARN = theme.STATUS_WARN_FG
-STATUS_BG_ERR = theme.STATUS_ERROR_BG
-STATUS_FG_ERR = theme.STATUS_ERROR_FG
 STATUS_BG_RUN = theme.STATUS_RUNNING_BG
 STATUS_FG_RUN = theme.STATUS_RUNNING_FG
+# Readiness tone → (bg, fg).
+STATUS_COLORS: dict[StatusTone, tuple[str, str]] = {
+    "ready": (theme.STATUS_READY_BG, theme.STATUS_READY_FG),
+    "warn": (theme.STATUS_WARN_BG, theme.STATUS_WARN_FG),
+    "error": (theme.STATUS_ERROR_BG, theme.STATUS_ERROR_FG),
+}
 
-# macOS Option+Shift: prefer CGEventTap (consume + CFRunLoop); poll is fallback.
-MAC_POLL_INTERVAL_MS = 10
-MAC_ALT_SHIFT_DEBOUNCE_SECONDS = 0.2
-# Poll-only hold filter (tap fires on chord rising edge, no hold delay).
-MAC_ALT_SHIFT_HOLD_SECONDS = 0.015
-
-P = ParamSpec("P")
-R = TypeVar("R")
 VoidCallback = Callable[[], None]
-
-
-class ReadinessSnapshot(TypedDict):
-    can_start: bool
-    badge_text: str
-    title: str
-    detail: str
-    bg: str
-    fg: str
-    missing_permissions: NotRequired[list[str]]
-    # One-line status text and the single fix action shown when blocked.
-    summary: NotRequired[str]
-    action: NotRequired[str]
-
-
-def safe_call(func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R | None:
-    """예외를 무시하고 함수 호출"""
-    try:
-        return func(*args, **kwargs)
-    except Exception:
-        return None
-
 
 
 class KeystrokeSimulatorApp(tk.Tk):
@@ -137,7 +74,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.profiles_dir = Path("profiles")
         self.profiles_dir.mkdir(exist_ok=True)
         self.modkey_sets_path = Path(DEFAULT_MODKEY_SETS_PATH)
-        self.is_running: tk.BooleanVar = tk.BooleanVar(value=False)
         self.selected_process: tk.StringVar = tk.StringVar()
         self.selected_profile: tk.StringVar = tk.StringVar()
         self.selected_modkey_set: tk.StringVar = tk.StringVar(
@@ -145,33 +81,17 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         self.selected_run_set: tk.StringVar = tk.StringVar(value=CURRENT_RUN_SET_ID)
         self.run_sets_path = Path(DEFAULT_RUN_SETS_PATH)
-        self.keystroke_processor: KeystrokeProcessor | None = None
-        self.terminate_event: threading.Event = threading.Event()
-        self.settings: UserSettings = UserSettings()
         self.settings_window: KeystrokeSettings | None = None
-        self.latest_scroll_time: float | None = None
         self.sound_player: SoundPlayer = SoundPlayer()
-
-        # Input Listeners
-        self.start_stop_mouse_listener: InputListener | None = None
-        self.runtime_toggle_mouse_listener: InputListener | None = None
-        self.keyboard_listener: InputListener | None = None
-        self.input_listener_session = InputRouter(TkDispatcher(self))
-        self.alt_pressed: bool = False
-        self.shift_pressed: bool = False
-        self.last_alt_shift_toggle_time: float = 0
-        self.ctrl_check_active: bool = False
-        self._mac_hotkey_tap_listener: MacHotkeyTapListener | None = None
-        self._mac_key_poll_listener: MacKeyPollListener | None = None
         self._selection_trace_handles: list[str] = []
-        self.runtime_toggle_enabled: bool = False
-        self.runtime_toggle_key: str | None = None
-        self.runtime_toggle_active: bool = False
-        self.runtime_toggle_member_count: int = 0
-        self.last_runtime_toggle_time: float = 0
-        self.latest_runtime_scroll_time: float | None = None
-        self.toggle_transition_in_progress: bool = False
-        self._pending_start_stop_toggle: bool = False
+        self.run = RunController(
+            self,
+            router=InputRouter(TkDispatcher(self)),
+            sound_player=self.sound_player,
+            profiles_dir=self.profiles_dir,
+            modkey_sets_path=self.modkey_sets_path,
+            run_sets_path=self.run_sets_path,
+        )
 
         self._create_ui()
         self._bind_selection_traces()
@@ -492,24 +412,58 @@ class KeystrokeSimulatorApp(tk.Tk):
         ):
             self._selection_trace_handles.append(var.trace_add("write", schedule_update))
 
+    # ── RunHost ────────────────────────────────────────────────────────
+
+    def selection(self) -> RunSelection:
+        return RunSelection(
+            process=self.selected_process.get(),
+            profile=self.selected_profile.get(),
+            run_set=self.selected_run_set.get(),
+            modkey_set=self.selected_modkey_set.get(),
+        )
+
+    def on_run_state_changed(self) -> None:
+        self.update_ui()
+
+    def on_status_changed(self) -> None:
+        self._update_main_status()
+
+    def before_start(self) -> None:
+        quick_hud = self._quick_hud
+        if quick_hud is not None and quick_hud.is_open():
+            quick_hud.close()
+
+    def defer(self, action: Callable[[], None]) -> None:
+        self.after(0, action)
+
+    def window_position(self) -> str | None:
+        try:
+            return f"{self.winfo_x()}/{self.winfo_y()}"
+        except tk.TclError:
+            return None
+
+    def is_alive(self) -> bool:
+        return bool(self.winfo_exists())
+
+    # ── run controller delegation (settings window, buttons) ───────────
+
+    @property
+    def settings(self) -> UserSettings:
+        return self.run.settings
+
+    def setup_event_handlers(self) -> None:
+        self.run.setup_event_handlers()
+        # Esc는 앱을 끄지 않는다(M-05). 창 닫기로만 종료한다.
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def unbind_events(self) -> None:
+        self.run.unbind_events()
+
+    def toggle_start_stop(self, event: object | None = None) -> None:
+        self.run.toggle_start_stop()
+
     def load_settings(self) -> None:
-        # Load settings
-        s_file = Path("user_settings.json")
-        self.settings, can_save_settings = load_user_settings(s_file)
-        self.settings.language = normalize_language(self.settings.language)
-        set_language(self.settings.language)
-        if can_save_settings:
-            save_user_settings(self.settings, s_file)
-        sound_player = getattr(self, "sound_player", None)
-        if sound_player is not None:
-            safe_call(
-                sound_player.set_notification_pack,
-                self.settings.notification_sound_pack,
-            )
-            safe_call(
-                sound_player.set_runtime_toggle_pack,
-                self.settings.runtime_toggle_sound_pack,
-            )
+        self.run.load_settings()
         self._refresh_ui_texts()
 
         # Load state
@@ -549,92 +503,6 @@ class KeystrokeSimulatorApp(tk.Tk):
         if hasattr(self, "lbl_status_badge"):
             self._update_main_status()
 
-    def _get_hotkey_hint_text(self) -> str:
-        if not hasattr(self, "settings"):
-            return ""
-        if platform.system() == "Darwin" and self.settings.toggle_start_stop_mac:
-            trigger = txt("Alt + Shift", "Alt + Shift")
-        elif platform.system() == "Windows" and self.settings.use_alt_shift_hotkey:
-            trigger = txt("Alt + Shift", "Alt + Shift")
-        elif self.settings.start_stop_key == "DISABLED":
-            return txt(
-                "Start/stop hotkey is disabled. Use the Start button.",
-                "시작/중지 단축키가 꺼져 있습니다. 시작 버튼을 사용하세요.",
-            )
-        elif self.settings.start_stop_key == "W_UP":
-            trigger = txt("Mouse wheel up", "마우스 휠 위")
-        elif self.settings.start_stop_key == "W_DN":
-            trigger = txt("Mouse wheel down", "마우스 휠 아래")
-        else:
-            trigger = self.settings.start_stop_key
-
-        hint = txt(
-            "Start or stop with {trigger}.",
-            "{trigger}(으)로 시작 또는 중지할 수 있습니다.",
-            trigger=trigger,
-        )
-        if self.runtime_toggle_enabled and self.runtime_toggle_key:
-            toggle_state = (
-                txt("ON", "켜짐") if self.runtime_toggle_active else txt("OFF", "꺼짐")
-            )
-            hint = txt(
-                "{base}\nHotkey set: {trigger} ({state})",
-                "{base}\n단축키 묶음: {trigger} ({state})",
-                base=hint,
-                trigger=display_runtime_toggle_trigger(self.runtime_toggle_key),
-                state=toggle_state,
-            )
-        return hint
-
-    def _hotkey_short(self) -> str:
-        """시작 버튼에 붙이는 짧은 단축키 표시. 꺼져 있으면 빈 문자열."""
-        settings = self.__dict__.get("settings")
-        if settings is None:
-            return ""
-        if platform.system() == "Darwin" and settings.toggle_start_stop_mac:
-            return "⌥⇧"
-        if platform.system() == "Windows" and settings.use_alt_shift_hotkey:
-            return "Alt+Shift"
-        key = str(settings.start_stop_key or "")
-        if key == "DISABLED":
-            return ""
-        wheel = {"W_UP": txt("wheel ↑", "휠 ↑"), "W_DN": txt("wheel ↓", "휠 ↓")}
-        return wheel.get(key, key)
-
-    @staticmethod
-    def _listener_key_name(key: object) -> str:
-        return normalize_runtime_toggle_listener_key(key)
-
-    def _selected_process_pid(self) -> int | None:
-        pid_match = re.search(r"\((\d+)\)", self.selected_process.get())
-        return int(pid_match.group(1)) if pid_match else None
-
-    def _target_process_is_active(self) -> bool:
-        return ProcessUtils.is_process_active(self._selected_process_pid())
-
-    def _reset_runtime_toggle_session(self) -> None:
-        self.runtime_toggle_enabled = False
-        self.runtime_toggle_key = None
-        self.runtime_toggle_active = False
-        self.runtime_toggle_member_count = 0
-        self.latest_runtime_scroll_time = None
-
-    def _configure_runtime_toggle_session(
-        self,
-        *,
-        enabled: bool,
-        toggle_key: str | None,
-        events: list[EventModel],
-    ) -> None:
-        self._reset_runtime_toggle_session()
-        key = normalize_runtime_toggle_trigger(toggle_key)
-        member_count = runtime_toggle_member_count(events)
-        self.runtime_toggle_enabled = bool(enabled and key and member_count > 0)
-        self.runtime_toggle_key = key if self.runtime_toggle_enabled else None
-        self.runtime_toggle_member_count = (
-            member_count if self.runtime_toggle_enabled else 0
-        )
-
     def _restore_run_set_selection(self, state: dict[str, object]) -> None:
         """Restore a named run set, or migrate the legacy run_profiles list.
 
@@ -650,424 +518,19 @@ class KeystrokeSimulatorApp(tk.Tk):
                 frame.set_target("run_set", run_set.strip())
             return
         # Legacy: run_profiles list from earlier multi-select UI.
-        run_profiles_raw = state.get("run_profiles")
-        run_profiles: list[str] = []
-        if isinstance(run_profiles_raw, list):
-            run_profiles = [
-                str(item)
-                for item in cast(list[object], run_profiles_raw)
-                if isinstance(item, str) and item
-            ]
-        elif isinstance(run_profiles_raw, str) and run_profiles_raw:
-            run_profiles = [run_profiles_raw]
-        if len(run_profiles) >= 2:
-            migrated = "Migrated"
-            try:
-                # Avoid clobbering an existing user set name if present.
-                existing = set(frame.run_set_names)
-                name = migrated
-                n = 2
-                while name in existing:
-                    name = f"{migrated} {n}"
-                    n += 1
-                upsert_run_set(name, run_profiles, self.run_sets_path)
-                frame.load(select=("run_set", name))
-            except Exception as exc:
-                logger.warning(f"Legacy run profile migration failed: {exc}")
-            return
-
-    def _get_run_profile_names(self) -> list[str]:
-        frame = self.__dict__.get("run_target_frame")
-        if frame is not None:
-            names = frame.get_run_profiles()
-            if names:
-                return names
-        selected = self.selected_profile.get()
-        return [selected] if selected else []
-
-    def _run_set_status_label(self) -> str:
-        """Short label for status lines: the profile, or the named set."""
-        set_id = (self.selected_run_set.get() or "").strip()
-        if set_id and not is_current_run_set(set_id):
-            return txt("Set {name}", "세트 {name}", name=set_id)
-        return (self.selected_profile.get() or "—").strip() or "—"
-
-    def _run_target_label(self, profile_names: list[str] | None = None) -> str:
-        """"BM_야수" 또는 "세트 레이드 (프로필 2개)"."""
-        target = self._run_set_status_label()
-        members = self._run_set_members_status_label(profile_names)
-        return target if members in ("—", target) else f"{target} ({members})"
-
-    def _run_set_members_status_label(self, profile_names: list[str] | None = None) -> str:
-        """Compact member summary: profile name, count, or em dash."""
-        names = profile_names
-        if names is None:
-            names = self._get_run_profile_names()
-        cleaned = [n for n in names if n]
-        if not cleaned:
-            return "—"
-        if len(cleaned) == 1:
-            return cleaned[0]
-        return txt(
-            "{count} profiles",
-            "프로필 {count}개",
-            count=len(cleaned),
+        migrated = migrate_legacy_run_profiles(
+            state, list(frame.run_set_names), self.run_sets_path
         )
-
-    def _load_profiles_for_run(
-        self, names: list[str], *, migrate: bool
-    ) -> tuple[list[tuple[str, ProfileModel]], list[str]]:
-        loaded: list[tuple[str, ProfileModel]] = []
-        load_errors: list[str] = []
-        profiles_dir = Path(self.profiles_dir)
-        for name in names:
-            jpath = profiles_dir / f"{name}.json"
-            # When the file is on disk, fail closed on corrupt/non-object JSON so a
-            # broken run-set member is not silently treated as an empty profile.
-            # (Unit tests that mock load_profile without files skip this gate.)
-            if jpath.is_file():
-                try:
-                    raw: object = json.loads(jpath.read_text(encoding="utf-8"))
-                    if not isinstance(raw, dict):
-                        raise ValueError(
-                            f"Profile root must be an object, got {type(raw).__name__}"
-                        )
-                except Exception as exc:
-                    load_errors.append(
-                        txt(
-                            "Profile '{profile}' could not be loaded: {error}",
-                            "프로필 '{profile}'을(를) 불러오지 못했습니다: {error}",
-                            profile=name,
-                            error=exc,
-                        )
-                    )
-                    continue
-            try:
-                profile = load_profile(profiles_dir, name, migrate=migrate)
-            except Exception as exc:
-                load_errors.append(
-                    txt(
-                        "Profile '{profile}' could not be loaded: {error}",
-                        "프로필 '{profile}'을(를) 불러오지 못했습니다: {error}",
-                        profile=name,
-                        error=exc,
-                    )
-                )
-                continue
-            loaded.append((name, profile))
-        return loaded, load_errors
-
-    def _compose_selected_run(
-        self, *, migrate: bool
-    ) -> tuple[ComposedRunSession | None, list[str]]:
-        names = self._get_run_profile_names()
-        if not names:
-            return None, [
-                txt(
-                    "Select at least one profile to run.",
-                    "실행할 프로필을 하나 이상 선택하세요.",
-                )
-            ]
-        loaded, load_errors = self._load_profiles_for_run(names, migrate=migrate)
-        if load_errors and not loaded:
-            return None, load_errors
-        if not loaded:
-            return None, load_errors or [
-                txt(
-                    "Select at least one profile to run.",
-                    "실행할 프로필을 하나 이상 선택하세요.",
-                )
-            ]
-        session = compose_run_session(
-            loaded,
-            settings=self.__dict__.get("settings"),
-            os_name=platform.system(),
-        )
-        errors = list(load_errors) + list(session.errors)
-        if errors:
-            return session, errors
-        return session, []
-
-    @staticmethod
-    def _runnable_events(events: list[EventModel]) -> list[EventModel]:
-        return [
-            evt
-            for evt in events
-            if getattr(evt, "use_event", True)
-            and (
-                getattr(evt, "key_to_enter", None)
-                or not getattr(evt, "execute_action", True)
-            )
-        ]
-
-    @staticmethod
-    def _events_with_processor_inputs(events: list[EventModel]) -> list[EventModel]:
-        ready: list[EventModel] = []
-        for evt in events:
-            if evt.is_screenless_input():
-                ready.append(evt)
-                continue
-            if evt.latest_position is None or evt.clicked_position is None:
-                continue
-            mode = evt.match_mode or "pixel"
-            if mode == "pixel" and (
-                evt.ref_pixel_value is None or len(evt.ref_pixel_value) < 3
-            ):
-                continue
-            if mode == "region" and evt.held_screenshot is None:
-                continue
-            ready.append(evt)
-        return ready
-
-    def _get_readiness_snapshot(self) -> ReadinessSnapshot:
-        if self.is_running.get():
-            detail = txt(
-                "Stop to change the target, run or modifier keys. Workspace edits apply from the next start.",
-                "대상·실행·수정키를 바꾸려면 중지하세요. 작업 공간 편집은 다음 시작부터 반영됩니다.",
-            )
-            summary = self._run_target_label()
-            if self.runtime_toggle_enabled and self.runtime_toggle_key:
-                summary = txt(
-                    "{target} · hotkey set {trigger} ({state})",
-                    "{target} · 단축키 묶음 {trigger} ({state})",
-                    target=summary,
-                    trigger=display_runtime_toggle_trigger(self.runtime_toggle_key),
-                    state=txt("ON", "켜짐")
-                    if self.runtime_toggle_active
-                    else txt("OFF", "꺼짐"),
-                )
-            return {
-                "can_start": True,
-                "badge_text": txt("Running", "실행 중"),
-                "title": txt(
-                    "Simulation is active for the selected target.",
-                    "선택한 대상에 대해 시뮬레이션이 실행 중입니다.",
-                ),
-                "summary": summary,
-                "detail": detail,
-                "bg": STATUS_BG_OK,
-                "fg": STATUS_FG_OK,
-            }
-
-        if not self.selected_process.get() or "(" not in self.selected_process.get():
-            return {
-                "can_start": False,
-                "badge_text": txt("Select Process", "프로세스 선택"),
-                "title": txt(
-                    "Choose the target app before starting.",
-                    "시작하기 전에 대상 앱을 선택하세요.",
-                ),
-                "detail": txt(
-                    "Pick the process you want to watch in the Target list.",
-                    "감시할 대상을 대상 목록에서 고르세요.",
-                ),
-                "bg": STATUS_BG_WARN,
-                "fg": STATUS_FG_WARN,
-                "action": "process",
-            }
-
-        run_names = self._get_run_profile_names()
-        if not run_names:
-            return {
-                "can_start": False,
-                "badge_text": txt("Select Profile", "프로필 선택"),
-                "title": txt(
-                    "Select one or more profiles to run.",
-                    "실행할 프로필을 하나 이상 선택하세요.",
-                ),
-                "detail": txt(
-                    "Choose a profile or a run set in the Run list.",
-                    "실행 목록에서 프로필이나 실행 세트를 고르세요.",
-                ),
-                "bg": STATUS_BG_WARN,
-                "fg": STATUS_FG_WARN,
-                "action": "workspace",
-            }
-
-        session, compose_errors = self._compose_selected_run(migrate=False)
-        if compose_errors:
-            first = compose_errors[0]
-            badge = txt("Profile Error", "프로필 오류")
-            title = txt(
-                "The run set could not be prepared.",
-                "실행 세트를 준비하지 못했습니다.",
-            )
-            lower = first.lower()
-            if "duplicate" in lower or "중복" in first:
-                badge = txt("Duplicate Events", "중복 이벤트")
-                title = txt(
-                    "Duplicate event names were found in a run profile.",
-                    "실행 프로필에서 중복 이벤트 이름이 발견되었습니다.",
-                )
-            elif (
-                "on/off hotkey" in lower
-                or "hotkey set" in lower
-                or "켜고 끄는 단축키" in first
-                or "단축키 묶음" in first
-            ):
-                badge = txt("Hotkey Conflict", "단축키 충돌")
-                title = txt(
-                    "On/off hotkey settings need attention.",
-                    "켜고 끄는 단축키 설정을 확인해야 합니다.",
-                )
-            return {
-                "can_start": False,
-                "badge_text": badge,
-                "title": title,
-                "detail": first,
-                "bg": STATUS_BG_ERR,
-                "fg": STATUS_FG_ERR,
-                "action": "workspace",
-            }
-
-        assert session is not None
-        events = list(session.events)
-        runnable_events = self._runnable_events(events)
-        enabled_count = sum(1 for evt in events if getattr(evt, "use_event", True))
-        runnable_count = len(runnable_events)
-
-        if not events:
-            return {
-                "can_start": False,
-                "badge_text": txt("Add Events", "이벤트 추가"),
-                "title": txt("Nothing to run yet.", "실행할 이벤트가 아직 없습니다."),
-                "detail": txt(
-                    "Add at least one event in the workspace or with Quick events.",
-                    "작업 공간이나 빠른 이벤트에서 이벤트를 하나 이상 추가하세요.",
-                ),
-                "bg": STATUS_BG_WARN,
-                "fg": STATUS_FG_WARN,
-                "action": "workspace",
-            }
-
-        if enabled_count == 0:
-            return {
-                "can_start": False,
-                "badge_text": txt("Enable Event", "이벤트 활성화"),
-                "title": txt("Every event is turned off.", "모든 이벤트가 꺼져 있습니다."),
-                "detail": txt(
-                    "Turn on at least one event in the workspace before starting.",
-                    "시작하기 전에 작업 공간에서 이벤트를 하나 이상 켜세요.",
-                ),
-                "bg": STATUS_BG_WARN,
-                "fg": STATUS_FG_WARN,
-                "action": "workspace",
-            }
-
-        if runnable_count == 0:
-            return {
-                "can_start": False,
-                "badge_text": txt("Check Events", "이벤트 확인"),
-                "title": txt(
-                    "Rules in use have no input key.",
-                    "사용 중인 규칙에 키가 없습니다.",
-                ),
-                "detail": txt(
-                    "Open the workspace and set a key for rules marked 'no key'.",
-                    "작업 공간에서 '키 없음' 규칙에 키를 지정하세요.",
-                ),
-                "bg": STATUS_BG_WARN,
-                "fg": STATUS_FG_WARN,
-                "action": "workspace",
-            }
-
-        missing_permissions = PermissionUtils.missing_macos_permissions()
-        if missing_permissions:
-            missing_labels: list[str] = []
-            if "screen" in missing_permissions:
-                missing_labels.append(txt("Screen Recording", "화면 기록"))
-            if "accessibility" in missing_permissions:
-                missing_labels.append(txt("Accessibility", "손쉬운 사용"))
-            return {
-                "can_start": False,
-                "badge_text": txt("Permissions", "권한 필요"),
-                "summary": ", ".join(missing_labels),
-                "title": txt(
-                    "macOS permissions are blocking capture or key control.",
-                    "macOS 권한 부족으로 캡처 또는 키 제어가 차단되고 있습니다.",
-                ),
-                "detail": txt(
-                    "Grant {missing} to this executable, then restart the app.\nExecutable: {path}",
-                    "이 실행 파일에 {missing} 권한을 부여한 뒤 앱을 다시 실행하세요.\n실행 파일: {path}",
-                    missing=", ".join(missing_labels),
-                    path=sys.executable,
-                ),
-                "bg": STATUS_BG_ERR,
-                "fg": STATUS_FG_ERR,
-                "missing_permissions": missing_permissions,
-                "action": "permissions",
-            }
-
-        processor_ready_count = len(self._events_with_processor_inputs(runnable_events))
-        if processor_ready_count == 0:
-            return {
-                "can_start": False,
-                "badge_text": txt("Check Events", "이벤트 확인"),
-                "title": txt(
-                    "Enabled events need captured coordinates and reference data.",
-                    "활성 이벤트에는 캡처 좌표와 기준 데이터가 필요합니다.",
-                ),
-                "detail": txt(
-                    "Open the workspace and capture a screen for events missing one.",
-                    "작업 공간에서 화면이 빠진 이벤트를 다시 캡처하세요.",
-                ),
-                "bg": STATUS_BG_WARN,
-                "fg": STATUS_FG_WARN,
-                "action": "workspace",
-            }
-
-        target_label = self._run_target_label(list(session.profile_names))
-        modkey_set_name = self.selected_modkey_set.get() or DEFAULT_MODKEY_SET_NAME
-        rules = sum(1 for evt in runnable_events if evt.execute_action)
-        signals = len(runnable_events) - rules
-        return {
-            "can_start": True,
-            "badge_text": txt("Ready", "준비됨"),
-            "title": txt(
-                "Everything is ready to start monitoring.",
-                "모니터링을 시작할 준비가 끝났습니다.",
-            ),
-            "summary": txt(
-                "rules {rules} · signals {signals}",
-                "규칙 {rules} · 신호 {signals}",
-                rules=rules,
-                signals=signals,
-            ),
-            "detail": txt(
-                "Run {target} · Modifier keys {modkey_set} · {count} event(s).",
-                "실행 {target} · 수정키 {modkey_set} · 이벤트 {count}개.",
-                target=target_label,
-                modkey_set=modkey_set_name,
-                count=runnable_count,
-            ),
-            "bg": STATUS_BG_OK,
-            "fg": STATUS_FG_OK,
-        }
-
-    def _status_detail_with_selection(self, detail: str) -> str:
-        """Append the run target + modkey set when not already present."""
-        profile_name = (self.selected_profile.get() or "").strip()
-        modkey_set_name = (self.selected_modkey_set.get() or "").strip()
-        if not profile_name and not modkey_set_name:
-            return detail
-        if "Modifier keys " in detail or "수정키 " in detail:
-            return detail
-        line = txt(
-            "Run {target} · Modifier keys {modkey_set}",
-            "실행 {target} · 수정키 {modkey_set}",
-            target=self._run_target_label(),
-            modkey_set=modkey_set_name or "—",
-        )
-        return f"{detail}\n{line}" if detail else line
+        if migrated:
+            frame.load(select=("run_set", migrated))
 
     def _update_main_status(self) -> None:
         """상태는 한 줄. 막혔을 때만 해결 버튼 하나를 보인다."""
         if not hasattr(self, "lbl_status_badge"):
             return
-        snapshot = self._get_readiness_snapshot()
-        bg: str = snapshot["bg"]
-        fg: str = snapshot["fg"]
-        running = self.is_running.get()
+        snapshot = self.run.readiness()
+        bg, fg = STATUS_COLORS[snapshot["tone"]]
+        running = self.run.is_running
         if running:
             bg, fg = STATUS_BG_RUN, STATUS_FG_RUN
         icon = self._icon_for_status(bg, running)
@@ -1079,8 +542,8 @@ class KeystrokeSimulatorApp(tk.Tk):
         )
         tooltip = self.__dict__.get("status_tooltip")
         if tooltip is not None:
-            hint = self._get_hotkey_hint_text()
-            detail = self._status_detail_with_selection(snapshot["detail"])
+            hint = self.run.hotkey_hint_text()
+            detail = self.run.status_detail_with_selection(snapshot["detail"])
             tooltip.update_text(f"{detail}\n{hint}" if hint else detail)
         action = None if running else snapshot.get("action")
         self._status_action = action
@@ -1093,7 +556,7 @@ class KeystrokeSimulatorApp(tk.Tk):
                 fix.pack_forget()
         self._missing_permissions = list(snapshot.get("missing_permissions", []))
         if hasattr(self, "lbl_run_status"):
-            self.lbl_run_status.config(text=self._run_dock_text(snapshot, running))
+            self.lbl_run_status.config(text=self.run.run_dock_text(running))
 
     @staticmethod
     def _status_action_label(action: str) -> str:
@@ -1135,290 +598,6 @@ class KeystrokeSimulatorApp(tk.Tk):
             theme.STATUS_ERROR_BG: theme.STATUS_ERROR_ICON,
             theme.STATUS_RUNNING_BG: theme.STATUS_RUNNING_ICON,
         }.get(bg, theme.STATUS_INFO_ICON)
-
-    def _run_dock_text(self, snapshot: ReadinessSnapshot, running: bool) -> str:
-        """상태 줄과 겹치지 않게, 실행 중 멈추는 방법만 알린다."""
-        if running:
-            return txt(
-                "Press the hotkey or Stop to halt.",
-                "단축키나 중지로 멈춥니다.",
-            )
-        return ""
-
-    def setup_event_handlers(self) -> None:
-        self.unbind_events()
-        self.input_listener_session.start()
-        # Esc는 앱을 끄지 않는다(M-05). 창 닫기로만 종료한다.
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-        runtime_toggle_trigger = normalize_runtime_toggle_trigger(
-            self.runtime_toggle_key
-        )
-        use_mac_hotkeys = platform.system() == "Darwin" and (
-            self.settings.toggle_start_stop_mac
-            or (
-                self.runtime_toggle_enabled
-                and is_keyboard_runtime_toggle_trigger(runtime_toggle_trigger)
-            )
-        )
-        if use_mac_hotkeys:
-            self._start_mac_hotkeys()
-
-        key = self.settings.start_stop_key
-        if key.startswith("W_"):
-            self.start_stop_mouse_listener = cast(
-                InputListener,
-                pynput.mouse.Listener(
-                    on_scroll=lambda x, y, dx, dy: self.input_listener_session.post(
-                        lambda: self._on_mouse_scroll(x, y, dx, dy)
-                    )
-                ),
-            )
-            self.input_listener_session.add(self.start_stop_mouse_listener)
-
-        if self.runtime_toggle_enabled and (
-            is_wheel_runtime_toggle_trigger(runtime_toggle_trigger)
-            or is_mouse_button_runtime_toggle_trigger(runtime_toggle_trigger)
-        ):
-            self.runtime_toggle_mouse_listener = cast(
-                InputListener,
-                pynput.mouse.Listener(
-                    on_scroll=lambda x, y, dx, dy: self.input_listener_session.post(
-                        lambda: self._on_runtime_toggle_mouse_scroll(x, y, dx, dy)
-                    ),
-                    on_click=lambda x, y, button, pressed: self.input_listener_session.post(
-                        lambda: self._on_runtime_toggle_mouse_click(
-                            x, y, button, pressed
-                        )
-                    ),
-                ),
-            )
-            self.input_listener_session.add(self.runtime_toggle_mouse_listener)
-
-        should_listen_keyboard = (
-            (
-                self.runtime_toggle_enabled
-                and is_keyboard_runtime_toggle_trigger(runtime_toggle_trigger)
-            )
-            or (platform.system() == "Windows" and self.settings.use_alt_shift_hotkey)
-            or (key != "DISABLED" and not key.startswith("W_"))
-        )
-        if should_listen_keyboard and not use_mac_hotkeys:
-            self.keyboard_listener = cast(
-                InputListener,
-                pynput.keyboard.Listener(
-                    on_press=lambda key: self.input_listener_session.post(
-                        lambda: self._on_key_press(key)
-                    ),
-                    on_release=lambda key: self.input_listener_session.post(
-                        lambda: self._on_key_release(key)
-                    ),
-                ),
-            )
-            self.input_listener_session.add(self.keyboard_listener)
-
-    def _on_key_press(self, key: object) -> None:
-        now = time.time()
-        if key in (pynput.keyboard.Key.alt_l, pynput.keyboard.Key.alt_r):
-            self.alt_pressed = True
-        if key in (pynput.keyboard.Key.shift_l, pynput.keyboard.Key.shift_r):
-            self.shift_pressed = True
-        if (
-            platform.system() == "Windows"
-            and self.settings.use_alt_shift_hotkey
-            and now - self.last_alt_shift_toggle_time >= 0.2
-            and self.alt_pressed
-            and self.shift_pressed
-        ):
-            self.last_alt_shift_toggle_time = now
-            self.toggle_start_stop()
-            return
-
-        key_str = self._listener_key_name(key)
-        if self._should_toggle_runtime_group(key_str, now):
-            self.last_runtime_toggle_time = now
-            self.toggle_runtime_event_group()
-            return
-
-        if self._should_toggle_start_stop(key_str):
-            self.toggle_start_stop()
-
-    def _on_key_release(self, key: object) -> None:
-        if key in (pynput.keyboard.Key.alt_l, pynput.keyboard.Key.alt_r):
-            self.alt_pressed = False
-        if key in (pynput.keyboard.Key.shift_l, pynput.keyboard.Key.shift_r):
-            self.shift_pressed = False
-
-    def _should_toggle_start_stop(self, key_str: str) -> bool:
-        return (
-            bool(key_str)
-            and not (
-                platform.system() == "Windows" and self.settings.use_alt_shift_hotkey
-            )
-            and self.settings.start_stop_key not in {"DISABLED", "W_UP", "W_DN"}
-            and key_str == self.settings.start_stop_key.upper()
-        )
-
-    def _should_toggle_runtime_group(self, key_str: str, current_time: float) -> bool:
-        runtime_trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
-        return (
-            self.runtime_toggle_enabled
-            and self.is_running.get()
-            and bool(runtime_trigger)
-            and is_keyboard_runtime_toggle_trigger(runtime_trigger)
-            and key_str == runtime_trigger.upper()
-            and current_time - self.last_runtime_toggle_time
-            >= RUNTIME_TOGGLE_DEBOUNCE_SECONDS
-            and self._target_process_is_active()
-        )
-
-    def _start_mac_hotkeys(self) -> None:
-        """Arm macOS Option+Shift / runtime key via CGEventTap; poll fallback."""
-        self.ctrl_check_active = True
-        self.input_listener_session.begin_responsiveness()
-        tap = MacHotkeyTapListener(
-            self.input_listener_session,
-            debounce_seconds=MAC_ALT_SHIFT_DEBOUNCE_SECONDS,
-            runtime_debounce_seconds=RUNTIME_TOGGLE_DEBOUNCE_SECONDS,
-            start_stop_enabled=self._mac_start_stop_enabled_for_poll,
-            runtime_toggle_enabled=self._mac_runtime_toggle_enabled_for_poll,
-            runtime_key_provider=self._mac_runtime_key_for_poll,
-            on_start_stop=self._on_mac_start_stop_chord,
-            on_runtime_toggle=self._on_mac_runtime_toggle_chord,
-        )
-        tap.start()
-        if tap.is_active:
-            self._mac_hotkey_tap_listener = tap
-            self.input_listener_session.add(tap, started=True)
-            logger.info("macOS hotkeys: CGEventTap active (events consumed)")
-            return
-        # No Accessibility / tap install failure: observe-only poll (no consume).
-        try:
-            tap.stop()
-        except Exception:
-            pass
-        logger.warning(
-            "macOS hotkeys: CGEventTap unavailable; falling back to key-state poll "
-            "(Option+Shift will still reach the focused app)"
-        )
-        self._start_mac_key_polling()
-
-    def _start_mac_key_polling(self) -> None:
-        """Fallback: detect Option+Shift on a bg thread without consuming events."""
-        self.ctrl_check_active = True
-        listener = MacKeyPollListener(
-            self.input_listener_session,
-            interval_ms=MAC_POLL_INTERVAL_MS,
-            hold_seconds=MAC_ALT_SHIFT_HOLD_SECONDS,
-            debounce_seconds=MAC_ALT_SHIFT_DEBOUNCE_SECONDS,
-            runtime_debounce_seconds=RUNTIME_TOGGLE_DEBOUNCE_SECONDS,
-            start_stop_enabled=self._mac_start_stop_enabled_for_poll,
-            runtime_toggle_enabled=self._mac_runtime_toggle_enabled_for_poll,
-            runtime_key_provider=self._mac_runtime_key_for_poll,
-            on_start_stop=self._on_mac_start_stop_chord,
-            on_runtime_toggle=self._on_mac_runtime_toggle_chord,
-        )
-        self._mac_key_poll_listener = listener
-        self.input_listener_session.add(listener)
-
-    def _mac_start_stop_enabled_for_poll(self) -> bool:
-        return bool(getattr(self.settings, "toggle_start_stop_mac", False))
-
-    def _mac_runtime_toggle_enabled_for_poll(self) -> bool:
-        if not self.runtime_toggle_enabled or not self.is_running.get():
-            return False
-        if not self._target_process_is_active():
-            return False
-        return is_keyboard_runtime_toggle_trigger(self.runtime_toggle_key)
-
-    def _mac_runtime_key_for_poll(self) -> str | None:
-        if not self.runtime_toggle_enabled:
-            return None
-        trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
-        if not is_keyboard_runtime_toggle_trigger(trigger):
-            return None
-        return trigger
-
-    def _on_mac_start_stop_chord(self) -> None:
-        """Main-thread: Option+Shift chord accepted by bg poller."""
-        if not self.ctrl_check_active:
-            return
-        self.last_alt_shift_toggle_time = time.time()
-        self.toggle_start_stop()
-
-    def _on_mac_runtime_toggle_chord(self) -> None:
-        """Main-thread: runtime toggle key accepted by bg poller."""
-        if not self.ctrl_check_active:
-            return
-        self.last_runtime_toggle_time = time.time()
-        self.toggle_runtime_event_group()
-
-    def _on_mouse_scroll(self, x: int, y: int, dx: int, dy: int) -> None:
-        pid_match = re.search(r"\((\d+)\)", self.selected_process.get())
-        if not pid_match or not ProcessUtils.is_process_active(int(pid_match.group(1))):
-            return
-
-        curr_time = time.time()
-        if self.latest_scroll_time and curr_time - self.latest_scroll_time <= 0.75:
-            return
-
-        key = self.settings.start_stop_key
-        if (key == "W_UP" and dy > 0) or (key == "W_DN" and dy < 0):
-            self.toggle_start_stop()
-        self.latest_scroll_time = curr_time
-
-    def _runtime_toggle_trigger_ready(self, current_time: float) -> bool:
-        return (
-            self.runtime_toggle_enabled
-            and self.is_running.get()
-            and bool(normalize_runtime_toggle_trigger(self.runtime_toggle_key))
-            and current_time - self.last_runtime_toggle_time
-            >= RUNTIME_TOGGLE_DEBOUNCE_SECONDS
-            and self._target_process_is_active()
-        )
-
-    def _on_runtime_toggle_mouse_scroll(
-        self, x: int, y: int, dx: int, dy: int
-    ) -> None:
-        trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
-        curr_time = time.time()
-        if not self._runtime_toggle_trigger_ready(curr_time):
-            return
-        if (
-            self.latest_runtime_scroll_time
-            and curr_time - self.latest_runtime_scroll_time
-            <= RUNTIME_TOGGLE_SCROLL_GESTURE_SECONDS
-        ):
-            return
-        if (trigger == WHEEL_UP_TRIGGER and dy > 0) or (
-            trigger == WHEEL_DOWN_TRIGGER and dy < 0
-        ):
-            self.latest_runtime_scroll_time = curr_time
-            self.last_runtime_toggle_time = curr_time
-            self.toggle_runtime_event_group()
-
-    def _on_runtime_toggle_mouse_click(
-        self, x: int, y: int, button: object, pressed: bool
-    ) -> None:
-        if not pressed:
-            return
-
-        trigger = normalize_runtime_toggle_trigger(self.runtime_toggle_key)
-        curr_time = time.time()
-        if not self._runtime_toggle_trigger_ready(curr_time):
-            return
-
-        button_name = str(getattr(button, "name", button) or "").lower()
-        if button_name in {"button.x1", "x1"}:
-            button_trigger = MOUSE_BUTTON_3_TRIGGER
-        elif button_name in {"button.x2", "x2"}:
-            button_trigger = MOUSE_BUTTON_4_TRIGGER
-        else:
-            button_trigger = None
-
-        if button_trigger == trigger:
-            self.last_runtime_toggle_time = curr_time
-            self.toggle_runtime_event_group()
 
     def clear_local_logs(self) -> None:
         log_dir = Path("logs")
@@ -1472,128 +651,11 @@ class KeystrokeSimulatorApp(tk.Tk):
                 )
             )
 
-    def toggle_start_stop(self, event: object | None = None) -> None:
-        # Start/stop can take hundreds of ms (processor + UI + sound). A second
-        # Option+Shift during that window must not be dropped silently.
-        if self.toggle_transition_in_progress:
-            self._pending_start_stop_toggle = True
-            return
-        self.toggle_transition_in_progress = True
-        try:
-            if not self.is_running.get():
-                if self.start_simulation():
-                    self.is_running.set(True)
-                    self.update_ui()
-                else:
-                    self.update_ui()
-            else:
-                self.is_running.set(False)
-                self.stop_simulation()
-        finally:
-            self.toggle_transition_in_progress = False
-            if getattr(self, "_pending_start_stop_toggle", False):
-                self._pending_start_stop_toggle = False
-                # Defer so we do not recurse inside the input drain stack.
-                try:
-                    self.after(0, self.toggle_start_stop)
-                except Exception:
-                    self.toggle_start_stop()
-
-    def start_simulation(self) -> bool:
-        # 빠른 캡처 HUD는 모달이 아니다. 실행 중 전역 CTRL을 캡처·저장으로
-        # 받지 않도록 실행 전에 닫는다.
-        quick_hud = self._quick_hud
-        if quick_hud is not None and quick_hud.is_open():
-            quick_hud.close()
-        if not (
-            self.selected_process.get()
-            and "(" in self.selected_process.get()
-            and self._get_run_profile_names()
-        ):
-            return False
-
-        session, compose_errors = self._compose_selected_run(migrate=True)
-        if compose_errors or session is None:
-            return False
-
-        events = self._runnable_events(list(session.events))
-        if not events:
-            return False
-        self._configure_runtime_toggle_session(
-            enabled=bool(session.runtime_toggle_enabled),
-            toggle_key=session.runtime_toggle_key,
-            events=events,
-        )
-
-        set_name = self.selected_modkey_set.get() or DEFAULT_MODKEY_SET_NAME
-        try:
-            mod_keys = get_modkey_set(set_name, self.modkey_sets_path)
-        except Exception as exc:
-            logger.warning(f"Modifier key set load failed for '{set_name}': {exc}")
-            mod_keys = default_modification_keys()
-
-        self.terminate_event.clear()
-        self.keystroke_processor = KeystrokeProcessor(
-            self,
-            self.selected_process.get(),
-            events,
-            mod_keys,
-            self.terminate_event,
-        )
-        if not self.keystroke_processor.event_data_list:
-            self.keystroke_processor = None
-            self._reset_runtime_toggle_session()
-            return False
-
-        # Keep the macOS bg key poller alive while Option+Shift may still be held.
-        if platform.system() != "Darwin" or not self.__dict__.get(
-            "ctrl_check_active", False
-        ):
-            self.setup_event_handlers()
-
-        self.keystroke_processor.start()
-        self._save_latest_state()
-        self.sound_player.play_start_sound()
-        return True
-
-    def stop_simulation(self) -> None:
-        if self.keystroke_processor:
-            safe_call(self.keystroke_processor.stop)
-            self.keystroke_processor = None
-        self.terminate_event.set()
-        self._reset_runtime_toggle_session()
-        if platform.system() != "Darwin" or not self.settings.toggle_start_stop_mac:
-            self.setup_event_handlers()
-
-        if safe_call(self.winfo_exists):
-            self.sound_player.play_stop_sound()
-            self.update_ui()
-
-    def toggle_runtime_event_group(self) -> bool:
-        if not (
-            self.is_running.get()
-            and self.keystroke_processor
-            and self.runtime_toggle_enabled
-            and self.runtime_toggle_key
-        ):
-            return False
-
-        next_state = not self.runtime_toggle_active
-        safe_call(self.keystroke_processor.set_runtime_toggle_active, next_state)
-        self.runtime_toggle_active = next_state
-        if self.settings.runtime_toggle_sound_enabled:
-            if next_state:
-                self.sound_player.play_runtime_toggle_on_sound()
-            else:
-                self.sound_player.play_runtime_toggle_off_sound()
-        self._update_main_status()
-        return True
-
     def update_ui(self) -> None:
-        running = self.is_running.get()
+        running = self.run.is_running
         state = "disabled" if running else "normal"
         readonly_state = "disabled" if running else "readonly"
-        readiness = self._get_readiness_snapshot()
+        readiness: Readiness = self.run.readiness()
 
         self.process_frame.process_combobox.config(state=readonly_state)
         self.process_frame.refresh_button.config(state=state)
@@ -1612,7 +674,7 @@ class KeystrokeSimulatorApp(tk.Tk):
                 if running
                 else f"{theme.ICON_START} {txt('Start', '시작')}"
             )
-            if hotkey := self._hotkey_short():
+            if hotkey := self.run.hotkey_short():
                 label = f"{label}  {hotkey}"
             start_state = "normal" if can_press else "disabled"
             # Prefer single config() for Button/mocks; Label ignores state=.
@@ -1636,7 +698,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self._update_main_status()
 
     def open_modkeys(self) -> None:
-        if self.is_running.get():
+        if self.run.is_running:
             return
         set_name = self.selected_modkey_set.get()
         if not set_name:
@@ -1679,7 +741,7 @@ class KeystrokeSimulatorApp(tk.Tk):
             self,
             profiles_dir=self.profiles_dir,
             run_sets_path=self.run_sets_path,
-            running_getter=self.is_running.get,
+            running_getter=lambda: self.run.is_running,
             settings_getter=lambda: getattr(self, "settings", None),
             on_catalog_changed=self.reload_profiles,
             on_run_set_renamed=self._on_run_set_renamed,
@@ -1710,7 +772,7 @@ class KeystrokeSimulatorApp(tk.Tk):
         self.update_ui()
 
     def open_quick_events(self) -> None:
-        if self.is_running.get():
+        if self.run.is_running:
             return
         # HUD는 모달이 아니므로 두 번 열지 않고 기존 창을 앞으로 가져온다.
         existing = self._quick_hud
@@ -1749,40 +811,13 @@ class KeystrokeSimulatorApp(tk.Tk):
                 pass
         WindowUtils.center_window(self)
 
-    def _save_latest_state(self) -> None:
-        main_pos = None
-        try:
-            main_pos = f"{self.winfo_x()}/{self.winfo_y()}"
-        except tk.TclError:
-            pass
-        StateUtils.save_main_app_state(
-            process=self.selected_process.get().split(" (")[0],
-            profile=self.selected_profile.get(),
-            run_set=self.selected_run_set.get() or CURRENT_RUN_SET_ID,
-            modkey_set=self.selected_modkey_set.get(),
-            main_pos=main_pos,
-        )
-
-    def unbind_events(self) -> None:
-        self.input_listener_session.stop()
-        self.keyboard_listener = None
-        self.start_stop_mouse_listener = None
-        self.runtime_toggle_mouse_listener = None
-
-        self.ctrl_check_active = False
-        self._mac_hotkey_tap_listener = None
-        self._mac_key_poll_listener = None
-
     def on_closing(self, event: object | None = None) -> None:
         if getattr(self, "_is_closing", False):
             return
         self._is_closing = True
         logger.info("Shutting down...")
 
-        self.terminate_event.set()
-        safe_call(self.stop_simulation)
-        safe_call(self._save_latest_state)
-        safe_call(self.unbind_events)
+        self.run.shutdown()
         sound_player = getattr(self, "sound_player", None)
         if sound_player is not None:
             safe_call(getattr(sound_player, "close", lambda: None))

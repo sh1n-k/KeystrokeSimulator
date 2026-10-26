@@ -133,17 +133,18 @@ class TestRunWindowBehaviour(unittest.TestCase):
     def setUp(self):
         set_language("en")
 
-    @patch("app.ui.simulator_app.platform.system", return_value="Linux")
-    @patch("app.ui.simulator_app.pynput.keyboard.Listener")
-    def test_escape_no_longer_quits(self, _listener, _system):
+    def test_escape_no_longer_quits(self):
         """M-05."""
         app = _make_app_stub()
-        app.start_stop_mouse_listener = None
+        app.bind = MagicMock()
+        app.protocol = MagicMock()
 
         KeystrokeSimulatorApp.setup_event_handlers(app)
 
         bound = [c.args[0] for c in app.bind.call_args_list]
         self.assertNotIn("<Escape>", bound)
+        app.protocol.assert_called_once_with("WM_DELETE_WINDOW", app.on_closing)
+        app.run.setup_event_handlers.assert_called_once()
 
     def _status_app(self, snapshot):
         app = _make_app_stub()
@@ -151,7 +152,10 @@ class TestRunWindowBehaviour(unittest.TestCase):
         app.btn_status_fix = MagicMock()
         app.status_tooltip = MagicMock()
         app.lbl_run_status = MagicMock()
-        app._get_readiness_snapshot = MagicMock(return_value=snapshot)
+        app.run.readiness.return_value = snapshot
+        app.run.hotkey_hint_text.return_value = ""
+        app.run.status_detail_with_selection.side_effect = lambda detail: detail
+        app.run.run_dock_text.return_value = ""
         del app._update_main_status  # use the real method
         return app
 
@@ -164,8 +168,7 @@ class TestRunWindowBehaviour(unittest.TestCase):
                 "title": "t",
                 "summary": "rules 13 · signals 13",
                 "detail": "d",
-                "bg": "#E6F0E4",
-                "fg": "#1F4A2E",
+                "tone": "ready",
             }
         )
 
@@ -183,8 +186,7 @@ class TestRunWindowBehaviour(unittest.TestCase):
                 "badge_text": "Permissions",
                 "title": "macOS permissions are blocking capture.",
                 "detail": "d",
-                "bg": "#F7DAD4",
-                "fg": "#7A2820",
+                "tone": "error",
                 "missing_permissions": ["accessibility"],
                 "action": "permissions",
             }

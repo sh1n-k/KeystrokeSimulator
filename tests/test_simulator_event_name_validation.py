@@ -1,19 +1,16 @@
 import unittest
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.domain.models import EventModel, ProfileModel
-from app.ui.simulator_app import KeystrokeSimulatorApp
+from tests.test_run_controller import _make_app_stub
 from app.utils.i18n import set_language
 
 
 class TestSimulatorEventNameValidation(unittest.TestCase):
     def _make_app_stub(self):
-        app = KeystrokeSimulatorApp.__new__(KeystrokeSimulatorApp)
-        app.is_running = SimpleNamespace(get=lambda: False)
-        app.selected_process = SimpleNamespace(get=lambda: "TargetApp (123)")
-        app.selected_profile = SimpleNamespace(get=lambda: "TestProfile")
-        app.profiles_dir = "profiles"
+        app = _make_app_stub()
+        app.selected_process.set("TargetApp (123)")
+        app.selected_profile.set("TestProfile")
         return app
 
     def test_readiness_snapshot_blocks_duplicate_event_names(self):
@@ -27,11 +24,11 @@ class TestSimulatorEventNameValidation(unittest.TestCase):
             ],
         )
 
-        with patch("app.ui.simulator_app.load_profile", return_value=profile), patch(
-            "app.ui.simulator_app.PermissionUtils.missing_macos_permissions",
+        with patch("app.presenters.run_controller.load_profile", return_value=profile), patch(
+            "app.presenters.run_controller.PermissionUtils.missing_macos_permissions",
             return_value=[],
         ):
-            snapshot = app._get_readiness_snapshot()
+            snapshot = app.readiness()
 
         self.assertFalse(snapshot["can_start"])
         self.assertEqual(snapshot["badge_text"], "Duplicate Events")
@@ -39,10 +36,6 @@ class TestSimulatorEventNameValidation(unittest.TestCase):
 
     def test_start_simulation_returns_false_for_duplicate_event_names(self):
         app = self._make_app_stub()
-        app.terminate_event = SimpleNamespace(clear=lambda: None)
-        app.sound_player = SimpleNamespace(play_start_sound=lambda: None)
-        app._save_latest_state = lambda: None
-        app.keystroke_processor = None
         profile = ProfileModel(
             name="TestProfile",
             event_list=[
@@ -51,7 +44,7 @@ class TestSimulatorEventNameValidation(unittest.TestCase):
             ],
         )
 
-        with patch("app.ui.simulator_app.load_profile", return_value=profile):
+        with patch("app.presenters.run_controller.load_profile", return_value=profile):
             result = app.start_simulation()
 
         self.assertFalse(result)
