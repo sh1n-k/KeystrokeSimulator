@@ -10,27 +10,6 @@ from app.platform.system import (
 
 
 class KeyUtils(KeyCodes):
-    WINDOWS_EXTENDED_KEY_NAMES: ClassVar[frozenset[str]] = frozenset(
-        {
-            "Left",
-            "Up",
-            "Right",
-            "Down",
-            "Delete",
-            "Home",
-            "End",
-            "Pageup",
-            "Pagedown",
-            "Insert",
-        }
-    )
-
-    @classmethod
-    def is_extended_key(cls, key_name: str | None) -> bool:
-        if not key_name or not IS_WIN:
-            return False
-        return key_name in cls.WINDOWS_EXTENDED_KEY_NAMES
-
     # macOS HID keycodes: (left, right). Prefer physical key state over modifier
     # flags so Option/Shift chords match what the user is actually holding.
     _MAC_MODIFIER_KEYCODES: ClassVar[dict[str, tuple[int, ...]]] = {

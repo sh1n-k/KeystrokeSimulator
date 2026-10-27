@@ -28,7 +28,7 @@ def quartz_symbol(name: str) -> Any:
 class ResponsivenessActivity:
     """Hold an NSProcessInfo activity so background hotkeys are not App-Napped.
 
-    Tk `after()` callbacks are delayed when the app is occluded (game focus).
+    UI timers are delayed when the app is occluded (game focus).
     A user-initiated activity keeps the process eligible for timely timers.
     """
 

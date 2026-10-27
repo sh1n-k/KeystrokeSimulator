@@ -15,6 +15,7 @@ from app.domain.models import EventModel, ProfileModel
 from app.domain.profile_events import next_available_event_name
 from app.domain.validation import normalized_event_name
 from app.domain.runtime_toggle import normalize_runtime_toggle_trigger
+from app.storage.json_objects import as_object_dict
 
 
 PROFILE_SCHEMA_VERSION = 1
@@ -50,13 +51,6 @@ _EVENT_KEYS = frozenset(
     }
 )
 _HELD_SCREENSHOT_KEYS = frozenset({"format", "data_b64"})
-
-
-def _as_object_dict(value: object) -> dict[str, object] | None:
-    if not isinstance(value, dict):
-        return None
-    raw = cast(Mapping[object, object], value)
-    return {str(key): item for key, item in raw.items()}
 
 
 def _perf_enabled() -> bool:
@@ -110,11 +104,11 @@ def _load_json_meta_favorite(path: Path) -> bool:
             f"Profile metadata ignored for {path}: expected object, got {type(raw_data).__name__}"
         )
         return False
-    data = _as_object_dict(cast(object, raw_data))
+    data = as_object_dict(cast(object, raw_data))
     if data is None:
         return False
     raw_meta: object = data.get("profile") or {}
-    meta = _as_object_dict(raw_meta)
+    meta = as_object_dict(raw_meta)
     if meta is None:
         logger.warning(
             f"Profile metadata ignored for {path}: profile must be an object"
@@ -370,7 +364,7 @@ def raw_profile_has_unused_data(data: Mapping[str, object]) -> bool:
     raw_meta = data.get("profile")
     if raw_meta is None:
         return False
-    meta = _as_object_dict(raw_meta)
+    meta = as_object_dict(raw_meta)
     if meta is None:
         return True
     if not set(meta.keys()).issubset(_PROFILE_META_KEYS):
@@ -382,7 +376,7 @@ def raw_profile_has_unused_data(data: Mapping[str, object]) -> bool:
     if not isinstance(events_raw, list):
         return True
     for event_data in cast(list[object], events_raw):
-        event_dict = _as_object_dict(event_data)
+        event_dict = as_object_dict(event_data)
         if event_dict is None:
             return True
         if not set(event_dict.keys()).issubset(_EVENT_KEYS):
@@ -390,7 +384,7 @@ def raw_profile_has_unused_data(data: Mapping[str, object]) -> bool:
         held = event_dict.get("held_screenshot")
         if held is None:
             continue
-        held_dict = _as_object_dict(held)
+        held_dict = as_object_dict(held)
         if held_dict is None:
             return True
         if not set(held_dict.keys()).issubset(_HELD_SCREENSHOT_KEYS):
@@ -403,7 +397,7 @@ def profile_from_dict(d: Mapping[str, object]) -> ProfileModel:
         raise ValueError(f"Profile root must be an object, got {type(d).__name__}")
     ignored_invalid_data = False
     raw_meta: object = d.get("profile") or {}
-    meta = _as_object_dict(raw_meta)
+    meta = as_object_dict(raw_meta)
     if meta is None:
         logger.warning("Ignoring invalid profile metadata: profile must be an object")
         meta = {}
@@ -415,7 +409,7 @@ def profile_from_dict(d: Mapping[str, object]) -> ProfileModel:
         ignored_invalid_data = True
     events: list[EventModel] = []
     for index, event_data in enumerate(cast(list[object], events_raw), start=1):
-        event_dict = _as_object_dict(event_data)
+        event_dict = as_object_dict(event_data)
         if event_dict is None:
             logger.warning(f"Ignoring invalid event #{index}: event must be an object")
             ignored_invalid_data = True
@@ -489,11 +483,6 @@ def ensure_quick_profile(profiles_dir: Path) -> None:
     if _json_path(profiles_dir, "Quick").exists():
         return
     save_profile(profiles_dir, ProfileModel(name="Quick", event_list=[]), name="Quick")
-
-
-def load_profile_meta_favorite(profiles_dir: Path, name: str) -> bool:
-    """Favorite lookup without constructing models or decoding images."""
-    return _load_profile_meta_favorite_cached(profiles_dir, name)
 
 
 def load_profile_favorites(profiles_dir: Path, names: list[str]) -> dict[str, bool]:

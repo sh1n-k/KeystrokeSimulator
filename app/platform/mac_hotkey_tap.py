@@ -1,7 +1,7 @@
 """macOS CGEventTap hotkeys: consume Option+Shift and optional runtime key.
 
 Runs the tap on a dedicated CFRunLoop thread so detection is independent of the
-Tk main loop. Returning None from the tap callback suppresses delivery to the
+UI event loop. Returning None from the tap callback suppresses delivery to the
 focused app (games), fixing observe-only polling "input eaten by game" behavior.
 
 Requires Accessibility trust to create an active (filter) event tap. Callers

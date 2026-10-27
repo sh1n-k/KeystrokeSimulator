@@ -1,7 +1,7 @@
 """Design tokens shared by every UI: colors, spacing and icon glyphs.
 
-Plain constants with no toolkit import, so the graph renderer and the Qt UI
-can use them as well as the Tk theme.
+Plain constants with no toolkit import, shared by the graph renderer and the
+Qt UI.
 """
 
 # ---------------------------------------------------------------------------
@@ -9,7 +9,6 @@ can use them as well as the Tk theme.
 # ---------------------------------------------------------------------------
 SURFACE_PAPER = "#FAF7F2"        # main background
 SURFACE_PANEL = "#F4F0E8"        # nav rail / side panel
-SURFACE_CANVAS = "#FFFFFF"       # work area (lists, image previews, etc)
 SURFACE_SUNKEN = "#EEE9DD"       # input fields / disabled area
 SURFACE_DIVIDER = "#D9D2C1"      # 1px dividers
 
@@ -20,7 +19,6 @@ SURFACE_DIVIDER = "#D9D2C1"      # 1px dividers
 INK_PRIMARY = "#1A1816"
 INK_SECONDARY = "#4A463E"
 INK_MUTED = "#8A8474"
-INK_INVERSE = "#FAF7F2"
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +26,6 @@ INK_INVERSE = "#FAF7F2"
 # ---------------------------------------------------------------------------
 SIGNAL_BASE = "#2A6B4A"
 SIGNAL_HOVER = "#225A3D"
-SIGNAL_TINT = "#E3EFE7"
 
 
 # ---------------------------------------------------------------------------
@@ -50,27 +47,11 @@ STATUS_ERROR_BG = "#F7DAD4"
 STATUS_ERROR_FG = "#7A2820"
 STATUS_ERROR_ICON = "✕"      # ✕
 
-STATUS_INFO_BG = "#E5EAF2"
-STATUS_INFO_FG = "#1F3760"
-STATUS_INFO_ICON = "ⓘ"       # ⓘ
 
 # ---------------------------------------------------------------------------
-# Semantic — condition / danger
+# Semantic — condition
 # ---------------------------------------------------------------------------
-COND_ACTIVE_FG = SIGNAL_BASE
-COND_ACTIVE_BG = "#D6E9DC"
 COND_INACTIVE_FG = "#7A2820"
-COND_INACTIVE_BG = "#F2D9D4"
-DANGER_BASE = "#A33627"
-
-# Event row selection. The marker is shown only while selected — painting an
-# "idle" marker would require knowing the real row background, which macOS
-# aqua decides for itself. Mid-tone green so it separates from both a light
-# and a dark row background.
-ROW_BG = SURFACE_PAPER
-ROW_SELECTED_BG = SIGNAL_TINT
-ROW_MARKER_SELECTED = "#3A8F63"
-ROW_MARKER_WIDTH = 4
 
 # Capture box outline drawn over the game while the capture HUD is open.
 # Saturated so it reads on both dark and bright game scenes.
@@ -79,7 +60,7 @@ CAPTURE_BORDER_WIDTH = 2
 
 
 # ---------------------------------------------------------------------------
-# Spacing — 4px base grid (use these instead of arbitrary padx/pady)
+# Spacing — 4px base grid (use these for margins and spacing)
 # ---------------------------------------------------------------------------
 SPACE_1 = 4
 SPACE_2 = 8

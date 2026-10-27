@@ -1,8 +1,7 @@
 """설정 창.
 
 상태·검증·저장은 `SettingsForm`이 맡는다. 열려 있는 동안 전역 단축키 리스너를
-끄고, 닫힐 때(확인이든 취소든) Tk와 같은 순서로 실행 창 설정을 다시 읽고
-리스너를 되살린다. topmost가 아니며 Esc로 닫힌다.
+끄고, 닫힐 때(확인이든 취소든) 실행 창 설정을 다시 읽고 리스너를 되살린다. topmost가 아니며 Esc로 닫힌다.
 """
 
 from __future__ import annotations
@@ -97,7 +96,7 @@ class SettingsDialog(QDialog):
         self.form = form or SettingsForm.load()
         self._finished = False
         self.setWindowTitle(txt("Settings", "설정"))
-        # Tk grab_set과 같이 앱 모달. WindowModal은 macOS에서 시트가 된다.
+        # 앱 모달. WindowModal은 macOS에서 시트가 된다.
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.error_labels: dict[SettingsSection, QLabel] = {}
         self.timing_edits: dict[str, QLineEdit] = {}
@@ -444,7 +443,7 @@ class SettingsDialog(QDialog):
             host = self.host
             if host.settings_dialog is self:
                 host.settings_dialog = None
-            # Tk on_close: 설정을 다시 읽고 리스너를 되살린다(종료 중이면 생략).
+            # 설정을 다시 읽고 리스너를 되살린다(종료 중이면 생략).
             if host.is_alive():
                 host.load_settings()
                 host.setup_event_handlers()

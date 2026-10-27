@@ -1,6 +1,6 @@
 """Background macOS key-state poller for Option+Shift / runtime toggle.
 
-Runs chord detection on a dedicated thread (not Tk after, not pynput). Only
+Runs chord detection on a dedicated thread (not UI timers, not pynput). Only
 posts rare side-effect callbacks to InputRouter so the UI action
 queue cannot fill with 60+ samples/sec and stall after several toggles.
 """

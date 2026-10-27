@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import unicodedata
-
 SUPPORTED_LANGUAGES = ("en", "ko")
 LANGUAGE_LABELS = {
     "en": "English",
@@ -26,15 +24,3 @@ def set_language(value: str | None) -> str:
 def txt(en: str, ko: str, **fmt: object) -> str:
     base = ko if _current_language == "ko" else en
     return base.format(**fmt) if fmt else base
-
-
-def display_width(text: str) -> int:
-    width = 0
-    for ch in text:
-        width += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
-    return width
-
-
-def dual_text_width(en: str, ko: str, padding: int = 2, min_width: int = 0) -> int:
-    width = max(display_width(en), display_width(ko)) + padding
-    return max(width, min_width)

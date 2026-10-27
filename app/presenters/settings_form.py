@@ -66,7 +66,7 @@ class SettingsForm:
     def load(
         cls, path: Path = USER_SETTINGS_PATH, *, is_windows: bool | None = None
     ) -> SettingsForm:
-        """창을 열 때마다 파일을 다시 읽는다(Tk `_load_settings`)."""
+        """창을 열 때마다 파일을 다시 읽는다."""
         settings, _can_save = load_user_settings(path)
         set_language(settings.language)
         return cls(settings, is_windows=is_windows, path=path)
@@ -85,7 +85,7 @@ class SettingsForm:
         self.settings.use_alt_shift_hotkey = enabled
 
     def set_mac_hotkey_enabled(self, enabled: bool) -> None:
-        """Tk `_toggle_combo_state`: 켜면 DISABLED를 기본 키로, 끄면 DISABLED로."""
+        """켜면 DISABLED를 기본 키로, 끄면 DISABLED로."""
         self.settings.toggle_start_stop_mac = enabled
         if not enabled:
             self.settings.start_stop_key = "DISABLED"
@@ -196,8 +196,8 @@ class SettingsForm:
         return None, candidate
 
     def submit(self) -> FormError | SaveResult:
-        """검증을 통과하면 언어를 적용하고 저장한다. 저장 실패는 Tk와 같이
-        기록만 하고 창은 닫히게 둔다."""
+        """검증을 통과하면 언어를 적용하고 저장한다. 저장 실패는 기록만
+        하고 창은 닫히게 둔다."""
         error, candidate = self.validate()
         if error is not None:
             return error

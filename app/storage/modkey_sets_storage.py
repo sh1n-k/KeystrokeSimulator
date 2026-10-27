@@ -10,6 +10,7 @@ from typing import cast
 from loguru import logger
 
 from app.domain.models import ModificationKeys
+from app.storage.json_objects import as_object_dict
 
 MODKEY_SETS_SCHEMA_VERSION = 1
 DEFAULT_MODKEY_SET_NAME = "Default"
@@ -68,13 +69,6 @@ def coerce_modification_keys(raw: object) -> ModificationKeys:
         }
     return result
 
-def _as_object_dict(value: object) -> dict[str, object] | None:
-    if not isinstance(value, Mapping):
-        return None
-    raw = cast(Mapping[object, object], value)
-    return {str(key): item for key, item in raw.items()}
-
-
 def _normalize_set_name(name: object) -> str | None:
     if not isinstance(name, str):
         return None
@@ -87,7 +81,7 @@ def empty_catalog() -> dict[str, ModificationKeys]:
 
 
 def _parse_catalog(data: object) -> dict[str, ModificationKeys]:
-    root = _as_object_dict(data)
+    root = as_object_dict(data)
     if root is None:
         return empty_catalog()
 
@@ -96,7 +90,7 @@ def _parse_catalog(data: object) -> dict[str, ModificationKeys]:
 
     if isinstance(sets_raw, list):
         for entry_obj in cast(list[object], sets_raw):
-            entry_dict = _as_object_dict(entry_obj)
+            entry_dict = as_object_dict(entry_obj)
             if entry_dict is None:
                 continue
             name = _normalize_set_name(entry_dict.get("name"))
@@ -229,27 +223,6 @@ def delete_modkey_set(name: str, path: Path | None = None) -> str | None:
     if DEFAULT_MODKEY_SET_NAME in catalog:
         return DEFAULT_MODKEY_SET_NAME
     return sorted(catalog.keys(), key=str.lower)[0]
-
-
-def rename_modkey_set(
-    old_name: str,
-    new_name: str,
-    path: Path | None = None,
-) -> str:
-    src = _normalize_set_name(old_name)
-    dst = _normalize_set_name(new_name)
-    if not src or not dst:
-        raise ValueError("Names are required")
-    if src == dst:
-        return src
-    catalog = load_modkey_sets(path)
-    if src not in catalog:
-        raise KeyError(f"ModKey set '{src}' not found")
-    if dst in catalog:
-        raise FileExistsError(f"ModKey set '{dst}' already exists")
-    catalog[dst] = catalog.pop(src)
-    save_modkey_sets(catalog, path)
-    return dst
 
 
 def ensure_default_modkey_set(path: Path | None = None) -> dict[str, ModificationKeys]:

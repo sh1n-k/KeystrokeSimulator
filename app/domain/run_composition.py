@@ -200,29 +200,3 @@ def compose_run_session(
         runtime_toggle_key=runtime_toggle_key,
         errors=errors,
     )
-
-
-def format_run_profile_summary(names: list[str], *, max_names: int = 3) -> str:
-    cleaned = [n for n in names if n]
-    if not cleaned:
-        return "—"
-    if len(cleaned) <= max_names:
-        return " · ".join(cleaned)
-    head = " · ".join(cleaned[:max_names])
-    rest = len(cleaned) - max_names
-    return f"{head} (+{rest})"
-
-
-def normalize_run_profile_list(
-    names: list[str] | None, available: set[str] | list[str]
-) -> list[str]:
-    """Keep order, drop unknowns/duplicates."""
-    avail = set(available)
-    seen: set[str] = set()
-    result: list[str] = []
-    for name in names or []:
-        if not name or name in seen or name not in avail:
-            continue
-        seen.add(name)
-        result.append(name)
-    return result

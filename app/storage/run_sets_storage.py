@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from loguru import logger
+from app.storage.json_objects import as_object_dict
 
 RUN_SETS_SCHEMA_VERSION = 1
 DEFAULT_RUN_SETS_PATH = Path("run_sets.json")
@@ -48,22 +49,15 @@ def empty_catalog() -> dict[str, list[str]]:
     return {}
 
 
-def _as_object_dict(value: object) -> dict[str, object] | None:
-    if not isinstance(value, Mapping):
-        return None
-    raw = cast(Mapping[object, object], value)
-    return {str(key): item for key, item in raw.items()}
-
-
 def _parse_catalog(data: object) -> dict[str, list[str]]:
-    root = _as_object_dict(data)
+    root = as_object_dict(data)
     if root is None:
         return empty_catalog()
     catalog: dict[str, list[str]] = {}
     sets_raw = root.get("sets")
     if isinstance(sets_raw, list):
         for entry_obj in cast(list[object], sets_raw):
-            entry = _as_object_dict(entry_obj)
+            entry = as_object_dict(entry_obj)
             if entry is None:
                 continue
             name = _normalize_set_name(entry.get("name"))

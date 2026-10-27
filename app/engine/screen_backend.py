@@ -616,10 +616,6 @@ class MacStreamBackend:
         with self.lock:
             return self._dead
 
-    def is_dead_locked(self) -> bool:
-        """락을 이미 쥔 쪽에서 쓰는 사망 여부."""
-        return self._dead
-
     def grab(self, groups: Sequence[Any]) -> list[ImageFrame | None]:
         now = time.perf_counter()
         died = False

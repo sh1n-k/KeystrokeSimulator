@@ -160,7 +160,7 @@ class ModKeysDialog(QDialog):
             widgets.key.setPlaceholderText(txt("Press Key", "키 입력"))
         else:
             widgets.key.setText(row.value)
-        # Pass 중에는 키와 수정키 포함을 바꿀 수 없다(Tk와 같음).
+        # Pass 중에는 키와 수정키 포함을 바꿀 수 없다.
         widgets.key.setEnabled(not row.pass_through)
         widgets.include_check.setEnabled(not row.pass_through)
 

@@ -118,12 +118,6 @@ def normalize_runtime_toggle_trigger(
     return _canonical_key_name(raw, os_name=os_name)
 
 
-def is_supported_runtime_toggle_trigger(
-    trigger: str | None, os_name: str | None = None
-) -> bool:
-    return normalize_runtime_toggle_trigger(trigger, os_name=os_name) is not None
-
-
 def is_keyboard_runtime_toggle_trigger(
     trigger: str | None, os_name: str | None = None
 ) -> bool:

@@ -19,7 +19,6 @@ from app.storage.profile_storage import (
     list_profile_names,
     load_profile,
     load_profile_favorites,
-    load_profile_meta_favorite,
     raw_profile_has_unused_data,
     rename_profile_files,
     save_profile,
@@ -483,7 +482,7 @@ class TestEnsureQuickProfile(unittest.TestCase):
 
 
 class TestLoadProfileMetaFavorite(unittest.TestCase):
-    """load_profile_meta_favorite: favorite 메타데이터 조회"""
+    """load_profile_favorites: favorite 메타데이터 조회"""
 
     def test_json_favorite(self):
         """JSON에서 favorite 조회"""
@@ -494,13 +493,13 @@ class TestLoadProfileMetaFavorite(unittest.TestCase):
                 ProfileModel(name="Fav", event_list=[], favorite=True),
                 name="Fav",
             )
-            self.assertTrue(load_profile_meta_favorite(prof_dir, "Fav"))
+            self.assertTrue(load_profile_favorites(prof_dir, ["Fav"])["Fav"])
 
     def test_nonexistent_defaults_false(self):
         """파일 없음 → False (새 프로필 생성됨)"""
         with tempfile.TemporaryDirectory() as td:
             prof_dir = Path(td)
-            result = load_profile_meta_favorite(prof_dir, "NonExistent")
+            result = load_profile_favorites(prof_dir, ["NonExistent"])["NonExistent"]
             self.assertFalse(result)
 
     def test_load_profile_favorites_refreshes_when_file_changes(self):

@@ -3,10 +3,8 @@ import unittest
 from app.domain.models import EventModel, ProfileModel
 from app.domain.run_composition import (
     compose_run_session,
-    format_run_profile_summary,
     namespace_event,
     namespaced_token,
-    normalize_run_profile_list,
 )
 
 
@@ -170,21 +168,6 @@ class TestComposeRunSession(unittest.TestCase):
         self.assertFalse(util_evt.runtime_toggle_member)
         rot_extra = next(e for e in session.events if e.event_name == "Rot/Extra")
         self.assertTrue(rot_extra.runtime_toggle_member)
-
-
-class TestHelpers(unittest.TestCase):
-    def test_format_summary(self) -> None:
-        self.assertEqual(format_run_profile_summary([]), "—")
-        self.assertEqual(format_run_profile_summary(["A", "B"]), "A · B")
-        self.assertIn(
-            "+1", format_run_profile_summary(["A", "B", "C", "D"], max_names=3)
-        )
-
-    def test_normalize_run_profile_list(self) -> None:
-        self.assertEqual(
-            normalize_run_profile_list(["B", "A", "B", "missing"], {"A", "B", "C"}),
-            ["B", "A"],
-        )
 
 
 if __name__ == "__main__":

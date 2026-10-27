@@ -1,4 +1,4 @@
-"""작업 공간 동작. 대부분은 Tk 없이 stub으로, 창 흐름은 RUN_GUI_TESTS에서."""
+"""작업 공간 목록 표시 문구(구역 제목·조건 요약·배지)와 프로필 규칙(Quick·정렬)."""
 
 import tempfile
 import unittest

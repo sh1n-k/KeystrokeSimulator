@@ -4,7 +4,7 @@ from app.domain.validation import settings_number_entry_valid
 
 
 class TestValidateNumeric(unittest.TestCase):
-    """settings_number_entry_valid: 설정 창 숫자 칸 검증(Tk 불필요)"""
+    """settings_number_entry_valid: 설정 창 숫자 칸 검증"""
 
     def test_validate_numeric_basic(self):
         self.assertTrue(settings_number_entry_valid(""))

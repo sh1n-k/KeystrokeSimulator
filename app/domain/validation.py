@@ -108,11 +108,6 @@ def timing_is_valid(duration_ms: int | None, randomization_ms: int | None) -> bo
     )
 
 
-def is_digits(value: str) -> bool:
-    """숫자 입력 칸의 키 입력 검증. 빈 값은 입력 중으로 본다."""
-    return value == "" or value.isdigit()
-
-
 def settings_number_entry_valid(value: str) -> bool:
     """설정 창 숫자 칸: 빈 값 또는 앞자리 0 없는 0~999."""
     return value == "" or (

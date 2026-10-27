@@ -264,7 +264,7 @@ class WorkspaceWindow(QMainWindow):
         self._status_timer.timeout.connect(self._clear_status)
 
     def _bind_keys(self) -> None:
-        # 입력칸에 포커스가 있으면 입력칸이 ⌘Z를 먼저 받는다(Tk와 같다).
+        # 입력칸에 포커스가 있으면 입력칸이 ⌘Z를 먼저 받는다.
         undo = QShortcut(QKeySequence(QKeySequence.StandardKey.Undo), self)
         undo.activated.connect(self.undo)
         find = QShortcut(QKeySequence(QKeySequence.StandardKey.Find), self)

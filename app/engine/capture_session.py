@@ -36,7 +36,7 @@ class CaptureBackend(Protocol):
 
 
 class CaptureSession:
-    """Thread-safe capture state with no Tk calls from the capture thread."""
+    """Thread-safe capture state with no UI calls from the capture thread."""
 
     def __init__(self, capturer: CaptureBackend | None = None) -> None:
         self.capturer = capturer or ScreenshotCapturer()

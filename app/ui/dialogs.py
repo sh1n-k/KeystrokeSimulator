@@ -20,7 +20,7 @@ _PASS_THROUGH_KEYS = frozenset(
 
 
 def key_event_name(event: QKeyEvent) -> str:
-    """Tk `(event.char or event.keysym).upper()`에 대응하는 키 이름.
+    """키 입력 칸에 넣을 대문자 키 이름.
 
     영문·숫자는 키 코드로 읽어 macOS Option 조합 문자(å 등)를 피한다. F키는
     "F1" 형식, 그 밖의 인쇄 가능한 한 글자는 그대로, 나머지는 빈 문자열.
