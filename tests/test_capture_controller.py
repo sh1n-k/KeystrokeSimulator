@@ -215,7 +215,7 @@ class TestPreviewInput(unittest.TestCase):
         self.assertEqual(c.session.selected_position, (3, 4))
         self.assertEqual(c.mag_center, (3, 4))
 
-    def test_pixel_crosshair_is_in_magnifier_not_preview(self):
+    def test_pixel_crosshair_is_in_magnifier_and_preview(self):
         c, cap, *_ = make_controller()
         cap.emit((0, 0, 255))
         c.capture()
@@ -225,11 +225,24 @@ class TestPreviewInput(unittest.TestCase):
         zoomed = c.magnifier("#000000")
 
         assert preview is not None and zoomed is not None
-        self.assertEqual(preview.getpixel((0, 50))[:3], (0, 0, 255))
+        self.assertEqual(preview.getpixel((0, 50))[:3], (255, 255, 0))
+        self.assertEqual(preview.getpixel((0, 0))[:3], (0, 0, 255))
         cross = (MAGNIFIER_SPAN // 2) * MAGNIFIER_ZOOM + MAGNIFIER_ZOOM // 2
         self.assertEqual(zoomed.getpixel((0, cross)), (255, 255, 0))
         self.assertEqual(zoomed.getpixel((cross, zoomed.height - 1)), (255, 255, 0))
         self.assertEqual(zoomed.getpixel((0, 0)), (0, 0, 255))
+
+    def test_live_preview_has_no_crosshair(self):
+        c, cap, *_ = make_controller()
+        cap.emit((0, 0, 255))
+        c.capture()
+        c.click_preview((50, 50), (100, 100))
+        c.alt_down = True
+
+        preview, _size = c.preview()
+
+        assert preview is not None
+        self.assertEqual(preview.getpixel((0, 50))[:3], (0, 0, 255))
 
     def test_region_mode_keeps_rectangle_in_preview(self):
         c, cap, *_ = make_controller(region_size=(20, 20))
