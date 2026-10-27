@@ -122,7 +122,23 @@ class WorkspaceWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        top = QWidget()
+        # 사이드바는 창 맨 위부터 둔다. 머리 영역(이름·실행 옵션)은 오른쪽 안에만
+        # 두어, 프로필과 실행 세트를 오갈 때 높이가 달라도 사이드바가 움직이지 않는다.
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
+        self.sidebar = WorkspaceSidebar(
+            on_select=self._on_sidebar_select,
+            on_action=self._on_sidebar_action,
+            on_new=self._on_sidebar_new,
+        )
+        self.sidebar.setMinimumWidth(170)
+        self.splitter.addWidget(self.sidebar)
+        right = QWidget()
+        right_box = QVBoxLayout(right)
+        right_box.setContentsMargins(0, 0, 0, 0)
+        right_box.setSpacing(0)
+
+        self.top_bar = top = QWidget()
         top_row = QHBoxLayout(top)
         top_row.setContentsMargins(tokens.SPACE_3, tokens.SPACE_2, tokens.SPACE_3, 0)
         self.header = ProfileHeader(
@@ -130,13 +146,7 @@ class WorkspaceWindow(QMainWindow):
             on_favorite=self.model.set_favorite,
             validate=self.model.profile_name_problem,
         )
-        self.lbl_run_set_title = QLabel()
-        font = self.lbl_run_set_title.font()
-        font.setBold(True)
-        font.setPointSizeF(font.pointSizeF() + 2)
-        self.lbl_run_set_title.setFont(font)
         top_row.addWidget(self.header)
-        top_row.addWidget(self.lbl_run_set_title)
         top_row.addStretch(1)
         self.lbl_running = QLabel(
             txt(
@@ -148,7 +158,7 @@ class WorkspaceWindow(QMainWindow):
         self.lbl_running.setStyleSheet(style.badge_qss("running"))
         self.lbl_running.hide()
         top_row.addWidget(self.lbl_running)
-        root.addWidget(top)
+        right_box.addWidget(top)
 
         self.options_bar = QWidget()
         options = QVBoxLayout(self.options_bar)
@@ -161,18 +171,10 @@ class WorkspaceWindow(QMainWindow):
         self.toggle_box = RuntimeToggleBox(on_change=self._on_toggle_changed)
         self.toggle_box.hide()
         options.addWidget(self.toggle_box)
-        root.addWidget(self.options_bar)
+        right_box.addWidget(self.options_bar)
 
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.splitter.setChildrenCollapsible(False)
-        self.sidebar = WorkspaceSidebar(
-            on_select=self._on_sidebar_select,
-            on_action=self._on_sidebar_action,
-            on_new=self._on_sidebar_new,
-        )
-        self.sidebar.setMinimumWidth(170)
-        self.splitter.addWidget(self.sidebar)
-
+        self.content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.content_splitter.setChildrenCollapsible(False)
         self.center = QStackedWidget()
         self.profile_view = QWidget()
         profile_box = QVBoxLayout(self.profile_view)
@@ -228,20 +230,24 @@ class WorkspaceWindow(QMainWindow):
             on_rename=self._rename_current_run_set,
         )
         self.center.addWidget(self.run_set_view)
-        self.splitter.addWidget(self.center)
+        self.content_splitter.addWidget(self.center)
 
         self.detail = EventDetailPanel(
             self.model,
             running_getter=self.model.running_getter,
             selection_getter=self.tree.selected_events,
         )
-        self.splitter.addWidget(self.detail)
+        self.content_splitter.addWidget(self.detail)
+        self.content_splitter.setStretchFactor(0, 1)
+        self.content_splitter.setStretchFactor(1, 0)
+        right_box.addWidget(self.content_splitter, 1)
+        self.splitter.addWidget(right)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
-        self.splitter.setStretchFactor(2, 0)
         width = WORKSPACE_DEFAULT_SIZE[0]
-        self.splitter.setSizes(
-            [SIDEBAR_WIDTH, width - SIDEBAR_WIDTH - PANEL_WIDTH, PANEL_WIDTH]
+        self.splitter.setSizes([SIDEBAR_WIDTH, width - SIDEBAR_WIDTH])
+        self.content_splitter.setSizes(
+            [width - SIDEBAR_WIDTH - PANEL_WIDTH, PANEL_WIDTH]
         )
         root.addWidget(self.splitter, 1)
         self.setCentralWidget(central)
@@ -301,8 +307,8 @@ class WorkspaceWindow(QMainWindow):
         self.detail.forget()
         self.toggle_box.stop_capture()
         if model.mode == "profile":
-            self.lbl_run_set_title.hide()
             self.header.show()
+            self._sync_top_bar()
             self.header.load(
                 model.prof_name, model.favorite_draft, locked=model.name_locked
             )
@@ -325,10 +331,7 @@ class WorkspaceWindow(QMainWindow):
             self._refresh_graph_if_visible()
         else:
             self.header.hide()
-            self.lbl_run_set_title.setText(
-                txt("Run set · {n}", "실행 세트 · {n}", n=model.run_set_name)
-            )
-            self.lbl_run_set_title.show()
+            self._sync_top_bar()
             self.options_bar.hide()
             self.detail.hide()
             self.run_set_view.load(
@@ -468,6 +471,11 @@ class WorkspaceWindow(QMainWindow):
         self._running = running
         self.lbl_running.setVisible(running)
         self.header.set_locked(self.model.name_locked)
+        self._sync_top_bar()
+
+    def _sync_top_bar(self) -> None:
+        # 실행 세트에서는 이름 줄이 없으므로, 실행 중 배지가 없으면 빈 줄을 접는다.
+        self.top_bar.setVisible(self.model.mode == "profile" or self._running)
 
     # ── sidebar ────────────────────────────────────────────────────────
 

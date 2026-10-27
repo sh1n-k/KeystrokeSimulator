@@ -112,6 +112,31 @@ class TestOpening(WorkspaceWindowCase):
         self.assertIs(self.ws.center.currentWidget(), self.ws.run_set_view)
         self.assertTrue(self.ws.detail.isHidden())
 
+    def test_sidebar_stays_put_across_items_and_options(self) -> None:
+        upsert_run_set("Raid", ["P"], Path("run_sets.json"))
+        self.ws.on_catalog_changed()
+        self.app.processEvents()
+        top = self.ws.sidebar.mapTo(self.ws, self.ws.sidebar.rect().topLeft())
+
+        self.ws._toggle_options()
+        self.app.processEvents()
+        self.assertEqual(self.ws.sidebar.mapTo(self.ws, self.ws.sidebar.rect().topLeft()), top)
+
+        self.ws.model.open_run_set("Raid")
+        self.app.processEvents()
+        self.assertEqual(self.ws.sidebar.mapTo(self.ws, self.ws.sidebar.rect().topLeft()), top)
+        self.assertTrue(self.ws.header.isHidden())
+        self.assertTrue(self.ws.top_bar.isHidden())  # empty row is folded away
+
+        self.ws.set_running(True)
+        self.assertFalse(self.ws.top_bar.isHidden())  # running badge still shows
+        self.ws.set_running(False)
+        self.assertTrue(self.ws.top_bar.isHidden())
+
+        self.ws.model.open_profile("P")
+        self.assertFalse(self.ws.top_bar.isHidden())
+        self.assertFalse(self.ws.header.isHidden())
+
     def test_list_shows_sections_in_run_order(self) -> None:
         store = self.ws.tree.store
         heads = [store.item(r, 0).text() for r in range(store.rowCount())]
