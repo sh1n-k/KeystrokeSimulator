@@ -363,16 +363,22 @@ class TestSampleBufferStatus(unittest.TestCase):
         "SCStream output class requires macOS frameworks",
     )
     def test_callback_exception_does_not_escape(self):
+        """처리도, 프레임 버리기도 실패해도 예외가 콜백 밖으로 나가지 않는다."""
         classes = _sck_classes()
         output = classes["output"].alloc().init()
         broken = MagicMock()
-        broken.lock = MagicMock(side_effect=RuntimeError("boom"))
-        type(broken).union = property(
-            lambda _self: (_ for _ in ()).throw(RuntimeError("boom"))
-        )
+        broken.drop_frame.side_effect = RuntimeError("drop failed")
         output.backend = broken
 
-        output.stream_didOutputSampleBuffer_ofType_(None, object(), 0)
+        # 진짜 CoreMedia에 가짜 샘플 버퍼를 넘기면 메모리를 잘못 읽어 가끔
+        # 세그폴트가 난다. 처리 함수는 바꿔 끼운다.
+        with patch(
+            "app.engine.screen_backend._handle_sample_buffer",
+            side_effect=RuntimeError("boom"),
+        ):
+            output.stream_didOutputSampleBuffer_ofType_(None, object(), 0)
+
+        broken.drop_frame.assert_called_once_with(fault=True)
 
 
 class TestStallEscalation(unittest.TestCase):
