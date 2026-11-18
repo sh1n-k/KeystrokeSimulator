@@ -858,6 +858,13 @@ class WorkspaceModel:
         self._set_save_state("saved")
         return True
 
+    def save_pending_now(self) -> None:
+        """예약된 자동 저장을 기다리지 않고 지금 한다(실행 시작 직전).
+        실패는 저장 배지로만 알린다. 게임 중에 대화 상자를 띄우지 않는다."""
+        if self.save_pending:
+            self._cancel_timer()
+            self._run_autosave()
+
     def flush(self) -> bool:
         """예약된 저장을 지금 한다. 실패하면 이유를 보이고 False."""
         if self.mode != "profile" or not self.profile_open:

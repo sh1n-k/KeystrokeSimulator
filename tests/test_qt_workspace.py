@@ -51,6 +51,7 @@ class FakeHost(QWidget):
         self.settings = UserSettings()
         self.reload_targets = MagicMock()
         self.follow_renamed_run_set = MagicMock()
+        self.follow_workspace_item = MagicMock()
         self.update_ui = MagicMock()
 
 
@@ -111,6 +112,16 @@ class TestOpening(WorkspaceWindowCase):
         self.assertEqual(self.ws.model.current_item(), ("run_set", "Raid"))
         self.assertIs(self.ws.center.currentWidget(), self.ws.run_set_view)
         self.assertTrue(self.ws.detail.isHidden())
+
+    def test_opened_item_becomes_the_run_target(self) -> None:
+        self.host.follow_workspace_item.assert_called_with("profile", "P")
+        upsert_run_set("Raid", ["P"], Path("run_sets.json"))
+        self.ws.on_catalog_changed()
+
+        self.ws.model.new_profile("B")
+        self.host.follow_workspace_item.assert_called_with("profile", "B")
+        self.ws.model.open_run_set("Raid")
+        self.host.follow_workspace_item.assert_called_with("run_set", "Raid")
 
     def test_sidebar_stays_put_across_items_and_options(self) -> None:
         upsert_run_set("Raid", ["P"], Path("run_sets.json"))
@@ -371,6 +382,46 @@ class TestRunningAndClosing(WorkspaceWindowCase):
         self.ws.set_running(False)
         self.assertTrue(self.ws.lbl_running.isHidden())
         self.assertTrue(self.ws.header.entry.isEnabled())
+
+    def test_stopping_follows_the_item_opened_while_running(self) -> None:
+        self.host.run.is_running = True
+        self.ws.set_running(True)
+        self.ws.model.open_profile("Quick")
+        self.host.follow_workspace_item.reset_mock()
+
+        self.ws.set_running(True)
+        self.host.follow_workspace_item.assert_not_called()
+        self.host.run.is_running = False
+        self.ws.set_running(False)
+        self.host.follow_workspace_item.assert_called_once_with("profile", "Quick")
+        self.ws.set_running(False)
+        self.host.follow_workspace_item.assert_called_once()
+
+    def test_stopping_without_opening_keeps_the_chosen_target(self) -> None:
+        self.host.follow_workspace_item.reset_mock()
+        self.host.run.is_running = True
+        self.ws.set_running(True)
+        self.host.run.is_running = False
+        self.ws.set_running(False)
+
+        self.host.follow_workspace_item.assert_not_called()
+
+    def test_save_before_run_writes_the_pending_edit(self) -> None:
+        self.ws.btn_add_rule.click()
+        self.assertTrue(self.ws.model.save_pending)
+
+        self.ws.save_before_run()
+
+        self.assertFalse(self.ws.model.save_pending)
+        self.assertIn("Rule", [e.event_name for e in self.saved()])
+
+    def test_save_before_run_commits_the_typed_event_name(self) -> None:
+        self.ws.tree.select([self.event("loose")])
+        self.ws.detail.entry_name.setText("typed")
+
+        self.ws.save_before_run()
+
+        self.assertIn("typed", [e.event_name for e in self.saved()])
 
     def test_quick_name_is_locked(self) -> None:
         self.ws.model.open_profile("Quick")

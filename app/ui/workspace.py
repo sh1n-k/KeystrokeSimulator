@@ -77,6 +77,7 @@ class WorkspaceHost(Protocol):
     def settings(self) -> UserSettings: ...
     def reload_targets(self, new_name: str | None = None) -> None: ...
     def follow_renamed_run_set(self, old: str, new: str) -> None: ...
+    def follow_workspace_item(self, kind: str, name: str) -> None: ...
     def update_ui(self) -> None: ...
 
 
@@ -94,6 +95,8 @@ class WorkspaceWindow(QMainWindow):
         self._closed = False
         self._quitting = False
         self._running = False
+        # 실행 중에 다른 항목을 열면 중지한 뒤 그 항목을 실행 대상으로 고른다.
+        self._follow_after_run = False
         self._options_open = False
         self.new_signal_hud: CaptureHud | None = None
         self.model = WorkspaceModel(
@@ -344,6 +347,11 @@ class WorkspaceWindow(QMainWindow):
                 f"{txt('Workspace', '작업 공간')} - {model.run_set_name}"
             )
         self.sidebar.mark_current(model.current_item())
+        # 작업 공간에서 연 항목을 실행 대상으로 고른다. 실행 중이면 중지 후에 고른다.
+        if self.host.run.is_running:
+            self._follow_after_run = True
+        else:
+            self.host.follow_workspace_item(*model.current_item())
 
     def on_events_changed(self, select: list[EventModel] | None) -> None:
         model = self.model
@@ -468,10 +476,20 @@ class WorkspaceWindow(QMainWindow):
     def set_running(self, running: bool) -> None:
         if self._closed:
             return
+        stopped = self._running and not running
         self._running = running
         self.lbl_running.setVisible(running)
         self.header.set_locked(self.model.name_locked)
         self._sync_top_bar()
+        if stopped and self._follow_after_run:
+            self._follow_after_run = False
+            self.host.follow_workspace_item(*self.model.current_item())
+
+    def save_before_run(self) -> None:
+        """시작 직전: 방금 고친 내용이 디스크에 있어야 그 내용으로 돈다."""
+        if not self._closed:
+            self.commit_pending_edits()
+            self.model.save_pending_now()
 
     def _sync_top_bar(self) -> None:
         # 실행 세트에서는 이름 줄이 없으므로, 실행 중 배지가 없으면 빈 줄을 접는다.

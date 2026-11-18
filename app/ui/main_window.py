@@ -375,6 +375,9 @@ class RunWindow(QMainWindow):
         is_open = getattr(hud, "is_open", None)
         if hud is not None and callable(is_open) and is_open():
             hud.close()
+        save_before_run = getattr(self.workspace, "save_before_run", None)
+        if callable(save_before_run):
+            save_before_run()
 
     def defer(self, action: Callable[[], None]) -> None:
         QTimer.singleShot(0, action)
@@ -584,6 +587,14 @@ class RunWindow(QMainWindow):
         """고른 실행 세트의 이름이 바뀌면 새 이름을 계속 고른다."""
         if self.target() == ("run_set", old):
             self.load_targets(("run_set", new))
+
+    def follow_workspace_item(self, kind: TargetKind, name: str) -> None:
+        """작업 공간에서 연 프로필·실행 세트를 실행 대상으로 고른다.
+        실행 중에는 돌고 있는 대상을 그대로 보인다(중지하면 작업 공간이 다시 알린다)."""
+        if self.run.is_running or self.target() == (kind, name):
+            return
+        if not self.set_target(kind, name):
+            self.load_targets((kind, name))
 
     def copy_modkey_set(self) -> None:
         curr = self.modkey_combo.currentText()

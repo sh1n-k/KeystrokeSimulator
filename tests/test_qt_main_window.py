@@ -242,6 +242,32 @@ class TestRunWindow(unittest.TestCase):
 
         self.assertEqual(self.window.target(), ("profile", "Rot"))
 
+    def test_workspace_item_becomes_target_only_when_idle(self) -> None:
+        self.window.set_target("profile", "Rot")
+
+        self.window.follow_workspace_item("run_set", "Raid")
+        self.assertEqual(self.window.target(), ("run_set", "Raid"))
+
+        self.window.run.is_running = True
+        self.window.follow_workspace_item("profile", "Rot")
+        self.assertEqual(self.window.target(), ("run_set", "Raid"))
+
+    def test_workspace_item_missing_from_combo_is_loaded(self) -> None:
+        save_profile(Path("profiles"), ProfileModel(name="New"))
+
+        self.window.follow_workspace_item("profile", "New")
+
+        self.assertEqual(self.window.target(), ("profile", "New"))
+
+    def test_before_start_saves_pending_workspace_edits(self) -> None:
+        workspace = MagicMock()
+        self.window.workspace = workspace
+
+        self.window.before_start()
+
+        workspace.save_before_run.assert_called_once_with()
+        self.window.workspace = None
+
     def test_renamed_profile_follows_new_name(self) -> None:
         self.window.set_target("profile", "Rot")
         Path("profiles/Rot.json").rename(Path("profiles/Rot2.json"))
