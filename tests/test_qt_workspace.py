@@ -413,7 +413,7 @@ class TestRunningAndClosing(WorkspaceWindowCase):
         self.ws.save_before_run()
 
         self.assertFalse(self.ws.model.save_pending)
-        self.assertIn("Rule", [e.event_name for e in self.saved()])
+        self.assertIn("Action", [e.event_name for e in self.saved()])
 
     def test_save_before_run_commits_the_typed_event_name(self) -> None:
         self.ws.tree.select([self.event("loose")])
