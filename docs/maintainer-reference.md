@@ -32,7 +32,7 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 | `app/storage/profile_storage.py` | `profiles/*.json` 직렬화와 호환 로딩, 프로필 표시 순서 |
 | `app/storage/modkey_sets_storage.py` | `modkey_sets.json` 수정키 세트 저장 |
 | `app/storage/run_sets_storage.py` | `run_sets.json` 이름 있는 실행 세트 저장 |
-| `app/domain/profile_events.py` | 이벤트 복사·조건 참조, 신호/규칙 묶음과 표시 순서(=우선순위), 되돌리기 스냅숏, 자동 저장 dirty fingerprint |
+| `app/domain/profile_events.py` | 이벤트 복사·조건 참조, 상태/동작 묶음과 표시 순서(=우선순위), 되돌리기 스냅숏, 자동 저장 dirty fingerprint |
 | `app/domain/validation.py` | 이름 중복·순환 조건·영역 경계·타이밍 검증, 숫자 입력·시작/중지 키 검증 |
 | `app/domain/run_composition.py` | 다중 프로필 실행 시 이벤트/group 네임스페이스 합성 |
 | `app/domain/runtime_toggle.py` | 단축키 묶음 trigger 정규화·표시·검증 |
@@ -43,7 +43,7 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 | `app/storage/app_state.py` | `app_state.json`(최근 선택·창 위치) 읽기·쓰기 |
 | `app/presenters/workspace_model.py` | 작업 공간 상태와 동작: 프로필·실행 세트 CRUD, 이벤트 편집, 되돌리기, 자동 저장, 실행 중 편집 정책 |
 | `app/ui/workspace.py` | 작업 공간 창(사이드바·목록·상세·그래프 탭 배치) |
-| `app/ui/workspace_tree.py` | 가운데 목록: 신호/규칙 묶음, 드래그 순서 |
+| `app/ui/workspace_tree.py` | 가운데 목록: 상태/동작 묶음, 드래그 순서 |
 | `app/ui/workspace_detail.py` | 오른쪽 상세 패널: 이벤트 편집, 조건 추가, HUD 캡처 연결, 다중 선택 일괄 동작 |
 | `app/ui/workspace_panels.py` | 사이드바, 프로필 헤더(이름·즐겨찾기), 실행 옵션(단축키 묶음), 실행 세트 편집, 그래프 보기 |
 | `app/presenters/workspace_sidebar.py` | 사이드바 항목 종류와 항목별 동작 목록(Quick 이름 변경·삭제 없음) |
@@ -64,8 +64,8 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 ## Processor 불변조건
 
 - `_resolve_effective_states`가 한 loop 안에서 조건 체인의 유효 상태를 해석한다.
-- 같은 `group_id`에서 매칭된 규칙이 여러 개면 `(priority, name)`이 가장 작은 것이 실행된다. 작업 공간 목록은 그룹 안에서 같은 순서로 보이며, 드래그로 순서를 바꿀 때만 그룹 안에서 0부터 `priority`를 다시 쓴다.
-- `execute_action=False` 이벤트(UI 용어: 신호)는 조건 평가에는 참여하지만 키 입력을 실행하지 않는다. `execute_action=True`는 규칙이다.
+- 같은 `group_id`에서 매칭된 동작이 여러 개면 `(priority, name)`이 가장 작은 것이 실행된다. 작업 공간 목록은 그룹 안에서 같은 순서로 보이며, 드래그로 순서를 바꿀 때만 그룹 안에서 0부터 `priority`를 다시 쓴다.
+- `execute_action=False` 이벤트(UI 용어: 상태)는 조건 평가에는 참여하지만 키 입력을 실행하지 않는다. `execute_action=True`는 동작이다(UI 용어). 코드 식별자(`signal`, `rule`)는 그대로 둔다.
 - 화면 좌표가 없는 입력 이벤트는 조건이 하나 이상일 때만 로드하고, raw match를 True로 둔 뒤 기존 조건 AND로 키를 실행한다.
 - runtime toggle의 활성 상태와 trigger 처리는 processor와 `RunController` 사이에서 일치해야 한다.
 - key press duration과 loop delay는 stop 요청에 응답할 수 있어야 한다.

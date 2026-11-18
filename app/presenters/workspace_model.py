@@ -469,8 +469,8 @@ class WorkspaceModel:
         events = self.profile.event_list
         rules = sum(1 for e in events if e.execute_action)
         parts = [
-            txt("Rules {n}", "규칙 {n}", n=rules),
-            txt("Signals {n}", "신호 {n}", n=len(events) - rules),
+            txt("Actions {n}", "동작 {n}", n=rules),
+            txt("States {n}", "상태 {n}", n=len(events) - rules),
         ]
         missing = sum(1 for e in events if event_needs_attention(e))
         if missing:
@@ -492,9 +492,9 @@ class WorkspaceModel:
         self._changed()
 
     def add_rule(self) -> EventModel:
-        name = next_available_event_name(txt("Rule", "규칙"), self.names())
+        name = next_available_event_name(txt("Action", "동작"), self.names())
         event = EventModel(event_name=name, execute_action=True)
-        self._append([event], txt("add rule", "규칙 추가"))
+        self._append([event], txt("add action", "동작 추가"))
         return event
 
     def append_quick_event(self, result: CaptureResult) -> str | None:
@@ -507,7 +507,7 @@ class WorkspaceModel:
         return name
 
     def next_signal_name(self) -> str:
-        return next_available_event_name(txt("Signal", "신호"), self.names())
+        return next_available_event_name(txt("State", "상태"), self.names())
 
     def add_signal(
         self, name: str, result: CaptureResult, fallback: str = ""
@@ -517,7 +517,7 @@ class WorkspaceModel:
             final = next_available_event_name(final, self.names())
         event = EventModel(event_name=final, execute_action=False)
         apply_capture(event, result)
-        self._append([event], txt("add signal", "신호 추가"))
+        self._append([event], txt("add state", "상태 추가"))
         return event
 
     def copy_events(self, events: Sequence[EventModel]) -> list[EventModel]:
@@ -759,7 +759,7 @@ class WorkspaceModel:
     def condition_candidates(
         self, target: EventModel
     ) -> list[tuple[EventModel, list[str] | None]]:
-        """추가할 수 있는 조건 후보와, 순환이 생기면 그 경로. 신호가 먼저다."""
+        """추가할 수 있는 조건 후보와, 순환이 생기면 그 경로. 상태가 먼저다."""
         events = self.profile.event_list
         candidates = [
             e

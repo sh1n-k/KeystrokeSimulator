@@ -17,15 +17,15 @@ TARGET_COMBO_CHARS = 24
 def section_title(section: EventSection) -> str:
     count = len(section.events)
     if section.kind == "signal":
-        return txt("Signals ({count})", "신호 ({count})", count=count)
+        return txt("States ({count})", "상태 ({count})", count=count)
     if section.kind == "group":
         return txt(
-            "Rules · group {group} ({count})",
-            "규칙 · 그룹 {group} ({count})",
+            "Actions · group {group} ({count})",
+            "동작 · 그룹 {group} ({count})",
             group=section.group,
             count=count,
         )
-    return txt("Rules · no group ({count})", "규칙 · 그룹 없음 ({count})", count=count)
+    return txt("Actions · no group ({count})", "동작 · 그룹 없음 ({count})", count=count)
 
 
 def section_note(section: EventSection) -> str:

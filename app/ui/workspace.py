@@ -196,9 +196,9 @@ class WorkspaceWindow(QMainWindow):
         toolbar.addStretch(1)
         self.btn_sort = QPushButton(txt("Sort by name", "이름순 정렬"))
         self.btn_sort.clicked.connect(self.model.sort_by_name)
-        self.btn_add_signal = QPushButton(txt("＋ Signal", "＋ 신호"))
+        self.btn_add_signal = QPushButton(txt("＋ State", "＋ 상태"))
         self.btn_add_signal.clicked.connect(self.add_signal)
-        self.btn_add_rule = QPushButton(txt("＋ Rule", "＋ 규칙"))
+        self.btn_add_rule = QPushButton(txt("＋ Action", "＋ 동작"))
         self.btn_add_rule.clicked.connect(self.add_rule)
         for button in (self.btn_sort, self.btn_add_signal, self.btn_add_rule):
             button.setAutoDefault(False)

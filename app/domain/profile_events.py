@@ -110,7 +110,7 @@ SectionKind = Literal["signal", "group", "ungrouped"]
 
 @dataclass(frozen=True)
 class EventSection:
-    """한 묶음. 신호(`execute_action=False`), 그룹별 규칙, 그룹 없는 규칙."""
+    """한 묶음. 상태(`execute_action=False`), 그룹별 동작, 그룹 없는 동작."""
 
     kind: SectionKind
     group: str

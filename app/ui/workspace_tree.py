@@ -1,4 +1,4 @@
-"""작업 공간 가운데 목록: 신호/규칙 묶음, 드래그로 순서(=우선순위) 바꾸기."""
+"""작업 공간 가운데 목록: 상태/동작 묶음, 드래그로 순서(=우선순위) 바꾸기."""
 
 from __future__ import annotations
 
@@ -223,8 +223,8 @@ class EventTree(QTreeView):
             txt("No events match the search.", "검색과 일치하는 이벤트가 없습니다.")
             if self.events
             else txt(
-                "No events yet. Add a signal (screen watch) or a rule (key input).",
-                "이벤트가 없습니다. 신호(화면 감시)나 규칙(키 입력)을 추가하세요.",
+                "No events yet. Add a state (screen watch) or an action (key input).",
+                "이벤트가 없습니다. 상태(화면 감시)나 동작(키 입력)을 추가하세요.",
             )
         )
         self._place_empty()

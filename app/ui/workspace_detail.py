@@ -160,8 +160,8 @@ class EventDetailPanel(QScrollArea):
 
         kind_row = QHBoxLayout()
         self.kind_group = QButtonGroup(self)
-        self.radio_signal = QRadioButton(txt("Signal", "신호"))
-        self.radio_rule = QRadioButton(txt("Rule", "규칙"))
+        self.radio_signal = QRadioButton(txt("State", "상태"))
+        self.radio_rule = QRadioButton(txt("Action", "동작"))
         for button in (self.radio_signal, self.radio_rule):
             self.kind_group.addButton(button)
             kind_row.addWidget(button)
@@ -454,17 +454,17 @@ class EventDetailPanel(QScrollArea):
     def _group_hint(event: EventModel) -> str:
         if not event.execute_action:
             return txt(
-                "Signals only feed conditions; groups apply to rules.",
-                "신호는 조건으로만 쓰입니다. 그룹은 규칙에만 적용됩니다.",
+                "States only feed conditions; groups apply to actions.",
+                "상태는 조건으로만 쓰입니다. 그룹은 동작에만 적용됩니다.",
             )
         if (event.group_id or "").strip():
             return txt(
-                "Only one rule per group runs: the highest in the list.",
-                "그룹에서는 목록 위쪽 규칙 하나만 실행됩니다.",
+                "Only one action per group runs: the highest in the list.",
+                "그룹에서는 목록 위쪽 동작 하나만 실행됩니다.",
             )
         return txt(
-            "No group: every matching rule runs, so order does not matter.",
-            "그룹 없음: 조건이 맞는 규칙이 모두 실행되어 순서가 상관없습니다.",
+            "No group: every matching action runs, so order does not matter.",
+            "그룹 없음: 조건이 맞는 동작이 모두 실행되어 순서가 상관없습니다.",
         )
 
     @staticmethod

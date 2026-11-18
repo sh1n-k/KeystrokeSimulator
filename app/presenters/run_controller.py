@@ -533,12 +533,12 @@ class RunController:
                 "can_start": False,
                 "badge_text": txt("Check Events", "이벤트 확인"),
                 "title": txt(
-                    "Rules in use have no input key.",
-                    "사용 중인 규칙에 키가 없습니다.",
+                    "Actions in use have no input key.",
+                    "사용 중인 동작에 키가 없습니다.",
                 ),
                 "detail": txt(
-                    "Open the workspace and set a key for rules marked 'no key'.",
-                    "작업 공간에서 '키 없음' 규칙에 키를 지정하세요.",
+                    "Open the workspace and set a key for actions marked 'no key'.",
+                    "작업 공간에서 '키 없음' 동작에 키를 지정하세요.",
                 ),
                 "tone": "warn",
                 "action": "workspace",
@@ -598,8 +598,8 @@ class RunController:
                 "모니터링을 시작할 준비가 끝났습니다.",
             ),
             "summary": txt(
-                "rules {rules} · signals {signals}",
-                "규칙 {rules} · 신호 {signals}",
+                "actions {rules} · states {signals}",
+                "동작 {rules} · 상태 {signals}",
                 rules=rules,
                 signals=signals,
             ),
