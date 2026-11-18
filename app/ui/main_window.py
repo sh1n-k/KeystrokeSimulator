@@ -167,7 +167,10 @@ class RunWindow(QMainWindow):
         self.lbl_modkeys = QLabel()
         self.modkey_combo = QComboBox()
         grid.addWidget(self.lbl_modkeys, 2, 0)
+        self.modkey_edit_button = QPushButton()
+        self.modkey_edit_button.clicked.connect(self.open_modkeys)
         grid.addWidget(self.modkey_combo, 2, 1)
+        grid.addWidget(self.modkey_edit_button, 2, 2)
         root.addWidget(card)
 
         status_row = QHBoxLayout()
@@ -219,7 +222,6 @@ class RunWindow(QMainWindow):
             ("workspace", "Open workspace…", "작업 공간 열기…", self.open_profile, False),
             ("quick", "Quick events…", "빠른 이벤트…", self.open_quick_events, True),
             ("sep", "", "", lambda: None, False),
-            ("modkey_edit", "Edit modifier keys…", "수정키 세트 편집…", self.open_modkeys, True),
             ("modkey_copy", "Duplicate modifier keys", "수정키 세트 복사", self.copy_modkey_set, True),
             ("modkey_delete", "Delete modifier keys", "수정키 세트 삭제", self.delete_modkey_set, True),
             ("sep", "", "", lambda: None, False),
@@ -261,6 +263,7 @@ class RunWindow(QMainWindow):
         self.lbl_target.setText(txt("Run", "실행"))
         self.edit_button.setText(txt("Edit…", "편집…"))
         self.lbl_modkeys.setText(txt("Modifier keys", "수정키"))
+        self.modkey_edit_button.setText(txt("Edit…", "편집…"))
         self.refresh_button.setToolTip(txt("Refresh", "새로고침"))
         self.tools_button.setToolTip(txt("Tools", "도구"))
         self._build_tools_menus()
@@ -456,6 +459,8 @@ class RunWindow(QMainWindow):
             widget.setEnabled(not running)
         # 작업 공간은 실행 중에도 연다. 편집은 다음 시작부터 반영된다.
         self.edit_button.setEnabled(True)
+        # 수정키는 시작 시점에 읽으므로 실행 중에는 편집을 막는다.
+        self.modkey_edit_button.setEnabled(not running)
         self._sync_tools_menus(running)
 
         can_press = bool(running or readiness["can_start"])

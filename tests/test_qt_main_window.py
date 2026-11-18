@@ -107,6 +107,7 @@ class TestRunWindow(unittest.TestCase):
         self.assertFalse(self.window.target_combo.isEnabled())
         self.assertFalse(self.window.modkey_combo.isEnabled())
         self.assertTrue(self.window.edit_button.isEnabled())
+        self.assertFalse(self.window.modkey_edit_button.isEnabled())
         self.assertTrue(self.window.run_button.isEnabled())
         self.assertIn("Stop", self.window.run_button.text())
 
