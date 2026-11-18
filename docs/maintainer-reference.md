@@ -13,7 +13,7 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 | 경로 | 책임 |
 | --- | --- |
 | `app/__main__.py` | GUI 진입점(`app.ui.application.main`) |
-| `app/ui/application.py` | `QApplication` 생성, 로그·예외 훅, 스타일 적용, SIGINT/SIGTERM 종료 |
+| `app/ui/application.py` | `QApplication` 생성, 앱 아이콘(`app/ui/assets/app_icon.svg`) 적용, 로그·예외 훅, 스타일 적용, SIGINT/SIGTERM 종료 |
 | `app/ui/main_window.py` | 실행 창(대상·프로세스·수정키 콤보, 상태 배지, 시작 버튼, ⚙ 메뉴) |
 | `app/presenters/run_controller.py` | 실행 상태와 입력 동작 조정: listener 연결, 시작/중지, runtime toggle, 준비 상태, 상태 저장 |
 | `app/platform/input_router.py` | OS listener 수명, App Nap 응답성 유지, `Dispatcher` 프로토콜(start/post/stop)로 메인 스레드 전달 |
@@ -38,7 +38,7 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 | `app/domain/runtime_toggle.py` | 단축키 묶음 trigger 정규화·표시·검증 |
 | `app/domain/key_codes.py` | OS별 키 이름↔키 코드 표(`KeyCodes`). OS 호출 없음 |
 | `app/platform/keys.py` | `KeyUtils`(`KeyCodes` 상속): 실제 키 눌림 상태 조회(Quartz/`GetAsyncKeyState`) |
-| `app/platform/system.py` | 모니터·프로세스·macOS 권한·App Nap 등 OS 서비스 |
+| `app/platform/system.py` | 모니터·프로세스·macOS 권한·App Nap·Windows AppUserModelID(작업 표시줄 아이콘) 등 OS 서비스 |
 | `app/platform/mac_hotkey_tap.py`, `app/platform/mac_key_poll.py` | macOS 전역 단축키 CGEventTap과 폴링 폴백 |
 | `app/storage/app_state.py` | `app_state.json`(최근 선택·창 위치) 읽기·쓰기 |
 | `app/presenters/workspace_model.py` | 작업 공간 상태와 동작: 프로필·실행 세트 CRUD, 이벤트 편집, 되돌리기, 자동 저장, 실행 중 편집 정책 |

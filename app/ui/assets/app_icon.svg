@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1C2E5E"/><stop offset="1" stop-color="#0F1B3D"/></linearGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4E5560"/><stop offset="1" stop-color="#343A43"/></linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="212" y="232" width="600" height="590" rx="90" fill="#0E1013"/>
+  <rect x="246" y="246" width="532" height="492" rx="72" fill="url(#top)"/>
+  <g stroke="#3DDC84" stroke-width="24" stroke-linecap="round" fill="none" filter="url(#glow)">
+    <circle cx="512" cy="492" r="150"/>
+    <line x1="512" y1="290" x2="512" y2="392"/>
+    <line x1="512" y1="592" x2="512" y2="694"/>
+    <line x1="310" y1="492" x2="412" y2="492"/>
+    <line x1="612" y1="492" x2="714" y2="492"/>
+  </g>
+  <circle cx="512" cy="492" r="30" fill="#3DDC84" filter="url(#glow)"/>
+</svg>

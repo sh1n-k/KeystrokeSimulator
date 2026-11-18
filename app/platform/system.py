@@ -76,6 +76,20 @@ class ResponsivenessActivity:
             logger.debug(f"Failed to end responsiveness activity: {exc}")
 
 
+def set_windows_app_user_model_id(app_id: str) -> None:
+    """Group taskbar buttons under this app instead of python.exe.
+
+    Without an explicit ID Windows shows the Python icon in the taskbar,
+    ignoring the Qt window icon. Must run before the first window exists.
+    """
+    if not IS_WIN:
+        return
+    try:
+        windows_windll().shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+    except Exception as exc:
+        logger.debug(f"Failed to set AppUserModelID: {exc}")
+
+
 class MonitorUtils:
     @staticmethod
     def get_primary_size() -> tuple[int, int]:

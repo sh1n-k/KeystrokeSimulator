@@ -9,10 +9,14 @@ from types import FrameType
 
 from loguru import logger
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from app.platform.system import set_windows_app_user_model_id
 from app.ui import style
 from app.utils.exception_hooks import install_exception_hooks
+
+APP_ICON_PATH = Path(__file__).resolve().parent / "assets" / "app_icon.svg"
 
 
 def main() -> int:
@@ -26,8 +30,11 @@ def main() -> int:
     )
     install_exception_hooks()
 
+    set_windows_app_user_model_id("KeystrokeSimulator.App")
     qt_app = QApplication(sys.argv)
     qt_app.setApplicationName("Keystroke Simulator")
+    # Window/taskbar icon on Windows, Dock icon on macOS.
+    qt_app.setWindowIcon(QIcon(str(APP_ICON_PATH)))
     style.apply_app_style(qt_app)
 
     from app.ui.main_window import RunWindow
