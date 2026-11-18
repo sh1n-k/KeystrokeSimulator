@@ -14,7 +14,7 @@ def event_issues(event: EventModel) -> list[str]:
     issues: list[str] = []
     if event.execute_action:
         if not (event.key_to_enter or "").strip():
-            issues.append(txt("No input key: this rule cannot run.", "키 없음: 이 규칙은 실행되지 않습니다."))
+            issues.append(txt("No input key: this action cannot run.", "키 없음: 이 동작은 실행되지 않습니다."))
         if not event_has_screen(event) and not event.conditions:
             issues.append(
                 txt(
@@ -24,7 +24,7 @@ def event_issues(event: EventModel) -> list[str]:
             )
     elif not event_has_screen(event):
         issues.append(
-            txt("A signal needs a screen. Capture one.", "신호에는 화면이 필요합니다. 캡처하세요.")
+            txt("A state needs a screen. Capture one.", "상태에는 화면이 필요합니다. 캡처하세요.")
         )
     if event.match_mode == "region" and event.held_screenshot is None:
         issues.append(txt("Region mode needs a capture.", "영역 모드에는 캡처본이 필요합니다."))

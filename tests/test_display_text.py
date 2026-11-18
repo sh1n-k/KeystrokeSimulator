@@ -35,7 +35,7 @@ class TestListPresentation(unittest.TestCase):
 
         self.assertEqual(
             [section_title(s) for s in sections],
-            ["Signals (1)", "Rules · group g (1)", "Rules · no group (1)"],
+            ["States (1)", "Actions · group g (1)", "Actions · no group (1)"],
         )
         self.assertEqual(
             [section_note(s) for s in sections],

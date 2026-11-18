@@ -650,7 +650,7 @@ def _draw_legend(
 
     node_style_items = [
         ("solid", "Normal (일반)"),
-        ("dashed", "Signal (신호)"),
+        ("dashed", "State (상태)"),
         ("faded", "Disabled (사용 안 함)"),
         ("missing", "Missing ref (참조 누락)"),
     ]
@@ -683,7 +683,7 @@ def _draw_legend(
     badge_items = [
         ("warn", BADGE_COLOR_MISSING, "Missing reference (참조 누락)"),
         ("off", BADGE_COLOR_DISABLED, "Disabled event (비활성 이벤트)"),
-        ("eye", BADGE_COLOR_CONDITION, "Signal (신호)"),
+        ("eye", BADGE_COLOR_CONDITION, "State (상태)"),
     ]
     badge_y_start = y_start + len(node_style_items) * item_step
     for i, (btype, bcolor, blabel) in enumerate(badge_items):

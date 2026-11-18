@@ -141,7 +141,7 @@ class TestOpening(WorkspaceWindowCase):
         store = self.ws.tree.store
         heads = [store.item(r, 0).text() for r in range(store.rowCount())]
         self.assertEqual(
-            heads, ["Signals (1)", "Rules · group g (2)", "Rules · no group (1)"]
+            heads, ["States (1)", "Actions · group g (2)", "Actions · no group (1)"]
         )
         group = store.item(1, 0)
         names = [group.child(r, 0).text() for r in range(group.rowCount())]
@@ -336,8 +336,8 @@ class TestEditing(WorkspaceWindowCase):
         self.ws.btn_add_rule.click()
         self.flush()
 
-        self.assertEqual(self.ws.detail.entry_name.text(), "Rule")
-        self.assertIn("Rule", [e.event_name for e in self.saved()])
+        self.assertEqual(self.ws.detail.entry_name.text(), "Action")
+        self.assertIn("Action", [e.event_name for e in self.saved()])
         self.assertIn("No key 2", self.ws.lbl_counts.text())
 
     def test_bulk_turn_off(self) -> None:
@@ -475,7 +475,7 @@ class TestRunSetsAndOptions(WorkspaceWindowCase):
         saved = load_profile(Path("profiles"), "Quick", migrate=False).event_list
         self.assertEqual(name, "2")
         self.assertIn("2", [e.event_name for e in saved])
-        self.assertEqual(self.ws.model.undo_label, "add rule")
+        self.assertEqual(self.ws.model.undo_label, "add action")
 
     def test_run_set_rename_follows_in_main_window(self) -> None:
         upsert_run_set("Raid", ["P"], Path("run_sets.json"))

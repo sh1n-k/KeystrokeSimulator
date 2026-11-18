@@ -328,20 +328,20 @@ class TestListActions(ModelCase):
         self.assertIn(("events", copies), self.view.calls)
 
     def test_add_rule_uses_a_fresh_name(self):
-        model = self.make([rule("Rule")])
+        model = self.make([rule("Action")])
 
         event = model.add_rule()
 
-        self.assertEqual(event.event_name, "Rule (2)")
+        self.assertEqual(event.event_name, "Action (2)")
         self.assertTrue(event.execute_action)
-        self.assertEqual(model.undo_label, "add rule")
+        self.assertEqual(model.undo_label, "add action")
 
     def test_add_signal_applies_capture_and_avoids_duplicates(self):
-        model = self.make([signal("Signal")])
+        model = self.make([signal("State")])
 
-        event = model.add_signal("Signal", capture_result(), fallback="Signal (2)")
+        event = model.add_signal("State", capture_result(), fallback="State (2)")
 
-        self.assertEqual(event.event_name, "Signal (2)")
+        self.assertEqual(event.event_name, "State (2)")
         self.assertFalse(event.execute_action)
         self.assertEqual(event.latest_position, (50, 60))
         self.assertEqual(event.ref_pixel_value, (0, 0, 255))
@@ -362,7 +362,7 @@ class TestListActions(ModelCase):
     def test_counts_text(self):
         model = self.make([rule("a", key_to_enter="1"), rule("b"), signal("s")])
 
-        self.assertEqual(model.counts_text(), "Rules 2 · Signals 1 · No key 1")
+        self.assertEqual(model.counts_text(), "Actions 2 · States 1 · No key 1")
 
 
 class TestEventEdits(ModelCase):
@@ -508,7 +508,7 @@ class TestAutosave(ModelCase):
         self.scheduler.fire()
 
         saved = self.saved()
-        self.assertEqual([e.event_name for e in saved], ["Rule"])
+        self.assertEqual([e.event_name for e in saved], ["Action"])
         self.assertIsNone(saved[0].key_to_enter)
 
     def test_duplicate_names_are_not_saved(self):
