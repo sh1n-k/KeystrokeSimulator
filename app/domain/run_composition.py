@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from app.domain.models import EventModel, ProfileModel
 from app.domain.profile_events import clone_event
@@ -64,6 +65,10 @@ def namespace_profile_events(
     ]
 
 
+# errors 문구 대신 이 값으로 오류 종류를 판단한다(문구는 번역·수정될 수 있다).
+RunErrorKind = Literal["duplicate_events", "runtime_toggle"]
+
+
 @dataclass
 class ComposedRunSession:
     """Result of composing one or more profiles for a single processor start."""
@@ -73,6 +78,8 @@ class ComposedRunSession:
     runtime_toggle_enabled: bool = False
     runtime_toggle_key: str | None = None
     errors: list[str] = field(default_factory=list[str])
+    # errors가 있을 때 그 종류. 프로필 미선택처럼 분류가 없으면 None.
+    error_kind: RunErrorKind | None = None
 
     @property
     def ok(self) -> bool:
@@ -125,21 +132,24 @@ def compose_run_session(
                 name,
                 raw_events,
                 keep_runtime_toggle_member=bool(
-                    getattr(profile, "runtime_toggle_enabled", False)
+                    profile.runtime_toggle_enabled
                 ),
             )
         )
 
     if errors:
         return ComposedRunSession(
-            profile_names=profile_names, events=composed_events, errors=errors
+            profile_names=profile_names,
+            events=composed_events,
+            errors=errors,
+            error_kind="duplicate_events",
         )
 
     toggle_sources: list[tuple[str, str | None]] = []
     for name, profile in loaded:
-        if getattr(profile, "runtime_toggle_enabled", False):
+        if profile.runtime_toggle_enabled:
             toggle_sources.append(
-                (name, getattr(profile, "runtime_toggle_key", None))
+                (name, profile.runtime_toggle_key)
             )
 
     runtime_toggle_enabled = False
@@ -199,4 +209,6 @@ def compose_run_session(
         runtime_toggle_enabled=runtime_toggle_enabled,
         runtime_toggle_key=runtime_toggle_key,
         errors=errors,
+        # 이 지점까지 온 오류는 모두 켜고 끄는 단축키(단축키 묶음) 검증에서 나온다.
+        error_kind="runtime_toggle" if errors else None,
     )

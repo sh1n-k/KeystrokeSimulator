@@ -23,7 +23,7 @@ KeystrokeSimulator는 화면 픽셀/영역을 감시해 키 입력을 실행하�
 
 ## 검증
 
-- 기본 검증: `uv run -m scripts.verify`
+- 기본 검증: `uv run -m scripts.verify` (unittest를 임시 작업 디렉터리에서 돌리고, 테스트가 그 디렉터리에 파일을 남기면 실패한다. 테스트는 저장소 루트의 `app_state.json` 같은 실제 사용자 파일에 쓰지 않는다)
 - 빠른 정적 검증: `uv run -m scripts.verify --static-only`
 - 로컬 훅: `uv run pre-commit run --all-files`
 - 실제 OS hook, 화면 캡처, GUI 흐름 영향이 있을 때만 [`tests/E2E_TESTPLAN.md`](tests/E2E_TESTPLAN.md)의 관련 항목을 추가로 확인한다.

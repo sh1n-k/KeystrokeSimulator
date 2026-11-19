@@ -28,6 +28,14 @@ def event_issues(event: EventModel) -> list[str]:
         )
     if event.match_mode == "region" and event.held_screenshot is None:
         issues.append(txt("Region mode needs a capture.", "영역 모드에는 캡처본이 필요합니다."))
+    elif event_has_screen(event) and not event.has_processor_inputs():
+        # 좌표는 있지만 기준 색 등 processor 입력이 빠져 실행 시 로드되지 않는다.
+        issues.append(
+            txt(
+                "The screen capture is incomplete. Capture again.",
+                "화면 캡처가 불완전합니다. 다시 캡처하세요.",
+            )
+        )
     return issues
 
 

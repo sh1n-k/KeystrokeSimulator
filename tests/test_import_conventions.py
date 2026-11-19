@@ -81,12 +81,81 @@ def _app_python_files(package: str | None = None) -> list[Path]:
     )
 
 
-def _imported_modules(path: Path) -> list[tuple[int, str]]:
-    """Return (line, dotted module) for every import, including nested ones."""
+DYNAMIC_IMPORT_FUNCS = {"import_module", "__import__"}
+# 모듈 이름을 변수로 받는 동적 import helper. 이름을 정적으로 알 수 없어 경계 검사를
+# 우회하므로 OS 모듈만 다루는 이 파일들에만 허용한다.
+NON_LITERAL_DYNAMIC_IMPORT_ALLOWLIST = {
+    "app/engine/screen_backend.py",
+    "app/platform/system.py",
+}
+
+
+def _dynamic_import_names(tree: ast.AST) -> set[str]:
+    """동적 import 함수를 부르는 이름. `from importlib import import_module as im` 별칭 포함."""
+    names = set(DYNAMIC_IMPORT_FUNCS)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "importlib":
+            names.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "import_module"
+            )
+    return names
+
+
+def _dynamic_import_call(node: ast.AST, names: set[str]) -> ast.Call | None:
+    """`importlib.import_module(...)`/`import_module(...)`/`__import__(...)` 호출."""
+    if not isinstance(node, ast.Call):
+        return None
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        is_dynamic = func.attr in DYNAMIC_IMPORT_FUNCS
+    else:
+        is_dynamic = isinstance(func, ast.Name) and func.id in names
+    return node if is_dynamic else None
+
+
+def _literal_module_name(call: ast.Call) -> str | None:
+    """정적으로 알 수 있는 절대 모듈 이름. 변수·상대 이름(".x")이면 None."""
+    first = (
+        call.args[0]
+        if call.args
+        else next((kw.value for kw in call.keywords if kw.arg == "name"), None)
+    )
+    if (
+        isinstance(first, ast.Constant)
+        and isinstance(first.value, str)
+        and first.value
+        and not first.value.startswith(".")
+    ):
+        return first.value
+    return None
+
+
+def _non_literal_dynamic_imports(path: Path) -> list[int]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    names = _dynamic_import_names(tree)
+    return [
+        call.lineno
+        for node in ast.walk(tree)
+        if (call := _dynamic_import_call(node, names)) is not None
+        and _literal_module_name(call) is None
+    ]
+
+
+def _imported_modules(path: Path) -> list[tuple[int, str]]:
+    """Return (line, dotted module) for every import, including nested ones.
+
+    문자열 리터럴로 부르는 `importlib.import_module("X")`도 import로 센다.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    names = _dynamic_import_names(tree)
     modules: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
+        if (call := _dynamic_import_call(node, names)) is not None:
+            if (module := _literal_module_name(call)) is not None:
+                modules.append((call.lineno, module))
+        elif isinstance(node, ast.Import):
             modules.extend((node.lineno, alias.name) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             if node.level:
@@ -209,22 +278,62 @@ class TestPackageBoundaries(unittest.TestCase):
             + "\n".join(violations),
         )
 
+    def test_non_literal_dynamic_imports_are_allowlisted(self):
+        violations = [
+            f"{rel}:{lineno}"
+            for path in _app_python_files()
+            if (rel := path.relative_to(PROJECT_ROOT).as_posix())
+            not in NON_LITERAL_DYNAMIC_IMPORT_ALLOWLIST
+            for lineno in _non_literal_dynamic_imports(path)
+        ]
+        self.assertEqual(
+            violations,
+            [],
+            "Dynamic imports must use a string literal so boundary checks see "
+            "them:\n" + "\n".join(violations),
+        )
+
     def test_boundary_checker_detects_forbidden_imports(self):
         sample = "\n".join(
             [
+                "import importlib",
+                "from importlib import import_module",
                 "import tkinter as tk",
                 "from app import ui",
                 "from app.platform.keys import KeyUtils",
                 "def f():",
                 "    import win32api",
                 "    from Quartz import CGEventTapCreate",
+                "    importlib.import_module('AppKit')",
+                "    import_module('PySide6.QtWidgets')",
+                "    __import__('objc')",
+                "    importlib.import_module(name)",
+                "from importlib import import_module as im",
+                "im('ScreenCaptureKit')",
+                "importlib.import_module(name='mss')",
+                "importlib.import_module('.sibling', 'app.ui')",
             ]
         )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sample.py"
             path.write_text(sample, encoding="utf-8")
             modules = {module for _line, module in _imported_modules(path)}
-        self.assertTrue({"tkinter", "app.ui", "win32api", "Quartz"} <= modules)
+            non_literal = _non_literal_dynamic_imports(path)
+        self.assertTrue(
+            {
+                "tkinter",
+                "app.ui",
+                "win32api",
+                "Quartz",
+                "AppKit",
+                "PySide6.QtWidgets",
+                "objc",
+                "ScreenCaptureKit",
+                "mss",
+            }
+            <= modules
+        )
+        self.assertEqual(sorted(non_literal), [12, 16])
         self.assertTrue(_is_under("app.platform.keys", "app.platform"))
         self.assertFalse(_is_under("app.platformx", "app.platform"))
         self.assertTrue(_is_os_service_module("win32api"))

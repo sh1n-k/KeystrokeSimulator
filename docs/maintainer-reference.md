@@ -9,6 +9,7 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 - `tkinter`는 어디서도 import하지 않는다. `PySide6`는 `app/ui/**`에서만 import한다.
 - `app/domain`은 `app.engine`·`app.platform`·`app.storage`·`app.ui`와 OS 모듈(Quartz, AppKit, ApplicationServices, ScreenCaptureKit, objc, win32*, mss, pynput, ctypes)을 import하지 않는다.
 - `app/engine`·`app/platform`·`app/presenters`·`app/storage`·`app/utils`는 `app.ui`를 import하지 않는다.
+- 문자열 리터럴로 부르는 `importlib.import_module("X")`·`__import__("X")`도 import로 검사한다. 모듈 이름을 변수로 받는 동적 import는 `app/platform/system.py`·`app/engine/screen_backend.py`에서만 허용한다(`NON_LITERAL_DYNAMIC_IMPORT_ALLOWLIST`).
 
 | 경로 | 책임 |
 | --- | --- |
@@ -56,6 +57,10 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 | `app/domain/event_graph_layout.py` | 조건·그룹 관계 그래프의 노드·간선 구성과 배치 계산 |
 | `app/ui/event_graph.py` | 관계 그래프 PIL 렌더링(토큰 색)과 PNG 캐시 |
 | `app/utils/i18n.py` | 언어 상태, 언어 정규화와 `txt()` 선택 helper |
+| `app/utils/sounds.py`, `app/utils/notification_sound_packs.py` | 알림음 재생(miniaudio)과 사운드 팩 정의·선택 |
+| `app/utils/_classic_notification_sounds.py`, `app/utils/_soft_notification_sounds.py`, `app/utils/_toggle_notification_sounds.py`, `app/utils/sound_assets.py` | base64 오디오만 담은 데이터 모듈. 손으로 고치지 않는다(soft 계열은 `uv run -m scripts.generate_soft_notification_sounds`로 생성). 한 줄이 수만 자라 `.rgignore`로 ripgrep 검색에서 뺐다 |
+| `app/utils/exception_hooks.py` | 처리되지 않은 예외(메인·스레드)를 로그로 남기는 훅 |
+| `app/storage/json_objects.py` | JSON 객체를 문자열 키 dict로 바꾸는 저장소 공용 helper |
 | `app/ui/tokens.py` | 툴킷과 무관한 색상·간격·아이콘 토큰 |
 | `app/ui/style.py` | Qt 스타일 적용, 상태 배지·시작 버튼 색. 일반 위젯은 플랫폼 기본 스타일과 시스템 라이트/다크를 따른다 |
 
@@ -67,6 +72,8 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 - 같은 `group_id`에서 매칭된 동작이 여러 개면 `(priority, name)`이 가장 작은 것이 실행된다. 작업 공간 목록은 그룹 안에서 같은 순서로 보이며, 드래그로 순서를 바꿀 때만 그룹 안에서 0부터 `priority`를 다시 쓴다.
 - `execute_action=False` 이벤트(UI 용어: 상태)는 조건 평가에는 참여하지만 키 입력을 실행하지 않는다. `execute_action=True`는 동작이다(UI 용어). 코드 식별자(`signal`, `rule`)는 그대로 둔다.
 - 화면 좌표가 없는 입력 이벤트는 조건이 하나 이상일 때만 로드하고, raw match를 True로 둔 뒤 기존 조건 AND로 키를 실행한다.
+- 이벤트를 실행에 로드할 수 있는지는 `EventModel.has_processor_inputs()` 하나로 판정한다. 실행 창 시작 가능 여부(`events_with_processor_inputs`), processor 로드(`_init_event_data`), 작업 공간 배지(`event_issues`)가 이 기준을 함께 쓰며 `tests/test_processor_inputs_consistency.py`가 일치를 검사한다. 영역 모드는 여기에 더해 processor가 캡처본에서 기준 영역을 잘라낼 수 있어야 로드된다.
+- 실행 구성 오류의 종류(중복 이벤트·단축키 묶음)는 `ComposedRunSession.error_kind`로 판단한다. 오류 문구를 문자열로 검사해 분기하지 않는다.
 - runtime toggle의 활성 상태와 trigger 처리는 processor와 `RunController` 사이에서 일치해야 한다.
 - key press duration과 loop delay는 stop 요청에 응답할 수 있어야 한다.
 
@@ -103,12 +110,18 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 
 | 변경 종류 | 필수 구현 확인 | 최소 자동 테스트 | 필요 E2E |
 | --- | --- | --- | --- |
-| 이벤트 스키마·복사 | `app/domain/models.py`, `app/domain/profile_events.py` (`EVENT_DIRTY_FIELD_NAMES` / `event_fingerprint`), `app/storage/profile_storage.py`, `app/presenters/workspace_model.py`, `app/ui/workspace_detail.py`, `app/presenters/capture_controller.py`, `app/engine/processor.py` | `test_event_data_conversion.py`, `test_event_copy_sync.py`, `test_profile_json_storage.py`, `test_event_dirty_fingerprint.py` | 캡처·편집 또는 실행 의미가 바뀌면 앱과 프로필, 실제 실행 |
+| 이벤트 스키마·복사 | `app/domain/models.py` (`has_processor_inputs` 포함), `app/domain/profile_events.py` (`EVENT_DIRTY_FIELD_NAMES` / `event_fingerprint`), `app/storage/profile_storage.py`, `app/presenters/workspace_model.py`, `app/ui/workspace_detail.py`, `app/presenters/capture_controller.py`, `app/engine/processor.py` | `test_event_data_conversion.py`, `test_event_copy_sync.py`, `test_profile_json_storage.py`, `test_event_dirty_fingerprint.py`, `test_processor_inputs_consistency.py` | 캡처·편집 또는 실행 의미가 바뀌면 앱과 프로필, 실제 실행 |
 | 작업 공간 목록·순서 | `app/domain/profile_events.py`, `app/domain/display_text.py`, `app/presenters/workspace_model.py`, `app/ui/workspace_tree.py`, `app/ui/workspace.py` | `test_workspace_order.py`, `test_workspace_model.py`, `test_display_text.py`, `test_qt_workspace.py` | 앱과 프로필, 조건·그룹과 그래프 |
 | 설정 | `UserSettings` (incl. `notification_sound_pack`, `runtime_toggle_sound_pack`, `runtime_toggle_sound_enabled`), `app/storage/settings_storage.py`, `app/presenters/settings_form.py`, `app/ui/settings_dialog.py`, `app/utils/sounds.py` / `notification_sound_packs.py`, 설정 소비 경로 | `test_settings_storage.py`, `test_settings_form.py`, `test_qt_settings_dialog.py`, `test_notification_sound_packs.py`, `test_keystroke_sounds.py` | 표시·재시작 복원·실행 동작이 바뀌면 설정과 복원 |
 | runtime toggle(단축키 묶음) | 모델·저장 필드, `app/domain/runtime_toggle.py`, `app/ui/workspace_panels.py`, `app/ui/workspace_detail.py`, `app/presenters/run_controller.py`, `app/engine/processor.py` | `test_profile_json_storage.py`, `test_resolve_effective_states.py`, `test_condition_and_core_logic.py`, `test_run_controller.py` | 실제 실행; Windows system/hotkey 변경은 Windows 필수 |
 | 프로필 경로·저장 | `app/storage/profile_storage.py`, `app/storage/profile_display.py`, `app/ui/main_window.py`, `app/presenters/workspace_model.py` | `test_profile_json_storage.py`, `test_profile_display.py`, `test_qt_main_window.py`, `test_workspace_model.py` | 앱과 프로필 |
 | 캡처 UI | `app/engine/capturer.py`, `app/engine/capture_session.py`, `app/domain/capture_geometry.py`, `app/domain/capture_render.py`, `app/domain/event_editing.py`, `app/presenters/capture_controller.py`, `app/ui/capture_hud.py`, `app/ui/capture_border.py`, `app/ui/workspace_detail.py`, processor 입력 형식 | `test_capturer.py`, `test_capture_session.py`, `test_capture_geometry.py`, `test_capture_controller.py`, `test_qt_capture_hud.py`, `test_event_editing.py`, `test_extract_roi_and_capture.py` | 앱과 프로필, 실제 화면 캡처 |
 | OS listener·권한 | `app/platform/input_router.py`, `app/ui/dispatcher.py`, `app/presenters/run_controller.py`, `app/platform/system.py`, 관련 설정과 main-thread UI 갱신 | `test_input_router.py`, `test_run_controller.py`, `test_mac_key_poll.py`, `test_keystroke_utils.py` | 실제 실행; 변경 대상 OS에서 수행하고 Windows system/hotkey 변경은 Windows 필수 |
+
+## 테스트·검증 규칙
+
+- `uv run -m scripts.verify`는 unittest를 빈 임시 폴더를 작업 디렉터리로 삼아 실행하고, 끝난 뒤 그 폴더에 파일이 남으면 실패한다. 앱의 저장 경로(`app_state.json`, `user_settings.json`, `run_sets.json`, `modkey_sets.json`, `profiles/`, `logs/`)는 작업 디렉터리 기준 상대경로라서, 테스트는 임시 폴더로 `os.chdir`하거나 임시 경로를 넘겨야 한다. `os.chdir` 복귀는 setUp에서 `addCleanup`으로 등록해(임시 폴더 삭제 바로 다음) 테스트 본문이 등록한 cleanup(창 닫기 → 상태 저장)보다 늦게 돌게 한다. tearDown에서 복귀하면 cleanup이 저장소 루트에서 돈다.
+- verify는 테스트 출력에서 loguru 로그와 offscreen Qt 경고를 끈다. 실패 원인을 볼 때는 `LOGURU_LEVEL=DEBUG QT_LOGGING_RULES= uv run -m scripts.verify`처럼 다시 켠다.
+- 진단용 환경변수: `KEYSIM_PROFILE_PERF=1`은 프로필 로드·저장 시간과 processor 메인 루프 1회 시간을 `[perf]`로 출력한다. `KEYSIM_WIN_SCANCODE=1`은 Windows 키 입력을 scancode 경로(`KEYEVENTF_SCANCODE`)로 보낸다.
 
 표의 자동 테스트는 시작점이다. Qt 위젯 테스트는 `tests/qt_support.py`가 `QT_QPA_PLATFORM=offscreen`으로 실행하므로 실제 창 배치·항상 위·전체화면 위 표시·포커스는 E2E로 확인한다. 공용 계약을 추가로 건드렸다면 해당 구현을 직접 검증하는 기존 테스트까지 확장한다.

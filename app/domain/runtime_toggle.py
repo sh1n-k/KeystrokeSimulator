@@ -218,11 +218,11 @@ def normalize_runtime_toggle_wheel_event(
 
 
 def runtime_toggle_member_count(events: Iterable[EventModel]) -> int:
-    return sum(1 for evt in events if getattr(evt, "runtime_toggle_member", False))
+    return sum(1 for evt in events if evt.runtime_toggle_member)
 
 
 def active_runtime_toggle_events(events: Iterable[EventModel]) -> list[EventModel]:
-    return [evt for evt in events if getattr(evt, "use_event", True)]
+    return [evt for evt in events if evt.use_event]
 
 
 def _resolve_start_stop_trigger(
@@ -249,12 +249,12 @@ def collect_runtime_toggle_validation_errors(
     settings: StartStopSettings | None = None,
     os_name: str | None = None,
 ) -> list[str]:
-    if not getattr(profile, "runtime_toggle_enabled", False):
+    if not profile.runtime_toggle_enabled:
         return []
 
     errors: list[str] = []
     active_events = active_runtime_toggle_events(events)
-    trigger_raw = (getattr(profile, "runtime_toggle_key", None) or "").strip()
+    trigger_raw = (profile.runtime_toggle_key or "").strip()
     trigger = normalize_runtime_toggle_trigger(trigger_raw, os_name=os_name)
 
     if not trigger_raw:
@@ -283,11 +283,11 @@ def collect_runtime_toggle_validation_errors(
 
     invalid_member_events = sorted(
         {
-            (getattr(evt, "event_name", None) or txt("Unnamed", "이름 없음")).strip()
+            (evt.event_name or txt("Unnamed", "이름 없음")).strip()
             for evt in active_events
-            if getattr(evt, "runtime_toggle_member", False)
-            and getattr(evt, "execute_action", True)
-            and not (getattr(evt, "key_to_enter", None) or "").strip()
+            if evt.runtime_toggle_member
+            and evt.execute_action
+            and not (evt.key_to_enter or "").strip()
         }
     )
     if invalid_member_events:
@@ -332,12 +332,12 @@ def collect_runtime_toggle_validation_errors(
         conflicting_events = sorted(
             {
                 (
-                    getattr(evt, "event_name", None) or txt("Unnamed", "이름 없음")
+                    evt.event_name or txt("Unnamed", "이름 없음")
                 ).strip()
                 for evt in active_events
-                if getattr(evt, "execute_action", True)
+                if evt.execute_action
                 and normalize_runtime_toggle_trigger(
-                    getattr(evt, "key_to_enter", None), os_name=os_name
+                    evt.key_to_enter, os_name=os_name
                 )
                 == trigger
             }

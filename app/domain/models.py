@@ -65,6 +65,21 @@ class EventModel:
             and self.clicked_position is None
         )
 
+    def has_processor_inputs(self) -> bool:
+        """processor가 로드할 입력(화면 기준 데이터, 또는 조건만 쓰는 입력)을 갖췄는지.
+
+        실행 가능 판정의 단일 기준이다. 실행 창 시작 가능 여부(`RunController`),
+        processor 로드(`KeystrokeProcessor._init_event_data`), 작업 공간 배지
+        (`event_issues`)가 함께 쓴다. 사용 여부(`use_event`)와 키 유무는 보지 않는다.
+        """
+        if self.is_screenless_input():
+            return True
+        if self.latest_position is None or self.clicked_position is None:
+            return False
+        if (self.match_mode or "pixel") == "region":
+            return self.held_screenshot is not None
+        return self.ref_pixel_value is not None and len(self.ref_pixel_value) >= 3
+
 
 @dataclass
 class ProfileModel:

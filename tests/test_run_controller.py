@@ -1,6 +1,8 @@
 import json
+import shutil
 import tempfile
 import unittest
+import weakref
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -45,14 +47,18 @@ def _make_app_stub(run_profiles=None) -> RunController:
         return listener
 
     router.add.side_effect = _router_add
+    # 저장소 루트의 실제 사용자 파일을 건드리지 않도록 저장 경로를 임시 폴더에 둔다.
+    root = Path(tempfile.mkdtemp(prefix="run-controller-test-"))
     app = RunController(
         host,
         router=router,
         sound_player=MagicMock(),
-        profiles_dir=Path("profiles"),
-        modkey_sets_path=Path("modkey_sets.json"),
-        run_sets_path=Path("run_sets.json"),
+        profiles_dir=root / "profiles",
+        modkey_sets_path=root / "modkey_sets.json",
+        run_sets_path=root / "run_sets.json",
     )
+    # stub이 사라질 때 임시 폴더도 지운다.
+    weakref.finalize(app, shutil.rmtree, root, True)
     app.selected_process = FakeVar("")
     app.selected_profile = FakeVar("")
     app.selected_modkey_set = FakeVar("Default")

@@ -1,5 +1,7 @@
 # Tkinter → PySide6 전환 계획
 
+> 이력 문서다. 아래의 `app/ui/qt/`, `-m app.qt`, Tk 진입점 같은 구조는 지금 코드에 없다. 현재 모듈 경계와 불변조건은 [`maintainer-reference.md`](maintainer-reference.md)를 따른다.
+
 - 권장 추론 레벨: xhigh (장기·다단계 작업)
 - 작업 위치: `git worktree add ../KeystrokeSimulator-qt -b feat/pyside6` (대규모 변경이라 main 직접 작업 금지)
 - 성공 기준: 각 단계 `uv run -m scripts.verify` 통과 + diff 리뷰, 최종 단계는 macOS·Windows 실기에서 아래 "기능 동등성 체크리스트" 전 항목 통과

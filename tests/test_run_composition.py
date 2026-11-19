@@ -39,6 +39,7 @@ class TestComposeRunSession(unittest.TestCase):
         session = compose_run_session([])
         self.assertFalse(session.ok)
         self.assertTrue(session.errors)
+        self.assertIsNone(session.error_kind)
 
     def test_merges_two_profiles_without_name_collision(self) -> None:
         a = ProfileModel(
@@ -61,6 +62,7 @@ class TestComposeRunSession(unittest.TestCase):
         )
         session = compose_run_session([("A", a), ("B", b)])
         self.assertTrue(session.ok)
+        self.assertIsNone(session.error_kind)
         names = [e.event_name for e in session.events]
         self.assertEqual(names, ["A/Heal", "A/Cond", "B/Heal"])
         cond = next(e for e in session.events if e.event_name == "A/Cond")
@@ -78,6 +80,7 @@ class TestComposeRunSession(unittest.TestCase):
         self.assertTrue(
             any("X" in err or "중복" in err or "Duplicate" in err for err in session.errors)
         )
+        self.assertEqual(session.error_kind, "duplicate_events")
 
     def test_runtime_toggle_conflicting_keys_error(self) -> None:
         a = ProfileModel(
@@ -111,6 +114,27 @@ class TestComposeRunSession(unittest.TestCase):
         self.assertTrue(
             any("differ" in e.lower() or "다릅니다" in e for e in session.errors)
         )
+        self.assertEqual(session.error_kind, "runtime_toggle")
+
+    def test_runtime_toggle_validation_error_kind(self) -> None:
+        # 단축키 묶음에 선택된 이벤트가 없음 → collect_runtime_toggle_validation_errors
+        p = ProfileModel(
+            event_list=[EventModel(event_name="Base", key_to_enter="A")],
+            runtime_toggle_enabled=True,
+            runtime_toggle_key="F6",
+        )
+        session = compose_run_session([("P", p)])
+        self.assertFalse(session.ok)
+        self.assertEqual(session.error_kind, "runtime_toggle")
+
+    def test_missing_runtime_toggle_key_error_kind(self) -> None:
+        p = ProfileModel(
+            event_list=[EventModel(event_name="Base", key_to_enter="A")],
+            runtime_toggle_enabled=True,
+            runtime_toggle_key=None,
+        )
+        session = compose_run_session([("P", p)])
+        self.assertEqual(session.error_kind, "runtime_toggle")
 
     def test_runtime_toggle_same_key_merges(self) -> None:
         a = ProfileModel(

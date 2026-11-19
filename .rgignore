@@ -1,0 +1,7 @@
+# ripgrep(에이전트 검색) 전용 제외 목록. git·ruff·pyright에는 영향이 없다.
+# base64 오디오만 담은 생성 데이터 모듈: 한 줄이 수만 자라 검색 결과가 컨텍스트를 크게 소모한다.
+# 사운드 팩 정의는 app/utils/notification_sound_packs.py, 생성기는 scripts/generate_soft_notification_sounds.py를 본다.
+app/utils/_classic_notification_sounds.py
+app/utils/_soft_notification_sounds.py
+app/utils/_toggle_notification_sounds.py
+app/utils/sound_assets.py

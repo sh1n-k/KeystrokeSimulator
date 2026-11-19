@@ -83,7 +83,7 @@ def rename_colliding_events(
 def event_needs_attention(event: EventModel) -> bool:
     """A rule without an input key cannot run. Single source of truth for the
     'no key' badge and counts."""
-    return bool(getattr(event, "execute_action", True)) and not (
+    return bool(event.execute_action) and not (
         event.key_to_enter or ""
     ).strip()
 

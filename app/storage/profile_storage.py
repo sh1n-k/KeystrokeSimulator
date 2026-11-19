@@ -232,12 +232,12 @@ def _to_conditions(v: object) -> dict[str, bool]:
 
 
 def _normalize_loaded_event_names(profile: ProfileModel) -> bool:
-    events = list(getattr(profile, "event_list", []) or [])
+    events = list(profile.event_list or [])
     if not events:
         return False
 
     raw_names = [
-        normalized_event_name(getattr(evt, "event_name", None)) for evt in events
+        normalized_event_name(evt.event_name) for evt in events
     ]
     duplicates = {
         name
@@ -248,14 +248,14 @@ def _normalize_loaded_event_names(profile: ProfileModel) -> bool:
     used_names: set[str] = set()
     changed = False
     for index, evt in enumerate(events, start=1):
-        current_name = normalized_event_name(getattr(evt, "event_name", None))
+        current_name = normalized_event_name(evt.event_name)
         base_name = current_name or f"Event {index}"
         if current_name in duplicates or not current_name:
             final_name = next_available_event_name(base_name, used_names)
         else:
             final_name = base_name
 
-        if getattr(evt, "event_name", None) != final_name:
+        if evt.event_name != final_name:
             evt.event_name = final_name
             changed = True
         used_names.add(final_name)
@@ -542,7 +542,7 @@ def save_profile(
     started = time.perf_counter()
     profiles_dir.mkdir(exist_ok=True)
     prof_name = (
-        name or getattr(profile, "name", None) or "Unnamed"
+        name or profile.name or "Unnamed"
     ).strip() or "Unnamed"
     profile.name = prof_name
     _ensure_profile_defaults(profile)

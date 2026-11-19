@@ -54,9 +54,9 @@ def build_graph(profile: ProfileModel) -> tuple[list[GraphNode], list[GraphEdge]
             node_id=node_id,
             name=name,
             label=label,
-            group_id=getattr(evt, "group_id", None),
-            use_event=getattr(evt, "use_event", True),
-            execute_action=getattr(evt, "execute_action", True),
+            group_id=evt.group_id,
+            use_event=evt.use_event,
+            execute_action=evt.execute_action,
             missing=False,
         )
         nodes.append(node)
@@ -66,7 +66,7 @@ def build_graph(profile: ProfileModel) -> tuple[list[GraphNode], list[GraphEdge]
 
     for idx, evt in enumerate(profile.event_list):
         tgt_id = f"evt_{idx}"
-        conditions = getattr(evt, "conditions", {}) or {}
+        conditions = evt.conditions or {}
         for cond_name, state in conditions.items():
             cond_name = str(cond_name)
             if cond_name in name_map:

@@ -62,6 +62,10 @@ class WorkspaceWindowCase(unittest.TestCase):
         self._cwd = os.getcwd()
         self._tmp = tempfile.TemporaryDirectory()
         os.chdir(self._tmp.name)
+        # 정리 순서: cleanup은 tearDown 뒤 역순으로 돈다. 테스트가 등록한 cleanup
+        # (예: HUD 닫기 → 상태 저장)이 임시 폴더 안에서 끝나도록 복귀를 맨 뒤에 둔다.
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(os.chdir, self._cwd)
         save_profile(
             Path("profiles"),
             ProfileModel(
@@ -88,8 +92,6 @@ class WorkspaceWindowCase(unittest.TestCase):
             ws.close()
         self.host.deleteLater()
         self.app.processEvents()
-        os.chdir(self._cwd)
-        self._tmp.cleanup()
 
     def event(self, name: str) -> EventModel:
         return next(e for e in self.ws.model.profile.event_list if e.event_name == name)

@@ -123,28 +123,13 @@ def runnable_events(events: list[EventModel]) -> list[EventModel]:
     return [
         evt
         for evt in events
-        if getattr(evt, "use_event", True)
-        and (getattr(evt, "key_to_enter", None) or not getattr(evt, "execute_action", True))
+        if evt.use_event
+        and (evt.key_to_enter or not evt.execute_action)
     ]
 
 
 def events_with_processor_inputs(events: list[EventModel]) -> list[EventModel]:
-    ready: list[EventModel] = []
-    for evt in events:
-        if evt.is_screenless_input():
-            ready.append(evt)
-            continue
-        if evt.latest_position is None or evt.clicked_position is None:
-            continue
-        mode = evt.match_mode or "pixel"
-        if mode == "pixel" and (
-            evt.ref_pixel_value is None or len(evt.ref_pixel_value) < 3
-        ):
-            continue
-        if mode == "region" and evt.held_screenshot is None:
-            continue
-        ready.append(evt)
-    return ready
+    return [evt for evt in events if evt.has_processor_inputs()]
 
 
 def legacy_run_profiles(state: dict[str, object]) -> list[str]:
@@ -469,19 +454,19 @@ class RunController:
                 "The run set could not be prepared.",
                 "실행 세트를 준비하지 못했습니다.",
             )
-            lower = first.lower()
-            if "duplicate" in lower or "중복" in first:
+            # 불러오기 오류가 앞에 오면 그 오류를 그대로 보인다(종류 없음).
+            kind = (
+                session.error_kind
+                if session is not None and session.errors and session.errors[0] == first
+                else None
+            )
+            if kind == "duplicate_events":
                 badge = txt("Duplicate Events", "중복 이벤트")
                 title = txt(
                     "Duplicate event names were found in a run profile.",
                     "실행 프로필에서 중복 이벤트 이름이 발견되었습니다.",
                 )
-            elif (
-                "on/off hotkey" in lower
-                or "hotkey set" in lower
-                or "켜고 끄는 단축키" in first
-                or "단축키 묶음" in first
-            ):
+            elif kind == "runtime_toggle":
                 badge = txt("Hotkey Conflict", "단축키 충돌")
                 title = txt(
                     "On/off hotkey settings need attention.",
@@ -499,7 +484,7 @@ class RunController:
         assert session is not None
         events = list(session.events)
         runnable = runnable_events(events)
-        enabled_count = sum(1 for evt in events if getattr(evt, "use_event", True))
+        enabled_count = sum(1 for evt in events if evt.use_event)
         runnable_count = len(runnable)
 
         if not events:
@@ -883,7 +868,7 @@ class RunController:
         self.router.add(listener)
 
     def _mac_start_stop_enabled_for_poll(self) -> bool:
-        return bool(getattr(self.settings, "toggle_start_stop_mac", False))
+        return bool(self.settings.toggle_start_stop_mac)
 
     def _mac_runtime_toggle_enabled_for_poll(self) -> bool:
         """tap/poll 스레드에서 불린다. host(UI)를 읽지 않는다."""

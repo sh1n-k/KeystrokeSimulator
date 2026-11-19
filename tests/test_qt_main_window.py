@@ -48,6 +48,9 @@ class TestRunWindow(unittest.TestCase):
         self._cwd = os.getcwd()
         self._tmp = tempfile.TemporaryDirectory()
         os.chdir(self._tmp.name)
+        # cleanup이 tearDown 뒤에 돌아도 임시 폴더 안에서 끝나도록 복귀를 맨 뒤에 둔다.
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(os.chdir, self._cwd)
         save_profile(Path("profiles"), ProfileModel(name="Rot"))
         upsert_run_set("Raid", ["Rot"], Path("run_sets.json"))
         patches = [
@@ -64,8 +67,6 @@ class TestRunWindow(unittest.TestCase):
     def tearDown(self) -> None:
         self.window._closing = True
         self.window.deleteLater()
-        os.chdir(self._cwd)
-        self._tmp.cleanup()
 
     def test_processes_are_sorted_with_pid(self) -> None:
         items = [

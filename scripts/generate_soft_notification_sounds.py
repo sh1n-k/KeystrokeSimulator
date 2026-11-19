@@ -5,7 +5,7 @@
 
 출력:
   samples/notification-preview/set{A,B,C}_{start,stop}.wav
-  app/utils/notification_sound_packs.py   (_SOFT_*_START / _SOFT_*_STOP)
+  app/utils/_soft_notification_sounds.py   (SOFT_*_START / SOFT_*_STOP)
   app/utils/_toggle_notification_sounds.py (SOFT_*_TOGGLE_ON)
 
 실행:
@@ -25,7 +25,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SAMPLES_DIR = PROJECT_ROOT / "samples" / "notification-preview"
-PACKS_FILE = PROJECT_ROOT / "app" / "utils" / "notification_sound_packs.py"
+PACKS_FILE = PROJECT_ROOT / "app" / "utils" / "_soft_notification_sounds.py"
 TOGGLE_FILE = PROJECT_ROOT / "app" / "utils" / "_toggle_notification_sounds.py"
 
 SAMPLE_RATE = 44100
@@ -87,12 +87,12 @@ TOGGLE_SOUNDS: dict[str, Sound] = {
     ),
 }
 PACK_CONSTANTS = {
-    "_SOFT_A_START": "setA_start",
-    "_SOFT_A_STOP": "setA_stop",
-    "_SOFT_B_START": "setB_start",
-    "_SOFT_B_STOP": "setB_stop",
-    "_SOFT_C_START": "setC_start",
-    "_SOFT_C_STOP": "setC_stop",
+    "SOFT_A_START": "setA_start",
+    "SOFT_A_STOP": "setA_stop",
+    "SOFT_B_START": "setB_start",
+    "SOFT_B_STOP": "setB_stop",
+    "SOFT_C_START": "setC_start",
+    "SOFT_C_STOP": "setC_stop",
 }
 
 

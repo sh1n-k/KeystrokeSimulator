@@ -716,7 +716,7 @@ class KeystrokeProcessor:
         events_data: list[EventData] = []
 
         for e in raw_events:
-            if not e.use_event:
+            if not e.use_event or not e.has_processor_inputs():
                 continue
 
             if e.is_screenless_input():
@@ -758,10 +758,6 @@ class KeystrokeProcessor:
             if latest_position is None or clicked_position is None:
                 continue
 
-            if mode == "pixel":
-                if not e.ref_pixel_value or len(e.ref_pixel_value) < 3:
-                    continue
-
             center_x = latest_position[0] + clicked_position[0]
             center_y = latest_position[1] + clicked_position[1]
             raw_key = e.key_to_enter
@@ -792,8 +788,6 @@ class KeystrokeProcessor:
             }
 
             if evt_data["mode"] == "region":
-                if e.held_screenshot is None:
-                    continue
                 r_size = e.region_size
                 w, h = r_size if r_size else (20, 20)
                 evt_data["region_w"], evt_data["region_h"] = w, h

@@ -15,7 +15,7 @@ def normalized_event_name(name: object) -> str:
 def find_duplicate_event_names(events: Iterable[EventModel]) -> list[str]:
     counts: dict[str, int] = {}
     for evt in events:
-        name = normalized_event_name(getattr(evt, "event_name", None))
+        name = normalized_event_name(evt.event_name)
         if not name:
             continue
         counts[name] = counts.get(name, 0) + 1
