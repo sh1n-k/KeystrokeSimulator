@@ -9,12 +9,14 @@ from PIL import Image
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QIntValidator, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QComboBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMenu,
@@ -23,6 +25,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -207,11 +211,11 @@ class EventDetailPanel(QScrollArea):
 
         # --- conditions ---
         box.addWidget(_section_label(txt("Conditions", "조건")))
-        self.cond_host = QWidget()
-        self.cond_list = QVBoxLayout(self.cond_host)
-        self.cond_list.setContentsMargins(0, 0, 0, 0)
-        self.cond_list.setSpacing(2)
-        box.addWidget(self.cond_host)
+        self.cond_table = self._build_condition_table()
+        box.addWidget(self.cond_table)
+        self.lbl_no_cond = QLabel(txt("None", "없음"))
+        style.caption(self.lbl_no_cond)
+        box.addWidget(self.lbl_no_cond)
         self.btn_add_cond = QToolButton()
         self.btn_add_cond.setText(txt("＋ Add condition", "＋ 조건 추가"))
         self.btn_add_cond.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -269,6 +273,35 @@ class EventDetailPanel(QScrollArea):
         self.lbl_issues.setWordWrap(True)
         self.lbl_issues.setStyleSheet(f"color: {style.status_colors('warn')[1]};")
         box.addWidget(self.lbl_issues)
+
+    def _build_condition_table(self) -> QTableWidget:
+        table = QTableWidget(0, 3)
+        table.setHorizontalHeaderLabels(
+            [txt("Condition", "조건 이름"), txt("State", "상태"), ""]
+        )
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        table.setAlternatingRowColors(True)
+        table.setShowGrid(False)
+        table.setWordWrap(False)
+        table.setTextElideMode(Qt.TextElideMode.ElideRight)
+        # 패널이 통째로 스크롤되므로 표는 행 수만큼 늘어나고 자체 스크롤은 없다.
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        table.verticalHeader().hide()
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setDefaultAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        header.setHighlightSections(False)
+        header.setSectionsClickable(True)
+        header.sectionClicked.connect(self._on_condition_header_clicked)
+        return table
 
     def _build_advanced(self, parent: QWidget) -> None:
         box = QVBoxLayout(parent)
@@ -471,35 +504,35 @@ class EventDetailPanel(QScrollArea):
     def _state_label(state: bool) -> str:
         return txt("on", "켜짐") if state else txt("off", "꺼짐")
 
+    def _state_badge(self, name: str, state: bool) -> QToolButton:
+        """누르면 켜짐/꺼짐이 바뀌는 색 배지."""
+        bg, fg = style.status_colors("ready" if state else "error")
+        badge = QToolButton()
+        badge.setObjectName("condition_state")
+        icon = "●" if state else "○"
+        badge.setText(f"{icon} {self._state_label(state)}")
+        badge.setToolTip(txt("Click to switch", "눌러서 바꾸기"))
+        badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        badge.setStyleSheet(
+            f"QToolButton {{ background: {bg}; color: {fg}; border: none;"
+            f" border-radius: 4px; padding: 1px 8px; }}"
+        )
+        badge.clicked.connect(
+            lambda _checked=False, n=name, s=state: self._set_condition(n, not s)
+        )
+        return badge
+
     def _refresh_conditions(self) -> None:
-        while self.cond_list.count():
-            item = self.cond_list.takeAt(0)
-            widget = item.widget() if item is not None else None
-            if widget is not None:
-                # 지우기 전에 바로 숨긴다(deleteLater는 다음 루프에서 지운다).
-                widget.hide()
-                widget.setParent(None)
-                widget.deleteLater()
+        table = self.cond_table
         event = self.current
-        if event is None:
-            return
-        if not event.conditions:
-            none = QLabel(txt("None", "없음"))
-            style.caption(none)
-            self.cond_list.addWidget(none)
-            return
-        for name, state in list(event.conditions.items()):
-            row = QWidget()
-            line = QHBoxLayout(row)
-            line.setContentsMargins(0, 0, 0, 0)
-            label = QLabel(name)
-            label.setObjectName("condition_name")
-            line.addWidget(label, 1)
-            combo = QComboBox()
-            combo.addItems([self._state_label(True), self._state_label(False)])
-            combo.setCurrentIndex(0 if state else 1)
-            combo.activated.connect(self._condition_slot(name))
-            line.addWidget(combo)
+        rows = self.model.condition_rows(event) if event is not None else []
+        table.setRowCount(0)  # 이전 행의 셀 위젯도 함께 지운다
+        table.setRowCount(len(rows))
+        for row, (name, state) in enumerate(rows):
+            item = QTableWidgetItem(name)
+            item.setToolTip(name)
+            table.setItem(row, 0, item)
+            table.setCellWidget(row, 1, self._state_badge(name, state))
             remove = QToolButton()
             remove.setText(tokens.ICON_REMOVE)
             remove.setAutoRaise(True)
@@ -507,8 +540,29 @@ class EventDetailPanel(QScrollArea):
             remove.clicked.connect(
                 lambda _checked=False, n=name: self._remove_condition(n)
             )
-            line.addWidget(remove)
-            self.cond_list.addWidget(row)
+            table.setCellWidget(row, 2, remove)
+        table.resizeRowsToContents()
+        header = table.horizontalHeader()
+        column = self.model.condition_sort
+        header.setSortIndicatorShown(column is not None)
+        if column is not None:
+            header.setSortIndicator(
+                0 if column == "name" else 1,
+                Qt.SortOrder.DescendingOrder
+                if self.model.condition_sort_descending
+                else Qt.SortOrder.AscendingOrder,
+            )
+        height = header.sizeHint().height() + 2 * table.frameWidth()
+        height += sum(table.rowHeight(r) for r in range(len(rows)))
+        table.setFixedHeight(height)
+        table.setVisible(bool(rows))
+        self.lbl_no_cond.setVisible(event is not None and not rows)
+
+    def _on_condition_header_clicked(self, section: int) -> None:
+        if section not in (0, 1):
+            return
+        self.model.cycle_condition_sort("name" if section == 0 else "state")
+        self._refresh_conditions()
 
     def _refresh_screen(self) -> None:
         event = self.current
@@ -723,12 +777,6 @@ class EventDetailPanel(QScrollArea):
 
     def _bulk_slot(self, action: BulkAction, value: object) -> Callable[[], None]:
         return lambda: self._bulk(action, value)
-
-    def _condition_slot(self, name: str) -> Callable[[int], None]:
-        def on_activated(index: int) -> None:
-            self._set_condition(name, index == 0)
-
-        return on_activated
 
     def _bulk(self, action: BulkAction, value: object) -> None:
         self.model.bulk(action, value, self.selection_getter())

@@ -18,6 +18,7 @@ from typing import Literal, Protocol
 from loguru import logger
 
 from app.domain.capture_geometry import CaptureResult
+from app.domain.display_text import ConditionSortColumn, natural_key, sorted_conditions
 from app.domain.event_editing import apply_capture, clamp_region, clear_capture
 from app.domain.models import EventModel, ProfileModel
 from app.domain.profile_events import (
@@ -152,6 +153,9 @@ class WorkspaceModel:
         self._undo: list[tuple[str, list[EventModel]]] = []
         self._last_saved_fingerprint: tuple[object, ...] | None = None
         self._cancel_autosave: CancelTimer | None = None
+        # 조건 표 정렬(보기 전용, 저장하지 않음). None이면 저장된 순서.
+        self.condition_sort: ConditionSortColumn | None = None
+        self.condition_sort_descending = False
 
     # ── catalog ────────────────────────────────────────────────────────
 
@@ -756,6 +760,20 @@ class WorkspaceModel:
         event.conditions.pop(name)
         self._event_changed()
 
+    def cycle_condition_sort(self, column: ConditionSortColumn) -> None:
+        """같은 열을 누를 때마다 오름차순 → 내림차순 → 저장된 순서."""
+        if self.condition_sort != column:
+            self.condition_sort, self.condition_sort_descending = column, False
+        elif not self.condition_sort_descending:
+            self.condition_sort_descending = True
+        else:
+            self.condition_sort, self.condition_sort_descending = None, False
+
+    def condition_rows(self, event: EventModel) -> list[tuple[str, bool]]:
+        return sorted_conditions(
+            event.conditions, self.condition_sort, self.condition_sort_descending
+        )
+
     def condition_candidates(
         self, target: EventModel
     ) -> list[tuple[EventModel, list[str] | None]]:
@@ -769,7 +787,7 @@ class WorkspaceModel:
             and e.event_name not in target.conditions
         ]
         candidates.sort(
-            key=lambda e: (bool(e.execute_action), (e.event_name or "").casefold())
+            key=lambda e: (bool(e.execute_action), natural_key(e.event_name or ""))
         )
         return [
             (e, condition_cycle_if_added(events, target, e.event_name or ""))

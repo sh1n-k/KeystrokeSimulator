@@ -9,9 +9,11 @@ from app.storage.profile_storage import save_profile
 from app.storage.profile_storage import ordered_profile_names
 from app.domain.display_text import (
     condition_summary,
+    natural_key,
     row_badges,
     section_note,
     section_title,
+    sorted_conditions,
 )
 from app.presenters.workspace_sidebar import sidebar_actions
 from app.domain.profile_events import build_event_sections
@@ -80,3 +82,35 @@ class TestListPresentation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+CONDS = {"사거리 30": True, "Buff": False, "사거리 5": False, "aura": True}
+
+
+class TestConditionSort(unittest.TestCase):
+    def test_natural_key_compares_numbers_as_numbers(self):
+        names = ["사거리 30", "사거리 5", "사거리 100", "Buff 2", "buff 10"]
+
+        self.assertEqual(
+            sorted(names, key=natural_key),
+            ["Buff 2", "buff 10", "사거리 5", "사거리 30", "사거리 100"],
+        )
+
+    def test_unsorted_keeps_saved_order(self):
+        self.assertEqual(sorted_conditions(CONDS, None), list(CONDS.items()))
+
+    def test_name_ascending_and_descending(self):
+        names = [n for n, _ in sorted_conditions(CONDS, "name")]
+        self.assertEqual(names, ["aura", "Buff", "사거리 5", "사거리 30"])
+        names = [n for n, _ in sorted_conditions(CONDS, "name", True)]
+        self.assertEqual(names, ["사거리 30", "사거리 5", "Buff", "aura"])
+
+    def test_state_groups_on_first_then_name_ascending(self):
+        self.assertEqual(
+            sorted_conditions(CONDS, "state"),
+            [("aura", True), ("사거리 30", True), ("Buff", False), ("사거리 5", False)],
+        )
+        self.assertEqual(
+            sorted_conditions(CONDS, "state", True),
+            [("Buff", False), ("사거리 5", False), ("aura", True), ("사거리 30", True)],
+        )

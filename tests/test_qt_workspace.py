@@ -372,6 +372,48 @@ class TestEditing(WorkspaceWindowCase):
         self.assertTrue(texts["loose"])
 
 
+    def condition_table(self) -> list[tuple[str, str]]:
+        table = self.ws.detail.cond_table
+        return [
+            (table.item(r, 0).text(), table.cellWidget(r, 1).text())
+            for r in range(table.rowCount())
+        ]
+
+    def test_condition_table_sorts_by_header_and_toggles_by_badge(self) -> None:
+        loose = self.event("loose")
+        loose.conditions = {"S": False, "02 b": True, "01 a": True}
+        self.ws.tree.select([loose])
+        detail = self.ws.detail
+        header = detail.cond_table.horizontalHeader()
+        self.assertFalse(detail.cond_table.isHidden())
+        self.assertEqual([n for n, _ in self.condition_table()], ["S", "02 b", "01 a"])
+
+        detail._on_condition_header_clicked(0)  # name ascending
+        self.assertEqual(
+            self.condition_table(),
+            [("01 a", "● on"), ("02 b", "● on"), ("S", "○ off")],
+        )
+        self.assertTrue(header.isSortIndicatorShown())
+        detail._on_condition_header_clicked(1)  # state: on first
+        self.assertEqual([n for n, _ in self.condition_table()], ["01 a", "02 b", "S"])
+        detail._on_condition_header_clicked(1)  # state descending: off first
+        self.assertEqual([n for n, _ in self.condition_table()], ["S", "01 a", "02 b"])
+        detail._on_condition_header_clicked(1)  # back to saved order
+        self.assertEqual([n for n, _ in self.condition_table()], ["S", "02 b", "01 a"])
+        self.assertFalse(header.isSortIndicatorShown())
+
+        detail.cond_table.cellWidget(0, 1).click()  # S: off → on
+        self.assertTrue(loose.conditions["S"])
+        self.assertEqual(self.condition_table()[0], ("S", "● on"))
+        self.assertEqual(list(loose.conditions), ["S", "02 b", "01 a"])
+
+    def test_condition_table_hidden_without_conditions(self) -> None:
+        self.ws.tree.select([self.event("loose")])
+
+        self.assertTrue(self.ws.detail.cond_table.isHidden())
+        self.assertFalse(self.ws.detail.lbl_no_cond.isHidden())
+
+
 class TestRunningAndClosing(WorkspaceWindowCase):
     def test_running_shows_banner_and_locks_profile_name(self) -> None:
         self.host.run.is_running = True

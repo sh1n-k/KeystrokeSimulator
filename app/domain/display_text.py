@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
+from typing import Literal
+
 from app.domain.models import EventModel
 from app.domain.profile_events import (
     EventSection,
@@ -12,6 +16,37 @@ from app.utils.i18n import txt
 
 COND_SUMMARY_CHARS = 40
 TARGET_COMBO_CHARS = 24
+
+ConditionSortColumn = Literal["name", "state"]
+_DIGITS = re.compile(r"([0-9]+)")
+
+
+def natural_key(text: str) -> tuple[tuple[tuple[int, int, str], ...], str]:
+    """숫자 부분을 수로 비교하는 정렬 키: '사거리 5' < '사거리 30'."""
+    parts = tuple(
+        (0, int(part), "") if part.isascii() and part.isdigit() else (1, 0, part)
+        for part in _DIGITS.split(text.casefold())
+        if part
+    )
+    return parts, text
+
+
+def sorted_conditions(
+    conditions: Mapping[str, bool],
+    column: ConditionSortColumn | None,
+    descending: bool = False,
+) -> list[tuple[str, bool]]:
+    """조건 표의 행 순서. column이 None이면 저장된 순서 그대로다.
+
+    상태 정렬은 오름차순에서 켜짐이 먼저이고, 같은 상태끼리는 늘 이름 오름차순이다.
+    """
+    rows = list(conditions.items())
+    if column == "name":
+        rows.sort(key=lambda row: natural_key(row[0]), reverse=descending)
+    elif column == "state":
+        rows.sort(key=lambda row: natural_key(row[0]))
+        rows.sort(key=lambda row: not row[1], reverse=descending)
+    return rows
 
 
 def section_title(section: EventSection) -> str:
