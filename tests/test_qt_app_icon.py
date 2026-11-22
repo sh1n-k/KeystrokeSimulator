@@ -15,7 +15,7 @@ class TestAppIcon(unittest.TestCase):
         self.assertFalse(icon.isNull())
         image = icon.pixmap(32, 32).toImage()
         self.assertFalse(image.isNull())
-        # Center of the crosshair is opaque, not a blank render.
+        # Center of the keycap is opaque, not a blank render.
         self.assertGreater(image.pixelColor(16, 16).alpha(), 0)
 
     @patch("app.platform.system.IS_WIN", True)
