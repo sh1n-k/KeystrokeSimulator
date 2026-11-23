@@ -60,13 +60,20 @@ class EventModel:
     wait_action: bool = False
 
     def is_screenless_input(self) -> bool:
-        """화면 좌표 없이 조건 AND만으로 키를 실행하는 입력 이벤트인지."""
+        """화면 좌표 없이 조건 AND만으로 판정하는 이벤트인지.
+
+        동작이면 조건이 맞을 때 키를 실행하고, 상태면 파생 상태로서 다른
+        이벤트의 조건으로만 쓰인다.
+        """
         return (
-            bool(self.execute_action)
-            and bool(self.conditions)
+            bool(self.conditions)
             and self.latest_position is None
             and self.clicked_position is None
         )
+
+    def is_derived_state(self) -> bool:
+        """화면 없이 다른 이벤트의 조건만으로 켜지는 상태인지."""
+        return not self.execute_action and self.is_screenless_input()
 
     def has_processor_inputs(self) -> bool:
         """processor가 로드할 입력(화면 기준 데이터, 또는 조건만 쓰는 입력)을 갖췄는지.

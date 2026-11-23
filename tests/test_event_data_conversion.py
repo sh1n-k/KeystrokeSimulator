@@ -182,14 +182,29 @@ class TestInitEventDataFiltering(unittest.TestCase):
         ])
         self.assertEqual(events, [])
 
-    def test_condition_only_without_screen_is_skipped(self):
+    def test_derived_state_loads_without_key_execution(self):
+        proc = _make_processor_with_key_codes()
+        events = proc._init_event_data([
+            _make_basic_event(
+                latest_position=None,
+                clicked_position=None,
+                ref_pixel_value=None,
+                execute_action=False,
+                conditions={"Other": True},
+            )
+        ])
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0]["screenless"])
+        self.assertFalse(events[0]["exec"])
+        self.assertEqual(events[0]["conds"], {"Other": True})
+
+    def test_state_without_screen_or_conditions_is_skipped(self):
         proc = _make_processor_with_key_codes()
         events = proc._init_event_data([
             _make_basic_event(
                 latest_position=None,
                 clicked_position=None,
                 execute_action=False,
-                conditions={"Other": True},
             )
         ])
         self.assertEqual(events, [])

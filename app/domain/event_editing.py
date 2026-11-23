@@ -22,9 +22,12 @@ def event_issues(event: EventModel) -> list[str]:
                     "조건을 추가하거나 화면 트리거를 캡처하세요.",
                 )
             )
-    elif not event_has_screen(event):
+    elif not event_has_screen(event) and not event.conditions:
         issues.append(
-            txt("A state needs a screen. Capture one.", "상태에는 화면이 필요합니다. 캡처하세요.")
+            txt(
+                "A state needs a screen or a condition.",
+                "상태에는 화면이나 조건이 필요합니다.",
+            )
         )
     if event.match_mode == "region" and event.held_screenshot is None:
         issues.append(txt("Region mode needs a capture.", "영역 모드에는 캡처본이 필요합니다."))

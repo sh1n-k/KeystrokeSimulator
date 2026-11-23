@@ -626,6 +626,97 @@ class WorkspaceModel:
         self.view.on_events_changed(None)
         self._changed()
 
+    def bulk_condition_candidates(self, events: Sequence[EventModel]) -> list[str]:
+        """일괄 조건 후보 이름. 목록 표시 순서(상태 먼저) 뒤에, 선택한 이벤트가
+        참조하지만 목록에 없는 이름(제거용)을 붙인다."""
+        names = [
+            event.event_name
+            for section in build_event_sections(self.profile.event_list)
+            for event in section.events
+            if event.event_name
+        ]
+        known = set(names)
+        for event in events:
+            for name in event.conditions:
+                if name not in known:
+                    known.add(name)
+                    names.append(name)
+        return names
+
+    def bulk_set_condition(
+        self, name: str, state: bool, events: Sequence[EventModel]
+    ) -> None:
+        """선택한 이벤트에 조건을 넣거나 값을 바꾼다. 자기 자신이거나 순환이
+        생기는 이벤트는 건너뛴다."""
+        targets = [e for e in events if self._owns(e)]
+        if not name or not targets:
+            return
+        if name not in {e.event_name for e in self.profile.event_list}:
+            self.view.on_status(
+                txt(
+                    "'{n}' is not in this profile, so it can only be removed.",
+                    "'{n}'은(는) 이 프로필에 없어 제거만 할 수 있습니다.",
+                    n=name,
+                )
+            )
+            return
+        self.push_undo(txt("bulk condition", "일괄 조건"))
+        changed = skipped = derived = 0
+        for event in targets:
+            if event.event_name == name or condition_cycle_if_added(
+                self.profile.event_list, event, name
+            ):
+                skipped += 1
+                continue
+            if event.conditions.get(name) is state:
+                continue
+            was_derived = event.is_derived_state()
+            event.conditions[name] = state
+            changed += 1
+            if event.is_derived_state() and not was_derived:
+                derived += 1
+        self._finish_bulk_condition(changed, skipped, derived)
+
+    def bulk_remove_condition(self, name: str, events: Sequence[EventModel]) -> None:
+        targets = [e for e in events if self._owns(e)]
+        if not name or not targets:
+            return
+        self.push_undo(txt("bulk condition", "일괄 조건"))
+        changed = 0
+        for event in targets:
+            if name in event.conditions:
+                event.conditions.pop(name)
+                changed += 1
+        self._finish_bulk_condition(changed, 0)
+
+    def _finish_bulk_condition(
+        self, changed: int, skipped: int, derived: int = 0
+    ) -> None:
+        if not changed:
+            self._undo.pop()
+        else:
+            self.view.on_events_changed(None)
+            self._changed()
+        message = txt(
+            "Conditions changed on {n} event(s)",
+            "이벤트 {n}개의 조건을 바꿨습니다",
+            n=changed,
+        )
+        if skipped:
+            message += txt(
+                " ({n} skipped: self or cycle)",
+                " (건너뜀 {n}개: 자기 자신 또는 순환)",
+                n=skipped,
+            )
+        if derived:
+            # 화면 없는 상태가 조건을 얻으면 파생 상태가 되어 실행에 로드된다.
+            message += txt(
+                " — {n} screenless state(s) are now derived (on when conditions match)",
+                " — 화면 없는 상태 {n}개가 파생 상태가 됐습니다(조건이 맞으면 켜짐)",
+                n=derived,
+            )
+        self.view.on_status(message)
+
     def move_event(self, moved: EventModel, target: EventModel) -> bool:
         """`moved`를 `target` 자리로 옮긴다. 같은 묶음 안에서만 된다."""
         if moved is target:
@@ -915,6 +1006,17 @@ class WorkspaceModel:
         self.push_undo(txt("screen", "화면"))
         clear_capture(event)
         self._event_changed()
+        if event.is_derived_state():
+            # 화면을 지워도 조건이 남은 상태는 파생 상태로 실행에 로드된다.
+            self.view.on_status(
+                txt(
+                    "Screen cleared. '{n}' still has conditions, so it now runs "
+                    "as a derived state (on when conditions match).",
+                    "화면을 지웠습니다. '{n}'에 조건이 남아 있어 이제 파생 "
+                    "상태로 동작합니다(조건이 맞으면 켜짐).",
+                    n=event.event_name or "",
+                )
+            )
 
     def apply_capture_to(self, event: EventModel, result: CaptureResult) -> None:
         if not self._owns(event):

@@ -387,6 +387,58 @@ class TestEditing(WorkspaceWindowCase):
         self.assertEqual([a.use_event, b.use_event], [False, False])
         self.assertEqual(self.ws.tree.selected_events(), [a, b])
 
+    def test_bulk_condition_panel_sets_and_removes(self) -> None:
+        a, loose = self.event("01 a"), self.event("loose")
+        self.ws.tree.select([a, loose])
+        detail = self.ws.detail
+        combo = detail.combo_bulk_cond
+
+        self.assertEqual(
+            [combo.itemText(i) for i in range(combo.count())],
+            ["S", "01 a", "02 b", "loose"],
+        )
+        self.assertEqual(detail.lbl_bulk_conditions.text(), "S ●1/2")
+
+        combo.setCurrentText("S")
+        detail.combo_bulk_cond_state.setCurrentIndex(1)  # off
+        detail.btn_bulk_cond_set.click()
+
+        self.assertEqual((a.conditions, loose.conditions), ({"S": False}, {"S": False}))
+        self.assertEqual(self.ws.tree.selected_events(), [a, loose])
+        self.assertEqual(detail.lbl_bulk_conditions.text(), "S ○2/2")
+        self.assertEqual(combo.currentText(), "S")
+
+        detail.btn_bulk_cond_remove.click()
+
+        self.assertEqual((a.conditions, loose.conditions), ({}, {}))
+        self.assertEqual(detail.lbl_bulk_conditions.text(), "No conditions")
+
+    def test_bulk_condition_combo_clears_when_its_name_disappears(self) -> None:
+        a, loose = self.event("01 a"), self.event("loose")
+        loose.conditions["gone"] = True
+        self.ws.tree.select([a, loose])
+        detail = self.ws.detail
+        detail.combo_bulk_cond.setCurrentText("gone")
+
+        detail.btn_bulk_cond_remove.click()
+
+        self.assertEqual(detail.combo_bulk_cond.currentIndex(), -1)
+        detail.btn_bulk_cond_set.click()  # 이름이 없으면 아무것도 하지 않는다
+        self.assertEqual((a.conditions, loose.conditions), ({"S": True}, {}))
+
+    def test_derived_state_detail_explains_screenless_trigger(self) -> None:
+        loose = self.event("loose")
+        self.ws.model.set_condition(loose, "S", True)
+        self.ws.model.set_event_kind(loose, False)
+        self.ws.tree.select([loose])
+
+        self.assertTrue(loose.is_derived_state())
+        self.assertEqual(
+            self.ws.detail.lbl_screen.text(),
+            "No screen — on when all conditions match",
+        )
+        self.assertTrue(self.ws.detail.lbl_issues.isHidden())
+
     def test_condition_menu_marks_cycles(self) -> None:
         self.ws.tree.select([self.event("S")])
         self.ws.detail._fill_condition_menu()

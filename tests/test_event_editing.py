@@ -54,6 +54,14 @@ class TestEventIssues(unittest.TestCase):
             [],
         )
 
+    def test_derived_state_needs_no_screen(self):
+        event = EventModel(event_name="d", execute_action=False, conditions={"s": True})
+
+        self.assertTrue(event.is_derived_state())
+        self.assertEqual(event_issues(event), [])
+        self.assertFalse(screen_event(event_name="s", execute_action=False).is_derived_state())
+        self.assertFalse(EventModel(event_name="r", conditions={"s": True}).is_derived_state())
+
     def test_signal_needs_screen_but_no_key(self):
         self.assertTrue(event_issues(EventModel(event_name="s", execute_action=False)))
         self.assertEqual(

@@ -28,6 +28,12 @@ class TestNamespace(unittest.TestCase):
         self.assertEqual(evt.event_name, "Skill")
         self.assertEqual(evt.group_id, "gcd")
 
+    def test_derived_state_stays_derived_after_namespacing(self) -> None:
+        evt = EventModel(event_name="D", execute_action=False, conditions={"X": True})
+        out = namespace_event("P", evt)
+        self.assertTrue(out.is_derived_state())
+        self.assertEqual(out.conditions, {"P/X": True})
+
     def test_empty_group_stays_none(self) -> None:
         evt = EventModel(event_name="A", group_id="  ", key_to_enter="1")
         out = namespace_event("P", evt)

@@ -173,6 +173,58 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pressed, [])
         self.assertEqual(proc.current_states, {"A": False, "B": False})
 
+    async def test_derived_state_feeds_actions_without_pressing(self):
+        from app.domain.models import EventModel
+
+        proc = make_processor_stub()
+        proc.key_codes = {"A": 0, "B": 1}
+        screen = dict(
+            latest_position=(10, 10), clicked_position=(1, 1), ref_pixel_value=(1, 2, 3)
+        )
+        proc.event_data_list = proc._init_event_data([
+            EventModel(event_name="IN_COMBAT", execute_action=False, **screen),
+            EventModel(event_name="CASTING", execute_action=False, **screen),
+            # 동작이었다가 상태로 바뀌어 키·그룹이 남은 파생 상태도 키를 누르거나
+            # 그룹 경쟁에 끼면 안 된다(priority 0이라 끼면 ACT를 이긴다).
+            EventModel(
+                event_name="COMMON",
+                execute_action=False,
+                key_to_enter="B",
+                group_id="g",
+                priority=0,
+                conditions={"IN_COMBAT": True, "CASTING": False},
+            ),
+            EventModel(
+                event_name="CHAINED",
+                execute_action=False,
+                conditions={"COMMON": True},
+            ),
+            EventModel(
+                event_name="ACT",
+                key_to_enter="A",
+                group_id="g",
+                priority=1,
+                conditions={"CHAINED": True},
+            ),
+        ])
+        pressed = []
+
+        async def fake_press(evt, _local_states):
+            pressed.append(evt["name"])
+
+        proc._press_key_async = fake_press
+
+        for casting, expected in ((False, ["ACT"]), (True, [])):
+            pressed.clear()
+            match_map = {"IN_COMBAT": True, "CASTING": casting}
+            proc._check_match = lambda _img, evt, m=match_map: m.get(evt["name"], False)
+
+            await evaluate_processor_events(proc)
+
+            self.assertEqual(pressed, expected)
+            self.assertEqual(proc.current_states["COMMON"], not casting)
+            self.assertEqual(proc.current_states["CHAINED"], not casting)
+
     async def test_evaluate_and_execute_strict_chain_blocks_child(self):
         proc = make_processor_stub()
         proc.event_data_list = [

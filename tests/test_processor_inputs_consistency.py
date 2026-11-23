@@ -100,8 +100,13 @@ def _cases() -> dict[str, tuple[EventModel, bool]]:
             EventModel(event_name="n", key_to_enter="A"),
             False,
         ),
-        "state_without_screen": (
+        # 화면 없이 조건만 있는 상태는 파생 상태로 로드한다.
+        "derived_state": (
             EventModel(event_name="st", execute_action=False, conditions={"p": True}),
+            True,
+        ),
+        "state_without_screen_or_conditions": (
+            EventModel(event_name="st0", execute_action=False),
             False,
         ),
         "state_complete": (

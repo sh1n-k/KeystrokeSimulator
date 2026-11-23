@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal, cast
 
@@ -223,6 +223,24 @@ def referenced_event_names(events: Iterable[EventModel]) -> set[str]:
     for event in events:
         names.update(event.conditions)
     return names
+
+
+def shared_conditions(
+    events: Iterable[EventModel], order: Sequence[str] = ()
+) -> list[tuple[str, int, int]]:
+    """선택한 이벤트들의 조건별 (이름, 켜짐 수, 꺼짐 수).
+
+    `order`(보통 목록 표시 순서)에 있는 이름이 그 순서로 먼저 오고, 나머지는
+    처음 나온 순서다.
+    """
+    counts: dict[str, list[int]] = {}
+    for event in events:
+        for name, state in event.conditions.items():
+            on_off = counts.setdefault(name, [0, 0])
+            on_off[0 if state else 1] += 1
+    rank = {name: index for index, name in enumerate(order)}
+    names = sorted(counts, key=lambda name: rank.get(name, len(rank)))
+    return [(name, counts[name][0], counts[name][1]) for name in names]
 
 
 def event_has_screen(event: EventModel) -> bool:

@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from app.domain.capture_geometry import CaptureResult
 from app.domain.capture_render import render_overlay
+from app.domain.display_text import shared_condition_summary
 from app.domain.event_editing import capture_from_event, event_issues
 from app.domain.key_codes import KeyCodes
 from app.domain.models import EventModel, Position
@@ -406,6 +407,35 @@ class EventDetailPanel(QScrollArea):
         group_row.addStretch(1)
         box.addLayout(group_row)
 
+        box.addWidget(_section_label(txt("Conditions", "조건")))
+        cond_row = QHBoxLayout()
+        self.combo_bulk_cond = QComboBox()
+        self.combo_bulk_cond.setMinimumWidth(140)
+        cond_row.addWidget(self.combo_bulk_cond)
+        self.combo_bulk_cond_state = QComboBox()
+        self.combo_bulk_cond_state.addItem(txt("● on", "● 켜짐"), True)
+        self.combo_bulk_cond_state.addItem(txt("○ off", "○ 꺼짐"), False)
+        cond_row.addWidget(self.combo_bulk_cond_state)
+        cond_row.addStretch(1)
+        box.addLayout(cond_row)
+        cond_buttons = QHBoxLayout()
+        self.btn_bulk_cond_set = QPushButton(txt("Add / change", "추가·변경"))
+        self.btn_bulk_cond_set.setAutoDefault(False)
+        self.btn_bulk_cond_set.clicked.connect(self._bulk_set_condition)
+        cond_buttons.addWidget(self.btn_bulk_cond_set)
+        self.btn_bulk_cond_remove = QPushButton(txt("Remove", "제거"))
+        self.btn_bulk_cond_remove.setAutoDefault(False)
+        self.btn_bulk_cond_remove.clicked.connect(self._bulk_remove_condition)
+        cond_buttons.addWidget(self.btn_bulk_cond_remove)
+        cond_buttons.addStretch(1)
+        box.addLayout(cond_buttons)
+        self.lbl_bulk_conditions = QLabel()
+        self.lbl_bulk_conditions.setWordWrap(True)
+        self.lbl_bulk_conditions.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        box.addWidget(self.lbl_bulk_conditions)
+
     # ── showing ────────────────────────────────────────────────────────
 
     def forget(self) -> None:
@@ -440,6 +470,7 @@ class EventDetailPanel(QScrollArea):
             self.combo_bulk_group.clear()
             self.combo_bulk_group.addItems(self.model.group_names())
             self.combo_bulk_group.setEditText(current)
+            self._refresh_bulk_conditions()
         else:
             self.lbl_title.setText(txt("Details", "상세"))
 
@@ -608,11 +639,16 @@ class EventDetailPanel(QScrollArea):
             )
             self.btn_clear_screen.setEnabled(True)
         else:
-            self.lbl_screen.setText(
-                txt("No screen trigger", "화면 트리거 없음")
-                if event.execute_action
-                else txt("No screen yet", "화면 없음")
-            )
+            if event.execute_action:
+                text = txt("No screen trigger", "화면 트리거 없음")
+            elif event.is_derived_state():
+                text = txt(
+                    "No screen — on when all conditions match",
+                    "화면 없음 — 조건이 모두 맞으면 켜짐",
+                )
+            else:
+                text = txt("No screen yet", "화면 없음")
+            self.lbl_screen.setText(text)
             self.btn_clear_screen.setEnabled(False)
 
     def _refresh_advanced(self) -> None:
@@ -795,6 +831,32 @@ class EventDetailPanel(QScrollArea):
 
     def _bulk_delete(self) -> None:
         self.model.delete_events(self.selection_getter())
+
+    def _refresh_bulk_conditions(self) -> None:
+        selection = self.selection_getter()
+        current = self.combo_bulk_cond.currentText()
+        self.combo_bulk_cond.blockSignals(True)
+        self.combo_bulk_cond.clear()
+        candidates = self.model.bulk_condition_candidates(selection)
+        self.combo_bulk_cond.addItems(candidates)
+        index = self.combo_bulk_cond.findText(current)
+        if index < 0 and current:
+            # 고르던 이름이 사라졌다. 다른 이름으로 몰래 바꾸면 다음 클릭이
+            # 엉뚱한 조건을 적용하므로 비워 두고 다시 고르게 한다.
+            self.combo_bulk_cond.setCurrentIndex(-1)
+        else:
+            self.combo_bulk_cond.setCurrentIndex(max(index, 0))
+        self.combo_bulk_cond.blockSignals(False)
+        self.lbl_bulk_conditions.setText(shared_condition_summary(selection, candidates))
+
+    def _bulk_set_condition(self) -> None:
+        name = self.combo_bulk_cond.currentText()
+        state = bool(self.combo_bulk_cond_state.currentData())
+        self.model.bulk_set_condition(name, state, self.selection_getter())
+
+    def _bulk_remove_condition(self) -> None:
+        name = self.combo_bulk_cond.currentText()
+        self.model.bulk_remove_condition(name, self.selection_getter())
 
     # ── capture HUD ────────────────────────────────────────────────────
 

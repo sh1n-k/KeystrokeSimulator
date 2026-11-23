@@ -742,7 +742,7 @@ class KeystrokeProcessor:
                         "center_y": 0,
                         "dur": e.press_duration_ms,
                         "rand": e.randomization_ms,
-                        "exec": True,
+                        "exec": e.execute_action,
                         "group": e.group_id,
                         "priority": e.priority,
                         "conds": e.conditions,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 from app.domain.models import EventModel
@@ -11,6 +11,7 @@ from app.domain.profile_events import (
     EventSection,
     event_has_screen,
     event_needs_attention,
+    shared_conditions,
 )
 from app.utils.i18n import txt
 
@@ -79,8 +80,24 @@ def condition_summary(event: EventModel, limit: int = COND_SUMMARY_CHARS) -> str
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def shared_condition_summary(
+    events: Sequence[EventModel], order: Sequence[str] = ()
+) -> str:
+    """일괄 선택의 조건 현황: `이름 ●켜짐수/전체 ○꺼짐수/전체`를 줄마다."""
+    total = len(events)
+    lines: list[str] = []
+    for name, on, off in shared_conditions(events, order):
+        parts = [name]
+        if on:
+            parts.append(f"●{on}/{total}")
+        if off:
+            parts.append(f"○{off}/{total}")
+        lines.append(" ".join(parts))
+    return "\n".join(lines) if lines else txt("No conditions", "조건 없음")
+
+
 def row_detail(event: EventModel) -> str:
-    if event.execute_action:
+    if event.execute_action or event.is_derived_state():
         return condition_summary(event)
     if event.latest_position is not None and event.clicked_position is not None:
         x = event.latest_position[0] + event.clicked_position[0]
@@ -97,7 +114,9 @@ def row_badges(
         badges.append(txt("off", "꺼짐"))
     if event_needs_attention(event):
         badges.append(txt("no key", "키 없음"))
-    if not event.execute_action and not event_has_screen(event):
+    if event.is_derived_state():
+        badges.append(txt("derived", "파생"))
+    elif not event.execute_action and not event_has_screen(event):
         badges.append(txt("no screen", "화면 없음"))
     if (
         event.execute_action

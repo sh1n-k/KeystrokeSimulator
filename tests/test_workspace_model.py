@@ -188,6 +188,21 @@ class TestUndoTargets(ModelCase):
         self.assertIs(restored.held_screenshot, image)
         self.assertEqual(restored.latest_position, (10, 20))
 
+    def test_clearing_screen_of_state_with_conditions_reports_derived(self):
+        state = captured("HP")
+        state.conditions = {"C": True}
+        model = self.make([signal("C"), state, captured("Plain")])
+        _c, hp, plain = model.profile.event_list
+
+        model.clear_screen(plain)
+        self.assertEqual(self.view.statuses, [])
+
+        model.clear_screen(hp)
+
+        self.assertTrue(hp.is_derived_state())
+        self.assertIn("'HP'", self.view.statuses[-1])
+        self.assertIn("derived state", self.view.statuses[-1])
+
     def test_recapturing_is_undoable(self):
         model = self.make([captured()])
         event = model.profile.event_list[0]
@@ -216,6 +231,105 @@ class TestUndoTargets(ModelCase):
         model.undo()
         self.assertIsNone(model.profile.event_list[0].group_id)
         self.assertEqual(model.undo_label, "bulk change")
+
+    def test_bulk_set_condition_adds_changes_and_is_one_undo(self):
+        model = self.make(
+            [signal("S", priority=0), signal("T", priority=1), rule("A"), rule("B"), rule("C")]
+        )
+        _s, _t, a, b, c = model.profile.event_list
+        b.conditions["S"] = False
+        b.conditions["T"] = True
+
+        model.bulk_set_condition("S", True, [a, b])
+
+        self.assertEqual(a.conditions, {"S": True})
+        self.assertEqual(list(b.conditions.items()), [("S", True), ("T", True)])
+        self.assertEqual(c.conditions, {})
+        self.assertEqual(model.undo_label, "bulk condition")
+        self.assertEqual(self.view.statuses[-1], "Conditions changed on 2 event(s)")
+        self.scheduler.fire()
+        saved = {e.event_name: e.conditions for e in self.saved()}
+        self.assertEqual(saved["A"], {"S": True})
+        model.undo()
+        a, b = model.profile.event_list[2:4]
+        self.assertEqual((a.conditions, b.conditions), ({}, {"S": False, "T": True}))
+
+    def test_bulk_set_condition_skips_self_and_cycles(self):
+        model = self.make(
+            [signal("S"), signal("D", conditions={"S": True}), rule("A", conditions={"D": True})]
+        )
+        s, d, a = model.profile.event_list
+
+        # S에 D를 넣으면 D → S → D 순환, D 자신에는 넣을 수 없다.
+        model.bulk_set_condition("D", True, [s, d, a])
+
+        self.assertEqual(s.conditions, {})
+        self.assertEqual(d.conditions, {"S": True})
+        self.assertEqual(a.conditions, {"D": True})  # 이미 같은 값
+        self.assertIsNone(model.undo_label)
+        self.assertEqual(
+            self.view.statuses[-1],
+            "Conditions changed on 0 event(s) (2 skipped: self or cycle)",
+        )
+
+    def test_bulk_set_condition_checks_cycles_within_the_batch(self):
+        model = self.make([signal("X"), signal("Y", conditions={"X": True})])
+        x, y = model.profile.event_list
+
+        model.bulk_set_condition("Y", True, [x])
+
+        self.assertEqual(x.conditions, {})
+        self.assertIsNone(model.undo_label)
+
+    def test_bulk_set_condition_ignores_unknown_name_and_foreign_events(self):
+        model = self.make([signal("S"), rule("A")])
+        _s, a = model.profile.event_list
+        foreign = rule("F")
+
+        model.bulk_set_condition("Nope", True, [a])
+        self.assertIn("can only be removed", self.view.statuses[-1])
+        model.bulk_set_condition("S", True, [foreign])
+
+        self.assertEqual((a.conditions, foreign.conditions), ({}, {}))
+        self.assertIsNone(model.undo_label)
+
+    def test_bulk_set_condition_reports_states_that_become_derived(self):
+        model = self.make([captured("S"), signal("Bare"), rule("A")])
+        _s, bare, a = model.profile.event_list
+
+        model.bulk_set_condition("S", True, [bare, a])
+
+        self.assertTrue(bare.is_derived_state())
+        self.assertEqual(
+            self.view.statuses[-1],
+            "Conditions changed on 2 event(s) — 1 screenless state(s) are now "
+            "derived (on when conditions match)",
+        )
+
+    def test_bulk_remove_condition(self):
+        model = self.make(
+            [signal("S"), rule("A", conditions={"S": True, "gone": False}), rule("B")]
+        )
+        _s, a, b = model.profile.event_list
+
+        model.bulk_remove_condition("gone", [a, b])
+        self.assertEqual(a.conditions, {"S": True})
+        self.assertEqual(self.view.statuses[-1], "Conditions changed on 1 event(s)")
+        model.bulk_remove_condition("gone", [a, b])
+        self.assertEqual(self.view.statuses[-1], "Conditions changed on 0 event(s)")
+        self.assertEqual(model.undo_label, "bulk condition")
+        model.undo()
+        self.assertIn("gone", model.profile.event_list[1].conditions)
+
+    def test_bulk_condition_candidates_follow_list_and_keep_dangling(self):
+        model = self.make(
+            [rule("R", "g"), signal("S2", priority=1), signal("S1", priority=0)]
+        )
+        r = model.profile.event_list[0]
+        r.conditions["gone"] = True
+
+        self.assertEqual(model.bulk_condition_candidates([r]), ["S1", "S2", "R", "gone"])
+        self.assertEqual(model.bulk_condition_candidates([]), ["S1", "S2", "R"])
 
     def test_move_writes_priorities_and_is_undoable(self):
         model = self.make([rule("01", "g", 1), rule("02", "g", 1)])

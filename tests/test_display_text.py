@@ -11,8 +11,10 @@ from app.domain.display_text import (
     condition_summary,
     natural_key,
     row_badges,
+    row_detail,
     section_note,
     section_title,
+    shared_condition_summary,
     sorted_conditions,
 )
 from app.presenters.workspace_sidebar import sidebar_actions
@@ -58,6 +60,32 @@ class TestListPresentation(unittest.TestCase):
         self.assertIn(
             "hotkey", row_badges(event, referenced=False, toggle_enabled=True)
         )
+
+    def test_derived_state_row(self):
+        derived = signal("d", conditions={"a": True, "b": False})
+
+        self.assertEqual(row_badges(derived, referenced=False, toggle_enabled=False), ["derived"])
+        self.assertEqual(row_detail(derived), "a · !b")
+        self.assertEqual(
+            row_badges(signal("s"), referenced=False, toggle_enabled=False), ["no screen"]
+        )
+        self.assertEqual(row_detail(signal("s")), "")
+
+    def test_shared_condition_summary(self):
+        events = [
+            rule("x", conditions={"a": True, "b": False}),
+            rule("y", conditions={"a": True, "b": True}),
+            rule("z"),
+        ]
+
+        self.assertEqual(shared_condition_summary(events), "a ●2/3\nb ●1/3 ○1/3")
+        # 목록 순서를 주면 그 순서, 목록에 없는 이름은 뒤에 둔다.
+        events.append(rule("w", conditions={"gone": True}))
+        self.assertEqual(
+            shared_condition_summary(events, ["b", "a"]),
+            "b ●1/4 ○1/4\na ●2/4\ngone ●1/4",
+        )
+        self.assertEqual(shared_condition_summary([rule("z")]), "No conditions")
 
     def test_quick_cannot_be_renamed_or_deleted(self):
         actions = {a for a, _ in sidebar_actions("profile", "Quick")}
