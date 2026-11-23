@@ -306,6 +306,54 @@ class TestUndoTargets(ModelCase):
             "derived (on when conditions match)",
         )
 
+    def test_cycle_condition_on_off_none_with_undo(self):
+        model = self.make([signal("S"), signal("T"), rule("A", conditions={"T": True})])
+        _s, _t, a = model.profile.event_list
+
+        model.cycle_condition(a, "S")
+        self.assertEqual(list(a.conditions.items()), [("S", True), ("T", True)])
+        model.cycle_condition(a, "S")
+        self.assertEqual(a.conditions["S"], False)
+        model.cycle_condition(a, "S")
+        self.assertEqual(a.conditions, {"T": True})
+        self.scheduler.fire()
+        self.assertEqual({e.event_name: e.conditions for e in self.saved()}["A"], {"T": True})
+        model.undo()
+        self.assertEqual(model.profile.event_list[2].conditions, {"S": False, "T": True})
+
+    def test_cycle_condition_refuses_self_cycle_unknown_and_foreign(self):
+        model = self.make([signal("S"), signal("D", conditions={"S": True})])
+        s, d = model.profile.event_list
+
+        model.cycle_condition(d, "D")
+        self.assertIn("self or cycle", self.view.statuses[-1])
+        model.cycle_condition(s, "D")
+        self.assertIn("self or cycle", self.view.statuses[-1])
+        model.cycle_condition(s, "Nope")
+        self.assertIn("can only be removed", self.view.statuses[-1])
+        model.cycle_condition(rule("F"), "S")
+        self.assertEqual((s.conditions, d.conditions), ({}, {"S": True}))
+        self.assertIsNone(model.undo_label)
+
+    def test_cycle_condition_removes_unknown_name_and_reports_derived(self):
+        model = self.make(
+            [
+                captured("S"),
+                signal("Bare"),
+                rule("A", conditions={"gone": False}),
+                rule("B", conditions={"gone": True}),
+            ]
+        )
+        _s, bare, a, b = model.profile.event_list
+
+        model.cycle_condition(a, "gone")  # 꺼짐 → 없음: 목록에 없어도 지울 수 있다
+        self.assertEqual(a.conditions, {})
+        model.cycle_condition(b, "gone")  # 켜짐도 꺼짐(늘 맞음)으로 두지 않고 지운다
+        self.assertEqual(b.conditions, {})
+        model.cycle_condition(bare, "S")
+        self.assertTrue(bare.is_derived_state())
+        self.assertIn("'Bare' is now a derived state", self.view.statuses[-1])
+
     def test_bulk_remove_condition(self):
         model = self.make(
             [signal("S"), rule("A", conditions={"S": True, "gone": False}), rule("B")]

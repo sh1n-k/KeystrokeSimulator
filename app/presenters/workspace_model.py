@@ -928,6 +928,57 @@ class WorkspaceModel:
         event.conditions.pop(name)
         self._event_changed()
 
+    def cycle_condition(self, event: EventModel, name: str) -> None:
+        """일괄 행렬 칸: 켜짐 → 꺼짐 → 없음 → 켜짐. 되돌리기 한 단계.
+
+        프로필에 없는 이름은 일괄 조건과 같이 제거만 한다. 꺼짐으로 바꾸면
+        늘 맞는 조건이 되어 그동안 멈춰 있던 동작이 실행되기 때문이다.
+        """
+        if not self._owns(event) or not name:
+            return
+        state = event.conditions.get(name)
+        known = name in {e.event_name for e in self.profile.event_list}
+        if state is None:
+            if not known:
+                self.view.on_status(
+                    txt(
+                        "'{n}' is not in this profile, so it can only be removed.",
+                        "'{n}'은(는) 이 프로필에 없어 제거만 할 수 있습니다.",
+                        n=name,
+                    )
+                )
+                return
+            if event.event_name == name or condition_cycle_if_added(
+                self.profile.event_list, event, name
+            ):
+                self.view.on_status(
+                    txt(
+                        "'{n}' can't be added to '{e}': self or cycle.",
+                        "'{e}'에 '{n}'을(를) 넣을 수 없습니다: 자기 자신 또는 순환",
+                        n=name,
+                        e=event.event_name or "",
+                    )
+                )
+                return
+        self.push_undo(txt("condition", "조건"))
+        was_derived = event.is_derived_state()
+        if state is None:
+            event.conditions[name] = True
+        elif state and known:
+            event.conditions[name] = False
+        else:
+            event.conditions.pop(name)
+        self._event_changed()
+        if event.is_derived_state() and not was_derived:
+            # 일괄 조건 추가와 같이, 화면 없는 상태가 파생 상태로 바뀐 것을 알린다.
+            self.view.on_status(
+                txt(
+                    "'{e}' is now a derived state (on when conditions match).",
+                    "'{e}'이(가) 파생 상태가 됐습니다(조건이 맞으면 켜짐).",
+                    e=event.event_name or "",
+                )
+            )
+
     def cycle_condition_sort(self, column: ConditionSortColumn) -> None:
         """같은 열을 누를 때마다 오름차순 → 내림차순 → 저장된 순서."""
         if self.condition_sort != column:

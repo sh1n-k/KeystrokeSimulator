@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Literal
 
 from app.domain.models import EventModel
@@ -17,8 +18,11 @@ from app.utils.i18n import txt
 
 COND_SUMMARY_CHARS = 40
 TARGET_COMBO_CHARS = 24
+# 오른쪽 패널 폭에서 이벤트 열이 읽히는 최대 개수. 넘으면 요약 표로 바꾼다.
+BULK_MATRIX_MAX_EVENTS = 5
 
 ConditionSortColumn = Literal["name", "state"]
+BulkConditionView = Literal["matrix", "summary"]
 _DIGITS = re.compile(r"([0-9]+)")
 
 
@@ -80,20 +84,49 @@ def condition_summary(event: EventModel, limit: int = COND_SUMMARY_CHARS) -> str
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def shared_condition_summary(
+@dataclass(frozen=True)
+class BulkConditionRow:
+    """일괄 선택의 조건 한 줄. `cells`는 선택 순서대로 켜짐/꺼짐/없음(None)."""
+
+    name: str
+    cells: tuple[bool | None, ...]
+    on: int
+    off: int
+    missing: int
+
+    @property
+    def uniform(self) -> bool:
+        """선택한 이벤트가 모두 같은 값으로 이 조건을 갖는지."""
+        return self.missing == 0 and (self.on == 0 or self.off == 0)
+
+
+def bulk_condition_rows(
     events: Sequence[EventModel], order: Sequence[str] = ()
-) -> str:
-    """일괄 선택의 조건 현황: `이름 ●켜짐수/전체 ○꺼짐수/전체`를 줄마다."""
-    total = len(events)
-    lines: list[str] = []
-    for name, on, off in shared_conditions(events, order):
-        parts = [name]
-        if on:
-            parts.append(f"●{on}/{total}")
-        if off:
-            parts.append(f"○{off}/{total}")
-        lines.append(" ".join(parts))
-    return "\n".join(lines) if lines else txt("No conditions", "조건 없음")
+) -> list[BulkConditionRow]:
+    """일괄 선택의 조건 현황. 행 순서는 `order`(목록 표시 순서) 기준."""
+    return [
+        BulkConditionRow(
+            name=name,
+            cells=tuple(event.conditions.get(name) for event in events),
+            on=on,
+            off=off,
+            missing=len(events) - on - off,
+        )
+        for name, on, off in shared_conditions(events, order)
+    ]
+
+
+BULK_COLUMN_MARKS = "①②③④⑤"
+
+
+def bulk_column_legend(names: Sequence[str]) -> str:
+    """행렬 열 번호와 이벤트 이름. 좁은 열 제목 대신 표 아래에 보인다."""
+    return "   ".join(f"{mark} {name}" for mark, name in zip(BULK_COLUMN_MARKS, names, strict=False))
+
+
+def bulk_condition_view(count: int) -> BulkConditionView:
+    """선택이 적으면 이벤트별 행렬, 많으면 열 폭이 모자라므로 요약 표."""
+    return "matrix" if count <= BULK_MATRIX_MAX_EVENTS else "summary"
 
 
 def row_detail(event: EventModel) -> str:

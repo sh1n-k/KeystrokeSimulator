@@ -387,6 +387,15 @@ class TestEditing(WorkspaceWindowCase):
         self.assertEqual([a.use_event, b.use_event], [False, False])
         self.assertEqual(self.ws.tree.selected_events(), [a, b])
 
+    def bulk_table_text(self) -> list[list[str]]:
+        table = self.ws.detail.bulk_cond_table
+        if not table.isVisibleTo(self.ws.detail):
+            return []
+        return [
+            [table.item(r, c).text() for c in range(table.columnCount())]
+            for r in range(table.rowCount())
+        ]
+
     def test_bulk_condition_panel_sets_and_removes(self) -> None:
         a, loose = self.event("01 a"), self.event("loose")
         self.ws.tree.select([a, loose])
@@ -397,7 +406,7 @@ class TestEditing(WorkspaceWindowCase):
             [combo.itemText(i) for i in range(combo.count())],
             ["S", "01 a", "02 b", "loose"],
         )
-        self.assertEqual(detail.lbl_bulk_conditions.text(), "S ●1/2")
+        self.assertEqual(self.bulk_table_text(), [["S", "●", "—"]])
 
         combo.setCurrentText("S")
         detail.combo_bulk_cond_state.setCurrentIndex(1)  # off
@@ -405,13 +414,58 @@ class TestEditing(WorkspaceWindowCase):
 
         self.assertEqual((a.conditions, loose.conditions), ({"S": False}, {"S": False}))
         self.assertEqual(self.ws.tree.selected_events(), [a, loose])
-        self.assertEqual(detail.lbl_bulk_conditions.text(), "S ○2/2")
+        self.assertEqual(self.bulk_table_text(), [["S", "○", "○"]])
         self.assertEqual(combo.currentText(), "S")
 
         detail.btn_bulk_cond_remove.click()
 
         self.assertEqual((a.conditions, loose.conditions), ({}, {}))
-        self.assertEqual(detail.lbl_bulk_conditions.text(), "No conditions")
+        self.assertEqual(self.bulk_table_text(), [])
+        self.assertEqual(detail.lbl_bulk_cond_hint.text(), "No conditions")
+
+    def test_bulk_matrix_cell_cycles_one_event(self) -> None:
+        a, loose = self.event("01 a"), self.event("loose")
+        self.ws.tree.select([a, loose])
+        detail = self.ws.detail
+        header = detail.bulk_cond_table.horizontalHeaderItem(2)
+        self.assertEqual((header.text(), header.toolTip()), ("②", "loose"))
+        self.assertEqual(detail.lbl_bulk_cond_legend.text(), "① 01 a   ② loose")
+
+        detail.bulk_cond_table.cellClicked.emit(0, 2)  # S × loose: 없음 → 켜짐
+
+        self.assertEqual(loose.conditions, {"S": True})
+        self.assertEqual(a.conditions, {"S": True})
+        self.assertEqual(self.ws.tree.selected_events(), [a, loose])
+        self.assertEqual(self.bulk_table_text(), [["S", "●", "●"]])
+        self.assertEqual(detail.combo_bulk_cond.currentText(), "S")
+
+        detail.bulk_cond_table.cellClicked.emit(0, 0)  # 이름 칸은 고르기만 한다
+        self.assertEqual(loose.conditions, {"S": True})
+
+    def test_bulk_condition_summary_for_many_events(self) -> None:
+        names = [f"r{i}" for i in range(6)]
+        for name in names:
+            self.ws.btn_add_rule.click()
+            self.flush()
+            self.ws.detail.entry_name.setText(name)
+            self.ws.detail.entry_name.editingFinished.emit()
+            self.flush()
+        events = [self.event(n) for n in names]
+        events[0].conditions["S"] = True
+        self.ws.tree.select(events)
+        detail = self.ws.detail
+
+        self.ws.tree.select(events[:5])
+        self.assertEqual(detail.bulk_cond_table.columnCount(), 6)  # 행렬
+        self.assertTrue(detail.lbl_bulk_cond_legend.isVisibleTo(detail))
+        self.ws.tree.select(events)
+        self.assertEqual(detail.bulk_cond_table.columnCount(), 4)  # 요약
+        self.assertFalse(detail.lbl_bulk_cond_legend.isVisibleTo(detail))
+        self.assertEqual(detail.bulk_buttons[-1].text(), "Delete selected")
+        self.assertEqual(self.bulk_table_text(), [["S", "1", "—", "5"]])
+        detail.bulk_cond_table.cellClicked.emit(0, 1)  # 요약 표는 바꾸지 않는다
+        self.assertEqual([bool(e.conditions) for e in events], [True] + [False] * 5)
+        self.assertEqual(detail.combo_bulk_cond.currentText(), "S")
 
     def test_bulk_condition_combo_clears_when_its_name_disappears(self) -> None:
         a, loose = self.event("01 a"), self.event("loose")

@@ -8,13 +8,17 @@ from app.domain.models import EventModel, ProfileModel
 from app.storage.profile_storage import save_profile
 from app.storage.profile_storage import ordered_profile_names
 from app.domain.display_text import (
+    BULK_MATRIX_MAX_EVENTS,
+    BULK_COLUMN_MARKS,
+    bulk_column_legend,
+    bulk_condition_rows,
+    bulk_condition_view,
     condition_summary,
     natural_key,
     row_badges,
     row_detail,
     section_note,
     section_title,
-    shared_condition_summary,
     sorted_conditions,
 )
 from app.presenters.workspace_sidebar import sidebar_actions
@@ -71,21 +75,35 @@ class TestListPresentation(unittest.TestCase):
         )
         self.assertEqual(row_detail(signal("s")), "")
 
-    def test_shared_condition_summary(self):
+    def test_bulk_condition_rows(self):
         events = [
             rule("x", conditions={"a": True, "b": False}),
             rule("y", conditions={"a": True, "b": True}),
-            rule("z"),
+            rule("z", conditions={"a": True}),
         ]
 
-        self.assertEqual(shared_condition_summary(events), "a ●2/3\nb ●1/3 ○1/3")
+        rows = bulk_condition_rows(events)
+        self.assertEqual([r.name for r in rows], ["a", "b"])
+        self.assertEqual(rows[0].cells, (True, True, True))
+        self.assertTrue(rows[0].uniform)
+        self.assertEqual(rows[1].cells, (False, True, None))
+        self.assertEqual((rows[1].on, rows[1].off, rows[1].missing), (1, 1, 1))
+        self.assertFalse(rows[1].uniform)
         # 목록 순서를 주면 그 순서, 목록에 없는 이름은 뒤에 둔다.
-        events.append(rule("w", conditions={"gone": True}))
-        self.assertEqual(
-            shared_condition_summary(events, ["b", "a"]),
-            "b ●1/4 ○1/4\na ●2/4\ngone ●1/4",
-        )
-        self.assertEqual(shared_condition_summary([rule("z")]), "No conditions")
+        events.append(rule("w", conditions={"gone": False}))
+        rows = bulk_condition_rows(events, ["b", "a"])
+        self.assertEqual([r.name for r in rows], ["b", "a", "gone"])
+        self.assertEqual(rows[2].cells, (None, None, None, False))
+        self.assertEqual(bulk_condition_rows([rule("z")]), [])
+
+    def test_bulk_column_legend(self):
+        self.assertEqual(bulk_column_legend(["a", "b c"]), "① a   ② b c")
+        self.assertEqual(len(BULK_COLUMN_MARKS), BULK_MATRIX_MAX_EVENTS)
+
+    def test_bulk_condition_view_switches_after_limit(self):
+        self.assertEqual(bulk_condition_view(2), "matrix")
+        self.assertEqual(bulk_condition_view(BULK_MATRIX_MAX_EVENTS), "matrix")
+        self.assertEqual(bulk_condition_view(BULK_MATRIX_MAX_EVENTS + 1), "summary")
 
     def test_quick_cannot_be_renamed_or_deleted(self):
         actions = {a for a, _ in sidebar_actions("profile", "Quick")}

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 from PIL import Image
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QIntValidator, QPixmap
+from PySide6.QtGui import QBrush, QColor, QImage, QIntValidator, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -34,7 +34,13 @@ from PySide6.QtWidgets import (
 
 from app.domain.capture_geometry import CaptureResult
 from app.domain.capture_render import render_overlay
-from app.domain.display_text import shared_condition_summary
+from app.domain.display_text import (
+    BulkConditionRow,
+    bulk_condition_rows,
+    bulk_condition_view,
+    BULK_COLUMN_MARKS,
+    bulk_column_legend,
+)
 from app.domain.event_editing import capture_from_event, event_issues
 from app.domain.key_codes import KeyCodes
 from app.domain.models import EventModel, Position
@@ -52,6 +58,8 @@ THUMB_MAX = 160
 # 키 드롭다운의 '대기' 항목 데이터. 키 이름 목록과 겹치지 않는다.
 WAIT_KEY_ITEM = "__wait__"
 PANEL_WIDTH = 340
+# 일괄 조건 표의 값 열 폭(px).
+BULK_VALUE_COLUMN = 40
 
 
 def pil_to_pixmap(image: Image.Image) -> QPixmap:
@@ -372,25 +380,38 @@ class EventDetailPanel(QScrollArea):
         box = QVBoxLayout(parent)
         box.setContentsMargins(0, 0, 0, 0)
         box.setSpacing(tokens.SPACE_1)
-        entries: tuple[tuple[str, BulkAction | None, bool], ...] = (
-            (txt("Turn on", "사용 켜기"), "use", True),
-            (txt("Turn off", "사용 끄기"), "use", False),
-            (txt("Add to hotkey set", "단축키 묶음에 넣기"), "toggle", True),
-            (txt("Remove from hotkey set", "단축키 묶음에서 빼기"), "toggle", False),
-            (txt("Delete", "삭제"), None, False),
-        )
+        # 구획: 사용·단축키 → 그룹 → 조건, 삭제는 맨 아래에 떼어 둔다.
+        # bulk_buttons 순서(사용 켜기·끄기, 묶음 넣기·빼기, 삭제)는 유지한다.
         self.bulk_buttons: list[QPushButton] = []
-        for text, action, value in entries:
+
+        def bulk_button(text: str, action: BulkAction, value: bool) -> QPushButton:
             button = QPushButton(text)
             button.setAutoDefault(False)
-            if action is None:
-                button.clicked.connect(self._bulk_delete)
-            else:
-                button.clicked.connect(self._bulk_slot(action, value))
-            box.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft)
+            button.clicked.connect(self._bulk_slot(action, value))
             self.bulk_buttons.append(button)
+            return button
+
+        box.addWidget(_section_label(txt("Use and hotkey set", "사용·단축키")))
+        for pair in (
+            (
+                bulk_button(txt("Turn on", "사용 켜기"), "use", True),
+                bulk_button(txt("Turn off", "사용 끄기"), "use", False),
+            ),
+            (
+                bulk_button(txt("Add to hotkey set", "단축키 묶음에 넣기"), "toggle", True),
+                bulk_button(
+                    txt("Remove from hotkey set", "단축키 묶음에서 빼기"), "toggle", False
+                ),
+            ),
+        ):
+            row = QHBoxLayout()
+            for button in pair:
+                row.addWidget(button)
+            row.addStretch(1)
+            box.addLayout(row)
+
+        box.addWidget(_section_label(txt("Group", "그룹")))
         group_row = QHBoxLayout()
-        group_row.addWidget(QLabel(txt("Group", "그룹")))
         self.combo_bulk_group = QComboBox()
         self.combo_bulk_group.setEditable(True)
         self.combo_bulk_group.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -408,6 +429,17 @@ class EventDetailPanel(QScrollArea):
         box.addLayout(group_row)
 
         box.addWidget(_section_label(txt("Conditions", "조건")))
+        self._bulk_cond_matrix = True
+        self.bulk_cond_table = self._build_bulk_condition_table()
+        box.addWidget(self.bulk_cond_table)
+        self.lbl_bulk_cond_legend = QLabel()
+        self.lbl_bulk_cond_legend.setWordWrap(True)
+        self.lbl_bulk_cond_legend.setTextFormat(Qt.TextFormat.PlainText)
+        box.addWidget(self.lbl_bulk_cond_legend)
+        self.lbl_bulk_cond_hint = QLabel()
+        self.lbl_bulk_cond_hint.setWordWrap(True)
+        style.caption(self.lbl_bulk_cond_hint)
+        box.addWidget(self.lbl_bulk_cond_hint)
         cond_row = QHBoxLayout()
         self.combo_bulk_cond = QComboBox()
         self.combo_bulk_cond.setMinimumWidth(140)
@@ -429,12 +461,33 @@ class EventDetailPanel(QScrollArea):
         cond_buttons.addWidget(self.btn_bulk_cond_remove)
         cond_buttons.addStretch(1)
         box.addLayout(cond_buttons)
-        self.lbl_bulk_conditions = QLabel()
-        self.lbl_bulk_conditions.setWordWrap(True)
-        self.lbl_bulk_conditions.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        box.addWidget(self.lbl_bulk_conditions)
+
+        box.addSpacing(tokens.SPACE_3)
+        delete = QPushButton(txt("Delete selected", "선택 삭제"))
+        delete.setAutoDefault(False)
+        delete.setStyleSheet(f"color: {style.status_colors('error')[1]};")
+        delete.clicked.connect(self._bulk_delete)
+        box.addWidget(delete, 0, Qt.AlignmentFlag.AlignLeft)
+        self.bulk_buttons.append(delete)
+
+    def _build_bulk_condition_table(self) -> QTableWidget:
+        table = QTableWidget(0, 0)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        table.setShowGrid(False)
+        table.setWordWrap(False)
+        table.setTextElideMode(Qt.TextElideMode.ElideRight)
+        # 상세 패널의 조건 표와 같이 행 수만큼 늘어나고 자체 스크롤은 없다.
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        table.verticalHeader().hide()
+        header = table.horizontalHeader()
+        header.setHighlightSections(False)
+        header.setMinimumSectionSize(36)
+        table.cellClicked.connect(self._on_bulk_condition_cell)
+        return table
 
     # ── showing ────────────────────────────────────────────────────────
 
@@ -847,7 +900,126 @@ class EventDetailPanel(QScrollArea):
         else:
             self.combo_bulk_cond.setCurrentIndex(max(index, 0))
         self.combo_bulk_cond.blockSignals(False)
-        self.lbl_bulk_conditions.setText(shared_condition_summary(selection, candidates))
+        self._fill_bulk_condition_table(selection, bulk_condition_rows(selection, candidates))
+
+    def _fill_bulk_condition_table(
+        self, selection: list[EventModel], rows: list[BulkConditionRow]
+    ) -> None:
+        """선택이 적으면 조건×이벤트 행렬, 많으면 켜짐·꺼짐·없음 개수 요약 표."""
+        table = self.bulk_cond_table
+        matrix = bulk_condition_view(len(selection)) == "matrix"
+        self._bulk_cond_matrix = matrix
+        table.setRowCount(0)
+        if matrix:
+            headers = [txt("Condition", "조건"), *BULK_COLUMN_MARKS[: len(selection)]]
+            tips = [""] + [e.event_name or "" for e in selection]
+        else:
+            headers = [txt("Condition", "조건"), "●", "○", txt("None", "없음")]
+            tips = [
+                "",
+                txt("Events requiring ON", "켜짐을 요구하는 이벤트 수"),
+                txt("Events requiring OFF", "꺼짐을 요구하는 이벤트 수"),
+                txt("Events without it", "이 조건이 없는 이벤트 수"),
+            ]
+        table.setColumnCount(len(headers))
+        for column, (text, tip) in enumerate(zip(headers, tips, strict=True)):
+            item = QTableWidgetItem(text)
+            item.setToolTip(tip)
+            table.setHorizontalHeaderItem(column, item)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, len(headers)):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+            table.setColumnWidth(column, BULK_VALUE_COLUMN)
+        table.setRowCount(len(rows))
+        on_bg, on_fg = style.status_colors("ready")
+        off_bg, off_fg = style.status_colors("error")
+        warn_bg, warn_fg = style.status_colors("warn")
+        muted = table.palette().placeholderText()
+        for r, row in enumerate(rows):
+            name = QTableWidgetItem(row.name)
+            name.setToolTip(row.name)
+            if not row.uniform:
+                # 이벤트마다 값이 다르거나 빠진 조건: 맞출 대상임을 warn 색으로 표시한다.
+                name.setBackground(QBrush(QColor(warn_bg)))
+                name.setForeground(QBrush(QColor(warn_fg)))
+            table.setItem(r, 0, name)
+            if matrix:
+                for column, (event, state) in enumerate(
+                    zip(selection, row.cells, strict=True), start=1
+                ):
+                    cell = QTableWidgetItem(
+                        "●" if state else "○" if state is False else "—"
+                    )
+                    cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    if state is None:
+                        cell.setForeground(muted)
+                    else:
+                        cell.setBackground(QBrush(QColor(on_bg if state else off_bg)))
+                        cell.setForeground(QBrush(QColor(on_fg if state else off_fg)))
+                    cell.setToolTip(
+                        f"{event.event_name}: "
+                        + (
+                            txt("ON", "켜짐")
+                            if state
+                            else txt("OFF", "꺼짐")
+                            if state is False
+                            else txt("none", "없음")
+                        )
+                    )
+                    table.setItem(r, column, cell)
+            else:
+                for column, (count, bg, fg) in enumerate(
+                    (
+                        (row.on, on_bg, on_fg),
+                        (row.off, off_bg, off_fg),
+                        (row.missing, None, None),
+                    ),
+                    start=1,
+                ):
+                    cell = QTableWidgetItem(str(count) if count else "—")
+                    cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    if count and bg is not None and fg is not None:
+                        cell.setBackground(QBrush(QColor(bg)))
+                        cell.setForeground(QBrush(QColor(fg)))
+                    elif not count:
+                        cell.setForeground(muted)
+                    table.setItem(r, column, cell)
+        table.resizeRowsToContents()
+        height = header.sizeHint().height() + 2 * table.frameWidth()
+        height += sum(table.rowHeight(r) for r in range(len(rows)))
+        table.setFixedHeight(height)
+        table.setVisible(bool(rows))
+        if not rows:
+            hint = txt("No conditions", "조건 없음")
+        elif matrix:
+            hint = txt(
+                "Click a cell: ON → OFF → none. Highlighted names differ between events.",
+                "칸을 누르면 켜짐 → 꺼짐 → 없음. 색칠된 이름은 이벤트마다 다른 조건입니다.",
+            )
+        else:
+            hint = txt(
+                "Counts of selected events. Click a name to pick it below.",
+                "선택한 이벤트 수입니다. 이름을 누르면 아래에서 고를 수 있습니다.",
+            )
+        self.lbl_bulk_cond_hint.setText(hint)
+        self.lbl_bulk_cond_legend.setText(
+            bulk_column_legend([e.event_name or "?" for e in selection])
+        )
+        self.lbl_bulk_cond_legend.setVisible(matrix and bool(rows))
+
+    def _on_bulk_condition_cell(self, row: int, column: int) -> None:
+        item = self.bulk_cond_table.item(row, 0)
+        if item is None:
+            return
+        name = item.text()
+        index = self.combo_bulk_cond.findText(name)
+        if index >= 0:
+            self.combo_bulk_cond.setCurrentIndex(index)
+        if self._bulk_cond_matrix and column >= 1:
+            selection = self.selection_getter()
+            if column - 1 < len(selection):
+                self.model.cycle_condition(selection[column - 1], name)
 
     def _bulk_set_condition(self) -> None:
         name = self.combo_bulk_cond.currentText()
