@@ -782,10 +782,20 @@ class WorkspaceModel:
         self._event_changed()
 
     def set_event_key(self, event: EventModel, key: str | None) -> None:
+        """키를 고르면 대기 동작이 풀린다. 키와 대기는 둘 중 하나만 쓴다."""
         key = key or None
-        if key == event.key_to_enter:
+        if key == event.key_to_enter and not event.wait_action:
             return
         event.key_to_enter = key
+        event.wait_action = False
+        self._event_changed()
+
+    def set_event_wait(self, event: EventModel) -> None:
+        """대기 동작으로 바꾼다. 남은 키는 지워 둘 중 하나만 저장되게 한다."""
+        if event.wait_action and event.key_to_enter is None:
+            return
+        event.wait_action = True
+        event.key_to_enter = None
         self._event_changed()
 
     def set_event_group(self, event: EventModel, group: str | None) -> None:

@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from tests.helpers import evaluate_processor_events, make_processor_stub
 from app.engine.processor import _normalize_key_name
@@ -362,6 +362,60 @@ class TestEvaluateAndExecute(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(pressed[-2:], ["Base", "Extra"])
         self.assertEqual(proc.current_states, {"Base": True, "Extra": True})
+
+
+class TestWaitAction(unittest.IsolatedAsyncioTestCase):
+    """대기 동작: 상위 동작이 자원을 기다리는 동안 그룹의 하위 동작을 막는다."""
+
+    def _proc(self, ready: bool, low: bool):
+        proc = make_processor_stub()
+        proc.event_data_list = [
+            {"name": "READY", "conds": {}, "group": None, "priority": 0, "exec": False},
+            {"name": "LOW", "conds": {}, "group": None, "priority": 0, "exec": False},
+            {
+                "name": "WAIT", "conds": {"READY": True, "LOW": True}, "group": "G",
+                "priority": 0, "exec": True, "screenless": True, "key": None,
+                "wait": True,
+            },
+            {
+                "name": "SKILL", "conds": {"READY": True, "LOW": False}, "group": "G",
+                "priority": 1, "exec": True, "screenless": True, "key": "A",
+            },
+            {
+                "name": "FILLER", "conds": {}, "group": "G", "priority": 2,
+                "exec": True, "key": "B",
+            },
+        ]
+        match_map = {"READY": ready, "LOW": low, "FILLER": True}
+        proc._check_match = lambda _img, evt: match_map.get(evt["name"], True)
+        return proc
+
+    async def _selected(self, ready: bool, low: bool) -> list[str]:
+        proc = self._proc(ready, low)
+        pressed: list[str] = []
+
+        async def fake_press(evt, _local_states):
+            pressed.append(evt["name"])
+
+        proc._press_key_async = fake_press
+        await evaluate_processor_events(proc)
+        return pressed
+
+    async def test_wait_blocks_lower_actions_while_resource_is_low(self):
+        self.assertEqual(await self._selected(ready=True, low=True), ["WAIT"])
+
+    async def test_top_action_runs_once_resource_is_back(self):
+        self.assertEqual(await self._selected(ready=True, low=False), ["SKILL"])
+
+    async def test_lower_actions_run_while_top_action_is_not_ready(self):
+        self.assertEqual(await self._selected(ready=False, low=True), ["FILLER"])
+
+    async def test_wait_press_sends_no_key(self):
+        proc = self._proc(ready=True, low=True)
+        proc.sim = MagicMock()
+        proc.key_codes = {"A": 0, "B": 1}
+        await proc._press_key_async(proc.event_data_list[2])
+        proc.sim.press.assert_not_called()
 
 
 class TestSafetyAndNormalization(unittest.TestCase):

@@ -55,6 +55,9 @@ class EventModel:
     conditions: dict[str, bool] = field(default_factory=lambda: {})
     # 토글 세트(실행 중 ON/OFF)에 포함되는지 여부
     runtime_toggle_member: bool = False
+    # 대기 동작: 선택되면 키를 누르지 않는다. 그룹에서 아래 동작이 대신 실행되지
+    # 않게 막는 용도이며, 켜져 있으면 key_to_enter는 쓰지 않는다.
+    wait_action: bool = False
 
     def is_screenless_input(self) -> bool:
         """화면 좌표 없이 조건 AND만으로 키를 실행하는 입력 이벤트인지."""

@@ -20,6 +20,7 @@ from app.storage.profile_storage import load_profile, save_profile
 from app.storage.run_sets_storage import get_run_set, upsert_run_set
 from app.ui.capture_hud import open_quick_capture
 from app.ui.workspace import WorkspaceWindow, open_workspace
+from app.ui.workspace_detail import WAIT_KEY_ITEM
 from app.utils.i18n import set_language
 
 
@@ -344,6 +345,30 @@ class TestEditing(WorkspaceWindowCase):
         added = self.event("Buff")
         self.assertFalse(added.execute_action)
         self.assertEqual(self.ws.tree.selected_events(), [added])
+
+    def test_wait_item_in_key_combo_sets_wait_action(self) -> None:
+        event = self.event("02 b")
+        self.ws.tree.select([event])
+        combo = self.ws.detail.combo_key
+
+        index = combo.findData(WAIT_KEY_ITEM)
+        combo.setCurrentIndex(index)
+        combo.activated.emit(index)
+        self.flush()
+
+        self.assertTrue(event.wait_action)
+        self.assertIsNone(event.key_to_enter)
+        saved = next(e for e in self.saved() if e.event_name == "02 b")
+        self.assertTrue(saved.wait_action)
+        self.ws.tree.select([self.event("01 a")])
+        self.ws.tree.select([event])
+        self.assertEqual(combo.currentIndex(), index)
+
+        key_index = combo.findText("3")
+        combo.setCurrentIndex(key_index)
+        combo.activated.emit(key_index)
+        self.assertFalse(event.wait_action)
+        self.assertEqual(event.key_to_enter, "3")
 
     def test_add_rule_selects_it_and_saves_incomplete(self) -> None:
         self.ws.btn_add_rule.click()

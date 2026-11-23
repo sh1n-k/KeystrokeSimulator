@@ -71,6 +71,7 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 - `_resolve_effective_states`가 한 loop 안에서 조건 체인의 유효 상태를 해석한다.
 - 같은 `group_id`에서 매칭된 동작이 여러 개면 `(priority, name)`이 가장 작은 것이 실행된다. 작업 공간 목록은 그룹 안에서 같은 순서로 보이며, 드래그로 순서를 바꿀 때만 그룹 안에서 0부터 `priority`를 다시 쓴다.
 - `execute_action=False` 이벤트(UI 용어: 상태)는 조건 평가에는 참여하지만 키 입력을 실행하지 않는다. `execute_action=True`는 동작이다(UI 용어). 코드 식별자(`signal`, `rule`)는 그대로 둔다.
+- `wait_action=True` 동작(UI: 키 드롭다운의 "대기")은 그룹 선택에는 참여하지만 키를 누르지 않는다. 그룹에서 선택되면 그 루프에는 아래 동작이 실행되지 않으므로, 상위 동작이 자원을 기다리는 동안 하위 동작이 끼어들지 않게 막는 데 쓴다. 대기와 `key_to_enter`는 둘 중 하나만 저장한다.
 - 화면 좌표가 없는 입력 이벤트는 조건이 하나 이상일 때만 로드하고, raw match를 True로 둔 뒤 기존 조건 AND로 키를 실행한다.
 - 이벤트를 실행에 로드할 수 있는지는 `EventModel.has_processor_inputs()` 하나로 판정한다. 실행 창 시작 가능 여부(`events_with_processor_inputs`), processor 로드(`_init_event_data`), 작업 공간 배지(`event_issues`)가 이 기준을 함께 쓰며 `tests/test_processor_inputs_consistency.py`가 일치를 검사한다. 영역 모드는 여기에 더해 processor가 캡처본에서 기준 영역을 잘라낼 수 있어야 로드된다.
 - 실행 구성 오류의 종류(중복 이벤트·단축키 묶음)는 `ComposedRunSession.error_kind`로 판단한다. 오류 문구를 문자열로 검사해 분기하지 않는다.

@@ -27,6 +27,24 @@ def _make_basic_event(**overrides) -> EventModel:
 class TestInitEventDataFieldMapping(unittest.TestCase):
     """_init_event_data: EventModel → 내부 dict 변환 정합성"""
 
+    def test_wait_action_loads_without_key(self):
+        """대기 동작은 남은 키가 있어도 누르지 않는다."""
+        proc = _make_processor_with_key_codes()
+        events = proc._init_event_data([
+            _make_basic_event(wait_action=True, key_to_enter="A"),
+            _make_basic_event(
+                event_name="ScreenlessWait",
+                latest_position=None,
+                clicked_position=None,
+                key_to_enter=None,
+                conditions={"TestEvent": True},
+                wait_action=True,
+            ),
+        ])
+        self.assertEqual([e["key"] for e in events], [None, None])
+        self.assertEqual([e.get("wait") for e in events], [True, True])
+        self.assertTrue(all(e["exec"] for e in events))
+
     def test_basic_field_mapping(self):
         """기본 필드가 올바르게 매핑되는지 확인"""
         proc = _make_processor_with_key_codes()

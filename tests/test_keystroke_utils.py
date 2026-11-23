@@ -376,6 +376,38 @@ class TestRuntimeToggleUtils(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("missing an input key", errors[0])
 
+    def test_wait_member_is_valid_and_its_stale_key_does_not_conflict(self):
+        profile = ProfileModel(
+            name="P1",
+            runtime_toggle_enabled=True,
+            runtime_toggle_key="F6",
+            event_list=[
+                EventModel(
+                    event_name="Hold",
+                    key_to_enter="F6",
+                    wait_action=True,
+                    runtime_toggle_member=True,
+                )
+            ],
+        )
+
+        errors = collect_runtime_toggle_validation_errors(
+            profile,
+            profile.event_list,
+            settings=type(
+                "SettingsStub",
+                (),
+                {
+                    "toggle_start_stop_mac": False,
+                    "use_alt_shift_hotkey": False,
+                    "start_stop_key": "DISABLED",
+                },
+            )(),
+            os_name="Darwin",
+        )
+
+        self.assertEqual(errors, [])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

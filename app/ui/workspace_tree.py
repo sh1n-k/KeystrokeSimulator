@@ -47,6 +47,14 @@ MoveCallback = Callable[[EventModel, EventModel], bool]
 ContextCallback = Callable[[QPoint, list[EventModel], EventSection | None], None]
 
 
+def _key_cell_text(event: EventModel) -> str:
+    if not event.execute_action:
+        return ""
+    if event.wait_action:
+        return txt("(wait)", "(대기)")
+    return event.key_to_enter or ""
+
+
 class EventTree(QTreeView):
     """묶음(부모 행) 아래 이벤트(자식 행). 같은 묶음 안에서만 끌어 옮긴다."""
 
@@ -193,7 +201,7 @@ class EventTree(QTreeView):
         )
         cells = [
             QStandardItem(f"{DRAG_HANDLE} {event.event_name or ''}"),
-            QStandardItem((event.key_to_enter or "") if event.execute_action else ""),
+            QStandardItem(_key_cell_text(event)),
             QStandardItem(row_detail(event)),
             QStandardItem(" · ".join(badges)),
         ]
