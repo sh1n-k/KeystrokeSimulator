@@ -359,6 +359,24 @@ class TestListActions(ModelCase):
         self.assertEqual(a.event_name, "A")  # the source stays untouched
         self.assertIn("1 renamed", self.view.statuses[-1])
 
+    def test_copy_to_profile_sorts_conditions_for_target(self):
+        target_events = [signal("S2", priority=0), signal("S1", priority=1)]
+        save_profile(self.profiles_dir, ProfileModel(name="T", event_list=target_events), name="T")
+        model = self.make(
+            [
+                signal("S1", priority=0),
+                signal("S2", priority=1),
+                rule("R", conditions={"S1": True, "S2": False}),
+            ]
+        )
+        r = model.profile.event_list[2]
+
+        model.copy_to_profile("T", [r])
+
+        copied = next(e for e in self.saved("T") if e.event_name == "R")
+        self.assertEqual(list(copied.conditions), ["S2", "S1"])
+        self.assertEqual(list(r.conditions), ["S1", "S2"])  # 원본은 그대로
+
     def test_counts_text(self):
         model = self.make([rule("a", key_to_enter="1"), rule("b"), signal("s")])
 
@@ -374,6 +392,17 @@ class TestEventEdits(ModelCase):
 
         self.assertEqual(a.event_name, "A2")
         self.assertEqual(b.conditions, {"A2": False})
+
+    def test_rename_event_keeps_conditions_in_list_order(self):
+        # 같은 priority의 상태는 이름순으로 보이므로 이름을 바꾸면 순서도 바뀐다.
+        model = self.make(
+            [signal("A"), signal("B"), rule("R", conditions={"A": True, "B": False})]
+        )
+        a, _b, r = model.profile.event_list
+
+        self.assertEqual(model.rename_event(a, "C"), "")
+
+        self.assertEqual(list(r.conditions), ["B", "C"])
 
     def test_rename_event_rejects_blank_and_duplicate(self):
         model = self.make([signal("A"), rule("B")])
@@ -442,6 +471,42 @@ class TestEventEdits(ModelCase):
         self.assertEqual(r.conditions, {"S": False})
         model.remove_condition(r, "S")
         self.assertEqual(r.conditions, {})
+
+    def test_conditions_are_saved_in_list_order(self):
+        model = self.make(
+            [signal("S1", priority=0), signal("S2", priority=1), rule("R"), rule("Q")]
+        )
+        _s1, _s2, r, q = model.profile.event_list
+
+        model.set_condition(r, "S2", True)
+        model.set_condition(r, "S1", False)
+        model.set_condition(q, "S2", False)
+        model.set_condition(q, "S1", True)
+        self.scheduler.fire()
+
+        self.assertEqual(list(r.conditions), ["S1", "S2"])
+        saved = {e.event_name: list(e.conditions.items()) for e in self.saved()}
+        self.assertEqual(saved["R"], [("S1", False), ("S2", True)])
+        self.assertEqual(saved["Q"], [("S1", True), ("S2", False)])
+
+    def test_reordering_states_reorders_conditions(self):
+        model = self.make(
+            [
+                signal("S1", priority=0),
+                signal("S2", priority=1),
+                rule("R", conditions={"S1": True, "S2": False}),
+            ]
+        )
+        s1, s2, r = model.profile.event_list
+        self.view.calls.clear()
+
+        self.assertTrue(model.move_event(s2, s1))
+        self.scheduler.fire()
+
+        self.assertEqual(list(r.conditions), ["S2", "S1"])
+        self.assertEqual(self.view.calls.count(("events", None)), 2)
+        saved = {e.event_name: list(e.conditions) for e in self.saved()}
+        self.assertEqual(saved["R"], ["S2", "S1"])
 
     def test_timing_validation(self):
         model = self.make([rule("R")])

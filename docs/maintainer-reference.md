@@ -81,6 +81,7 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 
 - 프로필의 canonical 저장 형식은 `profiles/*.json`이다.
 - `held_screenshot`은 base64 PNG로 저장한다.
+- 이벤트의 `conditions`는 작업 공간 목록 표시 순서(상태 → 그룹별 동작 → 그룹 없는 동작, 묶음 안은 `(priority, name)`)로 정렬해 저장한다. 작업 공간 편집(`WorkspaceModel._changed`)과 다른 프로필로 복사할 때 `sort_conditions_by_display_order`를 적용한다. 변경 감지 fingerprint는 조건 순서를 보지 않으므로 순서만 다른 기존 파일은 다음 실제 편집 때 정렬된다.
 - 알 수 없는 JSON 항목은 로딩 실패로 앱 전체를 중단시키지 않으며, 손상된 원본을 자동 덮어쓰지 않는다.
 - 수정키 세트는 `modkey_sets.json`에 프로필과 분리 저장한다.
 - 이름 있는 실행 세트는 `run_sets.json`에 저장한다. 실행 창은 프로필과 실행 세트를 한 콤보에서 고르며, 프로필을 고르면 `app_state.json`의 `run_set`에 `__current__`를 쓴다(예전 저장값과 같은 형식).

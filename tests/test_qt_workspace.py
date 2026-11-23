@@ -405,7 +405,9 @@ class TestEditing(WorkspaceWindowCase):
         detail.cond_table.cellWidget(0, 1).click()  # S: off → on
         self.assertTrue(loose.conditions["S"])
         self.assertEqual(self.condition_table()[0], ("S", "● on"))
-        self.assertEqual(list(loose.conditions), ["S", "02 b", "01 a"])
+        # 편집하면 조건이 목록 표시 순서로 정렬되고 표도 그 순서를 보인다.
+        self.assertEqual(list(loose.conditions), ["S", "01 a", "02 b"])
+        self.assertEqual([n for n, _ in self.condition_table()], ["S", "01 a", "02 b"])
 
     def test_condition_table_hidden_without_conditions(self) -> None:
         self.ws.tree.select([self.event("loose")])

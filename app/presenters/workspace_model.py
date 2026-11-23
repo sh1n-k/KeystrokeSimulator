@@ -35,6 +35,7 @@ from app.domain.profile_events import (
     rename_colliding_events,
     rename_condition_references,
     snapshot_events,
+    sort_conditions_by_display_order,
     sort_sections_by_name,
     write_section_order,
 )
@@ -645,6 +646,7 @@ class WorkspaceModel:
                 copies, (e.event_name or "" for e in profile.event_list)
             )
             profile.event_list.extend(copies)
+            sort_conditions_by_display_order(profile.event_list)
             save_profile(self.profiles_dir, profile, name=target)
         except Exception as exc:
             raise WorkspaceError(
@@ -856,6 +858,9 @@ class WorkspaceModel:
     def _changed(self, check_name: bool = False) -> None:
         if self.mode != "profile" or not self.profile_open:
             return
+        # 조건 추가, 목록 순서·이름 변경 뒤 조건을 목록 순서로 맞춰 저장한다.
+        if sort_conditions_by_display_order(self.profile.event_list):
+            self.view.on_events_changed(None)
         self._set_save_state("saving")
         self._cancel_timer()
         self._cancel_autosave = self.scheduler(

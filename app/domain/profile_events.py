@@ -189,6 +189,32 @@ def sort_sections_by_name(events: Iterable[EventModel]) -> bool:
     return changed
 
 
+def sort_conditions_by_display_order(events: Iterable[EventModel]) -> bool:
+    """각 이벤트의 조건을 목록 표시 순서(묶음 → 묶음 안 순서)로 정렬한다.
+
+    목록에 없는 이름은 뒤에 이름순으로 둔다. 순서가 바뀐 이벤트가 있으면 True.
+    """
+    events = list(events)
+    rank: dict[str, int] = {}
+    for section in build_event_sections(events):
+        for event in section.events:
+            rank.setdefault(event.event_name or "", len(rank))
+    missing = len(rank)
+    changed = False
+    for event in events:
+        if len(event.conditions) < 2:
+            continue
+        ordered = sorted(
+            event.conditions.items(),
+            key=lambda item: (rank.get(item[0], missing), item[0]),
+        )
+        if [name for name, _ in ordered] != list(event.conditions):
+            event.conditions.clear()
+            event.conditions.update(ordered)
+            changed = True
+    return changed
+
+
 def referenced_event_names(events: Iterable[EventModel]) -> set[str]:
     """다른 이벤트의 조건으로 쓰이는 이벤트 이름."""
     names: set[str] = set()
