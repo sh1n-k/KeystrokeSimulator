@@ -82,6 +82,9 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 - 프로필의 canonical 저장 형식은 `profiles/*.json`이다.
 - `held_screenshot`은 base64 PNG로 저장한다.
 - 알 수 없는 JSON 항목은 로딩 실패로 앱 전체를 중단시키지 않으며, 손상된 원본을 자동 덮어쓰지 않는다.
+  - `load_profile`은 읽을 수 없는 파일을 빈 프로필로 돌려주므로, 불러와 다시 쓰는 곳은 `profile_file_problem`과 `load_ignored_invalid_data`를 먼저 확인한다.
+  - 작업 공간은 손상된 프로필을 열지 않고 오류를 보인 뒤 보던 항목(없으면 Quick)에 머문다. 다른 프로필로 복사할 때 대상이 손상돼 있으면 복사를 거부한다.
+  - Quick이 손상됐으면 원본을 `Quick.json.broken-<시각>`으로 옮기고 빈 Quick을 만든다.
 - 수정키 세트는 `modkey_sets.json`에 프로필과 분리 저장한다.
 - 이름 있는 실행 세트는 `run_sets.json`에 저장한다. 실행 창은 프로필과 실행 세트를 한 콤보에서 고르며, 프로필을 고르면 `app_state.json`의 `run_set`에 `__current__`를 쓴다(예전 저장값과 같은 형식).
 - 최근 선택(프로필·실행 세트), 수정키 세트, 창 위치(메인·작업 공간·캡처 HUD)는 `app_state.json`에 저장한다. 프로필 파일은 편집 단위로 유지하고 실행 시에만 합성한다.

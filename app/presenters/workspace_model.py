@@ -54,11 +54,14 @@ from app.presenters.quick_capture import quick_event
 from app.presenters.workspace_sidebar import ItemKind
 from app.storage.profile_display import QUICK_PROFILE_NAME
 from app.storage.profile_storage import (
+    backup_profile_file,
     copy_profile,
     delete_profile_files,
+    ensure_quick_profile,
     list_profile_names,
     load_profile,
     ordered_profile_names,
+    profile_file_problem,
     rename_profile_files,
     save_profile,
 )
@@ -220,13 +223,43 @@ class WorkspaceModel:
             return False
         if name not in list_profile_names(self.profiles_dir):
             name = QUICK_PROFILE_NAME
+        profile, problem = self._load_for_editing(name)
+        if profile is None:
+            # 손상된 파일을 빈 프로필로 열면 첫 자동 저장이 원본을 덮어쓴다.
+            showing_other = (self.mode == "profile" and self.profile_open) or (
+                self.mode == "run_set" and bool(self.run_set_name)
+            )
+            if name != QUICK_PROFILE_NAME:
+                self.view.show_error(
+                    txt(
+                        "'{p}' could not be read, so it was not opened. "
+                        "Fix or remove the file. ({e})",
+                        "'{p}' 파일을 읽을 수 없어 열지 않았습니다. "
+                        "파일을 고치거나 지우세요. ({e})",
+                        p=name,
+                        e=problem,
+                    )
+                )
+                if showing_other:
+                    self.view.on_catalog_changed()
+                    return False
+                return self.open_profile(QUICK_PROFILE_NAME)
+            backup = backup_profile_file(self.profiles_dir, name)
+            ensure_quick_profile(self.profiles_dir)
+            self.view.show_error(
+                txt(
+                    "Quick could not be read. The file was moved to '{b}' "
+                    "and an empty Quick was created. ({e})",
+                    "Quick 파일을 읽을 수 없어 '{b}'(으)로 옮기고 "
+                    "빈 Quick을 만들었습니다. ({e})",
+                    b=backup.name,
+                    e=problem,
+                )
+            )
+            profile = load_profile(self.profiles_dir, name, migrate=True)
         self.mode = "profile"
         self.prof_name = name
-        try:
-            self.profile = load_profile(self.profiles_dir, name, migrate=True)
-        except Exception as exc:
-            logger.error(f"Workspace load failed for {name}: {exc}")
-            self.profile = ProfileModel(name=name, event_list=[])
+        self.profile = profile
         self.profile_open = True
         self.name_draft = name
         self.favorite_draft = bool(self.profile.favorite)
@@ -237,6 +270,19 @@ class WorkspaceModel:
         self._set_save_state("saved")
         self.view.on_opened()
         return True
+
+    def _load_for_editing(self, name: str) -> tuple[ProfileModel | None, str]:
+        """편집해 다시 저장해도 되는 프로필, 아니면 (None, 이유)."""
+        if problem := profile_file_problem(self.profiles_dir, name):
+            return None, problem
+        try:
+            profile = load_profile(self.profiles_dir, name, migrate=True)
+        except Exception as exc:
+            logger.error(f"Workspace load failed for {name}: {exc}")
+            return None, str(exc)
+        if profile.load_ignored_invalid_data:
+            return None, txt("invalid entries", "잘못된 항목")
+        return profile, ""
 
     def open_run_set(self, name: str) -> bool:
         if self.mode == "run_set" and name == self.run_set_name:
@@ -639,7 +685,26 @@ class WorkspaceModel:
         if not events:
             return
         try:
+            # 손상된 대상을 불러오면 빈(또는 일부만 남은) 프로필이 되어,
+            # 저장하는 순간 원본 이벤트가 사라진다. 덮어쓰지 않고 거부한다.
+            if problem := profile_file_problem(self.profiles_dir, target):
+                raise ValueError(
+                    txt(
+                        "'{p}' could not be read, so it was left unchanged ({e})",
+                        "'{p}' 파일을 읽을 수 없어 그대로 두었습니다 ({e})",
+                        p=target,
+                        e=problem,
+                    )
+                )
             profile = load_profile(self.profiles_dir, target, migrate=True)
+            if profile.load_ignored_invalid_data:
+                raise ValueError(
+                    txt(
+                        "'{p}' has invalid entries, so it was left unchanged",
+                        "'{p}' 파일에 잘못된 항목이 있어 그대로 두었습니다",
+                        p=target,
+                    )
+                )
             copies = [clone_event(e) for e in events]
             renamed = rename_colliding_events(
                 copies, (e.event_name or "" for e in profile.event_list)

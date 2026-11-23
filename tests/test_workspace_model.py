@@ -20,6 +20,14 @@ from app.storage.run_sets_storage import get_run_set, list_run_set_names, upsert
 from app.utils.i18n import set_language
 
 
+# 파일 이름 → 내용. 읽을 수 없거나 일부 항목이 무시되는 프로필.
+CORRUPT_PROFILE_TEXTS = {
+    "broken": "{not json",
+    "root_list": "[]",
+    "bad_events": '{"schema_version": 1, "profile": {}, "events": 5}',
+}
+
+
 def rule(name, group=None, priority=0, **kwargs):
     return EventModel(event_name=name, group_id=group, priority=priority, **kwargs)
 
@@ -112,7 +120,7 @@ class ModelCase(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def make(self, events=(), *, name="P", **profile):
+    def make(self, events=(), *, name="P", open_profile=True, **profile):
         save_profile(
             self.profiles_dir,
             ProfileModel(name=name, event_list=list(events), **profile),
@@ -129,7 +137,8 @@ class ModelCase(unittest.TestCase):
             on_catalog_changed=self.catalog_events.append,
             on_run_set_renamed=lambda a, b: self.renamed_sets.append((a, b)),
         )
-        self.assertTrue(model.open_profile(name))
+        if open_profile:
+            self.assertTrue(model.open_profile(name))
         return model
 
     def names(self, model):
@@ -358,6 +367,26 @@ class TestListActions(ModelCase):
         self.assertEqual(target[2].conditions, {"A (2)": True})
         self.assertEqual(a.event_name, "A")  # the source stays untouched
         self.assertIn("1 renamed", self.view.statuses[-1])
+
+    def test_copy_to_corrupt_profile_leaves_file_untouched(self):
+        model = self.make([rule("A")])
+        for name, text in CORRUPT_PROFILE_TEXTS.items():
+            with self.subTest(name=name):
+                path = self.profiles_dir / f"{name}.json"
+                path.write_text(text, encoding="utf-8")
+
+                with self.assertRaises(WorkspaceError) as caught:
+                    model.copy_to_profile(name, model.profile.event_list)
+
+                self.assertIn(f"'{name}'", str(caught.exception))
+                self.assertEqual(path.read_text(encoding="utf-8"), text)
+
+    def test_copy_to_missing_profile_creates_it(self):
+        model = self.make([rule("A")])
+
+        model.copy_to_profile("New", model.profile.event_list)
+
+        self.assertEqual([e.event_name for e in self.saved("New")], ["A"])
 
     def test_counts_text(self):
         model = self.make([rule("a", key_to_enter="1"), rule("b"), signal("s")])
@@ -724,6 +753,50 @@ class TestCatalog(ModelCase):
         self.assertEqual(model.current_item(), ("profile", "P"))
         model.open_item("profile", "Nope")
         self.assertEqual(model.current_item(), ("profile", "Quick"))
+
+    def test_corrupt_profile_is_not_opened_and_stays_on_current(self):
+        model = self.make([rule("A")])
+        for name, text in CORRUPT_PROFILE_TEXTS.items():
+            with self.subTest(name=name):
+                path = self.profiles_dir / f"{name}.json"
+                path.write_text(text, encoding="utf-8")
+                self.view.calls.clear()
+
+                self.assertFalse(model.open_profile(name))
+
+                self.assertEqual(model.current_item(), ("profile", "P"))
+                self.assertEqual(self.names(model), ["A"])
+                self.assertIn(f"'{name}'", self.view.errors[-1])
+                self.assertIn(("catalog", None), self.view.calls)
+                self.scheduler.fire()
+                self.assertEqual(path.read_text(encoding="utf-8"), text)
+
+    def test_corrupt_profile_on_first_open_falls_back_to_quick(self):
+        model = self.make(open_profile=False)
+        path = self.profiles_dir / "broken.json"
+        path.write_text("{not json", encoding="utf-8")
+
+        self.assertTrue(model.open_profile("broken"))
+
+        self.assertEqual(model.current_item(), ("profile", "Quick"))
+        self.assertIn("'broken'", self.view.errors[-1])
+        model.add_rule()
+        self.scheduler.fire()
+        self.assertEqual(path.read_text(encoding="utf-8"), "{not json")
+
+    def test_corrupt_quick_is_backed_up_and_recreated(self):
+        model = self.make(open_profile=False)
+        quick = self.profiles_dir / "Quick.json"
+        quick.write_text("{not json", encoding="utf-8")
+
+        self.assertTrue(model.open_profile("Quick"))
+
+        self.assertEqual(model.current_item(), ("profile", "Quick"))
+        self.assertEqual(self.names(model), [])
+        (backup,) = self.profiles_dir.glob("Quick.json.broken-*")
+        self.assertEqual(backup.read_text(encoding="utf-8"), "{not json")
+        self.assertIn(backup.name, self.view.errors[-1])
+        self.assertNotIn("Quick.json.broken", " ".join(model.all_profiles()))
 
 
 if __name__ == "__main__":

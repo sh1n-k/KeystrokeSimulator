@@ -491,6 +491,38 @@ def load_profile_favorites(profiles_dir: Path, names: list[str]) -> dict[str, bo
     }
 
 
+def profile_file_problem(profiles_dir: Path, name: str) -> str | None:
+    """프로필 파일이 있는데 JSON 객체로 읽히지 않으면 그 이유. 없거나 정상이면 None.
+
+    `load_profile`은 이런 파일을 빈 프로필로 돌려주므로, 불러온 뒤 다시 쓰는
+    쪽은 먼저 확인해야 원본을 덮어쓰지 않는다.
+    """
+    jpath = _json_path(profiles_dir, name)
+    if not jpath.exists():
+        return None
+    try:
+        with open(jpath, "r", encoding="utf-8") as f:
+            data: object = json.load(f)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        return str(exc)
+    if not isinstance(data, dict):
+        return f"Profile root must be an object, got {type(data).__name__}"
+    return None
+
+
+def backup_profile_file(profiles_dir: Path, name: str) -> Path:
+    """프로필 파일을 목록에 잡히지 않는 이름으로 옮겨 보관하고 그 경로를 돌려준다."""
+    src = _json_path(profiles_dir, name)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    dst = src.with_name(f"{src.name}.broken-{stamp}")
+    index = 2
+    while dst.exists():
+        dst = src.with_name(f"{src.name}.broken-{stamp}-{index}")
+        index += 1
+    src.rename(dst)
+    return dst
+
+
 def load_profile(profiles_dir: Path, name: str, migrate: bool = True) -> ProfileModel:
     started = time.perf_counter()
     profiles_dir.mkdir(exist_ok=True)
