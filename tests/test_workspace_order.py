@@ -11,6 +11,7 @@ from app.domain.profile_events import (
     move_in_section,
     referenced_event_names,
     snapshot_events,
+    sort_conditions_by_display_order,
     sort_sections_by_name,
     write_section_order,
 )
@@ -156,6 +157,32 @@ class TestOrderWriting(unittest.TestCase):
             {e.event_name: e.priority for e in events},
             {"a": 0, "b": 1, "y": 0, "z": 1},
         )
+
+    def test_sort_conditions_follows_display_order(self):
+        s_b = signal("b", priority=0)
+        s_a = signal("a", priority=1)
+        other = rule("x", "h", 0)
+        target = rule(
+            "r",
+            "g",
+            0,
+            conditions={"gone": True, "x": False, "a": True, "b": False},
+        )
+        conditions = target.conditions
+
+        changed = sort_conditions_by_display_order([target, other, s_a, s_b])
+
+        self.assertTrue(changed)
+        # 상태 묶음(priority 순) → 그룹 동작 → 목록에 없는 이름
+        self.assertEqual(list(target.conditions), ["b", "a", "x", "gone"])
+        self.assertEqual(target.conditions, {"b": False, "a": True, "x": False, "gone": True})
+        self.assertIs(target.conditions, conditions)
+
+    def test_sort_conditions_reports_no_change_when_sorted(self):
+        events = [signal("a", priority=0), signal("b", priority=1)]
+        events.append(rule("r", conditions={"a": True, "b": True}))
+
+        self.assertFalse(sort_conditions_by_display_order(events))
 
     def test_snapshot_is_independent_of_later_edits(self):
         original = rule("a", "g", 3, conditions={"s": True})
