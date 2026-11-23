@@ -25,6 +25,7 @@ from app.domain.capture_geometry import (
     hud_position,
     magnifier_to_image,
     preview_size,
+    wheel_capture_size,
 )
 from app.domain.capture_render import render_magnifier, render_overlay
 from app.domain.models import ColorTuple, Position
@@ -178,15 +179,35 @@ class CaptureController:
         self._capture_size = self.session.set_capture_size(
             *clamp_capture_size(width, height)
         )
+        # 이전 크기에 대한 안내(새 크기 대기 등)는 더 이상 맞지 않는다.
+        self.feedback = None
         return self._capture_size
+
+    def wheel_size(self, steps: int) -> bool:
+        """미리보기 휠로 크기를 바꾼다. 실시간 화면일 때만 바뀌고, 고정한
+        캡처본에서 대상을 고르는 중에는 바뀌지 않는다."""
+        if steps == 0 or not self.shows_live():
+            return False
+        size = wheel_capture_size(self._capture_size, steps)
+        if size == self._capture_size:
+            return False
+        self.set_capture_size(*size)
+        return True
 
     def box(self) -> Rect:
         return capture_rect(self.session.current_position(), self._capture_size)
 
     def moved_off_hold(self) -> bool:
-        """고정한 뒤 ALT나 좌표 입력으로 위치를 옮겨, 새 위치가 아직 고정되지 않았다."""
+        """고정한 뒤 위치(ALT·좌표 입력)나 크기를 바꿔, 바뀐 영역이 아직 고정되지
+        않았다. 고정 당시 캡처본은 예전 영역이라 다시 고정해야 적용할 수 있다."""
         held = self.session.held_position
-        return held is not None and held != self.session.current_position()
+        if held is None:
+            return False
+        if held != self.session.current_position():
+            return True
+        # 범위 밖으로 저장된 기존 캡처는 세션이 범위 안으로 맞춘 크기와 비교한다.
+        held_size = self._held_size
+        return held_size is not None and clamp_capture_size(*held_size) != self._capture_size
 
     def shows_live(self) -> bool:
         return (
@@ -226,7 +247,19 @@ class CaptureController:
     def capture(self) -> None:
         """현재 실시간 프레임을 고정한다. 고른 픽셀은 새 캡처본 안이면 유지한다."""
         session = self.session
-        if session.latest_image is None or not session.hold():
+        latest = session.latest_image
+        if latest is not None and latest.size != self._capture_size:
+            # 크기를 바꾼 직후이거나 박스가 화면을 벗어나 새 크기 프레임이 아직
+            # 없다. 예전 프레임을 고정하면 크기와 캡처본이 어긋난 채 저장된다.
+            self.feedback = (
+                txt(
+                    "The new size isn't captured yet. Press CTRL again in a moment.",
+                    "새 크기가 아직 반영되지 않았습니다. 잠시 후 CTRL을 다시 누르세요.",
+                ),
+                "warn",
+            )
+            return
+        if latest is None or not session.hold():
             self.feedback = (
                 txt(
                     "Move the mouse with ALT until the preview follows it.",
@@ -293,14 +326,9 @@ class CaptureController:
         self.feedback = (message, "ready")
 
     def on_ctrl(self) -> None:
-        session = self.session
         # 연속 모드에서 대상을 고른 뒤 다시 누른 CTRL은 적용이다. 새 프레임을
         # 찍지 않고 대상을 고른 캡처본을 그대로 저장한다.
-        if (
-            self.mode == "continuous"
-            and self.is_ready()
-            and session.held_position == session.current_position()
-        ):
+        if self.mode == "continuous" and self.is_ready() and not self.moved_off_hold():
             self.apply()
             return
         self.capture()
@@ -351,6 +379,21 @@ class CaptureController:
 
     def set_box_position(self, position: Position) -> None:
         self.session.set_position(position)
+
+    def nudge_selection(self, dx: int, dy: int) -> bool:
+        """고른 픽셀을 캡처본 안에서 옮긴다(화살표 키). 바뀌었으면 True."""
+        held = self.session.held_image
+        selected = self.session.selected_position
+        if held is None or selected is None or self.shows_live():
+            return False
+        pixel = (
+            min(max(selected[0] + dx, 0), held.width - 1),
+            min(max(selected[1] + dy, 0), held.height - 1),
+        )
+        if pixel == selected:
+            return False
+        self.mag_center = pixel
+        return self.select(pixel)
 
     def set_pixel(self, pixel: Position) -> bool:
         if pixel == self.session.selected_position:

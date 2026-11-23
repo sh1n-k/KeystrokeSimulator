@@ -4,9 +4,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from PIL import Image
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QWidget
 
 from app.domain.capture_geometry import CaptureResult, rects_overlap
 from app.ui.capture_hud import (
@@ -236,6 +237,158 @@ class TestCaptureHudFlow(HudTestCase):
 
         self.assertEqual(cap.size, (150, 100))
         self.assertEqual(hud.border.windows[0].width(), 154)
+
+    def test_size_row_is_visible_without_opening_advanced(self):
+        hud, _ = self.make()
+
+        self.assertTrue(hud.advanced.isHidden())
+        for spin in hud.size_spins:
+            self.assertTrue(spin.isVisibleTo(hud))
+            self.assertFalse(hud.advanced.isAncestorOf(spin))
+
+    @staticmethod
+    def wheel(widget: QWidget, dy: int) -> None:
+        event = QWheelEvent(
+            QPointF(5, 5),
+            QPointF(widget.mapToGlobal(QPoint(5, 5))),
+            QPoint(0, 0),
+            QPoint(0, dy),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+        QApplication.sendEvent(widget, event)
+
+    def test_wheel_on_live_preview_resizes_box_and_spins(self):
+        hud, cap = self.make()
+        cap.emit((0, 0, 255))
+
+        self.wheel(hud.preview, 240)
+
+        self.assertEqual(cap.size, (120, 120))
+        self.assertEqual([s.value() for s in hud.size_spins], [120, 120])
+        self.assertEqual(hud.border.windows[0].width(), 124)
+
+        self.wheel(hud.magnifier, -120)
+        self.assertEqual(cap.size, (110, 110))
+
+    def test_trackpad_wheel_steps_once_per_notch(self):
+        hud, cap = self.make()
+
+        self.wheel(hud.preview, 60)
+        self.assertEqual(cap.size, (100, 100))
+        self.wheel(hud.preview, 60)
+        self.assertEqual(cap.size, (110, 110))
+
+    def test_wheel_does_not_resize_a_frozen_capture(self):
+        hud, cap = self.make()
+        self.ready(hud, cap)
+
+        self.wheel(hud.preview, 120)
+
+        self.assertEqual(cap.size, (100, 100))
+        self.assertEqual(hud.controller.session.selected_position, (10, 10))
+
+    def test_size_spin_after_freeze_asks_for_a_new_freeze(self):
+        on_apply = MagicMock()
+        hud, cap = self.make(on_apply=on_apply)
+        self.ready(hud, cap)
+
+        hud.size_spins[0].setValue(150)
+
+        self.assertIn("CTRL", hud.lbl_status.text())
+        hud.apply()
+        on_apply.assert_not_called()
+        self.assertTrue(hud.is_open())
+
+    def test_arrows_nudge_the_picked_pixel(self):
+        hud, cap = self.make()
+        self.ready(hud, cap)
+
+        QTest.keyClick(hud, Qt.Key.Key_Right)
+        self.assertEqual(hud.controller.session.selected_position, (11, 10))
+        QTest.keyClick(hud, Qt.Key.Key_Down, Qt.KeyboardModifier.ShiftModifier)
+        self.assertEqual(hud.controller.session.selected_position, (11, 20))
+        self.assertEqual(hud.pixel_entries[0].text(), "11")
+
+    def test_preview_click_takes_focus_from_size_spin(self):
+        hud, cap = self.make()
+        hud.activateWindow()
+        self.app.processEvents()
+        cap.emit((0, 0, 255))
+        hud.capture()
+        hud.size_spins[0].setFocus()
+        self.app.processEvents()
+        self.assertTrue(hud.size_spins[0].hasFocus())
+
+        QTest.mouseClick(hud.preview, Qt.MouseButton.LeftButton, pos=QPoint(21, 31))
+        QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Right)
+
+        self.assertTrue(hud.hasFocus())
+        self.assertEqual(hud.controller.session.selected_position, (21, 30))
+        self.assertEqual(hud.size_spins[0].value(), 100)
+
+    def test_return_in_size_spin_hands_focus_back_for_ctrl(self):
+        hud, cap = self.make()
+        self.ready(hud, cap)
+        hud.activateWindow()
+        self.app.processEvents()
+        spin = hud.size_spins[0]
+        spin.setFocus()
+        self.app.processEvents()
+        spin.lineEdit().setText("150")
+
+        QTest.keyClick(spin, Qt.Key.Key_Return)
+
+        self.assertEqual(cap.size, (150, 100))
+        self.assertTrue(hud.hasFocus())
+        cap.emit((0, 255, 0))
+        self.keys["ctrl"] = True
+        hud._check_keys()
+        self.assertFalse(hud.controller.moved_off_hold())
+        self.assertEqual(hud.controller.session.held_image.size, (150, 100))
+
+    def test_size_spins_take_focus_only_by_click(self):
+        hud, _ = self.make()
+
+        for spin in hud.size_spins:
+            self.assertEqual(spin.focusPolicy(), Qt.FocusPolicy.ClickFocus)
+
+    def test_apply_button_disabling_does_not_hand_focus_to_size_spin(self):
+        """Windows: 클릭으로 포커스를 받은 적용 버튼이 저장 뒤 비활성화돼도
+        다음 CTRL이 동작해야 한다."""
+        hud, cap = self.make("continuous")
+        hud.activateWindow()
+        self.app.processEvents()
+        self.ready(hud, cap, pixel=(3, 4))
+        hud.btn_apply.setFocus()
+        self.app.processEvents()
+
+        hud.apply()
+        self.app.processEvents()
+
+        self.assertEqual(hud.saved_count, 1)
+        self.assertFalse(isinstance(QApplication.focusWidget(), QAbstractSpinBox))
+        self.assertFalse(text_input_has_focus())
+
+    def test_wheel_direction_change_drops_leftover(self):
+        hud, cap = self.make()
+
+        self.wheel(hud.preview, 60)
+        self.wheel(hud.preview, -60)  # reversal drops the +60 instead of cancelling it
+        self.assertEqual(cap.size, (100, 100))
+        self.wheel(hud.preview, -60)
+        self.assertEqual(cap.size, (90, 90))
+
+    def test_wide_capture_preview_and_hud_stay_bounded(self):
+        hud, cap = self.make(capture_size=(1000, 300))
+        cap.emit((0, 0, 255))
+        hud._render()
+        self.app.processEvents()
+
+        self.assertEqual(hud.preview.display_size, (320, 96))
+        self.assertLessEqual(hud.width(), 460)
 
     def test_initial_capture_is_restored(self):
         initial = CaptureResult(

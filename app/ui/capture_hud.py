@@ -29,6 +29,7 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPaintEvent,
+    QWheelEvent,
 )
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -78,6 +79,13 @@ from app.utils.i18n import txt
 HUD_WRAP = 250
 _MAGNIFIER_SIZE = MAGNIFIER_SPAN * MAGNIFIER_ZOOM
 _RETURN_KEYS = (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+_ARROW_STEPS = {
+    Qt.Key.Key_Left: (-1, 0),
+    Qt.Key.Key_Right: (1, 0),
+    Qt.Key.Key_Up: (0, -1),
+    Qt.Key.Key_Down: (0, 1),
+}
+WHEEL_NOTCH = 120  # QWheelEvent.angleDelta 한 칸
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +154,7 @@ class _ImageView(QWidget):
         on_press: Callable[[Position], None],
         on_hover: Callable[[Position], None] | None = None,
         on_leave: Callable[[], None] | None = None,
+        on_wheel: Callable[[int], bool] | None = None,
     ) -> None:
         super().__init__()
         self._image: QImage | None = None
@@ -153,6 +162,8 @@ class _ImageView(QWidget):
         self._on_press = on_press
         self._on_hover = on_hover
         self._on_leave = on_leave
+        self._on_wheel = on_wheel
+        self._wheel_delta = 0
         self.setMouseTracking(on_hover is not None)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -197,6 +208,23 @@ class _ImageView(QWidget):
         if self._on_leave is not None:
             self._on_leave()
         super().leaveEvent(event)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if self._on_wheel is None:
+            super().wheelEvent(event)
+            return
+        event.accept()
+        # 트랙패드는 잘게 나눠 보낸다. 마우스 휠 한 칸(120)이 모일 때마다 한 단계.
+        dy = event.angleDelta().y()
+        if self._wheel_delta * dy < 0:
+            self._wheel_delta = 0  # 방향을 바꾸면 남은 반대 방향 몫을 버린다
+        self._wheel_delta += dy
+        steps = int(self._wheel_delta / WHEEL_NOTCH)
+        if steps == 0:
+            return
+        self._wheel_delta -= steps * WHEEL_NOTCH
+        if not self._on_wheel(steps):
+            self._wheel_delta = 0
 
 
 class _CommitKeys(QObject):
@@ -368,8 +396,12 @@ class CaptureHud(QWidget):
             on_press=self._on_preview_press,
             on_hover=self._on_preview_hover,
             on_leave=self._on_preview_leave,
+            on_wheel=self._on_wheel,
         )
-        self.magnifier = _ImageView(on_press=self._on_magnifier_press)
+        # 휠로 줄어든 미리보기에서 포인터가 벗어나도 이어지도록 돋보기도 받는다.
+        self.magnifier = _ImageView(
+            on_press=self._on_magnifier_press, on_wheel=self._on_wheel
+        )
         images.addWidget(self.preview, 0, Qt.AlignmentFlag.AlignTop)
         images.addWidget(self.magnifier, 0, Qt.AlignmentFlag.AlignTop)
         images.addStretch(1)
@@ -388,13 +420,37 @@ class CaptureHud(QWidget):
         info.addWidget(self.lbl_info, 1)
         root.addLayout(info)
 
+        # 크기는 자주 바꾸므로 고급에 숨기지 않는다.
+        size_row = QHBoxLayout()
+        size_row.setSpacing(tokens.SPACE_1)
+        size_row.addWidget(QLabel(txt("Size", "크기")))
+        self.size_spins: list[QSpinBox] = []
+        for axis in ("W", "H"):
+            axis_label = QLabel(axis)
+            style.caption(axis_label)
+            size_row.addWidget(axis_label)
+            spin = QSpinBox()
+            spin.setRange(MIN_CAPTURE_SIZE, MAX_CAPTURE_SIZE)
+            spin.setKeyboardTracking(False)
+            spin.setFixedWidth(64)
+            # 클릭으로만 포커스를 받는다. 휠이나 버튼 비활성화로 포커스가 넘어와
+            # 남으면 CTRL 고정이 입력으로 취급돼 무시된다.
+            spin.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+            spin.valueChanged.connect(self._on_capture_size_change)
+            self._keys.bind(spin, lambda sp=spin: self._commit_size(sp))
+            size_row.addWidget(spin)
+            self.size_spins.append(spin)
+        size_row.addStretch(1)
+        root.addLayout(size_row)
+
         hint = QLabel(
             txt(
-                "ALT move · CTRL freeze · click to pick",
-                "ALT 이동 · CTRL 고정 · 클릭 지정",
+                "ALT move · wheel resize · CTRL freeze · click to pick · arrows nudge",
+                "ALT 이동 · 휠 크기 · CTRL 고정 · 클릭 지정 · 화살표 미세 이동",
             )
         )
         style.caption(hint)
+        hint.setWordWrap(True)
         hint.setFixedWidth(HUD_WRAP)
         self.lbl_status = QLabel()
         self.lbl_status.setWordWrap(True)
@@ -465,20 +521,6 @@ class CaptureHud(QWidget):
                     commit,
                     lambda delta, en=entry, c=commit: self._nudge_entry(en, c, delta),
                 )
-        grid.addWidget(QLabel(txt("Size", "크기")), 2, 0)
-        self.size_spins: list[QSpinBox] = []
-        for col, axis in enumerate(("W", "H")):
-            axis_label = QLabel(axis)
-            style.caption(axis_label)
-            grid.addWidget(axis_label, 2, 1 + col * 2, Qt.AlignmentFlag.AlignRight)
-            spin = QSpinBox()
-            spin.setRange(MIN_CAPTURE_SIZE, MAX_CAPTURE_SIZE)
-            spin.setKeyboardTracking(False)
-            spin.setFixedWidth(64)
-            spin.valueChanged.connect(self._on_capture_size_change)
-            self._keys.bind(spin, spin.interpretText)
-            grid.addWidget(spin, 2, 2 + col * 2)
-            self.size_spins.append(spin)
         grid.setColumnStretch(5, 1)
 
     # -- coordinates ----------------------------------------------------------
@@ -558,6 +600,12 @@ class CaptureHud(QWidget):
         if event.key() in _RETURN_KEYS:
             self.apply()
             return
+        step = _ARROW_STEPS.get(Qt.Key(event.key()))
+        if step is not None:
+            mult = 10 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
+            if self.controller.nudge_selection(step[0] * mult, step[1] * mult):
+                self._render()
+            return
         super().keyPressEvent(event)
 
     # -- input handlers -------------------------------------------------------
@@ -579,6 +627,14 @@ class CaptureHud(QWidget):
     def _on_magnifier_press(self, point: Position) -> None:
         if self.controller.click_magnifier(point):
             self._render()
+
+    def _on_wheel(self, steps: int) -> bool:
+        if not self.controller.wheel_size(steps):
+            return False
+        self._sync_size_spins()
+        self._sync_border()
+        self._render()
+        return True
 
     def _on_preview_hover(self, point: Position) -> None:
         if self.controller.hover_preview(point, self.preview.display_size):
@@ -621,6 +677,13 @@ class CaptureHud(QWidget):
             self.size_spins[0].value(), self.size_spins[1].value()
         )
         self._sync_border()
+        # 고정한 뒤 크기를 바꾸면 다시 고정할 때까지 실시간 화면과 안내로 돌아간다.
+        self._render()
+
+    def _commit_size(self, spin: QSpinBox) -> None:
+        spin.interpretText()
+        # 이름칸처럼 포커스를 창으로 돌려야 바로 CTRL로 다시 고정할 수 있다.
+        self.setFocus()
 
     def _sync_size_spins(self) -> None:
         for spin, value in zip(self.size_spins, self.controller.capture_size, strict=True):
