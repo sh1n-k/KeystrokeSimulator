@@ -170,6 +170,103 @@ class TestCaptureFlow(unittest.TestCase):
 
         self.assertEqual(c.result().capture_size, (100, 100))
 
+    def test_size_change_after_freeze_needs_a_new_freeze(self):
+        """고정 뒤 크기를 바꾸면 예전 크기로 조용히 저장하지 않고 다시 고정을 요구한다."""
+        c, cap, *_ = make_controller()
+        cap.emit((0, 0, 255))
+        c.capture()
+        c.select((3, 4))
+
+        c.set_capture_size(150, 120)
+        cap.emit((0, 255, 0))
+
+        self.assertTrue(c.moved_off_hold())
+        self.assertTrue(c.shows_live())
+        self.assertEqual(c.status()[0], "Press CTRL to freeze this area.")
+        c.apply()
+        c.on_apply.assert_not_called()
+
+        c.capture()
+        c.apply()
+
+        result = c.on_apply.call_args.args[0]
+        self.assertEqual(result.capture_size, (150, 120))
+        self.assertEqual(result.image.size, (150, 120))
+        self.assertEqual(result.pixel, (3, 4))
+
+    def test_restoring_the_held_size_returns_to_the_hold(self):
+        c, cap, *_ = make_controller()
+        cap.emit((0, 0, 255))
+        c.capture()
+        c.set_capture_size(150, 150)
+
+        c.set_capture_size(100, 100)
+
+        self.assertFalse(c.moved_off_hold())
+        self.assertFalse(c.shows_live())
+
+    def test_restored_capture_is_stale_after_size_change(self):
+        c, *_ = make_controller()
+        c.restore(
+            CaptureResult(
+                position=(10, 20),
+                capture_size=(120, 80),
+                image=Image.new("RGB", (120, 80), (1, 2, 3)),
+                pixel=(5, 6),
+                color=(1, 2, 3),
+            )
+        )
+        self.assertFalse(c.moved_off_hold())
+
+        c.set_capture_size(130, 80)
+
+        self.assertTrue(c.moved_off_hold())
+
+    def test_restored_out_of_range_size_still_applies(self):
+        c, *_ = make_controller()
+        c.restore(
+            CaptureResult(
+                position=(10, 20),
+                capture_size=(30, 30),
+                image=Image.new("RGB", (30, 30), (1, 2, 3)),
+                pixel=(5, 6),
+                color=(1, 2, 3),
+            )
+        )
+
+        self.assertFalse(c.shows_live())
+        c.apply()
+        self.assertEqual(c.on_apply.call_args.args[0].capture_size, (30, 30))
+
+    def test_freeze_waits_for_a_frame_of_the_new_size(self):
+        """크기를 바꾼 뒤 새 크기 프레임이 오기 전(박스가 화면 밖이면 계속)에는
+        고정하지 않는다. 예전 프레임을 새 크기로 저장하지 않는다."""
+        c, cap, *_ = make_controller()
+        cap.emit((0, 0, 255))
+        c.set_capture_size(300, 100)
+
+        c.capture()
+
+        self.assertIsNone(c.session.held_image)
+        self.assertEqual(c.status()[1], "warn")
+        self.assertIn("new size", c.status()[0])
+
+        cap.emit((0, 255, 0))
+        c.capture()
+
+        self.assertEqual(c.session.held_image.size, (300, 100))
+
+    def test_size_change_clears_the_waiting_warning(self):
+        c, cap, *_ = make_controller()
+        cap.emit((0, 0, 255))
+        c.set_capture_size(300, 100)
+        c.capture()
+        self.assertIsNotNone(c.feedback)
+
+        c.set_capture_size(100, 100)
+
+        self.assertIsNone(c.feedback)
+
     def test_recapture_clears_hold(self):
         c, cap, *_ = make_controller()
         cap.emit((0, 0, 255))
@@ -180,6 +277,81 @@ class TestCaptureFlow(unittest.TestCase):
 
         self.assertFalse(c.is_ready())
         self.assertIsNone(c.mag_center)
+
+
+class TestSizeWheelAndNudge(unittest.TestCase):
+    def setUp(self):
+        set_language("en")
+
+    def test_wheel_resizes_while_live(self):
+        c, cap, *_ = make_controller()
+
+        self.assertTrue(c.wheel_size(2))
+
+        self.assertEqual(c.capture_size, (120, 120))
+        self.assertEqual(cap.size, (120, 120))
+        self.assertFalse(c.wheel_size(0))
+
+    def test_wheel_is_ignored_on_a_frozen_capture(self):
+        c, cap, *_ = make_controller()
+        cap.emit((0, 0, 255))
+        c.capture()
+
+        self.assertFalse(c.wheel_size(1))
+
+        self.assertEqual(c.capture_size, (100, 100))
+        self.assertFalse(c.shows_live())
+
+    def test_wheel_with_alt_resizes_and_needs_a_new_freeze(self):
+        c, cap, *_ = make_controller()
+        cap.emit((0, 0, 255))
+        c.capture()
+        c.alt_down = True
+
+        self.assertTrue(c.wheel_size(1))
+        c.alt_down = False
+
+        self.assertEqual(c.capture_size, (110, 110))
+        self.assertTrue(c.shows_live())
+
+    def test_wheel_returns_false_at_the_range_limit(self):
+        c, *_ = make_controller(capture_size=(1000, 300))
+
+        self.assertFalse(c.wheel_size(1))
+        self.assertEqual(c.capture_size, (1000, 300))
+
+    def test_nudge_moves_pick_and_updates_color(self):
+        c, cap, *_ = make_controller()
+        cap.emit((0, 0, 255), ((4, 4), (9, 9, 9)))
+        c.capture()
+        c.select((3, 4))
+
+        self.assertTrue(c.nudge_selection(1, 0))
+
+        self.assertEqual(c.session.selected_position, (4, 4))
+        self.assertEqual(c.session.reference_color, (9, 9, 9))
+        self.assertEqual(c.mag_center, (4, 4))
+
+    def test_nudge_clamps_to_the_capture(self):
+        c, cap, *_ = make_controller()
+        cap.emit((0, 0, 255))
+        c.capture()
+        c.select((3, 98))
+
+        self.assertTrue(c.nudge_selection(-10, 10))
+        self.assertEqual(c.session.selected_position, (0, 99))
+        self.assertFalse(c.nudge_selection(-1, 1))
+
+    def test_nudge_needs_a_frozen_pick(self):
+        c, cap, *_ = make_controller()
+        cap.emit((0, 0, 255))
+        self.assertFalse(c.nudge_selection(1, 0))  # live
+        c.capture()
+        self.assertFalse(c.nudge_selection(1, 0))  # nothing picked yet
+        c.select((3, 4))
+        c.set_capture_size(150, 150)
+        self.assertFalse(c.nudge_selection(1, 0))  # stale after resize
+        self.assertEqual(c.session.selected_position, (3, 4))
 
 
 class TestRestore(unittest.TestCase):
@@ -394,6 +566,28 @@ class TestContinuous(unittest.TestCase):
         self.assertIsNone(c.session.held_image)
         self.assertEqual(c.feedback[1], "ready")
         self.assertIn("1 saved", c.title())
+
+    def test_second_ctrl_after_resize_recaptures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prof_dir = Path(tmp)
+            c, cap, keys, _pt = make_controller("continuous", profiles_dir=prof_dir)
+            cap.emit((0, 0, 255))
+            keys.ctrl = True
+            c.tick(text_focus=False)  # freeze
+            keys.ctrl = False
+            c.tick(text_focus=False)
+            c.select((3, 4))
+            c.set_capture_size(150, 150)
+            cap.emit((255, 0, 0))
+
+            keys.ctrl = True
+            c.tick(text_focus=False)  # freezes the new size instead of saving
+
+            saved = load_profile(prof_dir, "Quick", migrate=False).event_list
+        self.assertEqual(saved, [])
+        self.assertEqual(c.saved_count, 0)
+        self.assertEqual(c.session.held_image.size, (150, 150))
+        self.assertFalse(c.moved_off_hold())
 
     def test_open_workspace_takes_the_event_instead_of_disk(self):
         with tempfile.TemporaryDirectory() as tmp:

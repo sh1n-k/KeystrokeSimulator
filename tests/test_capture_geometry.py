@@ -17,6 +17,7 @@ from app.domain.capture_geometry import (
     magnifier_to_image,
     preview_size,
     rects_overlap,
+    wheel_capture_size,
 )
 from app.domain.capture_render import render_magnifier, render_overlay
 from app.presenters.quick_capture import append_quick_event
@@ -26,7 +27,24 @@ from app.ui import tokens as theme
 class TestPreviewMapping(unittest.TestCase):
     def test_preview_is_one_to_one_up_to_limit(self):
         self.assertEqual(preview_size((100, 100)), (100, 100))
-        self.assertEqual(preview_size((400, 200)), (200, 100))
+        self.assertEqual(preview_size((1000, 1000)), (200, 200))
+
+    def test_wide_preview_gets_a_wider_limit_than_tall(self):
+        self.assertEqual(preview_size((400, 200)), (320, 160))
+        self.assertEqual(preview_size((1000, 300)), (320, 96))
+        self.assertEqual(preview_size((300, 1000)), (60, 200))
+
+    def test_wheel_size_keeps_ratio_and_steps_the_long_side(self):
+        self.assertEqual(wheel_capture_size((100, 100), 1), (110, 110))
+        self.assertEqual(wheel_capture_size((100, 100), -1), (90, 90))
+        self.assertEqual(wheel_capture_size((300, 100), 1), (310, 103))
+        self.assertEqual(wheel_capture_size((100, 300), -2), (93, 280))
+
+    def test_wheel_size_stops_when_a_side_hits_the_range(self):
+        self.assertEqual(wheel_capture_size((1000, 300), 1), (1000, 300))
+        self.assertEqual(wheel_capture_size((990, 300), 5), (1000, 303))
+        self.assertEqual(wheel_capture_size((150, 50), -1), (150, 50))
+        self.assertEqual(wheel_capture_size((60, 60), -3), (50, 50))
 
     def test_display_to_image_scales_and_rejects_outside(self):
         self.assertEqual(

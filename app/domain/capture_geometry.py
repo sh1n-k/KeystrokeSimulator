@@ -11,7 +11,10 @@ from app.domain.models import ColorTuple, Position
 MIN_CAPTURE_SIZE = 50
 MAX_CAPTURE_SIZE = 1000
 
-PREVIEW_MAX = 200
+# 길쭉한 캡처가 너무 작게 줄지 않도록 가로 상한을 세로보다 넉넉히 둔다.
+PREVIEW_MAX_W = 320
+PREVIEW_MAX_H = 200
+WHEEL_SIZE_STEP = 10  # 휠 한 칸에 긴 변이 바뀌는 픽셀
 MAGNIFIER_ZOOM = 8
 MAGNIFIER_SPAN = 11  # 원본 픽셀 수(홀수라 가운데 픽셀이 있다)
 HUD_MARGIN = 16
@@ -47,10 +50,21 @@ def rects_overlap(a: Rect, b: Rect) -> bool:
 
 
 def preview_size(image_size: Position) -> Position:
-    """1:1로 보여주되 긴 변을 PREVIEW_MAX로 제한한다."""
+    """1:1로 보여주되 비율을 지킨 채 PREVIEW_MAX_W×PREVIEW_MAX_H 안에 맞춘다."""
     w, h = image_size
-    scale = min(1.0, PREVIEW_MAX / max(1, w), PREVIEW_MAX / max(1, h))
+    scale = min(1.0, PREVIEW_MAX_W / max(1, w), PREVIEW_MAX_H / max(1, h))
     return (max(1, int(w * scale)), max(1, int(h * scale)))
+
+
+def wheel_capture_size(size: Position, steps: int) -> Position:
+    """휠 steps칸만큼 비율을 지킨 채 키우거나 줄인다. 긴 변이 칸당
+    WHEEL_SIZE_STEP씩 바뀌고, 한 변이라도 범위 끝에 닿으면 거기서 멈춘다."""
+    w, h = size
+    scale = (max(w, h) + WHEEL_SIZE_STEP * steps) / max(w, h)
+    low = max(MIN_CAPTURE_SIZE / w, MIN_CAPTURE_SIZE / h)
+    high = min(MAX_CAPTURE_SIZE / w, MAX_CAPTURE_SIZE / h)
+    scale = min(max(scale, low), high)
+    return (round(w * scale), round(h * scale))
 
 
 def display_to_image(
