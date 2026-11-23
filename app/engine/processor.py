@@ -147,6 +147,7 @@ class EventData(TypedDict):
     rel_x: int
     rel_y: int
     screenless: NotRequired[bool]
+    wait: NotRequired[bool]
     ref_img: NotRequired[ImageFrame]
     check_points: NotRequired[list[CheckPoint]]
     ref_bgr: NotRequired[Pixel]
@@ -712,6 +713,16 @@ class KeystrokeProcessor:
             "key press will be skipped"
         )
 
+    def _event_key(self, e: EventModel) -> str | None:
+        """실행할 키 이름. 대기 동작이거나 키가 없으면 None."""
+        if e.wait_action:
+            return None
+        raw_key = e.key_to_enter
+        key = _normalize_key_name(self.key_codes, raw_key) if raw_key else None
+        if raw_key and raw_key.strip() and key is None:
+            self._warn_unsupported_key(e.event_name or "Unknown", raw_key.strip())
+        return key
+
     def _init_event_data(self, raw_events: list[EventModel]) -> list[EventData]:
         events_data: list[EventData] = []
 
@@ -720,14 +731,7 @@ class KeystrokeProcessor:
                 continue
 
             if e.is_screenless_input():
-                raw_key = e.key_to_enter
-                key = (
-                    _normalize_key_name(self.key_codes, raw_key) if raw_key else None
-                )
-                if raw_key and raw_key.strip() and key is None:
-                    self._warn_unsupported_key(
-                        e.event_name or "Unknown", raw_key.strip()
-                    )
+                key = self._event_key(e)
                 events_data.append(
                     {
                         "name": e.event_name or "Unknown",
@@ -743,6 +747,7 @@ class KeystrokeProcessor:
                         "priority": e.priority,
                         "conds": e.conditions,
                         "runtime_toggle_member": bool(e.runtime_toggle_member),
+                        "wait": bool(e.wait_action),
                         "region_w": 1,
                         "region_h": 1,
                         "rel_x": 0,
@@ -760,12 +765,7 @@ class KeystrokeProcessor:
 
             center_x = latest_position[0] + clicked_position[0]
             center_y = latest_position[1] + clicked_position[1]
-            raw_key = e.key_to_enter
-            key = (
-                _normalize_key_name(self.key_codes, raw_key) if raw_key else None
-            )
-            if raw_key and raw_key.strip() and key is None:
-                self._warn_unsupported_key(e.event_name or "Unknown", raw_key.strip())
+            key = self._event_key(e)
 
             evt_data: EventData = {
                 "name": e.event_name or "Unknown",
@@ -781,6 +781,7 @@ class KeystrokeProcessor:
                 "priority": e.priority,
                 "conds": e.conditions,
                 "runtime_toggle_member": bool(e.runtime_toggle_member),
+                "wait": bool(e.wait_action),
                 "region_w": 1,
                 "region_h": 1,
                 "rel_x": 0,
@@ -1408,6 +1409,9 @@ class KeystrokeProcessor:
 
         key = evt["key"]
         if not key:
+            if evt.get("wait"):
+                # 그룹 선택은 이미 끝났다. 아래 동작 대신 이번 루프를 비운다.
+                logger.debug(f"Wait Evt: '{evt['name']}' (no key pressed)")
             return
         code = self.key_codes.get(key)
         if code is None:

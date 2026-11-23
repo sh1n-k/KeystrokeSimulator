@@ -81,11 +81,13 @@ def rename_colliding_events(
 
 
 def event_needs_attention(event: EventModel) -> bool:
-    """A rule without an input key cannot run. Single source of truth for the
-    'no key' badge and counts."""
-    return bool(event.execute_action) and not (
-        event.key_to_enter or ""
-    ).strip()
+    """A rule without an input key (and not a wait action) cannot run. Single
+    source of truth for the 'no key' badge and counts."""
+    return (
+        bool(event.execute_action)
+        and not event.wait_action
+        and not (event.key_to_enter or "").strip()
+    )
 
 
 def event_matches_query(event: EventModel, query: str) -> bool:
@@ -264,6 +266,7 @@ EVENT_DIRTY_FIELD_NAMES: frozenset[str] = frozenset(
         "priority",
         "conditions",
         "runtime_toggle_member",
+        "wait_action",
         "held_screenshot",
     }
 )
@@ -295,6 +298,7 @@ def event_fingerprint(evt: EventModel) -> tuple[object, ...]:
         int(evt.priority or 0),
         tuple(sorted(dict(evt.conditions or {}).items())),
         bool(evt.runtime_toggle_member),
+        bool(evt.wait_action),
         _image_identity(evt.held_screenshot),
     )
 

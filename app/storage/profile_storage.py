@@ -47,6 +47,7 @@ _EVENT_KEYS = frozenset(
         "priority",
         "conditions",
         "runtime_toggle_member",
+        "wait_action",
         "held_screenshot",
     }
 )
@@ -287,6 +288,7 @@ def event_to_dict(evt: EventModel) -> dict[str, object]:
         "priority": int(evt.priority or 0),
         "conditions": dict(evt.conditions or {}),
         "runtime_toggle_member": bool(evt.runtime_toggle_member),
+        "wait_action": bool(evt.wait_action),
         "held_screenshot": held_payload,
     }
 
@@ -329,6 +331,7 @@ def event_from_dict(d: Mapping[str, object]) -> EventModel:
         priority=_to_int(d.get("priority", 0), default=0),
         conditions=_to_conditions(d.get("conditions")),
         runtime_toggle_member=bool(d.get("runtime_toggle_member", False)),
+        wait_action=bool(d.get("wait_action", False)),
     )
 
 
@@ -463,6 +466,7 @@ def _ensure_profile_defaults(p: ProfileModel) -> None:
             e.match_mode = "pixel"
         e.invert_match = bool(e.invert_match)
         e.execute_action = bool(e.execute_action)
+        e.wait_action = bool(e.wait_action)
         e.priority = int(e.priority or 0)
         if not e.conditions:
             e.conditions = {}

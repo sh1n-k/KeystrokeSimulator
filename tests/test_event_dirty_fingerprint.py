@@ -46,6 +46,8 @@ def _mutated_event(field_name: str) -> EventModel:
         evt.conditions = {"Other": True}
     elif field_name == "runtime_toggle_member":
         evt.runtime_toggle_member = True
+    elif field_name == "wait_action":
+        evt.wait_action = True
     else:
         raise AssertionError(f"No mutation defined for field {field_name!r}")
     return evt

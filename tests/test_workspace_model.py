@@ -482,6 +482,31 @@ class TestEventEdits(ModelCase):
         self.assertIn("no selected events", model.save_detail)
 
 
+class TestWaitAction(ModelCase):
+    def test_wait_and_key_are_exclusive_and_saved(self):
+        model = self.make([rule("A", key_to_enter="1")])
+        event = model.profile.event_list[0]
+
+        model.set_event_wait(event)
+        self.scheduler.fire()
+        self.assertTrue(self.saved()[0].wait_action)
+        self.assertIsNone(self.saved()[0].key_to_enter)
+
+        model.set_event_key(event, "2")
+        self.scheduler.fire()
+        self.assertFalse(self.saved()[0].wait_action)
+        self.assertEqual(self.saved()[0].key_to_enter, "2")
+
+    def test_choosing_blank_key_also_clears_wait(self):
+        model = self.make([rule("A", wait_action=True)])
+        event = model.profile.event_list[0]
+
+        model.set_event_key(event, None)
+
+        self.assertFalse(event.wait_action)
+        self.assertEqual(len(self.scheduler.pending), 1)
+
+
 class TestAutosave(ModelCase):
     def test_edit_schedules_one_debounced_save(self):
         model = self.make([rule("A", key_to_enter="1")])

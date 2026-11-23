@@ -13,6 +13,7 @@ from app.domain.event_editing import (
     event_issues,
 )
 from app.domain.models import EventModel
+from app.domain.profile_events import event_needs_attention
 from app.utils.i18n import set_language
 
 
@@ -37,6 +38,12 @@ class TestEventIssues(unittest.TestCase):
         issues = event_issues(screen_event(event_name="r", key_to_enter=None))
 
         self.assertTrue(any("key" in i for i in issues))
+
+    def test_wait_action_needs_no_key(self):
+        event = screen_event(event_name="w", key_to_enter=None, wait_action=True)
+
+        self.assertEqual(event_issues(event), [])
+        self.assertFalse(event_needs_attention(event))
 
     def test_rule_without_screen_needs_a_condition(self):
         self.assertTrue(event_issues(EventModel(event_name="r", key_to_enter="A")))

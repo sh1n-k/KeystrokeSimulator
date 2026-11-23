@@ -396,6 +396,21 @@ class TestEventRoundtrip(unittest.TestCase):
         self.assertIsNone(restored.latest_position)
         self.assertIsNone(restored.held_screenshot)
 
+    def test_wait_action_roundtrip(self):
+        evt = EventModel(event_name="Hold", conditions={"Gate": True}, wait_action=True)
+        d = event_to_dict(evt)
+        self.assertIs(d["wait_action"], True)
+        self.assertFalse(raw_profile_has_unused_data({
+            "schema_version": 1, "profile": {"name": "P"}, "events": [d]
+        }))
+        restored = event_from_dict(d)
+        self.assertTrue(restored.wait_action)
+        self.assertIsNone(restored.key_to_enter)
+
+    def test_wait_action_defaults_false_when_missing(self):
+        restored = event_from_dict({"event_name": "Old", "key_to_enter": "A"})
+        self.assertFalse(restored.wait_action)
+
     def test_missing_capture_size_defaults_to_100(self):
         """구버전 데이터에 capture_size가 없어도 100x100으로 복원"""
         raw = {

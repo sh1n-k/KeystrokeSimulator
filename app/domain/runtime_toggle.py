@@ -287,6 +287,7 @@ def collect_runtime_toggle_validation_errors(
             for evt in active_events
             if evt.runtime_toggle_member
             and evt.execute_action
+            and not evt.wait_action
             and not (evt.key_to_enter or "").strip()
         }
     )
@@ -336,6 +337,7 @@ def collect_runtime_toggle_validation_errors(
                 ).strip()
                 for evt in active_events
                 if evt.execute_action
+                and not evt.wait_action
                 and normalize_runtime_toggle_trigger(
                     evt.key_to_enter, os_name=os_name
                 )

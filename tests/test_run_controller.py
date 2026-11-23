@@ -18,6 +18,7 @@ from app.presenters.run_controller import (
     RunController,
     RunSelection,
     migrate_legacy_run_profiles,
+    runnable_events,
 )
 from app.storage.profile_storage import save_profile
 from app.storage.run_sets_storage import load_run_sets, upsert_run_set
@@ -88,6 +89,19 @@ def _make_app_stub(run_profiles=None) -> RunController:
         },
     )()
     return app
+
+
+class TestRunnableEvents(unittest.TestCase):
+    def test_wait_action_runs_without_key_but_keyless_action_does_not(self):
+        events = [
+            EventModel(event_name="Wait", key_to_enter=None, wait_action=True),
+            EventModel(event_name="NoKey", key_to_enter=None),
+            EventModel(event_name="State", execute_action=False),
+        ]
+
+        names = [e.event_name for e in runnable_events(events)]
+
+        self.assertEqual(names, ["Wait", "State"])
 
 
 class TestStartSimulation(unittest.TestCase):

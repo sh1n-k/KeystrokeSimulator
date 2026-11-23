@@ -48,6 +48,8 @@ if TYPE_CHECKING:
     from app.ui.capture_hud import CaptureHud
 
 THUMB_MAX = 160
+# 키 드롭다운의 '대기' 항목 데이터. 키 이름 목록과 겹치지 않는다.
+WAIT_KEY_ITEM = "__wait__"
 PANEL_WIDTH = 340
 
 
@@ -175,6 +177,10 @@ class EventDetailPanel(QScrollArea):
 
         self.combo_key = QComboBox()
         self.combo_key.addItem("")
+        # 키 이름과 겹치지 않도록 항목 데이터로 구분한다.
+        self.combo_key.addItem(
+            txt("(Wait — no input)", "(대기 — 입력 없음)"), WAIT_KEY_ITEM
+        )
         self.combo_key.addItems(KeyCodes.get_key_name_list())
         self.combo_key.setMaxVisibleItems(20)
         self.combo_key.activated.connect(self._on_key_changed)
@@ -457,7 +463,10 @@ class EventDetailPanel(QScrollArea):
                 self.entry_name.setText(event.event_name or "")
             self.radio_rule.setChecked(is_rule)
             self.radio_signal.setChecked(not is_rule)
-            index = self.combo_key.findText(event.key_to_enter or "")
+            if event.wait_action:
+                index = self.combo_key.findData(WAIT_KEY_ITEM)
+            else:
+                index = self.combo_key.findText(event.key_to_enter or "")
             self.combo_key.setCurrentIndex(max(index, 0))
             self.combo_key.setEnabled(is_rule)
             self.lbl_key.setEnabled(is_rule)
@@ -674,6 +683,9 @@ class EventDetailPanel(QScrollArea):
 
     def _on_key_changed(self, *_args: object) -> None:
         if self.current is None or self._syncing:
+            return
+        if self.combo_key.currentData() == WAIT_KEY_ITEM:
+            self.model.set_event_wait(self.current)
             return
         self.model.set_event_key(self.current, self.combo_key.currentText() or None)
 

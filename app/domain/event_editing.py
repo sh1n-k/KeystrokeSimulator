@@ -13,7 +13,7 @@ def event_issues(event: EventModel) -> list[str]:
     """실행되지 않는 이유. 비어 있으면 실행할 수 있다."""
     issues: list[str] = []
     if event.execute_action:
-        if not (event.key_to_enter or "").strip():
+        if not event.wait_action and not (event.key_to_enter or "").strip():
             issues.append(txt("No input key: this action cannot run.", "키 없음: 이 동작은 실행되지 않습니다."))
         if not event_has_screen(event) and not event.conditions:
             issues.append(

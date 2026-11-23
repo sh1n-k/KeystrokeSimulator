@@ -124,7 +124,7 @@ def runnable_events(events: list[EventModel]) -> list[EventModel]:
         evt
         for evt in events
         if evt.use_event
-        and (evt.key_to_enter or not evt.execute_action)
+        and (evt.key_to_enter or evt.wait_action or not evt.execute_action)
     ]
 
 
