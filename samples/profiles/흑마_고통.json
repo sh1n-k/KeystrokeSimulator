@@ -1,0 +1,1385 @@
+{
+  "schema_version": 1,
+  "profile": {
+    "name": "흑마_고통",
+    "favorite": false,
+    "runtime_toggle_enabled": false,
+    "runtime_toggle_key": null
+  },
+  "events": [
+    {
+      "event_name": "공통_전투",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 0,
+      "conditions": {
+        "상황_전투중": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "공통_전투일반",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 1,
+      "conditions": {
+        "공통_전투": true,
+        "상황_시전중": false
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "상황_전투중",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 2,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "상황_시전중",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 3,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "상황_완드중",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 4,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "상황_펫생존",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 5,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "상황_어그로상실",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 6,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "몹수_1",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 7,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "내_HP_70",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 8,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "내_HP_60",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 9,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "내_HP_30",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 10,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "내_HP_15",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 11,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "내_MP_30",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 12,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "적_HP_50",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 13,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "적_HP_40",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 14,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "적_HP_30",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 15,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "적_HP_20",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 16,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "펫_HP_30",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 17,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "DOT_부패",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 18,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "DOT_파멸",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 19,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "DEBUFF_공포",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 20,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_생명석",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 21,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_희생",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 22,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_공포",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 23,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_영혼흡수",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 24,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_부패",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 25,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_파멸",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 26,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_생명력흡수",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 27,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_생명력집중",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 28,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "응급_생명석",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "0",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "흑마",
+      "priority": 0,
+      "conditions": {
+        "공통_전투": true,
+        "내_HP_30": false,
+        "적_HP_20": true,
+        "READY_생명석": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "응급_생명석_최후",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "0",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "흑마",
+      "priority": 1,
+      "conditions": {
+        "공통_전투": true,
+        "내_HP_15": false,
+        "READY_생명석": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "응급_희생",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "-",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "흑마",
+      "priority": 2,
+      "conditions": {
+        "공통_전투": true,
+        "내_HP_30": false,
+        "적_HP_20": true,
+        "READY_생명석": false,
+        "READY_희생": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "응급_공포",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "=",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "흑마",
+      "priority": 3,
+      "conditions": {
+        "공통_전투": true,
+        "상황_어그로상실": false,
+        "내_HP_30": false,
+        "적_HP_20": true,
+        "DEBUFF_공포": false,
+        "READY_생명석": false,
+        "READY_희생": false,
+        "READY_공포": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "전투_영혼흡수",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "5",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "흑마",
+      "priority": 4,
+      "conditions": {
+        "공통_전투일반": true,
+        "몹수_1": true,
+        "적_HP_20": false,
+        "READY_영혼흡수": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "전투_부패",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "2",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "흑마",
+      "priority": 5,
+      "conditions": {
+        "공통_전투일반": true,
+        "적_HP_30": true,
+        "DOT_부패": false,
+        "READY_부패": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "전투_고통의파멸",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "3",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "흑마",
+      "priority": 6,
+      "conditions": {
+        "공통_전투일반": true,
+        "적_HP_50": true,
+        "DOT_파멸": false,
+        "READY_파멸": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "전투_생명력흡수",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "4",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "흑마",
+      "priority": 7,
+      "conditions": {
+        "공통_전투일반": true,
+        "내_HP_60": false,
+        "적_HP_20": true,
+        "READY_생명력흡수": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "전투_생명력전환",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "6",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "흑마",
+      "priority": 8,
+      "conditions": {
+        "공통_전투일반": true,
+        "내_HP_70": true,
+        "내_MP_30": false
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "전투_생명력집중",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "7",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "흑마",
+      "priority": 9,
+      "conditions": {
+        "공통_전투일반": true,
+        "상황_펫생존": true,
+        "내_HP_60": true,
+        "적_HP_40": true,
+        "펫_HP_30": false,
+        "READY_생명력집중": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "전투_완드",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "8",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "흑마",
+      "priority": 10,
+      "conditions": {
+        "공통_전투일반": true,
+        "상황_완드중": false
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    }
+  ]
+}

@@ -20,7 +20,7 @@ __pycache__/
 
 # Local runtime state
 logs/
-profiles/
+/profiles/
 app_state.json
 user_settings.json
 modkey_sets.json

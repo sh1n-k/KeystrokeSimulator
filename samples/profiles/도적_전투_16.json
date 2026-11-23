@@ -1,0 +1,1055 @@
+{
+  "schema_version": 1,
+  "profile": {
+    "name": "도적_전투_16",
+    "favorite": false,
+    "runtime_toggle_enabled": false,
+    "runtime_toggle_key": null
+  },
+  "events": [
+    {
+      "event_name": "공통_전투",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 0,
+      "conditions": {
+        "상황_전투중": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "상황_전투중",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 1,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "몹수_1",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 2,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "적_시전중",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 3,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "내_HP_30",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 4,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "내_HP_60",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 5,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "적_HP_15",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 6,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "적_HP_30",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 7,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "기력_25",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 8,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "기력_45",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 9,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "콤보_2",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 10,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "콤보_5",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 11,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "BUFF_난도질",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 12,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "DEBUFF_후려치기",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 13,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_회피",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 14,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_후려치기",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 15,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_발차기",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 16,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_절개",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 17,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_난도질",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 18,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "READY_사악한일격",
+      "use_event": true,
+      "capture_size": [
+        8,
+        8
+      ],
+      "latest_position": [
+        0,
+        0
+      ],
+      "clicked_position": [
+        0,
+        0
+      ],
+      "ref_pixel_value": [
+        255,
+        0,
+        255
+      ],
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": false,
+      "group_id": null,
+      "priority": 19,
+      "conditions": {},
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": {
+        "format": "png",
+        "data_b64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGP8z/CfARtgwio6aCUAkYsCDoRKzmMAAAAASUVORK5CYII="
+      }
+    },
+    {
+      "event_name": "이탈_대상해제",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "도적",
+      "priority": 0,
+      "conditions": {
+        "공통_전투": true,
+        "DEBUFF_후려치기": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "이탈_후려치기",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "6",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "도적",
+      "priority": 1,
+      "conditions": {
+        "공통_전투": true,
+        "몹수_1": true,
+        "내_HP_30": false,
+        "적_HP_30": true,
+        "READY_후려치기": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "이탈_기력대기",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "도적",
+      "priority": 2,
+      "conditions": {
+        "공통_전투": true,
+        "몹수_1": true,
+        "내_HP_30": false,
+        "적_HP_30": true,
+        "기력_45": false
+      },
+      "runtime_toggle_member": false,
+      "wait_action": true,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "응급_회피_다수",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "5",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "도적",
+      "priority": 3,
+      "conditions": {
+        "공통_전투": true,
+        "몹수_1": false,
+        "내_HP_60": false,
+        "READY_회피": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "차단_발차기",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "4",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "도적",
+      "priority": 4,
+      "conditions": {
+        "공통_전투": true,
+        "적_시전중": true,
+        "READY_발차기": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "차단_기력대기",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": null,
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "도적",
+      "priority": 5,
+      "conditions": {
+        "공통_전투": true,
+        "적_시전중": true,
+        "기력_25": false
+      },
+      "runtime_toggle_member": false,
+      "wait_action": true,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "마무리_절개_처형",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "2",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "도적",
+      "priority": 6,
+      "conditions": {
+        "공통_전투": true,
+        "적_HP_15": false,
+        "콤보_2": true,
+        "READY_절개": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "마무리_난도질",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "3",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "도적",
+      "priority": 7,
+      "conditions": {
+        "공통_전투": true,
+        "몹수_1": false,
+        "콤보_2": true,
+        "BUFF_난도질": false,
+        "READY_난도질": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "마무리_절개_막타",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "2",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "도적",
+      "priority": 8,
+      "conditions": {
+        "공통_전투": true,
+        "적_HP_30": false,
+        "콤보_2": true,
+        "READY_절개": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "마무리_절개_5콤보",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "2",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "도적",
+      "priority": 9,
+      "conditions": {
+        "공통_전투": true,
+        "콤보_5": true,
+        "READY_절개": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    },
+    {
+      "event_name": "생성_사악한일격",
+      "use_event": true,
+      "capture_size": [
+        100,
+        100
+      ],
+      "latest_position": null,
+      "clicked_position": null,
+      "ref_pixel_value": null,
+      "key_to_enter": "1",
+      "press_duration_ms": null,
+      "randomization_ms": null,
+      "match_mode": "pixel",
+      "invert_match": false,
+      "region_size": null,
+      "execute_action": true,
+      "group_id": "도적",
+      "priority": 10,
+      "conditions": {
+        "공통_전투": true,
+        "READY_사악한일격": true
+      },
+      "runtime_toggle_member": false,
+      "wait_action": false,
+      "held_screenshot": null
+    }
+  ]
+}
