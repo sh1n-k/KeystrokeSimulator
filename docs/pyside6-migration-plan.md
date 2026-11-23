@@ -193,7 +193,6 @@ macOS와 Windows에서 아래 체크리스트를 모두 통과해야 `feat/pysid
 - 테스트 프레임워크: 현행 `unittest` 유지(권장) vs `pytest-qt` 도입.
 - Windows 스타일: `windows11` vs `fusion`(S1에서 화면 비교 후 결정).
 - 작업 공간 이벤트 목록: `QTreeWidget`(빠름) vs `QTreeView` + 모델(드래그·필터에 유리, 권장).
-- 미추적 `scripts/mac_capture_bench.py`, `scripts/mac_global_toggle_probe.py` 보존 여부.
 
 ## 부록 A. P1 스파이크 결과 (2026-10-26, macOS 26.7.1 arm64, uv 관리 CPython 3.14.9, PySide6-Essentials 6.12.0)
 
