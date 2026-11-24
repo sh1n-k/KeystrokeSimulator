@@ -75,6 +75,49 @@ class TestRunWindow(unittest.TestCase):
         ]
         self.assertEqual(items, ["Editor (77)", "Game (4321)"])
 
+    def _refresh_with(self, procs: list) -> None:
+        with patch("app.ui.main_window.ProcessCollector.get", return_value=procs):
+            self.window.refresh_processes()
+
+    def test_refresh_keeps_same_pid(self) -> None:
+        self.window.process_combo.setCurrentText("Game (4321)")
+
+        self._refresh_with([("Game", 4321, None), ("Game", 9, None)])
+
+        self.assertEqual(self.window.process_combo.currentText(), "Game (4321)")
+
+    def test_refresh_follows_restarted_app(self) -> None:
+        self.window.process_combo.setCurrentText("Game (4321)")
+
+        self._refresh_with([("Game", 5000, None), ("Editor", 77, None)])
+
+        self.assertEqual(self.window.selection().process, "Game (5000)")
+
+    def test_refresh_clears_missing_target_and_follows_when_it_returns(self) -> None:
+        self.window.process_combo.setCurrentText("Game (4321)")
+
+        self._refresh_with([("Editor", 77, None)])
+        self.assertEqual(self.window.selection().process, "")
+
+        self._refresh_with([("Game", 5000, None), ("Editor", 77, None)])
+        self.assertEqual(self.window.selection().process, "Game (5000)")
+
+    def test_refresh_does_not_guess_between_same_name_instances(self) -> None:
+        self.window.process_combo.setCurrentText("Game (4321)")
+
+        self._refresh_with([("Game", 1, None), ("Game", 2, None)])
+
+        self.assertEqual(self.window.selection().process, "")
+
+    def test_opening_process_list_refreshes_it(self) -> None:
+        with (
+            patch("app.ui.main_window.ProcessCollector.get", return_value=[("Game", 5000, None)]),
+            patch("PySide6.QtWidgets.QComboBox.showPopup"),
+        ):
+            self.window.process_combo.showPopup()
+
+        self.assertEqual(self.window.process_combo.itemText(0), "Game (5000)")
+
     def test_profile_target_maps_to_profile_selection(self) -> None:
         self.assertTrue(self.window.set_target("profile", "Rot"))
 

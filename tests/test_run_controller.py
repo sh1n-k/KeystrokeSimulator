@@ -17,6 +17,7 @@ from app.platform.keys import KeyUtils
 from app.presenters.run_controller import (
     RunController,
     RunSelection,
+    match_process_index,
     migrate_legacy_run_profiles,
     runnable_events,
 )
@@ -102,6 +103,26 @@ class TestRunnableEvents(unittest.TestCase):
         names = [e.event_name for e in runnable_events(events)]
 
         self.assertEqual(names, ["Wait", "State"])
+
+
+PROCESS_ITEMS = ["Editor (77)", "Game (5000)", "Tool (1)", "Tool (2)"]
+
+
+class TestMatchProcessIndex(unittest.TestCase):
+
+    def test_same_pid_is_kept(self):
+        self.assertEqual(match_process_index("Game (5000)", PROCESS_ITEMS), 1)
+
+    def test_restarted_app_follows_new_pid_by_name(self):
+        self.assertEqual(match_process_index("Game (4321)", PROCESS_ITEMS), 1)
+
+    def test_same_pid_wins_over_other_instances(self):
+        self.assertEqual(match_process_index("Tool (2)", PROCESS_ITEMS), 3)
+
+    def test_ambiguous_or_missing_name_is_not_guessed(self):
+        self.assertIsNone(match_process_index("Tool (9)", PROCESS_ITEMS))
+        self.assertIsNone(match_process_index("Gone (3)", PROCESS_ITEMS))
+        self.assertIsNone(match_process_index("Game", PROCESS_ITEMS))
 
 
 class TestStartSimulation(unittest.TestCase):
@@ -670,6 +691,34 @@ class TestReadiness(unittest.TestCase):
         RunController.start_simulation(app)
 
         app.host.before_start.assert_called_once()
+
+    @patch("app.presenters.run_controller.KeystrokeProcessor")
+    @patch("app.presenters.run_controller.load_profile")
+    def test_start_simulation_uses_refreshed_process_pid(
+        self, mock_load_profile, mock_processor_cls
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Game (4321)")
+        app.selected_profile.set("Quick")
+        mock_load_profile.return_value = ProfileModel(
+            name="Quick",
+            event_list=[EventModel(event_name="A", use_event=True, key_to_enter="A")],
+        )
+        app.host.refresh_processes.side_effect = lambda: app.selected_process.set(
+            "Game (5000)"
+        )
+
+        self.assertTrue(RunController.start_simulation(app))
+
+        self.assertEqual(mock_processor_cls.call_args.args[1], "Game (5000)")
+        self.assertEqual(app._run_pid, 5000)
+
+    def test_start_simulation_stops_when_refresh_clears_process(self):
+        app = _make_app_stub(run_profiles=["Quick"])
+        app.selected_process.set("Game (4321)")
+        app.host.refresh_processes.side_effect = lambda: app.selected_process.set("")
+
+        self.assertFalse(RunController.start_simulation(app))
 
 
 class TestEventHandlerSetup(unittest.TestCase):

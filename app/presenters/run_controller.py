@@ -99,6 +99,7 @@ class RunHost(Protocol):
     def on_run_state_changed(self) -> None: ...
     def on_status_changed(self) -> None: ...
     def before_start(self) -> None: ...
+    def refresh_processes(self) -> None: ...
     def defer(self, action: Callable[[], None]) -> None: ...
     def window_position(self) -> str | None: ...
     def is_alive(self) -> bool: ...
@@ -117,6 +118,21 @@ def safe_call[**P, R](
 def selected_process_pid(process: str) -> int | None:
     pid_match = re.search(r"\((\d+)\)", process)
     return int(pid_match.group(1)) if pid_match else None
+
+
+def match_process_index(current: str, items: list[str]) -> int | None:
+    """새 대상 목록에서 `current`("이름 (PID)")를 다시 고른다.
+
+    같은 PID를 우선한다. 앱을 재시작해 PID가 바뀌었으면 같은 이름이 하나일
+    때만 따라가고, 없거나 여럿이면 None(사용자가 직접 고른다).
+    """
+    if current in items:
+        return items.index(current)
+    if " (" not in current:
+        return None
+    name = current.rsplit(" (", 1)[0]
+    same = [i for i, item in enumerate(items) if item.rsplit(" (", 1)[0] == name]
+    return same[0] if len(same) == 1 else None
 
 
 def runnable_events(events: list[EventModel]) -> list[EventModel]:
@@ -998,6 +1014,8 @@ class RunController:
         # 빠른 캡처 HUD는 모달이 아니다. 실행 중 전역 CTRL을 캡처·저장으로
         # 받지 않도록 실행 전에 닫는다.
         self.host.before_start()
+        # 대상 앱을 재시작했으면 PID가 바뀌었으니 목록을 다시 읽어 따라간다.
+        self.host.refresh_processes()
         process = self.host.selection().process
         if not (process and "(" in process and self.run_profile_names()):
             return False

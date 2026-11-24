@@ -38,6 +38,7 @@ from app.presenters.run_controller import (
     RunController,
     RunSelection,
     StatusAction,
+    match_process_index,
     migrate_legacy_run_profiles,
 )
 from app.storage.app_state import StateUtils
@@ -66,6 +67,18 @@ from app.utils.sounds import SoundPlayer
 TargetKind = str  # "profile" | "run_set"
 RunTarget = tuple[TargetKind, str]
 VoidCallback = Callable[[], None]
+
+
+class _ProcessComboBox(QComboBox):
+    """목록을 열 때마다 실행 중인 앱을 다시 읽는다."""
+
+    def __init__(self, on_open: VoidCallback) -> None:
+        super().__init__()
+        self._on_open = on_open
+
+    def showPopup(self) -> None:
+        self._on_open()
+        super().showPopup()
 
 
 class RunWindow(QMainWindow):
@@ -138,7 +151,7 @@ class RunWindow(QMainWindow):
         grid.setColumnStretch(1, 1)
 
         self.lbl_process = QLabel()
-        self.process_combo = QComboBox()
+        self.process_combo = _ProcessComboBox(self.refresh_processes)
         self.process_combo.setMinimumContentsLength(24)
         self.process_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
@@ -212,6 +225,7 @@ class RunWindow(QMainWindow):
         self._last_target: RunTarget = ("profile", QUICK_PROFILE_NAME)
         # 실행 세트를 골라도 마지막 프로필은 기억한다(app_state.json의 profile).
         self._last_profile = QUICK_PROFILE_NAME
+        self._last_process = ""
         self.refresh_processes()
         self.load_targets()
         self.load_modkey_sets()
@@ -279,16 +293,18 @@ class RunWindow(QMainWindow):
     # ── selections ─────────────────────────────────────────────────────
 
     def refresh_processes(self) -> None:
-        current = self.process_combo.currentText()
-        current_name = current.rsplit(" (", 1)[0] if "(" in current else None
+        # 대상이 사라져 선택이 비어도 마지막 대상을 기억해 다시 나타나면 따라간다.
+        current = self.process_combo.currentText() or self._last_process
         procs = sorted(ProcessCollector.get(), key=lambda x: x[0].lower())
+        items = [f"{n} ({p})" for n, p, _ in procs]
         self.process_combo.blockSignals(True)
         self.process_combo.clear()
-        self.process_combo.addItems([f"{n} ({p})" for n, p, _ in procs])
-        idx = next((i for i, (n, _, _) in enumerate(procs) if n == current_name), 0)
-        if procs:
-            self.process_combo.setCurrentIndex(idx)
+        self.process_combo.addItems(items)
+        idx = match_process_index(current, items) if current else 0
+        self.process_combo.setCurrentIndex(-1 if idx is None else idx)
         self.process_combo.blockSignals(False)
+        if current:
+            self._last_process = current
         self._on_selection_changed()
 
     def load_targets(self, select: RunTarget | None = None) -> None:
