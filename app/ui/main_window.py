@@ -40,6 +40,7 @@ from app.presenters.run_controller import (
     StatusAction,
     match_process_index,
     migrate_legacy_run_profiles,
+    process_name,
 )
 from app.storage.app_state import StateUtils
 from app.storage.modkey_sets_storage import (
@@ -274,6 +275,7 @@ class RunWindow(QMainWindow):
 
     def refresh_texts(self) -> None:
         self.lbl_process.setText(txt("Target", "대상"))
+        self._sync_process_placeholder()
         self.lbl_target.setText(txt("Run", "실행"))
         self.edit_button.setText(txt("Edit…", "편집…"))
         self.lbl_modkeys.setText(txt("Modifier keys", "수정키"))
@@ -288,6 +290,13 @@ class RunWindow(QMainWindow):
         if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.ApplicationPaletteChange):
             # Light/dark switch: recolor the status badge and run button.
             QTimer.singleShot(0, self.update_ui)
+        elif (
+            event.type() == QEvent.Type.ActivationChange
+            and self.isActiveWindow()
+            and self._waiting_for_process()
+        ):
+            # 기다리던 대상 앱을 켜고 돌아오면 새로고침 없이 고른다.
+            self.refresh_processes()
         super().changeEvent(event)
 
     # ── selections ─────────────────────────────────────────────────────
@@ -305,7 +314,23 @@ class RunWindow(QMainWindow):
         self.process_combo.blockSignals(False)
         if current:
             self._last_process = current
+        self._sync_process_placeholder()
         self._on_selection_changed()
+
+    def _waiting_for_process(self) -> bool:
+        """기억한 대상 앱이 꺼져 있어 선택이 비어 있다."""
+        return (
+            hasattr(self, "process_combo")
+            and not self.run.is_running
+            and bool(self._last_process)
+            and self.process_combo.currentIndex() < 0
+        )
+
+    def _sync_process_placeholder(self) -> None:
+        name = process_name(self._last_process)
+        self.process_combo.setPlaceholderText(
+            txt(f"{name} (not running)", f"{name} (실행 중 아님)") if name else ""
+        )
 
     def load_targets(self, select: RunTarget | None = None) -> None:
         """"실행" 콤보: 프로필, 구분선, 저장된 실행 세트."""
@@ -437,6 +462,11 @@ class RunWindow(QMainWindow):
                 if self.process_combo.itemText(index).startswith(proc):
                     self.process_combo.setCurrentIndex(index)
                     break
+            else:
+                # 저장된 앱이 꺼져 있으면 엉뚱한 앱을 고르지 않고 기다린다.
+                self._last_process = proc
+                self.process_combo.setCurrentIndex(-1)
+                self._sync_process_placeholder()
         prof = state.get("profile")
         if isinstance(prof, str) and prof:
             self.set_target("profile", prof)

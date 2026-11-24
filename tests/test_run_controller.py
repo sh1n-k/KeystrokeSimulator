@@ -122,7 +122,10 @@ class TestMatchProcessIndex(unittest.TestCase):
     def test_ambiguous_or_missing_name_is_not_guessed(self):
         self.assertIsNone(match_process_index("Tool (9)", PROCESS_ITEMS))
         self.assertIsNone(match_process_index("Gone (3)", PROCESS_ITEMS))
-        self.assertIsNone(match_process_index("Game", PROCESS_ITEMS))
+
+    def test_saved_name_without_pid_matches_unique_name(self):
+        self.assertEqual(match_process_index("Game", PROCESS_ITEMS), 1)
+        self.assertIsNone(match_process_index("Tool", PROCESS_ITEMS))
 
 
 class TestStartSimulation(unittest.TestCase):

@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from PySide6.QtCore import QEvent
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import QMessageBox, QWidget
 from tests.qt_support import qt_app
@@ -117,6 +118,52 @@ class TestRunWindow(unittest.TestCase):
             self.window.process_combo.showPopup()
 
         self.assertEqual(self.window.process_combo.itemText(0), "Game (5000)")
+
+    def _window_with_saved_process(self, name: str) -> RunWindow:
+        with patch(
+            "app.ui.main_window.StateUtils.load_main_app_state",
+            return_value={"process": name},
+        ):
+            window = RunWindow()
+        self.addCleanup(window.deleteLater)
+        self.addCleanup(setattr, window, "_closing", True)
+        return window
+
+    def _activate(self, window: RunWindow, procs: list) -> None:
+        with (
+            patch("app.ui.main_window.ProcessCollector.get", return_value=procs),
+            patch.object(window, "isActiveWindow", return_value=True),
+        ):
+            window.changeEvent(QEvent(QEvent.Type.ActivationChange))
+
+    def test_restore_keeps_saved_process_that_is_not_running(self) -> None:
+        window = self._window_with_saved_process("Gone")
+
+        self.assertEqual(window.selection().process, "")
+        self.assertEqual(window.process_combo.placeholderText(), "Gone (not running)")
+        self.assertFalse(window.run_button.isEnabled())
+
+    def test_restore_selects_saved_process_that_is_running(self) -> None:
+        window = self._window_with_saved_process("Game")
+
+        self.assertEqual(window.selection().process, "Game (4321)")
+
+    def test_activation_picks_saved_process_once_it_runs(self) -> None:
+        window = self._window_with_saved_process("Gone")
+
+        self._activate(window, PROCS)
+        self.assertEqual(window.selection().process, "")
+
+        self._activate(window, [*PROCS, ("Gone", 55, None)])
+        self.assertEqual(window.selection().process, "Gone (55)")
+
+    def test_activation_does_not_refresh_with_a_selected_process(self) -> None:
+        self.window.process_combo.setCurrentText("Game (4321)")
+        with patch("app.ui.main_window.ProcessCollector.get") as get:
+            with patch.object(self.window, "isActiveWindow", return_value=True):
+                self.window.changeEvent(QEvent(QEvent.Type.ActivationChange))
+
+        get.assert_not_called()
 
     def test_profile_target_maps_to_profile_selection(self) -> None:
         self.assertTrue(self.window.set_target("profile", "Rot"))

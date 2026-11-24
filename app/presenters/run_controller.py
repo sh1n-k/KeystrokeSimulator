@@ -120,18 +120,22 @@ def selected_process_pid(process: str) -> int | None:
     return int(pid_match.group(1)) if pid_match else None
 
 
-def match_process_index(current: str, items: list[str]) -> int | None:
-    """새 대상 목록에서 `current`("이름 (PID)")를 다시 고른다.
+def process_name(process: str) -> str:
+    """"이름 (PID)"에서 이름만. PID가 없으면(저장된 이름) 그대로."""
+    match = re.fullmatch(r"(.*) \(\d+\)", process)
+    return match.group(1) if match else process
 
-    같은 PID를 우선한다. 앱을 재시작해 PID가 바뀌었으면 같은 이름이 하나일
-    때만 따라가고, 없거나 여럿이면 None(사용자가 직접 고른다).
+
+def match_process_index(current: str, items: list[str]) -> int | None:
+    """새 대상 목록에서 `current`("이름 (PID)" 또는 저장된 이름)를 다시 고른다.
+
+    같은 PID를 우선한다. 앱을 재시작해 PID가 바뀌었거나 이름만 있으면 같은
+    이름이 하나일 때만 따라가고, 없거나 여럿이면 None(사용자가 직접 고른다).
     """
     if current in items:
         return items.index(current)
-    if " (" not in current:
-        return None
-    name = current.rsplit(" (", 1)[0]
-    same = [i for i, item in enumerate(items) if item.rsplit(" (", 1)[0] == name]
+    name = process_name(current)
+    same = [i for i, item in enumerate(items) if process_name(item) == name]
     return same[0] if len(same) == 1 else None
 
 
