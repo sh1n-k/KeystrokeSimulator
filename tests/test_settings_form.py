@@ -60,11 +60,19 @@ class TestStartStopKey(SettingsFormTestCase):
 
         form.set_mac_hotkey_enabled(False)
         self.assertEqual(form.settings.start_stop_key, "DISABLED")
-        self.assertFalse(form.key_capture_enabled)
 
         form.set_mac_hotkey_enabled(True)
         self.assertEqual(form.settings.start_stop_key, "`")
-        self.assertTrue(form.key_capture_enabled)
+
+    def test_mac_has_no_key_field_and_needs_no_key(self) -> None:
+        """macOS는 Option+Shift 고정이라 키를 받지도, 요구하지도 않는다."""
+        form = self.form(start_stop_key="DISABLED")
+
+        self.assertTrue(form.settings.toggle_start_stop_mac)
+        self.assertFalse(form.key_capture_enabled)
+        self.assertFalse(form.capture_key("a"))
+        self.assertIsInstance(form.submit(), SaveResult)
+        self.assertTrue(self.saved()["toggle_start_stop_mac"])
 
     def test_mac_ignores_keys_while_disabled(self) -> None:
         form = self.form(toggle_start_stop_mac=False, start_stop_key="DISABLED")
@@ -73,13 +81,13 @@ class TestStartStopKey(SettingsFormTestCase):
         self.assertEqual(form.settings.start_stop_key, "DISABLED")
 
     def test_capture_accepts_alnum_symbols_and_function_keys(self) -> None:
-        form = self.form()
+        form = self.form(is_windows=True)
         for key, expected in (("a", "A"), ("7", "7"), ("[", "["), ("F12", "F12")):
             self.assertTrue(form.capture_key(key))
             self.assertEqual(form.settings.start_stop_key, expected)
 
     def test_capture_rejects_other_keys(self) -> None:
-        form = self.form(start_stop_key="Q")
+        form = self.form(is_windows=True, start_stop_key="Q")
         for key in ("!", "RETURN", "~", ""):
             self.assertFalse(form.capture_key(key))
         self.assertEqual(form.settings.start_stop_key, "Q")

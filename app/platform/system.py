@@ -211,6 +211,32 @@ class ProcessCollector:
 
 class ProcessUtils:
     @staticmethod
+    def is_process_alive(pid: int) -> bool:
+        """프로세스가 아직 살아 있는지. 확인할 수 없으면 살아 있다고 본다."""
+        if IS_WIN:
+            # Windows의 os.kill은 신호 0에도 프로세스를 종료시키므로 쓰지 않는다.
+            try:
+                win32api = _platform_module("win32api")
+                win32process = _platform_module("win32process")
+                handle = win32api.OpenProcess(0x1000, False, pid)
+            except Exception as exc:
+                # ERROR_INVALID_PARAMETER(87): 그런 PID가 없다. 권한 거부 등은 살아 있음.
+                return getattr(exc, "winerror", None) != 87
+            try:
+                return bool(win32process.GetExitCodeProcess(handle) == 259)  # STILL_ACTIVE
+            except Exception:
+                return True
+            finally:
+                win32api.CloseHandle(handle)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True
+        return True
+
+    @staticmethod
     def is_process_active(pid: int | None) -> bool:
         if not pid:
             return False

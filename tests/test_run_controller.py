@@ -1019,5 +1019,155 @@ class TestMacRuntimeTogglePollProvider(unittest.TestCase):
         self.assertFalse(self._app()._mac_runtime_toggle_enabled_for_poll())
 
 
+class TestSaveStateKeepsMissingTarget(unittest.TestCase):
+    @patch("app.presenters.run_controller.StateUtils.save_main_app_state")
+    def test_empty_selection_does_not_erase_saved_process(self, mock_save_state):
+        app = _make_app_stub()
+        app.selected_process.set("")
+
+        RunController.save_state(app)
+
+        self.assertIsNone(mock_save_state.call_args.kwargs["process"])
+
+
+class TestFollowRestartedTarget(unittest.TestCase):
+    def _running_app(self, pid: int = 4321) -> RunController:
+        app = _make_app_stub()
+        app.is_running = True
+        app.keystroke_processor = MagicMock(pid=pid)
+        app._run_pid = pid
+        app.selected_process.set(f"Game ({pid})")
+        return app
+
+    def test_follows_new_pid_after_refresh(self):
+        app = self._running_app()
+        app.host.refresh_processes.side_effect = lambda: app.selected_process.set(
+            "Game (5000)"
+        )
+
+        RunController.follow_restarted_target(app, 4321)
+
+        self.assertEqual(app.keystroke_processor.pid, 5000)
+        self.assertEqual(app._run_pid, 5000)
+
+    def test_keeps_waiting_when_app_has_not_returned(self):
+        app = self._running_app()
+        app.host.refresh_processes.side_effect = lambda: app.selected_process.set("")
+
+        RunController.follow_restarted_target(app, 4321)
+
+        self.assertEqual(app.keystroke_processor.pid, 4321)
+        self.assertEqual(app._run_pid, 4321)
+
+    def test_ignores_report_when_stopped_or_stale(self):
+        app = self._running_app()
+        app.is_running = False
+        RunController.follow_restarted_target(app, 4321)
+
+        app.is_running = True
+        RunController.follow_restarted_target(app, 999)
+
+        app.host.refresh_processes.assert_not_called()
+
+    def test_report_from_processor_thread_is_posted_to_main_thread(self):
+        app = self._running_app()
+        app.follow_restarted_target = MagicMock()
+
+        RunController.report_target_process_lost(app, 4321)
+
+        app.follow_restarted_target.assert_not_called()
+        posted = app.router.post.call_args.args[0]
+        posted()
+        app.follow_restarted_target.assert_called_once_with(4321)
+
+    @patch("app.presenters.run_controller.KeystrokeProcessor")
+    @patch("app.presenters.run_controller.load_profile")
+    def test_start_wires_processor_target_lost_callback(
+        self, mock_load_profile, mock_processor_cls
+    ):
+        app = _make_app_stub()
+        app.selected_process.set("Game (4321)")
+        app.selected_profile.set("Quick")
+        mock_load_profile.return_value = ProfileModel(
+            name="Quick",
+            event_list=[EventModel(event_name="A", use_event=True, key_to_enter="A")],
+        )
+
+        self.assertTrue(RunController.start_simulation(app))
+
+        self.assertEqual(
+            mock_processor_cls.call_args.kwargs["on_target_lost"],
+            app.report_target_process_lost,
+        )
+
+
+class TestMacStartStopIsOptionShiftOnly(unittest.TestCase):
+    """macOS는 Option+Shift 고정이다. 저장된 시작/중지 키는 쓰지 않는다."""
+
+    def _app(self, key: str, *, mac_hotkey: bool) -> RunController:
+        app = _make_app_stub()
+        app.settings.start_stop_key = key
+        app.settings.toggle_start_stop_mac = mac_hotkey
+        return app
+
+    @patch("app.presenters.run_controller.MacHotkeyTapListener")
+    @patch("app.presenters.run_controller.pynput.mouse.Listener")
+    @patch("app.presenters.run_controller.pynput.keyboard.Listener")
+    @patch("app.presenters.run_controller.platform.system", return_value="Darwin")
+    def test_mac_starts_no_pynput_listener_for_saved_key(
+        self, _system, keyboard_listener, mouse_listener, mac_tap
+    ):
+        mac_tap.return_value = MagicMock(is_active=True)
+        for key, mac_hotkey in (("W_UP", True), ("W_DN", False), ("`", False)):
+            RunController.setup_event_handlers(self._app(key, mac_hotkey=mac_hotkey))
+
+        keyboard_listener.assert_not_called()
+        mouse_listener.assert_not_called()
+
+    @patch("app.presenters.run_controller.pynput.mouse.Listener")
+    @patch("app.presenters.run_controller.platform.system", return_value="Windows")
+    def test_windows_still_uses_wheel_key(self, _system, mouse_listener):
+        RunController.setup_event_handlers(self._app("W_UP", mac_hotkey=False))
+
+        mouse_listener.assert_called_once()
+
+    @patch("app.presenters.run_controller.platform.system", return_value="Darwin")
+    def test_mac_hint_ignores_saved_key(self, _system):
+        app = self._app("W_UP", mac_hotkey=False)
+
+        self.assertEqual(RunController.hotkey_short(app), "")
+        self.assertIn("disabled", RunController.hotkey_hint_text(app))
+        self.assertFalse(RunController.should_toggle_start_stop(app, "W_UP"))
+
+        app.settings.toggle_start_stop_mac = True
+        self.assertEqual(RunController.hotkey_short(app), "⌥⇧")
+
+    @patch("app.presenters.run_controller.platform.system", return_value="Darwin")
+    def test_mac_ignores_saved_keyboard_key(self, _system):
+        app = self._app("`", mac_hotkey=False)
+
+        self.assertFalse(RunController.should_toggle_start_stop(app, "`"))
+
+    @patch("app.presenters.run_controller.platform.system", return_value="Windows")
+    def test_windows_keeps_saved_key(self, _system):
+        app = self._app("`", mac_hotkey=False)
+
+        self.assertTrue(RunController.should_toggle_start_stop(app, "`"))
+        self.assertEqual(RunController.hotkey_short(app), "`")
+        app.settings.start_stop_key = "W_UP"
+        self.assertEqual(RunController.hotkey_short(app), "wheel ↑")
+
+    @patch("app.presenters.run_controller.ProcessUtils.is_process_active", return_value=True)
+    @patch("app.presenters.run_controller.platform.system", return_value="Darwin")
+    def test_mac_wheel_does_not_toggle(self, _system, _active):
+        app = self._app("W_UP", mac_hotkey=True)
+        app.selected_process.set("Game (4321)")
+        app.latest_scroll_time = None
+
+        RunController.on_mouse_scroll(app, 0, 0, 0, 1)
+
+        app.toggle_start_stop.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

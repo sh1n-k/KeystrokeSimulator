@@ -232,8 +232,9 @@ def _resolve_start_stop_trigger(
         return None
 
     os_name = os_name or platform.system()
-    if os_name == "Darwin" and settings.toggle_start_stop_mac:
-        return "ALT_SHIFT_MAC"
+    if os_name == "Darwin":
+        # macOS는 Option+Shift 고정이다. 저장된 키는 쓰지 않는다.
+        return "ALT_SHIFT_MAC" if settings.toggle_start_stop_mac else None
     if os_name == "Windows" and settings.use_alt_shift_hotkey:
         return "ALT_SHIFT_WIN"
 

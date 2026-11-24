@@ -157,23 +157,27 @@ class SettingsDialog(QDialog):
         group = QGroupBox(txt("Start / Stop", "시작 / 중지"))
         self.keys_group = group
         layout = QVBoxLayout(group)
-        row = QHBoxLayout()
-        row.addWidget(QLabel(txt("Start/Stop Key:", "시작/중지 키:")))
-        self.key_edit = KeyCaptureEdit()
-        self.key_edit.setPlaceholderText(txt("Press Key", "키 입력"))
-        self.key_edit.setFixedWidth(120)
-        self.key_edit.setToolTip(
-            txt(
-                "Click, then press a key (A-Z, 0-9, symbols, F1-F35).",
-                "클릭한 뒤 키를 누르세요(A-Z, 0-9, 기호, F1-F35).",
-            )
-        )
-        self.key_edit.keyCaptured.connect(self._on_key_captured)
+        # macOS는 Option+Shift 고정이라 키 칸 없이 켜고 끄기만 둔다.
+        self.key_edit: KeyCaptureEdit | None = None
         if self.form.is_windows:
+            row = QHBoxLayout()
+            row.addWidget(QLabel(txt("Start/Stop Key:", "시작/중지 키:")))
+            self.key_edit = KeyCaptureEdit()
+            self.key_edit.setPlaceholderText(txt("Press Key", "키 입력"))
+            self.key_edit.setFixedWidth(120)
+            self.key_edit.setToolTip(
+                txt(
+                    "Click, then press a key (A-Z, 0-9, symbols, F1-F35).",
+                    "클릭한 뒤 키를 누르세요(A-Z, 0-9, 기호, F1-F35).",
+                )
+            )
+            self.key_edit.keyCaptured.connect(self._on_key_captured)
             self.hotkey_check = QCheckBox(txt("Use Alt+Shift", "Alt+Shift 사용"))
             self.hotkey_check.toggled.connect(self._on_alt_shift_toggled)
             row.addWidget(self.key_edit)
             row.addWidget(self.hotkey_check)
+            row.addStretch(1)
+            layout.addLayout(row)
             hint = txt(
                 "Start/Stop: A-Z, 0-9, special keys only.",
                 "시작/중지: A-Z, 0-9, 특수키만 허용됩니다.",
@@ -187,13 +191,10 @@ class SettingsDialog(QDialog):
             )
             self.hotkey_check.toggled.connect(self._on_mac_hotkey_toggled)
             layout.addWidget(self.hotkey_check)
-            row.addWidget(self.key_edit)
             hint = txt(
                 "macOS: Start/Stop is Option+Shift.",
                 "macOS: 시작/중지는 Option+Shift입니다.",
             )
-        row.addStretch(1)
-        layout.addLayout(row)
         self.keys_hint = QLabel(hint)
         style.caption(self.keys_hint)
         layout.addWidget(self.keys_hint)
@@ -321,6 +322,8 @@ class SettingsDialog(QDialog):
         self._refresh_key()
 
     def _refresh_key(self) -> None:
+        if self.key_edit is None:
+            return
         self.key_edit.setText(self.form.start_stop_key_display)
         self.key_edit.setEnabled(self.form.key_capture_enabled)
 
@@ -410,12 +413,12 @@ class SettingsDialog(QDialog):
         label = self.error_labels.get(error.section)
         if label is not None:
             label.setText(error.message)
-        focus: QWidget = (
+        focus: QWidget | None = (
             self.timing_edits[f"{TIMING_PREFIXES[0]}_min"]
             if error.section == "timing"
             else self.key_edit
         )
-        if focus.isEnabled():
+        if focus is not None and focus.isEnabled():
             focus.setFocus()
 
     def ask_reset(self) -> bool:

@@ -583,5 +583,50 @@ class TestProcessorStart(unittest.TestCase):
         proc.main_thread.start.assert_called_once()
 
 
+class TestTargetAliveCheck(unittest.TestCase):
+    def _proc(self) -> KeystrokeProcessor:
+        proc = KeystrokeProcessor.__new__(KeystrokeProcessor)
+        proc.pid = 4321
+        proc._on_target_lost = MagicMock()
+        proc._last_alive_check = 0.0
+        return proc
+
+    @patch.object(processor_module.ProcessUtils, "is_process_alive", return_value=False)
+    def test_reports_dead_target_at_most_once_per_interval(self, alive):
+        proc = self._proc()
+
+        proc._check_target_alive(10.0)
+        proc._check_target_alive(10.5)
+        proc._check_target_alive(11.1)
+
+        self.assertEqual(proc._on_target_lost.call_args_list, [call(4321), call(4321)])
+        self.assertEqual(alive.call_count, 2)
+
+    @patch.object(processor_module.ProcessUtils, "is_process_alive", return_value=True)
+    def test_alive_target_is_not_reported(self, _alive):
+        proc = self._proc()
+
+        proc._check_target_alive(10.0)
+
+        proc._on_target_lost.assert_not_called()
+
+    @patch.object(
+        processor_module.ProcessUtils, "is_process_alive", side_effect=RuntimeError("x")
+    )
+    def test_check_failure_does_not_break_loop(self, _alive):
+        proc = self._proc()
+
+        proc._check_target_alive(10.0)
+
+        proc._on_target_lost.assert_not_called()
+
+    def test_without_callback_skips_check(self):
+        proc = self._proc()
+        proc._on_target_lost = None
+        with patch.object(processor_module.ProcessUtils, "is_process_alive") as alive:
+            proc._check_target_alive(10.0)
+        alive.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

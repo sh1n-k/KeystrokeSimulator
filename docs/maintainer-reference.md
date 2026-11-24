@@ -114,7 +114,8 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 - 다중 선택 조건 표는 선택이 `BULK_MATRIX_MAX_EVENTS`(5)개 이하면 조건×이벤트 행렬(칸을 누르면 그 이벤트만 켜짐 → 꺼짐 → 없음, 칸마다 되돌리기 한 단계), 넘으면 켜짐·꺼짐·없음 개수 요약 표로 바뀐다. 이벤트마다 값이 다르거나 빠진 조건 이름은 warn 색으로 칠한다. 색은 `style.status_colors`(켜짐 ready, 꺼짐 error)를 쓴다.
 - 키나 화면이 빠진 불완전한 이벤트도 저장하고 배지로 표시한다. 실행 시 로드 단계에서 걸러진다.
 - 메인(실행) 창은 Esc로 닫지 않는다. 보조 창은 Esc로 닫는다.
-- 대상 앱은 "이름 (PID)"로 고른다. 시작 직전과 대상 목록을 열 때 목록을 다시 읽고(`match_process_index`), 같은 PID가 있으면 유지하고, 없으면 같은 이름이 하나일 때만 새 PID로 따라간다. 같은 이름이 없거나 여럿이면 선택을 비워 시작을 막는다(같은 이름의 여러 인스턴스 중 하나를 지정하는 경우를 지키기 위해 이름만으로 비교하지 않는다). 실행 중에 대상 앱을 재시작하는 경우는 따라가지 않는다(2026-11 결정).
+- macOS 시작/중지는 Option+Shift 고정이다(켜고 끄기만 있다). macOS에서는 저장된 `start_stop_key`(키·휠)를 리스너·안내·단축키 묶음 충돌 검사 어디에서도 쓰지 않고(`RunController._start_stop_key`, `_resolve_start_stop_trigger`), 설정 창에 키 칸을 두지 않는다. `toggle_start_stop_mac`을 끌 때 `start_stop_key`를 `DISABLED`로 쓰는 저장 형식은 유지한다(2026-11 결정).
+- 대상 앱은 "이름 (PID)"로 고른다. 시작 직전과 대상 목록을 열 때 목록을 다시 읽고(`match_process_index`), 같은 PID가 있으면 유지하고, 없으면 같은 이름이 하나일 때만 새 PID로 따라간다. 같은 이름이 없거나 여럿이면 선택을 비워 시작을 막는다(같은 이름의 여러 인스턴스 중 하나를 지정하는 경우를 지키기 위해 이름만으로 비교하지 않는다). 실행 중 대상이 앞에 없을 때 processor가 1초마다 그 PID가 살아 있는지 보고(`ProcessUtils.is_process_alive`), 종료됐으면 `RunController.report_target_process_lost` → 메인 스레드 `follow_restarted_target`이 목록을 다시 읽어 같은 규칙으로 새 PID를 processor와 `_run_pid`에 넣는다. 재시작될 때까지 반복한다(2026-11 결정).
 - 저장된 대상 앱(`app_state.json`의 `process`, 이름만)이 꺼진 채 앱을 켜면 다른 앱을 고르지 않고 선택을 비운 채 "이름 (실행 중 아님)"을 placeholder로 보인다. 그 이름은 위 규칙으로 시작 직전·목록 열기·실행 창이 다시 활성화될 때(선택이 비었고 실행 중이 아닐 때만) 따라간다(2026-11 결정).
 
 ## 변경 체크리스트

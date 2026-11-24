@@ -573,6 +573,7 @@ class KeystrokeProcessor:
     # While Pass/mod is held, skip capture but poll often so release leads
     # promptly into a fresh grab/match (not an extra 100ms back-off).
     MOD_ACTIVE_POLL_INTERVAL = 0.02
+    TARGET_ALIVE_CHECK_S = 1.0
     # 백엔드가 죽었을 때 다시 여는 최소 간격. 디스플레이 슬립처럼 원인이
     # 지속되는 동안 매 사이클 재시도하지 않도록 한다.
     BACKEND_RETRY_INTERVAL_S = _BACKEND_RETRY_INTERVAL_S
@@ -584,8 +585,13 @@ class KeystrokeProcessor:
         events: list[EventModel],
         mod_keys: ModificationKeys,
         term_event: threading.Event,
+        *,
+        on_target_lost: Callable[[int], None] | None = None,
     ) -> None:
         self.main_app = main_app
+        # 대상 프로세스가 종료됐을 때 이 스레드에서 부른다(받는 쪽이 메인 스레드로 넘긴다).
+        self._on_target_lost = on_target_lost
+        self._last_alive_check = 0.0
         self.term_event = term_event
         self.os_type = platform.system()
 
@@ -873,6 +879,7 @@ class KeystrokeProcessor:
                     is_proc_active_cached = ProcessUtils.is_process_active(self.pid)
                     last_proc_check_time = current_time
                     if not is_proc_active_cached:
+                        self._check_target_alive(current_time)
                         await asyncio.sleep(0.5)
                         continue
 
@@ -901,6 +908,23 @@ class KeystrokeProcessor:
             if self._screen_backend is backend:
                 self._screen_backend = None
             self._join_backend_closers()
+
+    def _check_target_alive(self, now: float) -> None:
+        """대상이 앞에 없을 때, 종료됐으면 알린다. 재시작을 기다리는 동안 반복한다."""
+        pid = self.pid
+        if (
+            pid is None
+            or self._on_target_lost is None
+            or now - self._last_alive_check < self.TARGET_ALIVE_CHECK_S
+        ):
+            return
+        self._last_alive_check = now
+        try:
+            if not ProcessUtils.is_process_alive(pid):
+                self._on_target_lost(pid)
+        except Exception as exc:
+            # 실행 루프를 죽이지 않는다. 따라가기만 못 할 뿐이다.
+            logger.debug(f"Target alive check failed for pid {pid}: {exc}")
 
     @staticmethod
     def _clamp_to_screen(rect: Rect, screen_w: int, screen_h: int) -> Rect | None:

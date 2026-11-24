@@ -618,22 +618,30 @@ class RunController:
             "tone": "ready",
         }
 
+    def _start_stop_key(self) -> str:
+        """Option+Shift가 아닌 시작/중지 키. macOS는 Option+Shift 고정이라
+        저장된 키를 쓰지 않는다."""
+        if platform.system() == "Darwin":
+            return "DISABLED"
+        return str(self.settings.start_stop_key or "DISABLED")
+
     def hotkey_hint_text(self) -> str:
+        key = self._start_stop_key()
         if platform.system() == "Darwin" and self.settings.toggle_start_stop_mac:
             trigger = txt("Alt + Shift", "Alt + Shift")
         elif platform.system() == "Windows" and self.settings.use_alt_shift_hotkey:
             trigger = txt("Alt + Shift", "Alt + Shift")
-        elif self.settings.start_stop_key == "DISABLED":
+        elif key == "DISABLED":
             return txt(
                 "Start/stop hotkey is disabled. Use the Start button.",
                 "시작/중지 단축키가 꺼져 있습니다. 시작 버튼을 사용하세요.",
             )
-        elif self.settings.start_stop_key == "W_UP":
+        elif key == "W_UP":
             trigger = txt("Mouse wheel up", "마우스 휠 위")
-        elif self.settings.start_stop_key == "W_DN":
+        elif key == "W_DN":
             trigger = txt("Mouse wheel down", "마우스 휠 아래")
         else:
-            trigger = self.settings.start_stop_key
+            trigger = key
 
         hint = txt(
             "Start or stop with {trigger}.",
@@ -660,7 +668,7 @@ class RunController:
             return "⌥⇧"
         if platform.system() == "Windows" and settings.use_alt_shift_hotkey:
             return "Alt+Shift"
-        key = str(settings.start_stop_key or "")
+        key = self._start_stop_key()
         if key == "DISABLED":
             return ""
         wheel = {"W_UP": txt("wheel ↑", "휠 ↑"), "W_DN": txt("wheel ↓", "휠 ↓")}
@@ -720,7 +728,7 @@ class RunController:
         if use_mac_hotkeys:
             self._start_mac_hotkeys()
 
-        key = self.settings.start_stop_key
+        key = self._start_stop_key()
         if key.startswith("W_"):
             self.start_stop_mouse_listener = cast(
                 InputListener,
@@ -821,8 +829,8 @@ class RunController:
             and not (
                 platform.system() == "Windows" and self.settings.use_alt_shift_hotkey
             )
-            and self.settings.start_stop_key not in {"DISABLED", "W_UP", "W_DN"}
-            and key_str == self.settings.start_stop_key.upper()
+            and self._start_stop_key() not in {"DISABLED", "W_UP", "W_DN"}
+            and key_str == self._start_stop_key().upper()
         )
 
     def should_toggle_runtime_group(self, key_str: str, current_time: float) -> bool:
@@ -929,7 +937,7 @@ class RunController:
         if self.latest_scroll_time and curr_time - self.latest_scroll_time <= 0.75:
             return
 
-        key = self.settings.start_stop_key
+        key = self._start_stop_key()
         if (key == "W_UP" and dy > 0) or (key == "W_DN" and dy < 0):
             self.toggle_start_stop()
         self.latest_scroll_time = curr_time
@@ -1051,6 +1059,7 @@ class RunController:
             events,
             mod_keys,
             self.terminate_event,
+            on_target_lost=self.report_target_process_lost,
         )
         if not self.keystroke_processor.event_data_list:
             self.keystroke_processor = None
@@ -1066,6 +1075,24 @@ class RunController:
         self.save_state()
         self.sound_player.play_start_sound()
         return True
+
+    def report_target_process_lost(self, pid: int) -> None:
+        """processor 스레드에서 불린다. 대상 앱이 종료됐으니 메인 스레드에서
+        같은 이름의 새 프로세스를 찾게 한다."""
+        self.router.post(lambda: self.follow_restarted_target(pid))
+
+    def follow_restarted_target(self, lost_pid: int) -> None:
+        """실행 중 대상 앱을 재시작했으면 새 PID로 이어서 입력한다."""
+        processor = self.keystroke_processor
+        if not self.is_running or processor is None or processor.pid != lost_pid:
+            return
+        self.host.refresh_processes()
+        new_pid = selected_process_pid(self.host.selection().process)
+        if new_pid is None or new_pid == lost_pid:
+            return
+        logger.info(f"Target process restarted: PID {lost_pid} -> {new_pid}")
+        processor.pid = new_pid
+        self._run_pid = new_pid
 
     def stop_simulation(self) -> None:
         if self.keystroke_processor:
@@ -1105,7 +1132,8 @@ class RunController:
     def save_state(self) -> None:
         sel = self.host.selection()
         StateUtils.save_main_app_state(
-            process=sel.process.split(" (")[0],
+            # 대상 앱이 꺼져 선택이 비었으면 저장된 대상을 지우지 않는다(None은 건너뜀).
+            process=process_name(sel.process) or None,
             profile=sel.profile,
             run_set=sel.run_set or CURRENT_RUN_SET_ID,
             modkey_set=sel.modkey_set,

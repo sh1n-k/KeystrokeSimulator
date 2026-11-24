@@ -1,8 +1,11 @@
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app.domain.models import EventModel, ProfileModel
 from app.platform import system
@@ -134,6 +137,45 @@ class TestKeyUtils(unittest.TestCase):
         self.assertEqual(
             KeyUtils.get_key_name_for_keycode(0xC0, os_name="Windows"), "`"
         )
+
+
+class TestProcessAlive(unittest.TestCase):
+    @unittest.skipIf(system.IS_WIN, "POSIX 경로")
+    def test_posix_alive_and_dead_pids(self):
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        child.wait()
+
+        self.assertTrue(system.ProcessUtils.is_process_alive(os.getpid()))
+        self.assertFalse(system.ProcessUtils.is_process_alive(child.pid))
+
+    def _win_alive(self, *, open_error=None, exit_code=259):
+        win32api = MagicMock()
+        win32api.OpenProcess.side_effect = open_error
+        win32api.OpenProcess.return_value = "handle"
+        win32process = MagicMock()
+        win32process.GetExitCodeProcess.return_value = exit_code
+        modules = {"win32api": win32api, "win32process": win32process}
+        with (
+            patch.object(system, "IS_WIN", True),
+            patch.object(system, "_platform_module", side_effect=modules.__getitem__),
+        ):
+            result = system.ProcessUtils.is_process_alive(1234)
+        return result, win32api.CloseHandle
+
+    def test_windows_running_and_exited_process(self):
+        alive, close = self._win_alive(exit_code=259)
+        self.assertTrue(alive)
+        close.assert_called_once_with("handle")
+        self.assertFalse(self._win_alive(exit_code=0)[0])
+
+    def test_windows_missing_pid_is_dead_but_access_denied_is_alive(self):
+        missing = OSError("no such pid")
+        missing.winerror = 87  # type: ignore[attr-defined]
+        denied = OSError("access denied")
+        denied.winerror = 5  # type: ignore[attr-defined]
+
+        self.assertFalse(self._win_alive(open_error=missing)[0])
+        self.assertTrue(self._win_alive(open_error=denied)[0])
 
 
 class TestPermissionUtils(unittest.TestCase):
@@ -341,6 +383,33 @@ class TestRuntimeToggleUtils(unittest.TestCase):
 
         self.assertEqual(len(errors), 1)
         self.assertIn("conflicts with Start/Stop", errors[0])
+
+    def test_mac_saved_start_stop_key_does_not_conflict(self):
+        """macOS는 Option+Shift 고정이라 저장된 키와 겹쳐도 충돌이 아니다."""
+        profile = ProfileModel(
+            name="P1",
+            runtime_toggle_enabled=True,
+            runtime_toggle_key="F6",
+            event_list=[
+                EventModel(
+                    event_name="Extra", key_to_enter="A", runtime_toggle_member=True
+                )
+            ],
+        )
+        settings = SimpleNamespace(
+            toggle_start_stop_mac=False, use_alt_shift_hotkey=False, start_stop_key="F6"
+        )
+
+        mac = collect_runtime_toggle_validation_errors(
+            profile, profile.event_list, settings=settings, os_name="Darwin"
+        )
+        win = collect_runtime_toggle_validation_errors(
+            profile, profile.event_list, settings=settings, os_name="Windows"
+        )
+
+        self.assertEqual(mac, [])
+        self.assertEqual(len(win), 1)
+        self.assertIn("conflicts with Start/Stop", win[0])
 
     def test_collect_validation_errors_for_runtime_toggle_member_missing_key(self):
         profile = ProfileModel(

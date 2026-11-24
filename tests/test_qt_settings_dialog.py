@@ -175,7 +175,8 @@ class TestFields(QtSettingsTestCase):
         self.assertEqual(self.host.calls, [])
 
     def test_key_capture_sets_start_stop_key(self) -> None:
-        dialog = self.make()
+        dialog = self.make(is_windows=True)
+        assert dialog.key_edit is not None
 
         QTest.keyClick(dialog.key_edit, Qt.Key.Key_F5)
         self.assertEqual(dialog.key_edit.text(), "F5")
@@ -193,11 +194,22 @@ class TestFields(QtSettingsTestCase):
 
         dialog.hotkey_check.setChecked(False)
 
-        self.assertFalse(dialog.key_edit.isEnabled())
-        self.assertEqual(dialog.key_edit.text(), "")
+        self.assertIsNone(dialog.key_edit)
         dialog.ok_button.click()
         self.assertEqual(self.saved()["start_stop_key"], "DISABLED")
         self.assertFalse(self.saved()["toggle_start_stop_mac"])
+
+    def test_mac_has_no_key_field_and_saves_without_key(self) -> None:
+        save_user_settings(UserSettings(start_stop_key="DISABLED"))
+        dialog = self.make(is_windows=False)
+        dialog.show()
+
+        self.assertIsNone(dialog.key_edit)
+        self.assertTrue(dialog.hotkey_check.isChecked())
+        dialog.ok_button.click()
+
+        self.assertFalse(dialog.isVisible())
+        self.assertTrue(self.saved()["toggle_start_stop_mac"])
 
     def test_windows_requires_key_unless_alt_shift(self) -> None:
         save_user_settings(UserSettings(start_stop_key="DISABLED"))
@@ -209,6 +221,7 @@ class TestFields(QtSettingsTestCase):
         self.assertTrue(dialog.isVisible())
 
         dialog.hotkey_check.setChecked(True)
+        assert dialog.key_edit is not None
         self.assertFalse(dialog.key_edit.isEnabled())
         dialog.ok_button.click()
 

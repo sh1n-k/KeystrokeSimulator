@@ -75,11 +75,11 @@ class SettingsForm:
 
     @property
     def key_capture_enabled(self) -> bool:
-        """키 칸이 입력을 받는지. Windows는 Alt+Shift가 꺼졌을 때, 그 외는
-        Option+Shift 단축키가 켜졌을 때."""
+        """키 칸이 입력을 받는지. Windows는 Alt+Shift가 꺼졌을 때만.
+        macOS는 Option+Shift 고정이라 키 칸이 없다."""
         if self.is_windows:
             return not self.settings.use_alt_shift_hotkey
-        return self.settings.toggle_start_stop_mac
+        return False
 
     def set_use_alt_shift(self, enabled: bool) -> None:
         self.settings.use_alt_shift_hotkey = enabled
@@ -136,10 +136,8 @@ class SettingsForm:
         candidate = replace(self.settings)
         candidate.language = normalize_language(candidate.language)
         missing_key = candidate.start_stop_key in _UNSET_START_STOP_KEYS
-        if self.is_windows:
-            needs_key = not candidate.use_alt_shift_hotkey
-        else:
-            needs_key = candidate.toggle_start_stop_mac
+        # macOS는 Option+Shift 고정이라 키가 필요 없다.
+        needs_key = self.is_windows and not candidate.use_alt_shift_hotkey
         if needs_key and missing_key:
             return (
                 FormError(
