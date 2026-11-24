@@ -15,7 +15,7 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 | --- | --- |
 | `app/__main__.py` | GUI 진입점(`app.ui.application.main`) |
 | `app/ui/application.py` | `QApplication` 생성, 앱 아이콘(`app/ui/assets/app_icon.svg`) 적용, 로그·예외 훅, 스타일 적용, SIGINT/SIGTERM 종료 |
-| `app/ui/main_window.py` | 실행 창(대상·프로세스·수정키 콤보, 상태 배지, 시작 버튼, ⚙ 메뉴) |
+| `app/ui/main_window.py` | 실행 창(대상 앱·실행·수정키 콤보, 상태 배지, 시작 버튼, ⚙ 메뉴) |
 | `app/presenters/run_controller.py` | 실행 상태와 입력 동작 조정: listener 연결, 시작/중지, runtime toggle, 준비 상태, 상태 저장 |
 | `app/platform/input_router.py` | OS listener 수명, App Nap 응답성 유지, `Dispatcher` 프로토콜(start/post/stop)로 메인 스레드 전달 |
 | `app/ui/dispatcher.py` | Qt `Dispatcher`: Signal + QueuedConnection으로 메인 스레드 실행, `stop` 시 세대 번호로 남은 동작 폐기 |
@@ -98,25 +98,40 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 
 ## UI 정책
 
-2026-09 UI 개편에서 확정한 결정이다. 바꾸려면 사용자와 먼저 합의한다.
+사용자와 합의한 결정이다. 바꾸려면 먼저 합의한다.
 
 - 캡처 HUD는 게임 화면과 비교하기 위해 topmost를 유지한다. 작업 공간·설정·수정키 창은 topmost가 아니다.
-- 캡처 박스와 겹치면 HUD는 박스 바로 옆(같은 모니터 안의 가장 가까운 쪽)으로만 비킨다. ALT로 박스를 옮기는 동안 박스가 원래 자리에서 떨어지면 돌아오고, ALT를 놓은 뒤에는 움직이지 않는다. 위치 저장은 원래 자리 기준이다(2026-10 결정).
+- 캡처 박스와 겹치면 HUD는 박스 바로 옆(같은 모니터 안의 가장 가까운 쪽)으로만 비킨다. ALT로 박스를 옮기는 동안 박스가 원래 자리에서 떨어지면 돌아오고, ALT를 놓은 뒤에는 움직이지 않는다. 위치 저장은 원래 자리 기준이다.
 - 캡처 HUD에는 이름만 두고 키칸은 두지 않는다. ALT로 옮긴 위치는 CTRL로 고정하기 전까지 적용되지 않는다.
-- 캡처 HUD의 크기칸은 고급 밖에 상시 둔다. 미리보기·돋보기 휠은 실시간 화면(고정 전)에서만 비율을 지켜 크기를 바꾸고(고정 후에는 크기칸을 쓴다), 크기칸은 클릭으로만 포커스를 받는다(포커스가 남으면 CTRL이 무시된다). 새 크기 프레임이 오기 전에는 고정하지 않으며, 고정한 뒤에는 화살표로 고른 픽셀을 1px(Shift 10px)씩 옮긴다. 고정 후 위치나 크기를 바꾸면 CTRL로 다시 고정하기 전까지 적용되지 않는다(2026-11 결정).
+- 캡처 HUD의 크기칸은 고급 밖에 상시 둔다. 미리보기·돋보기 휠은 실시간 화면(고정 전)에서만 비율을 지켜 크기를 바꾸고(고정 후에는 크기칸을 쓴다), 크기칸은 클릭으로만 포커스를 받는다(포커스가 남으면 CTRL이 무시된다). 새 크기 프레임이 오기 전에는 고정하지 않으며, 고정한 뒤에는 화살표로 고른 픽셀을 1px(Shift 10px)씩 옮긴다. 고정 후 위치나 크기를 바꾸면 CTRL로 다시 고정하기 전까지 적용되지 않는다.
 - 캡처 영역 테두리는 박스 바깥쪽 얇은 창 4개로 그리며 캡처본에 찍히면 안 된다.
 - Quick 프로필은 삭제·이름 변경할 수 없다. 빠른 이벤트(연속 캡처)는 Quick 뒤에 자동 번호 이름으로 추가만 하고, 실행을 시작하면 HUD를 닫는다.
 - 수정키 세트 선택은 프로필·실행 세트와 독립이다.
-- 실행 세트를 고르면 그 세트의 현재 프로필만 실행한다. 남은 멤버가 없으면 마지막 프로필로 대신 실행하지 않고 시작을 막는다(2026-10 결정).
+- 실행 세트를 고르면 그 세트의 현재 프로필만 실행한다. 남은 멤버가 없으면 마지막 프로필로 대신 실행하지 않고 시작을 막는다.
 - 작업 공간은 자동 저장하며 확인 대화상자 대신 되돌리기를 쓴다. 삭제·순서·일괄 변경(조건 포함)·그룹 변경과 캡처 지우기·다시 캡처는 되돌리기 대상이다.
 - 일괄 조건 추가·변경은 자기 자신이거나 순환이 생기는 이벤트를 건너뛰고 건너뛴 수를 상태 줄에 알린다. 바뀐 이벤트가 없으면 되돌리기 항목을 남기지 않는다.
 - 화면 지우기나 일괄 조건 추가·행렬 칸 전환으로 화면 없는 상태가 파생 상태가 되면(실행에 로드되어 조건이 맞으면 켜짐) 상태 줄에 알린다.
 - 다중 선택 조건 표는 선택이 `BULK_MATRIX_MAX_EVENTS`(5)개 이하면 조건×이벤트 행렬(칸을 누르면 그 이벤트만 켜짐 → 꺼짐 → 없음, 칸마다 되돌리기 한 단계), 넘으면 켜짐·꺼짐·없음 개수 요약 표로 바뀐다. 이벤트마다 값이 다르거나 빠진 조건 이름은 warn 색으로 칠한다. 색은 `style.status_colors`(켜짐 ready, 꺼짐 error)를 쓴다.
 - 키나 화면이 빠진 불완전한 이벤트도 저장하고 배지로 표시한다. 실행 시 로드 단계에서 걸러진다.
 - 메인(실행) 창은 Esc로 닫지 않는다. 보조 창은 Esc로 닫는다.
-- macOS 시작/중지는 Option+Shift 고정이다(켜고 끄기만 있다). macOS에서는 저장된 `start_stop_key`(키·휠)를 리스너·안내·단축키 묶음 충돌 검사 어디에서도 쓰지 않고(`RunController._start_stop_key`, `_resolve_start_stop_trigger`), 설정 창에 키 칸을 두지 않는다. `toggle_start_stop_mac`을 끌 때 `start_stop_key`를 `DISABLED`로 쓰는 저장 형식은 유지한다(2026-11 결정).
-- 대상 앱은 "이름 (PID)"로 고른다. 시작 직전과 대상 목록을 열 때 목록을 다시 읽고(`match_process_index`), 같은 PID가 있으면 유지하고, 없으면 같은 이름이 하나일 때만 새 PID로 따라간다. 같은 이름이 없거나 여럿이면 선택을 비워 시작을 막는다(같은 이름의 여러 인스턴스 중 하나를 지정하는 경우를 지키기 위해 이름만으로 비교하지 않는다). 실행 중 대상이 앞에 없을 때 processor가 1초마다 그 PID가 살아 있는지 보고(`ProcessUtils.is_process_alive`), 종료됐으면 `RunController.report_target_process_lost` → 메인 스레드 `follow_restarted_target`이 목록을 다시 읽어 같은 규칙으로 새 PID를 processor와 `_run_pid`에 넣는다. 재시작될 때까지 반복한다(2026-11 결정).
-- 저장된 대상 앱(`app_state.json`의 `process`, 이름만)이 꺼진 채 앱을 켜면 다른 앱을 고르지 않고 선택을 비운 채 "이름 (실행 중 아님)"을 placeholder로 보인다. 그 이름은 위 규칙으로 시작 직전·목록 열기·실행 창이 다시 활성화될 때(선택이 비었고 실행 중이 아닐 때만) 따라간다(2026-11 결정).
+- macOS 시작/중지는 Option+Shift 고정이고 켜고 끄기만 있다. 설정 창에 키 칸이 없고, 저장된 `start_stop_key`(키·휠)는 리스너·안내·단축키 묶음 충돌 검사에 쓰지 않는다(`RunController._start_stop_key`, `_resolve_start_stop_trigger`). 끌 때 `start_stop_key`를 `DISABLED`로 쓰는 저장 형식은 Windows와 같게 유지한다.
+
+## 실행 대상 프로세스
+
+- 대상 앱은 "이름 (PID)"로 고르고 PID로 식별한다. 이름만으로 비교하지 않는 이유는 같은 이름의 여러 인스턴스 중 하나를 지정하는 경우를 지키기 위해서다.
+- 목록을 다시 읽을 때의 선택 규칙은 `match_process_index` 하나다: 같은 PID가 있으면 유지, 없으면 같은 이름이 정확히 하나일 때만 새 PID로 따라감, 없거나 여럿이면 선택을 비워 시작을 막는다.
+- 목록을 다시 읽는 때: 시작 직전, 대상 목록을 열 때, 선택이 비었고 실행 중이 아닐 때 실행 창이 다시 활성화될 때, 새로고침 버튼·상태 배지의 새로고침.
+- 실행 중 대상이 앞에 없으면 processor가 1초마다 PID 생존을 확인한다(`ProcessUtils.is_process_alive`; Windows는 `os.kill`이 신호 0에도 프로세스를 죽이므로 `OpenProcess`/`GetExitCodeProcess`). 종료됐으면 `report_target_process_lost` → 메인 스레드 `follow_restarted_target`이 목록을 다시 읽고 새 PID를 processor와 `_run_pid`에 넣는다. 앱이 다시 뜰 때까지 반복한다.
+- 저장된 대상(`app_state.json`의 `process`, 이름만)이 꺼진 채 앱을 켜면 다른 앱을 고르지 않고 선택을 비운 채 "이름 (실행 중 아님)" placeholder를 보인다. 선택이 비어 있으면 `save_state`는 저장된 이름을 덮어쓰지 않는다.
+- 알려진 한계: 같은 이름의 앱 두 개 중 지정한 쪽이 실행 중 죽고 하나만 남으면 그쪽으로 따라간다(막을지 정책 미정). 시작/중지 키가 휠이면(Windows) 옛 PID가 앞에 있어야 반응한다. 종료된 PID가 다른 프로세스에 재사용되면 따라가지 않는다.
+
+## 화면 캡처 백엔드
+
+- macOS는 감시 영역 전체를 덮는 SCStream 하나를 연다. 콜백은 버퍼만 붙잡고 읽을 때 필요한 영역만 복사한다. mss는 쓰지 않는다(픽셀값이 달라 SCStream 기준색 프로필이 매칭되지 않는다).
+- macOS 스트림 fps를 루프 주기에 맞춰 낮추는 최적화는 이득이 없다. 실측(3440×1440 전체): 앱 CPU 30fps 1.7%, 10fps 0.8%.
+- Windows는 mss 적응형 grab이다. 그룹이 둘 이상인 첫 grab에서 1회 비용을 보정하고(1×1 호출 단가 `C`, 주 모니터 전체 `U_full`), `N*C > U_full*1.05`이면 외접 영역 1회 grab 후 잘라 쓰고 아니면 그룹별 grab이다. 보정 실패 시 그룹별 grab. 미리보기(N=1)는 보정하지 않는다.
+- 채택하지 않은 대안: 항상 외접 grab(멀리 떨어진 그룹 2개에서 약 2.5배 느려짐), 고정 문턱 `N>=5`(기기별 비용 차를 못 따름), DXGI 교체. 실측(2560×1440): `C`≈7ms, `U_full`≈28–38ms. 벤치 스크립트는 `scripts/bench_capture_*.py`.
+- Windows 잔여 위험: 멀티 모니터에서 외접 영역이 다른 모니터를 넓게 덮으면 `U_full`이 낙관적일 수 있고, 해상도·DPI 변경 후에는 실행을 다시 시작해야 재보정된다.
 
 ## 변경 체크리스트
 
@@ -128,12 +143,14 @@ UI는 PySide6(Qt) 하나다. 패키지 의존 방향은 `ui` → `presenters` �
 | runtime toggle(단축키 묶음) | 모델·저장 필드, `app/domain/runtime_toggle.py`, `app/ui/workspace_panels.py`, `app/ui/workspace_detail.py`, `app/presenters/run_controller.py`, `app/engine/processor.py` | `test_profile_json_storage.py`, `test_resolve_effective_states.py`, `test_condition_and_core_logic.py`, `test_run_controller.py` | 실제 실행; Windows system/hotkey 변경은 Windows 필수 |
 | 프로필 경로·저장 | `app/storage/profile_storage.py`, `app/storage/profile_display.py`, `app/ui/main_window.py`, `app/presenters/workspace_model.py` | `test_profile_json_storage.py`, `test_profile_display.py`, `test_qt_main_window.py`, `test_workspace_model.py` | 앱과 프로필 |
 | 캡처 UI | `app/engine/capturer.py`, `app/engine/capture_session.py`, `app/domain/capture_geometry.py`, `app/domain/capture_render.py`, `app/domain/event_editing.py`, `app/presenters/capture_controller.py`, `app/ui/capture_hud.py`, `app/ui/capture_border.py`, `app/ui/workspace_detail.py`, processor 입력 형식 | `test_capturer.py`, `test_capture_session.py`, `test_capture_geometry.py`, `test_capture_controller.py`, `test_qt_capture_hud.py`, `test_event_editing.py`, `test_extract_roi_and_capture.py` | 앱과 프로필, 실제 화면 캡처 |
+| 실행 대상 프로세스 | `app/presenters/run_controller.py` (`match_process_index`, `follow_restarted_target`, `save_state`), `app/ui/main_window.py` (`refresh_processes`, `_restore_state`), `app/engine/processor.py` (`_check_target_alive`), `app/platform/system.py` (`ProcessCollector`, `ProcessUtils`) | `test_run_controller.py`, `test_qt_main_window.py`, `test_processor_key_execution.py`, `test_keystroke_utils.py` | 실제 실행 6, 설정과 복원 4; Windows 변경은 Windows 필수 |
 | OS listener·권한 | `app/platform/input_router.py`, `app/ui/dispatcher.py`, `app/presenters/run_controller.py`, `app/platform/system.py`, 관련 설정과 main-thread UI 갱신 | `test_input_router.py`, `test_run_controller.py`, `test_mac_key_poll.py`, `test_keystroke_utils.py` | 실제 실행; 변경 대상 OS에서 수행하고 Windows system/hotkey 변경은 Windows 필수 |
 
 ## 테스트·검증 규칙
 
 - `uv run -m scripts.verify`는 unittest를 빈 임시 폴더를 작업 디렉터리로 삼아 실행하고, 끝난 뒤 그 폴더에 파일이 남으면 실패한다. 앱의 저장 경로(`app_state.json`, `user_settings.json`, `run_sets.json`, `modkey_sets.json`, `profiles/`, `logs/`)는 작업 디렉터리 기준 상대경로라서, 테스트는 임시 폴더로 `os.chdir`하거나 임시 경로를 넘겨야 한다. `os.chdir` 복귀는 setUp에서 `addCleanup`으로 등록해(임시 폴더 삭제 바로 다음) 테스트 본문이 등록한 cleanup(창 닫기 → 상태 저장)보다 늦게 돌게 한다. tearDown에서 복귀하면 cleanup이 저장소 루트에서 돈다.
 - verify는 테스트 출력에서 loguru 로그와 offscreen Qt 경고를 끈다. 실패 원인을 볼 때는 `LOGURU_LEVEL=DEBUG QT_LOGGING_RULES= uv run -m scripts.verify`처럼 다시 켠다.
+- Windows 실기 검증 기록이 없는 항목: PySide6 전환 후 E2E 전체, 실행 중 대상 재시작 추적(`is_process_alive` Windows 분기는 mock 테스트만 있다).
 - 진단용 환경변수: `KEYSIM_PROFILE_PERF=1`은 프로필 로드·저장 시간과 processor 메인 루프 1회 시간을 `[perf]`로 출력한다. `KEYSIM_WIN_SCANCODE=1`은 Windows 키 입력을 scancode 경로(`KEYEVENTF_SCANCODE`)로 보낸다.
 
 표의 자동 테스트는 시작점이다. Qt 위젯 테스트는 `tests/qt_support.py`가 `QT_QPA_PLATFORM=offscreen`으로 실행하므로 실제 창 배치·항상 위·전체화면 위 표시·포커스는 E2E로 확인한다. 공용 계약을 추가로 건드렸다면 해당 구현을 직접 검증하는 기존 테스트까지 확장한다.
