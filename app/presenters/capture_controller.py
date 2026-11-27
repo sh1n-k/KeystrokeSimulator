@@ -46,6 +46,8 @@ CAPTURE_POLL_MS = 50
 # 키 폴링 100ms 기준 3초. 권한 조회는 호출당 10ms 이상이다.
 PERMISSION_POLL_TICKS = 30
 HUD_POS_STATE_KEY = "capture_hud_pos"
+# 마지막에 쓴 캡처 크기. 단일·연속 모드가 함께 쓴다.
+CAPTURE_SIZE_STATE_KEY = "capture_size"
 
 
 @dataclass(frozen=True)
@@ -153,17 +155,22 @@ class CaptureController:
         self.mag_center = initial.pixel
 
     def load_state(self, *, restore_pointer: bool) -> Position | None:
-        """저장한 HUD 위치를 돌려주고, 원하면 마지막 캡처 박스 위치를 복원한다."""
+        """저장한 HUD 위치를 돌려주고, 원하면 마지막 캡처 박스 위치와 크기를 복원한다."""
         state = StateUtils.load_main_app_state() or {}
-        if restore_pointer and (ptr := state.get(self.pointer_state_key)):
-            point = StateUtils.parse_position_tuple(ptr)
-            if point is not None:
-                self.session.set_position(point)
+        if restore_pointer:
+            if ptr := state.get(self.pointer_state_key):
+                point = StateUtils.parse_position_tuple(ptr)
+                if point is not None:
+                    self.session.set_position(point)
+            size = StateUtils.parse_slash_int_pair(state.get(CAPTURE_SIZE_STATE_KEY))
+            if size is not None:
+                self.set_capture_size(*size)
         return StateUtils.parse_slash_int_pair(state.get(HUD_POS_STATE_KEY))
 
     def save_state(self, hud_pos: Position | None) -> None:
         values: dict[str, object] = {
-            self.pointer_state_key: str(self.session.current_position())
+            self.pointer_state_key: str(self.session.current_position()),
+            CAPTURE_SIZE_STATE_KEY: f"{self._capture_size[0]}/{self._capture_size[1]}",
         }
         if hud_pos is not None:
             values[HUD_POS_STATE_KEY] = f"{hud_pos[0]}/{hud_pos[1]}"

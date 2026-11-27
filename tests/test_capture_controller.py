@@ -676,23 +676,43 @@ class TestHudPlacementAndState(unittest.TestCase):
     def test_save_state_uses_existing_keys(self, save):
         single, *_ = make_controller("single")
         single.save_state((12, 34))
-        save.assert_called_with(capture_hud_pos="12/34", event_pointer="(500, 400)")
+        save.assert_called_with(
+            capture_hud_pos="12/34", event_pointer="(500, 400)", capture_size="100/100"
+        )
 
         quick, *_ = make_controller("continuous")
         quick.save_state((1, 2))
-        save.assert_called_with(capture_hud_pos="1/2", quick_ptr="(500, 400)")
+        save.assert_called_with(
+            capture_hud_pos="1/2", quick_ptr="(500, 400)", capture_size="100/100"
+        )
 
     @patch(
         "app.presenters.capture_controller.StateUtils.load_main_app_state",
-        return_value={"capture_hud_pos": "30/40", "event_pointer": "(70, 80)"},
+        return_value={
+            "capture_hud_pos": "30/40",
+            "event_pointer": "(70, 80)",
+            "capture_size": "240/180",
+        },
     )
-    def test_load_state_restores_pointer_only_when_asked(self, _load):
+    def test_load_state_restores_pointer_and_size_only_when_asked(self, _load):
         c, cap, *_ = make_controller()
 
         self.assertEqual(c.load_state(restore_pointer=False), (30, 40))
         self.assertEqual(cap.position, (500, 400))
+        self.assertEqual(c.capture_size, (100, 100))
         self.assertEqual(c.load_state(restore_pointer=True), (30, 40))
         self.assertEqual(cap.position, (70, 80))
+        self.assertEqual(c.capture_size, (240, 180))
+
+    @patch(
+        "app.presenters.capture_controller.StateUtils.load_main_app_state",
+        return_value={"capture_size": "5000/5"},
+    )
+    def test_load_state_clamps_saved_size(self, _load):
+        c, *_ = make_controller()
+
+        c.load_state(restore_pointer=True)
+        self.assertEqual(c.capture_size, (1000, 50))
 
 
 if __name__ == "__main__":

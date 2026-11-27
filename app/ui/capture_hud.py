@@ -327,8 +327,8 @@ class CaptureHud(QWidget):
 
         if initial is not None:
             self.controller.restore(initial)
-        self._sync_size_spins()
         hud_pos = self.controller.load_state(restore_pointer=initial is None)
+        self._sync_size_spins()
         self._render()
         self.adjustSize()
         self._place(hud_pos)

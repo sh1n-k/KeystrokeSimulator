@@ -403,6 +403,28 @@ class TestCaptureHudFlow(HudTestCase):
         self.assertTrue(hud.btn_apply.isEnabled())
         self.assertEqual([s.value() for s in hud.size_spins], [120, 80])
 
+    def test_new_capture_starts_with_last_size_but_existing_keeps_its_own(self):
+        saved = {"capture_size": "240/180"}
+        with patch(f"{_CTRL}.StateUtils.load_main_app_state", return_value=saved):
+            for mode in ("single", "continuous"):
+                hud, cap = self.make(mode)
+                self.assertEqual(cap.size, (240, 180))
+                self.assertEqual([s.value() for s in hud.size_spins], [240, 180])
+
+            initial = CaptureResult(
+                position=(10, 20),
+                capture_size=(120, 80),
+                image=Image.new("RGB", (120, 80), (1, 2, 3)),
+                pixel=(5, 6),
+                color=(1, 2, 3),
+            )
+            hud, cap = self.make(initial=initial)
+            self.assertEqual(cap.size, (120, 80))
+
+        hud.size_spins[0].setValue(150)
+        hud.close()
+        self.assertEqual(self.saved[-1]["capture_size"], "150/80")
+
     def test_continuous_second_ctrl_saves_to_quick(self):
         hud, cap = self.make("continuous")
         cap.emit((0, 0, 255))
